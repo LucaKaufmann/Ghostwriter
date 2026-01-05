@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- E-ink optimized: Pure black on pure white -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Material 3 color scheme for high contrast -->
+    <color name="md_theme_primary">#000000</color>
+    <color name="md_theme_onPrimary">#FFFFFF</color>
+    <color name="md_theme_primaryContainer">#FFFFFF</color>
+    <color name="md_theme_onPrimaryContainer">#000000</color>
+    <color name="md_theme_background">#FFFFFF</color>
+    <color name="md_theme_onBackground">#000000</color>
+    <color name="md_theme_surface">#FFFFFF</color>
+    <color name="md_theme_onSurface">#000000</color>
+    <color name="md_theme_surfaceVariant">#F0F0F0</color>
+    <color name="md_theme_onSurfaceVariant">#000000</color>
+    <color name="md_theme_outline">#000000</color>
+</resources>

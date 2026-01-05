@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Epilog</string>
+
+    <!-- Feed Management -->
+    <string name="feed_manager">Feed Manager</string>
+    <string name="add_feed">Add Feed</string>
+    <string name="edit_feed">Edit Feed</string>
+    <string name="delete_feed">Delete Feed</string>
+    <string name="feed_url">Feed URL</string>
+    <string name="feed_nickname">Nickname</string>
+    <string name="processing_mode">Processing Mode</string>
+    <string name="mode_fidelity">Fidelity</string>
+    <string name="mode_briefing">Briefing</string>
+
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="api_key">API Key</string>
+    <string name="schedule_time">Schedule Time</string>
+    <string name="min_word_count">Minimum Word Count</string>
+
+    <!-- Actions -->
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="run_now">Run Now</string>
+    <string name="generating">Generating EPUB…</string>
+</resources>
