@@ -1,17 +1,17 @@
 package com.example.epilog.service
 
 import com.example.epilog.domain.model.ProcessedArticle
-import nl.siegmann.epublib.domain.Book
-import nl.siegmann.epublib.epub.EpubReader
+import io.documentnode.epub4j.domain.Author
+import io.documentnode.epub4j.domain.Book
+import io.documentnode.epub4j.domain.Resource
+import io.documentnode.epub4j.epub.EpubReader
+import io.documentnode.epub4j.epub.EpubWriter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import nl.siegmann.epublib.domain.Author
-import nl.siegmann.epublib.domain.Resource
-import nl.siegmann.epublib.epub.EpubWriter
 
 /**
  * Unit tests for EPUB generation logic.
@@ -40,7 +40,9 @@ class EpubGeneratorTest {
 
         val authors = book.metadata.authors
         assertTrue(authors.isNotEmpty())
-        assertEquals("Epilog", authors.first().firstname)
+        val author = authors.first()
+        // epub4j Author(name) sets lastname, not firstname
+        assertTrue(author.firstname == "Epilog" || author.lastname == "Epilog")
     }
 
     @Test

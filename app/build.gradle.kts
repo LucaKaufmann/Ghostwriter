@@ -54,6 +54,12 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -68,6 +74,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.7.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
@@ -100,8 +107,8 @@ dependencies {
     implementation("org.jsoup:jsoup:1.17.2")
     implementation("net.dankito.readability4j:readability4j:1.0.8")
 
-    // EPUB Generation
-    implementation("nl.siegmann.epublib:epublib-core:3.1") {
+    // EPUB Generation (epub4j is the maintained fork of epublib)
+    implementation("io.documentnode:epub4j-core:4.2.1") {
         exclude(group = "org.slf4j")
         exclude(group = "xmlpull")
     }

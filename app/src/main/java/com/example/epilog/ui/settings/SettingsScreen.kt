@@ -20,8 +20,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -109,7 +109,7 @@ fun SettingsScreen(
                 )
             }
 
-            HorizontalDivider()
+            Divider()
 
             // Schedule Section
             SettingsSection(title = "Daily Schedule") {
@@ -123,7 +123,7 @@ fun SettingsScreen(
                 )
             }
 
-            HorizontalDivider()
+            Divider()
 
             // Content Settings Section
             SettingsSection(title = "Content Settings") {
@@ -133,7 +133,7 @@ fun SettingsScreen(
                 )
             }
 
-            HorizontalDivider()
+            Divider()
 
             // Manual Run Section
             SettingsSection(title = "Manual Generation") {
@@ -206,7 +206,7 @@ fun ApiKeyInput(
             trailingIcon = {
                 IconButton(onClick = { showApiKey = !showApiKey }) {
                     Icon(
-                        if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        imageVector = if (showApiKey) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
                         contentDescription = if (showApiKey) "Hide" else "Show"
                     )
                 }
