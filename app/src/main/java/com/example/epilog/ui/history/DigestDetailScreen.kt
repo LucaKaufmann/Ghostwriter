@@ -1,5 +1,9 @@
 package com.example.epilog.ui.history
 
+import android.graphics.Typeface
+import android.text.method.LinkMovementMethod
+import android.util.TypedValue
+import android.widget.TextView
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,9 +41,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.text.HtmlCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilog.domain.model.DigestArticle
@@ -207,6 +214,8 @@ fun ArticleCard(
     modifier: Modifier = Modifier
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    val linkColor = MaterialTheme.colorScheme.primary.toArgb()
 
     Card(
         modifier = modifier
@@ -245,15 +254,41 @@ fun ArticleCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             if (expanded) {
-                // Full content - convert HTML to plain text for display
-                val plainText = remember(article.content) {
-                    HtmlCompat.fromHtml(article.content, HtmlCompat.FROM_HTML_MODE_COMPACT)
-                        .toString()
-                        .trim()
+                // Full content - use AndroidView with TextView for proper HTML rendering
+                val htmlContent = remember(article.content) {
+                    HtmlCompat.fromHtml(article.content, HtmlCompat.FROM_HTML_MODE_LEGACY)
                 }
+
+                AndroidView(
+                    factory = { context ->
+                        TextView(context).apply {
+                            // Text styling
+                            setTextColor(textColor)
+                            setLinkTextColor(linkColor)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                            setLineSpacing(4f, 1.2f)
+                            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+
+                            // Enable clickable links
+                            movementMethod = LinkMovementMethod.getInstance()
+
+                            // Remove extra padding that TextView adds
+                            includeFontPadding = false
+                        }
+                    },
+                    update = { textView ->
+                        textView.text = htmlContent
+                        textView.setTextColor(textColor)
+                        textView.setLinkTextColor(linkColor)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = plainText,
-                    style = MaterialTheme.typography.bodyMedium
+                    text = "Tap to collapse",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
                 )
             } else {
                 // Preview - first 200 characters of plain text
