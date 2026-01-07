@@ -57,6 +57,13 @@ object DatabaseModule {
         }
     }
 
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            // Add maxArticles column to feeds table with default 0 (unlimited)
+            database.execSQL("ALTER TABLE feeds ADD COLUMN maxArticles INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): EpilogDatabase {
@@ -65,7 +72,7 @@ object DatabaseModule {
             EpilogDatabase::class.java,
             "epilog_database"
         )
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 

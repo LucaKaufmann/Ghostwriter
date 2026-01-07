@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -116,8 +117,8 @@ fun FeedManagerScreen(
     if (uiState.showAddDialog) {
         AddFeedDialog(
             onDismiss = { viewModel.hideAddDialog() },
-            onConfirm = { url, name, mode ->
-                viewModel.addFeed(url, name, mode)
+            onConfirm = { url, name, mode, maxArticles ->
+                viewModel.addFeed(url, name, mode, maxArticles)
                 viewModel.hideAddDialog()
             }
         )
@@ -169,10 +170,20 @@ fun FeedItem(
                     maxLines = 1
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = if (feed.mode == ProcessingMode.FIDELITY) "Fidelity" else "Briefing",
-                    style = MaterialTheme.typography.labelMedium
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (feed.mode == ProcessingMode.FIDELITY) "Fidelity" else "Briefing",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    if (feed.maxArticles > 0) {
+                        Text(
+                            text = "Max: ${feed.maxArticles}",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete")
@@ -184,11 +195,12 @@ fun FeedItem(
 @Composable
 fun AddFeedDialog(
     onDismiss: () -> Unit,
-    onConfirm: (url: String, name: String, mode: ProcessingMode) -> Unit
+    onConfirm: (url: String, name: String, mode: ProcessingMode, maxArticles: Int) -> Unit
 ) {
     var url by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf(ProcessingMode.FIDELITY) }
+    var maxArticles by remember { mutableStateOf(0) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -225,11 +237,30 @@ fun AddFeedDialog(
                     )
                     Text("Briefing")
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Max articles", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        text = if (maxArticles == 0) "Unlimited" else "$maxArticles",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                Slider(
+                    value = maxArticles.toFloat(),
+                    onValueChange = { maxArticles = it.toInt() },
+                    valueRange = 0f..50f,
+                    steps = 9,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(url, name, mode) },
+                onClick = { onConfirm(url, name, mode, maxArticles) },
                 enabled = url.isNotBlank() && name.isNotBlank()
             ) {
                 Text("Add")
@@ -251,6 +282,7 @@ fun EditFeedDialog(
 ) {
     var name by remember { mutableStateOf(feed.name) }
     var mode by remember { mutableStateOf(feed.mode) }
+    var maxArticles by remember { mutableStateOf(feed.maxArticles) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -284,12 +316,31 @@ fun EditFeedDialog(
                     )
                     Text("Briefing")
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Max articles", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        text = if (maxArticles == 0) "Unlimited" else "$maxArticles",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                Slider(
+                    value = maxArticles.toFloat(),
+                    onValueChange = { maxArticles = it.toInt() },
+                    valueRange = 0f..50f,
+                    steps = 9,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    onConfirm(feed.copy(name = name.trim(), mode = mode))
+                    onConfirm(feed.copy(name = name.trim(), mode = mode, maxArticles = maxArticles))
                 },
                 enabled = name.isNotBlank()
             ) {

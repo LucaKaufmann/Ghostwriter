@@ -10,13 +10,15 @@ data class FeedEntity(
     @PrimaryKey val url: String,
     val name: String,
     val mode: ProcessingMode,
-    val lastFetched: Long = 0L
+    val lastFetched: Long = 0L,
+    val maxArticles: Int = 0  // 0 = unlimited
 ) {
     fun toDomain(): Feed = Feed(
         url = url,
         name = name,
         mode = mode,
-        lastFetched = lastFetched
+        lastFetched = lastFetched,
+        maxArticles = maxArticles
     )
 
     companion object {
@@ -24,7 +26,8 @@ data class FeedEntity(
             url = feed.url,
             name = feed.name,
             mode = feed.mode,
-            lastFetched = feed.lastFetched
+            lastFetched = feed.lastFetched,
+            maxArticles = feed.maxArticles
         )
     }
 }

@@ -37,6 +37,10 @@ class ArticleRepository @Inject constructor(
     /**
      * Fetches and processes articles from a single feed.
      *
+     * Uses smart fetching: analyzes RSS content to determine if it contains
+     * the full article or just a preview. Only fetches from the URL when
+     * the RSS content is a preview, saving bandwidth and time.
+     *
      * @param feed The feed to fetch from
      * @param onlyNew If true, only fetch articles published after lastFetched
      * @return FeedResult containing processed articles
@@ -45,18 +49,31 @@ class ArticleRepository @Inject constructor(
         val minWordCount = settingsRepository.getMinWordCount()
         val since = if (onlyNew) feed.lastFetched else 0L
 
-        val rssItems = rssService.fetchNewArticles(feed.url, since)
+        var rssItems = rssService.fetchNewArticles(feed.url, since)
+
+        // Apply per-feed max articles limit before processing
+        if (feed.maxArticles > 0) {
+            rssItems = rssItems.take(feed.maxArticles)
+        }
+
         var errorCount = 0
 
         val articles = rssItems.mapNotNull { item ->
             val link = item.link ?: return@mapNotNull null
 
-            // Extract full content
-            val processed = contentProcessor.process(link, minWordCount)
-                ?: run {
-                    errorCount++
-                    return@mapNotNull null
-                }
+            // Use smart fetching: analyze RSS content before deciding to fetch from URL
+            // This saves HTTP requests when RSS already contains the full article
+            val processed = contentProcessor.processWithRssContent(
+                url = link,
+                rssContent = item.content,
+                rssDescription = item.description,
+                rssTitle = item.title,
+                rssAuthor = item.author,
+                minWordCount = minWordCount
+            ) ?: run {
+                errorCount++
+                return@mapNotNull null
+            }
 
             // Apply processing mode
             when (feed.mode) {
@@ -103,6 +120,7 @@ class ArticleRepository @Inject constructor(
 
     /**
      * Fetches articles from all saved feeds.
+     * Per-feed max article limits are applied in fetchArticles().
      *
      * @param onlyNew If true, only fetch new articles
      * @return List of all processed articles
