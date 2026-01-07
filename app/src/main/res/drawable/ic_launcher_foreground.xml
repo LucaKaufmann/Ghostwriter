@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple book icon for Epilog -->
+    <group
+        android:translateX="24"
+        android:translateY="24">
+        <!-- Book cover -->
+        <path
+            android:fillColor="#000000"
+            android:pathData="M10,5 L50,5 L50,55 L10,55 Z" />
+        <!-- Book spine -->
+        <path
+            android:fillColor="#333333"
+            android:pathData="M10,5 L15,5 L15,55 L10,55 Z" />
+        <!-- Pages -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M18,10 L45,10 L45,50 L18,50 Z" />
+        <!-- Text lines -->
+        <path
+            android:fillColor="#000000"
+            android:pathData="M22,18 L41,18 L41,20 L22,20 Z" />
+        <path
+            android:fillColor="#000000"
+            android:pathData="M22,24 L41,24 L41,26 L22,26 Z" />
+        <path
+            android:fillColor="#000000"
+            android:pathData="M22,30 L35,30 L35,32 L22,32 Z" />
+        <path
+            android:fillColor="#000000"
+            android:pathData="M22,36 L41,36 L41,38 L22,38 Z" />
+        <path
+            android:fillColor="#000000"
+            android:pathData="M22,42 L38,42 L38,44 L22,44 Z" />
+    </group>
+</vector>
