@@ -6,6 +6,9 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.epilog.data.repository.ArticleRepository
+import com.example.epilog.data.repository.DigestRepository
+import com.example.epilog.data.repository.FeedRepository
+import com.example.epilog.domain.model.TriggerType
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.util.Date
@@ -13,13 +16,15 @@ import java.util.Date
 /**
  * WorkManager worker that generates the daily EPUB digest.
  * Fetches articles from all configured feeds, processes them according to their mode,
- * and generates an EPUB file.
+ * and generates an EPUB file. Also saves the digest to history.
  */
 @HiltWorker
 class DailyDigestWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
     private val articleRepository: ArticleRepository,
+    private val feedRepository: FeedRepository,
+    private val digestRepository: DigestRepository,
     private val epubGenerator: EpubGenerator
 ) : CoroutineWorker(context, workerParams) {
 
@@ -29,6 +34,7 @@ class DailyDigestWorker @AssistedInject constructor(
 
         // Input data keys
         const val KEY_FETCH_ALL = "fetch_all"  // If true, fetch all articles (not just new)
+        const val KEY_IS_MANUAL = "is_manual"  // If true, triggered manually (not scheduled)
     }
 
     override suspend fun doWork(): Result {
@@ -36,6 +42,10 @@ class DailyDigestWorker @AssistedInject constructor(
 
         return try {
             val fetchOnlyNew = !inputData.getBoolean(KEY_FETCH_ALL, false)
+            val isManual = inputData.getBoolean(KEY_IS_MANUAL, false)
+
+            // Get all feeds for later reference
+            val feeds = feedRepository.getAllFeedsList()
 
             // Fetch and process articles from all feeds
             val articles = articleRepository.fetchFromAllFeeds(onlyNew = fetchOnlyNew)
@@ -48,10 +58,21 @@ class DailyDigestWorker @AssistedInject constructor(
             Log.i(TAG, "Fetched ${articles.size} articles")
 
             // Generate EPUB
-            val epubFile = epubGenerator.generate(articles, Date())
+            val result = epubGenerator.generate(articles, Date())
 
-            if (epubFile != null) {
-                Log.i(TAG, "Generated EPUB: ${epubFile.absolutePath}")
+            if (result != null) {
+                Log.i(TAG, "Generated EPUB: ${result.file.absolutePath}")
+
+                // Save to digest history
+                val triggerType = if (isManual) TriggerType.MANUAL else TriggerType.SCHEDULED
+                digestRepository.saveDigest(
+                    articles = result.articles,
+                    feeds = feeds,
+                    epubFilePath = result.file.absolutePath,
+                    triggerType = triggerType
+                )
+                Log.i(TAG, "Saved digest to history")
+
                 Result.success()
             } else {
                 Log.e(TAG, "Failed to generate EPUB")

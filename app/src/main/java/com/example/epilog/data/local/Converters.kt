@@ -2,6 +2,7 @@ package com.example.epilog.data.local
 
 import androidx.room.TypeConverter
 import com.example.epilog.domain.model.ProcessingMode
+import com.example.epilog.domain.model.TriggerType
 
 class Converters {
     @TypeConverter
@@ -9,4 +10,10 @@ class Converters {
 
     @TypeConverter
     fun toProcessingMode(value: String): ProcessingMode = ProcessingMode.valueOf(value)
+
+    @TypeConverter
+    fun fromTriggerType(type: TriggerType): String = type.name
+
+    @TypeConverter
+    fun toTriggerType(value: String): TriggerType = TriggerType.valueOf(value)
 }

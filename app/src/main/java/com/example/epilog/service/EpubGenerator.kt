@@ -8,11 +8,10 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import nl.siegmann.epublib.domain.Author
-import nl.siegmann.epublib.domain.Book
-import nl.siegmann.epublib.domain.Resource
-import nl.siegmann.epublib.domain.TOCReference
-import nl.siegmann.epublib.epub.EpubWriter
+import io.documentnode.epub4j.domain.Author
+import io.documentnode.epub4j.domain.Book
+import io.documentnode.epub4j.domain.Resource
+import io.documentnode.epub4j.epub.EpubWriter
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -21,6 +20,14 @@ import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
+
+/**
+ * Result of EPUB generation containing the file and articles.
+ */
+data class EpubGenerationResult(
+    val file: File,
+    val articles: List<ProcessedArticle>
+)
 
 /**
  * Generates EPUB files from processed articles.
@@ -45,19 +52,19 @@ class EpubGenerator @Inject constructor(
      *
      * @param articles List of articles to include
      * @param date Date for the digest (defaults to today)
-     * @return The generated EPUB file, or null if generation fails
+     * @return Result containing the generated EPUB file and articles, or null if generation fails
      */
     suspend fun generate(
         articles: List<ProcessedArticle>,
         date: Date = Date()
-    ): File? = withContext(Dispatchers.IO) {
+    ): EpubGenerationResult? = withContext(Dispatchers.IO) {
         if (articles.isEmpty()) return@withContext null
 
         try {
             val book = createBook(articles, date)
             val outputFile = writeEpub(book, date)
             scanFile(outputFile)
-            outputFile
+            EpubGenerationResult(outputFile, articles)
         } catch (e: Exception) {
             null
         }

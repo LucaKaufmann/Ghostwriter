@@ -84,6 +84,7 @@ class DigestScheduler @Inject constructor(
     fun runNow(fetchAll: Boolean = false) {
         val inputData = Data.Builder()
             .putBoolean(DailyDigestWorker.KEY_FETCH_ALL, fetchAll)
+            .putBoolean(DailyDigestWorker.KEY_IS_MANUAL, true)
             .build()
 
         val oneTimeWorkRequest = OneTimeWorkRequestBuilder<DailyDigestWorker>()

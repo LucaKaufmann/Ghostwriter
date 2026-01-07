@@ -5,11 +5,12 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
 @Database(
-    entities = [FeedEntity::class],
-    version = 1,
+    entities = [FeedEntity::class, DigestEntity::class, DigestArticleEntity::class],
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class EpilogDatabase : RoomDatabase() {
     abstract fun feedDao(): FeedDao
+    abstract fun digestDao(): DigestDao
 }
