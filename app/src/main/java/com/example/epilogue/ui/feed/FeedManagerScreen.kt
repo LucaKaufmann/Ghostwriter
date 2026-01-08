@@ -192,6 +192,8 @@ fun FeedItem(
     }
 }
 
+private val maxArticleOptions = listOf(5, 10, 15, 20, 25, 30, 50, 0) // 0 = Unlimited
+
 @Composable
 fun AddFeedDialog(
     onDismiss: () -> Unit,
@@ -200,7 +202,8 @@ fun AddFeedDialog(
     var url by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf(ProcessingMode.FIDELITY) }
-    var maxArticles by remember { mutableStateOf(0) }
+    var sliderIndex by remember { mutableStateOf(maxArticleOptions.lastIndex.toFloat()) } // Default to Unlimited
+    val maxArticles = maxArticleOptions[sliderIndex.toInt().coerceIn(0, maxArticleOptions.lastIndex)]
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -250,10 +253,10 @@ fun AddFeedDialog(
                     )
                 }
                 Slider(
-                    value = maxArticles.toFloat(),
-                    onValueChange = { maxArticles = it.toInt() },
-                    valueRange = 0f..50f,
-                    steps = 9,
+                    value = sliderIndex,
+                    onValueChange = { sliderIndex = it },
+                    valueRange = 0f..(maxArticleOptions.lastIndex.toFloat()),
+                    steps = maxArticleOptions.size - 2,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -282,7 +285,9 @@ fun EditFeedDialog(
 ) {
     var name by remember { mutableStateOf(feed.name) }
     var mode by remember { mutableStateOf(feed.mode) }
-    var maxArticles by remember { mutableStateOf(feed.maxArticles) }
+    val initialIndex = maxArticleOptions.indexOf(feed.maxArticles).takeIf { it >= 0 } ?: maxArticleOptions.lastIndex
+    var sliderIndex by remember { mutableStateOf(initialIndex.toFloat()) }
+    val maxArticles = maxArticleOptions[sliderIndex.toInt().coerceIn(0, maxArticleOptions.lastIndex)]
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -329,10 +334,10 @@ fun EditFeedDialog(
                     )
                 }
                 Slider(
-                    value = maxArticles.toFloat(),
-                    onValueChange = { maxArticles = it.toInt() },
-                    valueRange = 0f..50f,
-                    steps = 9,
+                    value = sliderIndex,
+                    onValueChange = { sliderIndex = it },
+                    valueRange = 0f..(maxArticleOptions.lastIndex.toFloat()),
+                    steps = maxArticleOptions.size - 2,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
