@@ -60,6 +60,16 @@ private data class BookPage(
 )
 
 /**
+ * Represents a chapter (article) with its content and metadata.
+ */
+private data class Chapter(
+    val title: String,
+    val author: String,
+    val feedName: String,
+    val content: SpannableStringBuilder
+)
+
+/**
  * E-ink optimized book reader that combines all articles into one continuous
  * paginated text flow, like a real e-book reader.
  *
@@ -84,19 +94,20 @@ fun EinkBookReader(
 
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
 
-    // Build the combined book content as a SpannableStringBuilder
-    val bookContent = remember(articles) {
-        buildBookContent(articles)
+    // Build chapters from articles
+    val chapters = remember(articles) {
+        articles.map { article -> buildChapter(article) }
     }
 
     // Calculate pages when viewport dimensions are known
-    val pages = remember(bookContent, viewportWidth, viewportHeight, density) {
+    // Each chapter starts on a new page
+    val pages = remember(chapters, viewportWidth, viewportHeight, density) {
         if (viewportWidth <= 0 || viewportHeight <= 0) {
             emptyList()
         } else {
             val textSizePx = with(density) { 17.dp.toPx() }
-            paginateContent(
-                content = bookContent,
+            paginateChapters(
+                chapters = chapters,
                 viewportWidth = viewportWidth,
                 viewportHeight = viewportHeight,
                 textSizePx = textSizePx,
@@ -214,110 +225,132 @@ fun EinkBookReader(
 }
 
 /**
- * Builds the combined book content from all articles.
- * Article titles become chapter headings with proper styling.
+ * Builds a chapter from an article with proper styling.
  */
-private fun buildBookContent(articles: List<DigestArticle>): SpannableStringBuilder {
+private fun buildChapter(article: DigestArticle): Chapter {
     val builder = SpannableStringBuilder()
 
-    articles.forEachIndexed { index, article ->
-        if (index > 0) {
-            // Add spacing between chapters
-            builder.append("\n\n")
-            builder.append("───────────────────")
-            builder.append("\n\n")
-        }
+    // Chapter title (article title)
+    val titleStart = builder.length
+    builder.append(article.title)
+    val titleEnd = builder.length
 
-        // Chapter title (article title)
-        val titleStart = builder.length
-        builder.append(article.title)
-        val titleEnd = builder.length
+    // Style the title: bold and larger
+    builder.setSpan(
+        StyleSpan(Typeface.BOLD),
+        titleStart,
+        titleEnd,
+        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+    )
+    builder.setSpan(
+        RelativeSizeSpan(1.3f),
+        titleStart,
+        titleEnd,
+        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+    )
 
-        // Style the title: bold and larger
+    builder.append("\n")
+
+    // Author and source (if available)
+    if (article.author.isNotBlank()) {
+        val authorStart = builder.length
+        builder.append("By ${article.author}")
+        val authorEnd = builder.length
         builder.setSpan(
-            StyleSpan(Typeface.BOLD),
-            titleStart,
-            titleEnd,
+            StyleSpan(Typeface.ITALIC),
+            authorStart,
+            authorEnd,
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         )
-        builder.setSpan(
-            RelativeSizeSpan(1.3f),
-            titleStart,
-            titleEnd,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-
-        builder.append("\n")
-
-        // Author and source (if available)
-        if (article.author.isNotBlank()) {
-            val authorStart = builder.length
-            builder.append("By ${article.author}")
-            val authorEnd = builder.length
-            builder.setSpan(
-                StyleSpan(Typeface.ITALIC),
-                authorStart,
-                authorEnd,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-            builder.append(" • ")
-        }
-
-        val sourceStart = builder.length
-        builder.append(article.feedName)
-        val sourceEnd = builder.length
-        builder.setSpan(
-            RelativeSizeSpan(0.85f),
-            sourceStart,
-            sourceEnd,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-
-        builder.append("\n\n")
-
-        // Article content - strip HTML tags and clean up
-        val cleanContent = stripHtmlTags(article.content)
-        builder.append(cleanContent)
+        builder.append(" • ")
     }
 
-    return builder
+    val sourceStart = builder.length
+    builder.append(article.feedName)
+    val sourceEnd = builder.length
+    builder.setSpan(
+        RelativeSizeSpan(0.85f),
+        sourceStart,
+        sourceEnd,
+        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+    )
+
+    builder.append("\n\n")
+
+    // Article content - strip HTML tags and clean up
+    val cleanContent = stripHtmlTags(article.content)
+    builder.append(cleanContent)
+
+    return Chapter(
+        title = article.title,
+        author = article.author,
+        feedName = article.feedName,
+        content = builder
+    )
 }
 
 /**
  * Strips HTML tags from content and returns plain text.
+ * Aggressively removes excessive whitespace.
  */
 private fun stripHtmlTags(html: String): String {
     return html
-        .replace(Regex("<br\\s*/?>"), "\n")
-        .replace(Regex("<p[^>]*>"), "\n")
-        .replace("</p>", "\n")
+        // Handle block elements - add newlines
+        .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</?p[^>]*>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</?div[^>]*>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</?blockquote[^>]*>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</?h[1-6][^>]*>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</?li[^>]*>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</?ul[^>]*>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</?ol[^>]*>", RegexOption.IGNORE_CASE), "\n")
+        // Remove all other HTML tags
         .replace(Regex("<[^>]+>"), "")
+        // Decode HTML entities
         .replace("&nbsp;", " ")
         .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&#x27;", "'")
+        .replace("&mdash;", "—")
+        .replace("&ndash;", "–")
+        .replace("&hellip;", "…")
+        .replace(Regex("&#(\\d+);")) { matchResult ->
+            val code = matchResult.groupValues[1].toIntOrNull()
+            if (code != null && code in 32..126) code.toChar().toString() else ""
+        }
+        // Normalize whitespace: convert tabs and multiple spaces to single space
+        .replace("\t", " ")
+        .replace(Regex(" {2,}"), " ")
+        // Trim whitespace from each line
+        .split("\n")
+        .joinToString("\n") { it.trim() }
+        // Remove excessive blank lines (more than 2 newlines -> 2 newlines)
         .replace(Regex("\n{3,}"), "\n\n")
-        .trim()
+        // Remove blank lines at the start
+        .trimStart('\n', ' ')
+        // Remove blank lines at the end
+        .trimEnd('\n', ' ')
 }
 
 /**
- * Paginates the content into pages that fit the viewport.
+ * Paginates chapters into pages, ensuring each chapter starts on a new page.
  * Uses StaticLayout to accurately measure text.
  */
-private fun paginateContent(
-    content: SpannableStringBuilder,
+private fun paginateChapters(
+    chapters: List<Chapter>,
     viewportWidth: Int,
     viewportHeight: Int,
     textSizePx: Float,
     lineSpacingMultiplier: Float,
     lineSpacingExtra: Float
 ): List<BookPage> {
-    if (content.isEmpty()) return emptyList()
+    if (chapters.isEmpty()) return emptyList()
 
     val pages = mutableListOf<BookPage>()
-    var currentStart = 0
     var pageNumber = 1
 
     // Create TextPaint matching the TextView configuration
@@ -333,54 +366,62 @@ private fun paginateContent(
     val availableWidth = (viewportWidth - paddingHorizontal).toInt().coerceAtLeast(100)
     val availableHeight = (viewportHeight - paddingVertical).toInt().coerceAtLeast(100)
 
-    while (currentStart < content.length) {
-        // Create a StaticLayout for the remaining content
-        val remainingContent = content.subSequence(currentStart, content.length) as SpannableStringBuilder
+    // Process each chapter separately - each chapter starts on a new page
+    for (chapter in chapters) {
+        val content = chapter.content
+        if (content.isEmpty()) continue
 
-        val layout = StaticLayout.Builder.obtain(
-            remainingContent,
-            0,
-            remainingContent.length,
-            textPaint,
-            availableWidth
-        )
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-            .setLineSpacing(lineSpacingExtra, lineSpacingMultiplier)
-            .setIncludePad(false)
-            .build()
+        var currentStart = 0
 
-        // Find how many lines fit in the available height
-        var linesInPage = 0
+        while (currentStart < content.length) {
+            // Create a StaticLayout for the remaining content of this chapter
+            val remainingContent = SpannableStringBuilder(content.subSequence(currentStart, content.length))
 
-        for (line in 0 until layout.lineCount) {
-            val lineBottom = layout.getLineBottom(line)
-            if (lineBottom > availableHeight) {
-                break
+            val layout = StaticLayout.Builder.obtain(
+                remainingContent,
+                0,
+                remainingContent.length,
+                textPaint,
+                availableWidth
+            )
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setLineSpacing(lineSpacingExtra, lineSpacingMultiplier)
+                .setIncludePad(false)
+                .build()
+
+            // Find how many lines fit in the available height
+            var linesInPage = 0
+
+            for (line in 0 until layout.lineCount) {
+                val lineBottom = layout.getLineBottom(line)
+                if (lineBottom > availableHeight) {
+                    break
+                }
+                linesInPage = line + 1
             }
-            linesInPage = line + 1
+
+            if (linesInPage == 0) {
+                // If not even one line fits, force at least one line
+                linesInPage = 1
+            }
+
+            // Get the character offset at the end of the last line that fits
+            val endOffset = if (linesInPage >= layout.lineCount) {
+                remainingContent.length
+            } else {
+                layout.getLineEnd(linesInPage - 1)
+            }
+
+            // Extract the page content
+            val pageText = remainingContent.subSequence(0, endOffset)
+            pages.add(BookPage(pageText, pageNumber))
+
+            currentStart += endOffset
+            pageNumber++
+
+            // Safety check to prevent infinite loops
+            if (endOffset == 0) break
         }
-
-        if (linesInPage == 0) {
-            // If not even one line fits, force at least one line
-            linesInPage = 1
-        }
-
-        // Get the character offset at the end of the last line that fits
-        val endOffset = if (linesInPage >= layout.lineCount) {
-            remainingContent.length
-        } else {
-            layout.getLineEnd(linesInPage - 1)
-        }
-
-        // Extract the page content
-        val pageText = remainingContent.subSequence(0, endOffset)
-        pages.add(BookPage(pageText, pageNumber))
-
-        currentStart += endOffset
-        pageNumber++
-
-        // Safety check to prevent infinite loops
-        if (endOffset == 0) break
     }
 
     return pages
