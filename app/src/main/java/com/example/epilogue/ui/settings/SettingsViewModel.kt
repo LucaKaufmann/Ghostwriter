@@ -1,5 +1,6 @@
 package com.example.epilogue.ui.settings
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -31,13 +32,17 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun loadSettings() {
+        val customExportUri = settingsRepository.getCustomExportUri()
         _uiState.update { state ->
             state.copy(
                 apiKey = settingsRepository.getOpenAIApiKey() ?: "",
                 scheduleHour = settingsRepository.getScheduleHour(),
                 scheduleMinute = settingsRepository.getScheduleMinute(),
                 minWordCount = settingsRepository.getMinWordCount(),
-                einkMode = settingsRepository.getEinkMode()
+                einkMode = settingsRepository.getEinkMode(),
+                customExportUri = customExportUri,
+                customExportEnabled = settingsRepository.isCustomExportEnabled(),
+                customExportDisplayPath = getDisplayPath(customExportUri)
             )
         }
     }
@@ -137,6 +142,66 @@ class SettingsViewModel @Inject constructor(
     fun clearDataResetFlag() {
         _uiState.update { it.copy(dataReset = false) }
     }
+
+    // ===== Custom Export Directory =====
+
+    fun setCustomExportUri(uri: Uri?) {
+        viewModelScope.launch {
+            val uriString = uri?.toString()
+            settingsRepository.setCustomExportUri(uriString)
+            if (uriString != null) {
+                settingsRepository.setCustomExportEnabled(true)
+            }
+            _uiState.update {
+                it.copy(
+                    customExportUri = uriString,
+                    customExportDisplayPath = getDisplayPath(uriString),
+                    customExportEnabled = uriString != null
+                )
+            }
+        }
+    }
+
+    fun toggleCustomExport(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setCustomExportEnabled(enabled)
+            _uiState.update { it.copy(customExportEnabled = enabled) }
+        }
+    }
+
+    fun clearCustomExportDirectory() {
+        viewModelScope.launch {
+            settingsRepository.setCustomExportUri(null)
+            settingsRepository.setCustomExportEnabled(false)
+            _uiState.update {
+                it.copy(
+                    customExportUri = null,
+                    customExportDisplayPath = null,
+                    customExportEnabled = false
+                )
+            }
+        }
+    }
+
+    private fun getDisplayPath(uriString: String?): String? {
+        if (uriString == null) return null
+        return try {
+            val uri = Uri.parse(uriString)
+            // Extract the path portion from the tree URI
+            // Format is typically: content://com.android.externalstorage.documents/tree/primary%3APath%2FTo%2FFolder
+            val path = uri.lastPathSegment
+            if (path != null) {
+                // Decode and clean up the path
+                val decoded = Uri.decode(path)
+                // Remove the "primary:" or similar prefix and show just the path
+                decoded.substringAfter(":", decoded).replace("/", " / ")
+            } else {
+                uriString
+            }
+        } catch (e: Exception) {
+            uriString
+        }
+    }
 }
 
 data class SettingsUiState(
@@ -151,5 +216,8 @@ data class SettingsUiState(
     val digestTriggered: Boolean = false,
     val digestCompleted: Boolean = false,
     val digestFailed: Boolean = false,
-    val dataReset: Boolean = false
+    val dataReset: Boolean = false,
+    val customExportUri: String? = null,
+    val customExportEnabled: Boolean = false,
+    val customExportDisplayPath: String? = null
 )
