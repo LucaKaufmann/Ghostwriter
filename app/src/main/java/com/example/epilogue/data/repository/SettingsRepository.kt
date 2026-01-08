@@ -31,6 +31,8 @@ class SettingsRepository @Inject constructor(
         private const val KEY_SCHEDULE_MINUTE = "schedule_minute"
         private const val KEY_MIN_WORD_COUNT = "min_word_count"
         private const val KEY_EINK_MODE = "eink_mode"
+        private const val KEY_CUSTOM_EXPORT_URI = "custom_export_uri"
+        private const val KEY_CUSTOM_EXPORT_ENABLED = "custom_export_enabled"
 
         // Encrypted settings keys
         private const val KEY_OPENAI_API_KEY = "openai_api_key"
@@ -40,6 +42,7 @@ class SettingsRepository @Inject constructor(
         private const val DEFAULT_SCHEDULE_MINUTE = 0
         private const val DEFAULT_MIN_WORD_COUNT = 0
         private const val DEFAULT_EINK_MODE = false
+        private const val DEFAULT_CUSTOM_EXPORT_ENABLED = false
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -68,11 +71,21 @@ class SettingsRepository @Inject constructor(
     private val _einkModeFlow = MutableStateFlow(false)
     val einkModeFlow: Flow<Boolean> = _einkModeFlow.asStateFlow()
 
+    // Custom export state flows for reactive updates
+    private val _customExportUriFlow = MutableStateFlow<String?>(null)
+    val customExportUriFlow: Flow<String?> = _customExportUriFlow.asStateFlow()
+
+    private val _customExportEnabledFlow = MutableStateFlow(false)
+    val customExportEnabledFlow: Flow<Boolean> = _customExportEnabledFlow.asStateFlow()
+
     init {
         // Initialize API key flow
         _apiKeyFlow.value = getOpenAIApiKey()
         // Initialize e-ink mode flow
         _einkModeFlow.value = getEinkMode()
+        // Initialize custom export flows
+        _customExportUriFlow.value = getCustomExportUri()
+        _customExportEnabledFlow.value = isCustomExportEnabled()
     }
 
     // ===== OpenAI API Key (Encrypted) =====
@@ -165,5 +178,43 @@ class SettingsRepository @Inject constructor(
      */
     fun getEinkMode(): Boolean {
         return prefs.getBoolean(KEY_EINK_MODE, DEFAULT_EINK_MODE)
+    }
+
+    // ===== Custom Export Settings =====
+
+    /**
+     * Sets the custom export directory URI (from SAF).
+     */
+    suspend fun setCustomExportUri(uriString: String?) = withContext(Dispatchers.IO) {
+        if (uriString.isNullOrBlank()) {
+            prefs.edit().remove(KEY_CUSTOM_EXPORT_URI).apply()
+        } else {
+            prefs.edit().putString(KEY_CUSTOM_EXPORT_URI, uriString).apply()
+        }
+        _customExportUriFlow.value = uriString
+    }
+
+    /**
+     * Gets the custom export directory URI string.
+     */
+    fun getCustomExportUri(): String? {
+        return prefs.getString(KEY_CUSTOM_EXPORT_URI, null)
+    }
+
+    /**
+     * Sets whether custom export is enabled.
+     */
+    suspend fun setCustomExportEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putBoolean(KEY_CUSTOM_EXPORT_ENABLED, enabled)
+            .apply()
+        _customExportEnabledFlow.value = enabled
+    }
+
+    /**
+     * Gets whether custom export is enabled.
+     */
+    fun isCustomExportEnabled(): Boolean {
+        return prefs.getBoolean(KEY_CUSTOM_EXPORT_ENABLED, DEFAULT_CUSTOM_EXPORT_ENABLED)
     }
 }

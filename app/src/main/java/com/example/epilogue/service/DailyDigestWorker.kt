@@ -25,7 +25,8 @@ class DailyDigestWorker @AssistedInject constructor(
     private val articleRepository: ArticleRepository,
     private val feedRepository: FeedRepository,
     private val digestRepository: DigestRepository,
-    private val epubGenerator: EpubGenerator
+    private val epubGenerator: EpubGenerator,
+    private val epubExporter: EpubExporter
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -62,6 +63,17 @@ class DailyDigestWorker @AssistedInject constructor(
 
             if (result != null) {
                 Log.i(TAG, "Generated EPUB: ${result.file.absolutePath}")
+
+                // Export to custom directory if configured
+                when (val exportResult = epubExporter.exportToCustomDirectory(result.file)) {
+                    is ExportResult.Success ->
+                        Log.i(TAG, "Exported to custom directory")
+                    is ExportResult.PermissionRevoked ->
+                        Log.w(TAG, "Custom export permission revoked")
+                    is ExportResult.Error ->
+                        Log.e(TAG, "Custom export failed: ${exportResult.message}")
+                    ExportResult.NotConfigured -> { /* No-op */ }
+                }
 
                 // Save to digest history
                 val triggerType = if (isManual) TriggerType.MANUAL else TriggerType.SCHEDULED

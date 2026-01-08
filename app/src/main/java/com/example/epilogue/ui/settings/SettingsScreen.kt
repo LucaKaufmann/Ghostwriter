@@ -1,5 +1,8 @@
 package com.example.epilogue.ui.settings
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,10 +48,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -61,6 +66,20 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
+    // SAF directory picker launcher
+    val directoryPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            // Take persistable permission
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(it, flags)
+            viewModel.setCustomExportUri(it)
+        }
+    }
 
     LaunchedEffect(uiState.apiKeySaved) {
         if (uiState.apiKeySaved) {
@@ -162,6 +181,19 @@ fun SettingsScreen(
                 EinkModeInput(
                     enabled = uiState.einkMode,
                     onEnabledChange = viewModel::updateEinkMode
+                )
+            }
+
+            Divider()
+
+            // Export Directory Section
+            SettingsSection(title = "Export Directory") {
+                CustomExportInput(
+                    enabled = uiState.customExportEnabled,
+                    displayPath = uiState.customExportDisplayPath,
+                    onToggle = viewModel::toggleCustomExport,
+                    onSelectDirectory = { directoryPickerLauncher.launch(null) },
+                    onClearDirectory = viewModel::clearCustomExportDirectory
                 )
             }
 
@@ -488,6 +520,72 @@ fun EinkModeInput(
 
         Text(
             text = "Optimizes for e-ink displays: page-based navigation, volume button support, larger touch targets, no animations",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+fun CustomExportInput(
+    enabled: Boolean,
+    displayPath: String?,
+    onToggle: (Boolean) -> Unit,
+    onSelectDirectory: () -> Unit,
+    onClearDirectory: () -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Export to custom folder",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                if (displayPath != null) {
+                    Text(
+                        text = displayPath,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Switch(
+                checked = enabled && displayPath != null,
+                onCheckedChange = onToggle,
+                enabled = displayPath != null
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onSelectDirectory,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(if (displayPath == null) "Select Folder" else "Change")
+            }
+
+            if (displayPath != null) {
+                OutlinedButton(
+                    onClick = onClearDirectory,
+                ) {
+                    Text("Clear")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "EPUBs will be automatically copied to this folder (e.g., KOReader)",
             style = MaterialTheme.typography.bodySmall
         )
     }
