@@ -1,0 +1,258 @@
+This XML file does not appear to have any style information associated with it. The document tree is shown below.
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:thr="http://purl.org/syndication/thread/1.0" xml:lang="en-US">
+<title type="text">AI | The Verge</title>
+<subtitle type="text">The Verge is about technology and how it makes us feel. Founded in 2011, we offer our audience everything from breaking news to reviews to award-winning features and investigations, on our site, in video, and in podcasts.</subtitle>
+<updated>2026-01-07T19:52:30+00:00</updated>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/ai-artificial-intelligence"/>
+<id>https://www.theverge.com/rss/ai-artificial-intelligence/index.xml</id>
+<link rel="self" type="application/atom+xml" href="https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"/>
+<icon>https://platform.theverge.com/wp-content/uploads/sites/2/2025/01/verge-rss-large_80b47e.png?w=150&h=150&crop=1</icon>
+<entry>
+<author>
+<name>Hayden Field</name>
+</author>
+<title type="html">
+<![CDATA[ OpenAI launches ChatGPT Health, encouraging users to connect their medical records ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/ai-artificial-intelligence/857640/openai-launches-chatgpt-health-connect-medical-records"/>
+<id>https://www.theverge.com/?p=857640</id>
+<updated>2026-01-07T14:52:30-05:00</updated>
+<published>2026-01-07T14:00:00-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="News"/>
+<category scheme="https://www.theverge.com" term="OpenAI"/>
+<summary type="html">
+<![CDATA[ OpenAI has been dropping hints this week about AI's role as a "healthcare ally" - and today, the company is announcing a product to go along with that idea: ChatGPT Health. ChatGPT Health is a sandboxed tab within ChatGPT that's designed for users to ask their health-related questions in what it describes as a more [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="A graphic showing a ChatGPT interface with text related to health and medical history." data-caption="" data-portal-copyright="" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/ChatGPT-Health-3.png?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-text-align-none">OpenAI has been dropping <a href="https://cdn.openai.com/pdf/2cb29276-68cd-4ec6-a5f4-c01c5e7a36e9/OpenAI-AI-as-a-Healthcare-Ally-Jan-2026.pdf">hints</a> this week about AI's role as a "healthcare ally" - and today, the company is announcing a product to go along with that idea: ChatGPT Health. </p> <p class="has-text-align-none">ChatGPT Health is a sandboxed tab within ChatGPT that's designed for users to ask their health-related questions in what it describes as a more secure and personalized environment, with a separate chat history and memory feature than the rest of ChatGPT. The company is encouraging users to connect their personal medical records and wellness apps, such as Apple Health, Peloton, MyFitnessPal, Weight Watchers, and Function, "to get more personalized, grounded responses to …</p> <p><a href="https://www.theverge.com/ai-artificial-intelligence/857640/openai-launches-chatgpt-health-connect-medical-records">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Tom Warren</name>
+</author>
+<title type="html">
+<![CDATA[ Dell admits consumers don’t care about AI PCs ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/news/857723/dell-consumers-ai-pcs-comments"/>
+<id>https://www.theverge.com/?p=857723</id>
+<updated>2026-01-07T12:57:27-05:00</updated>
+<published>2026-01-07T12:57:27-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="CES"/>
+<category scheme="https://www.theverge.com" term="Dell"/>
+<category scheme="https://www.theverge.com" term="Gadgets"/>
+<category scheme="https://www.theverge.com" term="Laptops"/>
+<category scheme="https://www.theverge.com" term="Microsoft"/>
+<category scheme="https://www.theverge.com" term="News"/>
+<category scheme="https://www.theverge.com" term="Tech"/>
+<summary type="html">
+<![CDATA[ Dell has revealed that consumers aren't buying PCs for AI features right now. In an interview with PC Gamer ahead of CES, Dell has made it clear its 2026 products aren't all about being AI-first, and it's moving beyond being "all about" AI PCs. "We're very focused on delivering upon the AI capabilities of a [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="" data-caption="" data-portal-copyright="" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2025/01/STKB324_DELL_CVIRGINIA_B.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-text-align-none">Dell has revealed that consumers aren't buying PCs for AI features right now. In an <a href="https://www.pcgamer.com/hardware/dells-ces-2026-chat-was-the-most-pleasingly-un-ai-briefing-ive-had-in-maybe-5-years/">interview with <em>PC Gamer</em></a> ahead of CES, Dell has made it clear its 2026 products aren't all about being AI-first, and it's moving beyond being "all about" AI PCs.</p> <p class="has-text-align-none">"We're very focused on delivering upon the AI capabilities of a device-in fact everything that we're announcing has an NPU in it - but what we've learned over the course of this year, especially from a consumer perspective, is they're not buying based on AI," admits Kevin Terwilliger, Dell's head of product, in the <em>PC Gamer</em> interview. "In fact I think AI probably confuses them more than it helps them …</p> <p><a href="https://www.theverge.com/news/857723/dell-consumers-ai-pcs-comments">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Andrew Liszewski</name>
+</author>
+<title type="html">
+<![CDATA[ The best tech announced at CES 2026 so far ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/tech/854159/ces-2026-best-tech-gadgets-smartphones-appliances-robots-tvs-ai-smart-home"/>
+<id>https://www.theverge.com/?p=854159</id>
+<updated>2026-01-07T10:33:33-05:00</updated>
+<published>2026-01-07T08:13:25-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="Audio"/>
+<category scheme="https://www.theverge.com" term="CES"/>
+<category scheme="https://www.theverge.com" term="Gadgets"/>
+<category scheme="https://www.theverge.com" term="Gaming"/>
+<category scheme="https://www.theverge.com" term="Headphones"/>
+<category scheme="https://www.theverge.com" term="HP"/>
+<category scheme="https://www.theverge.com" term="Keyboards"/>
+<category scheme="https://www.theverge.com" term="Laptops"/>
+<category scheme="https://www.theverge.com" term="News"/>
+<category scheme="https://www.theverge.com" term="Phones"/>
+<category scheme="https://www.theverge.com" term="Robot"/>
+<category scheme="https://www.theverge.com" term="Smart Home"/>
+<category scheme="https://www.theverge.com" term="Tech"/>
+<category scheme="https://www.theverge.com" term="Toys"/>
+<category scheme="https://www.theverge.com" term="TVs"/>
+<category scheme="https://www.theverge.com" term="Wearable"/>
+<summary type="html">
+<![CDATA[ The CES show floor officially opened its doors yesterday and along with it came a deluge of more announcements and reveals. If you're struggling to stay on top of all the new tech, gadgets, concepts, and AI-powered devices as day two gets underway, we've rounded up some of the best hardware and upgrades that have [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="The Roborock Saros Rover robovac standing on two wheeled legs on a set of stairs." data-caption="" data-portal-copyright="Image: Roborock" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/roborock_best.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-drop-cap has-text-align-none">The CES show floor officially opened its doors yesterday and along with it came a deluge of more announcements and reveals. If you're struggling to stay on top of all the new tech, gadgets, concepts, and AI-powered devices as day two gets underway, we've rounded up some of the best hardware and upgrades that have debuted so far so you can quickly get up to speed.</p> <p class="has-text-align-none">There's still lots more to come, so you can check back here every day, or catch up on all of <a href="https://www.theverge.com/tech/836627/ces-2026-news-gadgets-announcements" data-type="link" data-id="https://www.theverge.com/tech/836627/ces-2026-news-gadgets-announcements"><em>The Verge</em>'s CES 2026 coverage here</a>.</p> <h2 class="wp-block-heading"><a href="https://www.theverge.com/tech/857403/ikea-kallsup-bluetooth-speaker-price-release-date" data-type="link" data-id="https://www.theverge.com/tech/857403/ikea-kallsup-bluetooth-speaker-price-release-date">Ikea Kallsup Bluetooth speaker</a></h2> <img src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/8A0A5149.jpeg?quality=90&amp;strip=all&amp;crop=0,0,100,100" alt="Nine of Ikea's Kallsup Bluetooth speakers stacked on a wooden serving tray." title="Nine of Ikea's Kallsup Bluetooth speakers stacked on a wooden serving tray." data-has-syndication-rights="1" data-caption="" data-portal-copyright=""> <p class="has-text-align-none">In addition to new <a href="https://www.theverge.com/tech/853143/ikea-smart-home-matter-varmblixt-donut-color-changing-pendant-lamp" data-type="link" data-id="https://www.theverge.com/tech/853143/ikea-smart-home-matter-varmblixt-donut-color-changing-pendant-lamp">Matter-compatible lamps</a>, Ikea announced a new Bluetooth speaker during its CES debut. Besides its com …</p> <p><a href="https://www.theverge.com/tech/854159/ces-2026-best-tech-gadgets-smartphones-appliances-robots-tvs-ai-smart-home">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Alex Heath</name>
+</author>
+<title type="html">
+<![CDATA[ Lenovo is building an AI assistant that ‘can act on your behalf’ ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/column/857053/lenovo-ai-assistant-qira"/>
+<id>https://www.theverge.com/?p=857053</id>
+<updated>2026-01-07T05:47:45-05:00</updated>
+<published>2026-01-06T21:30:00-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="Column"/>
+<category scheme="https://www.theverge.com" term="Lenovo"/>
+<category scheme="https://www.theverge.com" term="Sources"/>
+<category scheme="https://www.theverge.com" term="Tech"/>
+<summary type="html">
+<![CDATA[ While most attention in the AI race is focused on model builders and cloud platforms, Lenovo sits closer to millions of users than most companies. As the world's top PC maker by volume, Lenovo ships tens of millions of devices every year. What it decides to ship, bundle, and integrate can directly shape how AI [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="" data-caption="" data-portal-copyright="" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/374.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-text-align-none">While most attention in the AI race is focused on model builders and cloud platforms, Lenovo sits closer to millions of users than most companies. As the world's <a href="https://www.gartner.com/en/newsroom/press-releases/2025-10-16-gartner-says-worldwide-pc-shipments-grew-8-percent-in-third-quarter-of-2025">top PC maker by volume</a>, Lenovo ships tens of millions of devices every year. What it decides to ship, bundle, and integrate can directly shape how AI shows up in many everyday lives.</p> <p class="has-text-align-none">That's what made Lenovo's announcement today at CES notable. At a flashy event on Tuesday at The Sphere in Las Vegas, it introduced Qira, a system-level, cross-device AI assistant designed to live across Lenovo laptops and Motorola phones. It's Lenovo's most ambitious AI effort to date and a rare look …</p> <p><a href="https://www.theverge.com/column/857053/lenovo-ai-assistant-qira">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Victoria Song</name>
+</author>
+<title type="html">
+<![CDATA[ Lenovo’s joining the bandwagon with concept AI glasses ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/tech/853434/ces-2026-lenovo-concept-ai-glasses-wearables"/>
+<id>https://www.theverge.com/?p=853434</id>
+<updated>2026-01-07T04:39:01-05:00</updated>
+<published>2026-01-06T20:00:00-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="CES"/>
+<category scheme="https://www.theverge.com" term="Gadgets"/>
+<category scheme="https://www.theverge.com" term="News"/>
+<category scheme="https://www.theverge.com" term="Tech"/>
+<category scheme="https://www.theverge.com" term="Wearable"/>
+<summary type="html">
+<![CDATA[ Lenovo is the latest tech company to get bit by the smart glasses bug. The company just showed off a pair of concept AI glasses at CES 2026. While these weren't a working prototype, we have some idea of where Lenovo's head is at. The lightweight frames weigh about 45g and have a 2MP camera [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="" data-caption="" data-portal-copyright="Photo by Antonio G. Di Benedetto / The Verge" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/258166_Lenovo_AI_Glasses_Concept_CES_2026_ADiBenedetto_0002.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-text-align-none">Lenovo is the latest tech company to get bit by the smart glasses bug. The company just showed off a pair of concept AI glasses at CES 2026. </p> <p class="has-text-align-none">While these weren't a working prototype, we have some idea of where Lenovo's head is at. The lightweight frames weigh about 45g and have a 2MP camera right above the nose bridge. You can also sort of see the binocular display in our photos. A nearby spec sheet hinted at a green monochrome display in both lenses - something we saw <a href="https://www.theverge.com/2025/1/10/24340208/ces-2025-smart-glasses-rokid-halliday-xreal-vuzix-nuance-audio">quite a lot of at last year's show</a>. Supposedly, there's also a 28-degree field of view, 1,500 nits of brightness, two microphones, two speakers, and a 214mAh battery.</p> <img src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/258166_Lenovo_AI_Glasses_Concept_CES_2026_ADiBenedetto_0001.jpg?quality=90&amp;strip=all&amp;crop=0,0,100,100" alt="" title="" data-has-syndication-rights="1" data-caption="&lt;em&gt;At least they look sort of stylish? But a 2MP camera is baffling.&lt;/em&gt; | Photo by Antonio G. Di Benedetto / The Verge" data-portal-copyright="Photo by Antonio G. Di Benedetto / The Verge"> <p class="has-text-align-none">Featur …</p> <p><a href="https://www.theverge.com/tech/853434/ces-2026-lenovo-concept-ai-glasses-wearables">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Tina Nguyen</name>
+</author>
+<title type="html">
+<![CDATA[ Jake Sullivan is furious that Trump destroyed his AI foreign policy ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/policy/856815/jake-sullivan-interview-ai-chips-nvidia-trump"/>
+<id>https://www.theverge.com/856815/how-silicon-valley-turned-trump-into-a-fellow-broligarch</id>
+<updated>2026-01-07T11:58:54-05:00</updated>
+<published>2026-01-06T17:46:00-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="Column"/>
+<category scheme="https://www.theverge.com" term="Nvidia"/>
+<category scheme="https://www.theverge.com" term="Policy"/>
+<category scheme="https://www.theverge.com" term="Politics"/>
+<category scheme="https://www.theverge.com" term="Regulation"/>
+<category scheme="https://www.theverge.com" term="Regulator"/>
+<category scheme="https://www.theverge.com" term="Tech"/>
+<summary type="html">
+<![CDATA[ Hello and welcome to Regulator, a newsletter for Verge subscribers about Big Tech, Big Government, and the big paradigm shifts that result from their collision. Not a subscriber yet? It's a new year, so why not treat yourself? In 2022, Jake Sullivan, then national security adviser under President Joe Biden and a powerful figure in [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="" data-caption="" data-portal-copyright="" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/268233_Jake_Sullivan_is_really_mad__CVirginia.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-text-align-none"><em>Hello and welcome to </em>Regulator, <em>a newsletter for </em>Verge <em>subscribers about Big Tech, Big Government, and the big paradigm shifts that result from their collision. Not a subscriber yet? It's a new year, </em><a href="https://www.theverge.com/subscribe?utm_source=google&amp;utm_medium=h5d&amp;utm_campaign=h_vg_00050&amp;gad_source=1&amp;gad_campaignid=22454004883&amp;gbraid=0AAAAA9k5E7AAKCXniFvWYFRO57gD0nNap&amp;gclid=Cj0KCQiAubrJBhCbARIsAHIdxD9iJCNnFAd8lyfvT7nuQ7_ofx0LkpGLk0_R_s8R80d7fTJf3j_-eykaAldREALw_wcB"><em>so why not treat yourself</em></a><em>?</em></p> <p class="has-text-align-none">In 2022, Jake Sullivan, then national security adviser under President Joe Biden and a powerful figure in the White House's foreign policy team, <a href="https://time.com/7312305/agi-race-us-china-trump/">assembled an interagency planning exercise</a> out of the Situation Room: What were all the possible circumstances and outcomes of an AI arms race between the US and China - from trade wars to real wars, possibly even the arrival of AGI - and how would the federal government resp …</p> <p><a href="https://www.theverge.com/policy/856815/jake-sullivan-interview-ai-chips-nvidia-trump">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Hayden Field</name>
+</author>
+<title type="html">
+<![CDATA[ Grok is undressing children — can the law stop it? ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/ai-artificial-intelligence/855832/grok-undressing-children-csam-law-x-elon-musk"/>
+<id>https://www.theverge.com/?p=855832</id>
+<updated>2026-01-06T15:33:52-05:00</updated>
+<published>2026-01-06T15:08:18-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="Analysis"/>
+<category scheme="https://www.theverge.com" term="Policy"/>
+<category scheme="https://www.theverge.com" term="Report"/>
+<category scheme="https://www.theverge.com" term="xAI"/>
+<summary type="html">
+<![CDATA[ Grok began 2026 as it began 2025: under fire for its AI-generated images. Elon Musk's chatbot has spent the last week flooding X with nonconsensual, sexualized deepfakes of adults and minors. Circulating screenshots show Grok complying with requests to put real women in lingerie and make them spread their legs, and to put small children [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="" data-caption="" data-portal-copyright="" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2025/06/STK419_DEEPFAKE_CVIRGINIA_F.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-drop-cap has-text-align-none">Grok began 2026 <a href="https://www.theguardian.com/technology/2025/jan/13/just-the-start-xs-new-ai-software-driving-online-racist-abuse-experts-warn">as it began 2025</a>: under fire for its AI-generated images. </p> <p class="has-text-align-none">Elon Musk's chatbot has spent the last week <a href="https://www.theverge.com/news/853191/grok-explicit-bikini-pictures-minors" data-type="link" data-id="https://www.theverge.com/news/853191/grok-explicit-bikini-pictures-minors">flooding X with nonconsensual, sexualized deepfakes</a> of adults and minors. Circulating screenshots show Grok complying with requests to put real women in lingerie and make them spread their legs, and to put small children in bikinis. Reports of images that were later removed describe even more egregious contents. One X user confirmed in a conversation with <em>The Verge</em> that they came across multiple images of minors with what the prompter dubbed "donut glaze" on their faces, which appear to have since been removed. At one point …</p> <p><a href="https://www.theverge.com/ai-artificial-intelligence/855832/grok-undressing-children-csam-law-x-elon-musk">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Elissa Welle</name>
+</author>
+<title type="html">
+<![CDATA[ Universal Music signs a new AI deal with Nvidia ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/news/856849/universal-music-nvidia-ai-deal"/>
+<id>https://www.theverge.com/?p=856849</id>
+<updated>2026-01-06T15:07:03-05:00</updated>
+<published>2026-01-06T15:07:03-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="Entertainment"/>
+<category scheme="https://www.theverge.com" term="Music"/>
+<category scheme="https://www.theverge.com" term="News"/>
+<category scheme="https://www.theverge.com" term="Tech"/>
+<summary type="html">
+<![CDATA[ Universal Music Group is partnering with Nvidia to bring a new AI model to one of the world's largest music catalogs. Among other initiatives, Tuesday's announcement touts the extension of Nvidia's music AI model Music Flamingo, which is designed to mimic how humans understand music by recognizing nuanced elements like song structure, harmony, emotional arcs, [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="" data-caption="" data-portal-copyright="" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/STK467_AI_MUSIC_CVirginia_B.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-text-align-none">Universal Music Group is partnering with Nvidia to bring a new AI model to one of the world's largest music catalogs. Among other initiatives, Tuesday's <a href="https://www.prnewswire.com/news-releases/universal-music-group-to-transform-music-experience-for-billions-of-fans-with-nvidia-ai-302653913.html">announcement</a> touts the extension of Nvidia's music AI model <a href="https://research.nvidia.com/labs/adlr/MF/">Music Flamingo</a>, which is designed to mimic how humans understand music by recognizing nuanced elements like song structure, harmony, emotional arcs, and chord progressions. </p> <p class="has-text-align-none">It's another instance of the <a href="https://www.theverge.com/tech/825382/ai-music-streaming-deal-klay-umg-sony-warner">music industry's about-face on AI</a>, which took UMG from suing <a href="https://www.theverge.com/2023/10/19/23924100/universal-music-sue-anthropic-lyrics-copyright-katy-perry">Anthropic in 2023</a> over distribution of song lyrics to <a href="https://www.theverge.com/news/809882/universal-music-udio-settlement">partnering with AI music generator Udio</a> in October following another high-profile lawsuit. Still, concerns remain tha …</p> <p><a href="https://www.theverge.com/news/856849/universal-music-nvidia-ai-deal">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Robert Hart</name>
+</author>
+<title type="html">
+<![CDATA[ AI moves into the real world as companion robots and pets ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/news/856207/ces-2026-trend-ai-companion-robot-pet"/>
+<id>https://www.theverge.com/?p=856207</id>
+<updated>2026-01-06T14:01:38-05:00</updated>
+<published>2026-01-06T14:00:00-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="CES"/>
+<category scheme="https://www.theverge.com" term="News"/>
+<category scheme="https://www.theverge.com" term="Robot"/>
+<category scheme="https://www.theverge.com" term="Tech"/>
+<summary type="html">
+<![CDATA[ Artificial intelligence doesn't always want to optimize your life or steal your job. Sometimes, AI just wants to be your friend. And while robot pets weren't the biggest stars of CES 2026, they've become more than just noise and are signaling how AI is apparently leaving our screens and taking on a physical presence in [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="A woman on a sofa cuddling a white, fluffy robot dog. " data-caption="Uncanny valley meets Bichon Frisé." data-portal-copyright="" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/20251223-184439.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> Uncanny valley meets Bichon Frisé. </figcaption> </figure> <p class="has-text-align-none">Artificial intelligence doesn't always want to optimize your life or steal your job. Sometimes, AI just wants to be your friend. And while robot pets weren't the biggest stars of CES 2026, they've become more than just noise and are signaling how AI is apparently leaving our screens and taking on a physical presence in our lives.</p> <p class="has-text-align-none">To be clear, there's no shortage of purpose-built machines on display in Las Vegas: there's <a href="https://www.theverge.com/tech/853758/shut-the-fridge-door">Samsung's voice-controlled refrigerator</a>, <a href="https://www.theverge.com/tech/853818/bosch-smart-coffee-machine-alexa-plus-upgrade">Bosch's Alexa Plus-powered AI barista</a>, and smarter robovacs like Narwal's <a href="https://www.theverge.com/news/850787/narwal-flow-2-robovac-ai-object-recognition-ces-2026">earring-finding Flow 2</a> or Anker's <a href="https://www.theverge.com/gadgets/850483/eufy-robot-vacuum-omni-s2-ces-2026">Eufy S2</a>, which moonlights as an aromatherapy diffuser - all promising to au …</p> <p><a href="https://www.theverge.com/news/856207/ces-2026-trend-ai-companion-robot-pet">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+<entry>
+<author>
+<name>Dominic Preston</name>
+</author>
+<title type="html">
+<![CDATA[ Vibe Bot is an AI agent that sits on your desk ]]>
+</title>
+<link rel="alternate" type="text/html" href="https://www.theverge.com/tech/851270/vibe-bot-is-an-ai-agent-that-sits-on-your-desk"/>
+<id>https://www.theverge.com/?p=851270</id>
+<updated>2026-01-05T13:24:15-05:00</updated>
+<published>2026-01-06T09:00:00-05:00</published>
+<category scheme="https://www.theverge.com" term="AI"/>
+<category scheme="https://www.theverge.com" term="CES"/>
+<category scheme="https://www.theverge.com" term="Gadgets"/>
+<category scheme="https://www.theverge.com" term="News"/>
+<category scheme="https://www.theverge.com" term="Robot"/>
+<category scheme="https://www.theverge.com" term="Tech"/>
+<summary type="html">
+<![CDATA[ Smart whiteboard manufacturer Vibe is expanding further into hybrid work hardware with the Vibe Bot, a physical AI device that can serve as a voice assistant, a smart webcam, and an AI note-taker, designed for office desks and meeting rooms. Despite the name, Vibe Bot is definitely not a robot. In fact it's closer to [&#8230;] ]]>
+</summary>
+<content type="html">
+<![CDATA[ <figure> <img alt="" data-caption="" data-portal-copyright="" data-has-syndication-rights="1" src="https://platform.theverge.com/wp-content/uploads/sites/2/2026/01/vibe-bot-ces.jpg?quality=90&#038;strip=all&#038;crop=0,0,100,100" /> <figcaption> </figcaption> </figure> <p class="has-text-align-none">Smart whiteboard manufacturer <a href="https://vibe.us/">Vibe</a> is expanding further into hybrid work hardware with the Vibe Bot, a physical AI device that can serve as a voice assistant, a smart webcam, and an AI note-taker, designed for office desks and meeting rooms.</p> <p class="has-text-align-none">Despite the name, Vibe Bot is definitely not a robot. In fact it's closer to something you'd expect to find among Amazon's Echo line: a cylindrical speaker with a small, circular screen, beam-forming microphones, and a built-in 4K camera for video calls. Like <a href="https://www.theverge.com/22297810/amazon-echo-show-10-2021-review">some of Amazon's Echo Shows</a>, it can even rotate that screen and camera, tracking speakers in group conversations to make sure that the right perso …</p> <p><a href="https://www.theverge.com/tech/851270/vibe-bot-is-an-ai-agent-that-sits-on-your-desk">Read the full story at The Verge.</a></p> ]]>
+</content>
+</entry>
+</feed>
