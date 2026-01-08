@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Epilog is an Android application that aggregates RSS/Atom feeds, processes content through either full extraction or AI summarization, and compiles results into daily EPUB files for offline reading on e-ink devices (optimized for Onyx Boox Palma 2).
+Epilogue is an Android application that aggregates RSS/Atom feeds, processes content through either full extraction or AI summarization, and compiles results into daily EPUB files for offline reading on e-ink devices (optimized for Onyx Boox Palma 2).
 
 ## Build Commands
 
@@ -93,8 +93,8 @@ data class ProcessedArticle(
 
 ## EPUB Output
 
-- Location: `/Documents/Epilog/`
-- Naming: `Epilog_YYYY-MM-DD.epub`
+- Location: `/Documents/Epilogue/`
+- Naming: `Epilogue_YYYY-MM-DD.epub`
 - Structure: Cover → TOC → Section 1 (Briefings) → Section 2 (Full Articles)
 - **Critical**: Must call `MediaScannerConnection` after save for Boox Library visibility
 

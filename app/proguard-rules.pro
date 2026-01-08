@@ -7,7 +7,7 @@
 -keepattributes Exceptions
 
 # Keep Room entities
--keep class com.example.epilog.data.local.** { *; }
+-keep class com.example.epilogue.data.local.** { *; }
 
 # Keep Epublib
 -dontwarn nl.siegmann.epublib.**

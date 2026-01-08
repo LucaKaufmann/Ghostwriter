@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Epilog</string>
+    <string name="app_name">Epilogue</string>
 
     <!-- Feed Management -->
     <string name="feed_manager">Feed Manager</string>

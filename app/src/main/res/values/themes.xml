@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Epilog" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Epilogue" parent="android:Theme.Material.Light.NoActionBar">
         <!-- E-ink optimization: Disable animations -->
         <item name="android:windowAnimationStyle">@null</item>
         <item name="android:windowDisablePreview">true</item>

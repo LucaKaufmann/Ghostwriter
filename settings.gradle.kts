@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Epilog"
+rootProject.name = "Epilogue"
 include(":app")
