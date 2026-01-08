@@ -38,4 +38,8 @@ class FeedRepository @Inject constructor(
     suspend fun updateLastFetched(url: String, timestamp: Long) {
         feedDao.updateLastFetched(url, timestamp)
     }
+
+    suspend fun resetAllLastFetched() {
+        feedDao.resetAllLastFetched()
+    }
 }

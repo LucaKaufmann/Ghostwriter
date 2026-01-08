@@ -1,5 +1,6 @@
 package com.example.epilogue.service
 
+import android.util.Log
 import com.prof18.rssparser.RssParser
 import com.prof18.rssparser.model.RssItem
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,10 @@ import javax.inject.Singleton
 @Singleton
 class RssService @Inject constructor() {
 
+    companion object {
+        private const val TAG = "RssService"
+    }
+
     private val parser = RssParser()
 
     /**
@@ -24,8 +29,10 @@ class RssService @Inject constructor() {
     suspend fun fetchFeed(feedUrl: String): List<RssItem> = withContext(Dispatchers.IO) {
         try {
             val channel = parser.getRssChannel(feedUrl)
+            Log.d(TAG, "Fetched ${channel.items.size} items from $feedUrl")
             channel.items
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch feed $feedUrl: ${e.message}")
             emptyList()
         }
     }
@@ -43,7 +50,8 @@ class RssService @Inject constructor() {
 
         return items.filter { item ->
             val pubDate = item.pubDate?.let { parseDate(it) } ?: 0L
-            pubDate > since
+            // Include articles with unparseable/missing dates (0L) as they might be new
+            pubDate == 0L || pubDate > since
         }
     }
 
