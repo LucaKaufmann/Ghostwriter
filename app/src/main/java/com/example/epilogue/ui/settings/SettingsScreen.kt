@@ -28,9 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -130,6 +131,16 @@ fun SettingsScreen(
                 MinWordCountInput(
                     minWordCount = uiState.minWordCount,
                     onMinWordCountChange = viewModel::updateMinWordCount
+                )
+            }
+
+            Divider()
+
+            // E-ink Mode Section
+            SettingsSection(title = "E-ink Mode") {
+                EinkModeInput(
+                    enabled = uiState.einkMode,
+                    onEnabledChange = viewModel::updateEinkMode
                 )
             }
 
@@ -329,35 +340,92 @@ fun MinWordCountInput(
     onMinWordCountChange: (Int) -> Unit
 ) {
     Column {
+        Text(
+            text = "Minimum word count",
+            style = MaterialTheme.typography.bodyLarge
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Stepper control - easier for e-ink than slider
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = {
+                    val newValue = (minWordCount - 100).coerceAtLeast(0)
+                    onMinWordCountChange(newValue)
+                },
+                enabled = minWordCount > 0,
+                modifier = Modifier.height(48.dp)
+            ) {
+                Text("-", style = MaterialTheme.typography.titleLarge)
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Text(
+                text = if (minWordCount == 0) "Off" else "$minWordCount",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.width(100.dp),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            OutlinedButton(
+                onClick = {
+                    val newValue = (minWordCount + 100).coerceAtMost(1000)
+                    onMinWordCountChange(newValue)
+                },
+                enabled = minWordCount < 1000,
+                modifier = Modifier.height(48.dp)
+            ) {
+                Text("+", style = MaterialTheme.typography.titleLarge)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Skip articles shorter than this (0 = include all)",
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun EinkModeInput(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Minimum word count",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Text(
-                text = if (minWordCount == 0) "Off" else "$minWordCount",
-                style = MaterialTheme.typography.bodyLarge
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Enable E-ink optimizations",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onEnabledChange
             )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Slider(
-            value = minWordCount.toFloat(),
-            onValueChange = { onMinWordCountChange(it.toInt()) },
-            valueRange = 0f..1000f,
-            steps = 9,
-            modifier = Modifier.fillMaxWidth()
-        )
-
         Text(
-            text = "Skip articles shorter than this (0 = include all)",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 4.dp)
+            text = "Optimizes for e-ink displays: page-based navigation, volume button support, larger touch targets, no animations",
+            style = MaterialTheme.typography.bodySmall
         )
     }
 }

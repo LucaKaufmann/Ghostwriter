@@ -30,6 +30,7 @@ class SettingsRepository @Inject constructor(
         private const val KEY_SCHEDULE_HOUR = "schedule_hour"
         private const val KEY_SCHEDULE_MINUTE = "schedule_minute"
         private const val KEY_MIN_WORD_COUNT = "min_word_count"
+        private const val KEY_EINK_MODE = "eink_mode"
 
         // Encrypted settings keys
         private const val KEY_OPENAI_API_KEY = "openai_api_key"
@@ -38,6 +39,7 @@ class SettingsRepository @Inject constructor(
         private const val DEFAULT_SCHEDULE_HOUR = 22  // 10:00 PM
         private const val DEFAULT_SCHEDULE_MINUTE = 0
         private const val DEFAULT_MIN_WORD_COUNT = 0
+        private const val DEFAULT_EINK_MODE = false
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -62,9 +64,15 @@ class SettingsRepository @Inject constructor(
     private val _apiKeyFlow = MutableStateFlow<String?>(null)
     val apiKeyFlow: Flow<String?> = _apiKeyFlow.asStateFlow()
 
+    // E-ink mode state flow for reactive updates
+    private val _einkModeFlow = MutableStateFlow(false)
+    val einkModeFlow: Flow<Boolean> = _einkModeFlow.asStateFlow()
+
     init {
         // Initialize API key flow
         _apiKeyFlow.value = getOpenAIApiKey()
+        // Initialize e-ink mode flow
+        _einkModeFlow.value = getEinkMode()
     }
 
     // ===== OpenAI API Key (Encrypted) =====
@@ -137,5 +145,25 @@ class SettingsRepository @Inject constructor(
      */
     fun getMinWordCount(): Int {
         return prefs.getInt(KEY_MIN_WORD_COUNT, DEFAULT_MIN_WORD_COUNT)
+    }
+
+    // ===== E-ink Mode Settings =====
+
+    /**
+     * Sets the e-ink mode enabled state.
+     * When enabled, optimizes UI for e-ink displays.
+     */
+    suspend fun setEinkMode(enabled: Boolean) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putBoolean(KEY_EINK_MODE, enabled)
+            .apply()
+        _einkModeFlow.value = enabled
+    }
+
+    /**
+     * Gets whether e-ink mode is enabled.
+     */
+    fun getEinkMode(): Boolean {
+        return prefs.getBoolean(KEY_EINK_MODE, DEFAULT_EINK_MODE)
     }
 }

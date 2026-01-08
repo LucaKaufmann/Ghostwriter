@@ -2,6 +2,7 @@ package com.example.epilogue.ui.feed
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
@@ -25,25 +28,31 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
+import com.example.epilogue.ui.LocalEinkMode
+
+private const val FEEDS_PER_PAGE = 5
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,6 +64,7 @@ fun FeedManagerScreen(
 ) {
     val feeds by viewModel.feeds.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val einkMode = LocalEinkMode.current
 
     Scaffold(
         modifier = modifier,
@@ -95,7 +105,18 @@ fun FeedManagerScreen(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
+        } else if (einkMode) {
+            // E-ink mode: Paginated feed list
+            PaginatedFeedList(
+                feeds = feeds,
+                onFeedClick = { viewModel.showEditDialog(it) },
+                onFeedDelete = { viewModel.deleteFeed(it) },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
         } else {
+            // Standard mode: Scrollable list
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -133,6 +154,88 @@ fun FeedManagerScreen(
                 viewModel.hideEditDialog()
             }
         )
+    }
+}
+
+/**
+ * Paginated feed list for e-ink mode.
+ */
+@Composable
+fun PaginatedFeedList(
+    feeds: List<Feed>,
+    onFeedClick: (Feed) -> Unit,
+    onFeedDelete: (Feed) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var currentPage by rememberSaveable { mutableIntStateOf(0) }
+    val totalPages = (feeds.size + FEEDS_PER_PAGE - 1) / FEEDS_PER_PAGE
+    val startIndex = currentPage * FEEDS_PER_PAGE
+    val endIndex = minOf(startIndex + FEEDS_PER_PAGE, feeds.size)
+    val currentFeeds = feeds.subList(startIndex, endIndex)
+
+    // Reset page if feeds change and current page is out of bounds
+    if (currentPage >= totalPages && totalPages > 0) {
+        currentPage = totalPages - 1
+    }
+
+    Column(modifier = modifier) {
+        // Feed items
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
+            currentFeeds.forEach { feed ->
+                FeedItem(
+                    feed = feed,
+                    onClick = { onFeedClick(feed) },
+                    onDelete = { onFeedDelete(feed) }
+                )
+            }
+        }
+
+        // Pagination controls (only show if more than one page)
+        if (totalPages > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = { if (currentPage > 0) currentPage-- },
+                    enabled = currentPage > 0,
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = "Previous"
+                    )
+                    Text("Prev")
+                }
+
+                Text(
+                    text = "${currentPage + 1} / $totalPages",
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center
+                )
+
+                OutlinedButton(
+                    onClick = { if (currentPage < totalPages - 1) currentPage++ },
+                    enabled = currentPage < totalPages - 1,
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text("Next")
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Next"
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -202,8 +305,8 @@ fun AddFeedDialog(
     var url by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf(ProcessingMode.FIDELITY) }
-    var sliderIndex by remember { mutableStateOf(maxArticleOptions.lastIndex.toFloat()) } // Default to Unlimited
-    val maxArticles = maxArticleOptions[sliderIndex.toInt().coerceIn(0, maxArticleOptions.lastIndex)]
+    var maxArticlesIndex by remember { mutableStateOf(maxArticleOptions.lastIndex) } // Default to Unlimited
+    val maxArticles = maxArticleOptions[maxArticlesIndex]
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -241,24 +344,39 @@ fun AddFeedDialog(
                     Text("Briefing")
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+                Text("Max articles", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                // Stepper control - easier for e-ink than slider
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Max articles", style = MaterialTheme.typography.labelLarge)
+                    OutlinedButton(
+                        onClick = {
+                            if (maxArticlesIndex > 0) maxArticlesIndex--
+                        },
+                        enabled = maxArticlesIndex > 0
+                    ) {
+                        Text("-")
+                    }
+
                     Text(
                         text = if (maxArticles == 0) "Unlimited" else "$maxArticles",
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.width(80.dp),
+                        textAlign = TextAlign.Center
                     )
+
+                    OutlinedButton(
+                        onClick = {
+                            if (maxArticlesIndex < maxArticleOptions.lastIndex) maxArticlesIndex++
+                        },
+                        enabled = maxArticlesIndex < maxArticleOptions.lastIndex
+                    ) {
+                        Text("+")
+                    }
                 }
-                Slider(
-                    value = sliderIndex,
-                    onValueChange = { sliderIndex = it },
-                    valueRange = 0f..(maxArticleOptions.lastIndex.toFloat()),
-                    steps = maxArticleOptions.size - 2,
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         },
         confirmButton = {
@@ -286,8 +404,8 @@ fun EditFeedDialog(
     var name by remember { mutableStateOf(feed.name) }
     var mode by remember { mutableStateOf(feed.mode) }
     val initialIndex = maxArticleOptions.indexOf(feed.maxArticles).takeIf { it >= 0 } ?: maxArticleOptions.lastIndex
-    var sliderIndex by remember { mutableStateOf(initialIndex.toFloat()) }
-    val maxArticles = maxArticleOptions[sliderIndex.toInt().coerceIn(0, maxArticleOptions.lastIndex)]
+    var maxArticlesIndex by remember { mutableStateOf(initialIndex) }
+    val maxArticles = maxArticleOptions[maxArticlesIndex]
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -322,24 +440,39 @@ fun EditFeedDialog(
                     Text("Briefing")
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+                Text("Max articles", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                // Stepper control - easier for e-ink than slider
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Max articles", style = MaterialTheme.typography.labelLarge)
+                    OutlinedButton(
+                        onClick = {
+                            if (maxArticlesIndex > 0) maxArticlesIndex--
+                        },
+                        enabled = maxArticlesIndex > 0
+                    ) {
+                        Text("-")
+                    }
+
                     Text(
                         text = if (maxArticles == 0) "Unlimited" else "$maxArticles",
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.width(80.dp),
+                        textAlign = TextAlign.Center
                     )
+
+                    OutlinedButton(
+                        onClick = {
+                            if (maxArticlesIndex < maxArticleOptions.lastIndex) maxArticlesIndex++
+                        },
+                        enabled = maxArticlesIndex < maxArticleOptions.lastIndex
+                    ) {
+                        Text("+")
+                    }
                 }
-                Slider(
-                    value = sliderIndex,
-                    onValueChange = { sliderIndex = it },
-                    valueRange = 0f..(maxArticleOptions.lastIndex.toFloat()),
-                    steps = maxArticleOptions.size - 2,
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         },
         confirmButton = {

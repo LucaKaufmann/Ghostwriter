@@ -31,7 +31,8 @@ class SettingsViewModel @Inject constructor(
                 apiKey = settingsRepository.getOpenAIApiKey() ?: "",
                 scheduleHour = settingsRepository.getScheduleHour(),
                 scheduleMinute = settingsRepository.getScheduleMinute(),
-                minWordCount = settingsRepository.getMinWordCount()
+                minWordCount = settingsRepository.getMinWordCount(),
+                einkMode = settingsRepository.getEinkMode()
             )
         }
     }
@@ -64,6 +65,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setMinWordCount(count)
             _uiState.update { it.copy(minWordCount = count) }
+        }
+    }
+
+    fun updateEinkMode(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setEinkMode(enabled)
+            _uiState.update { it.copy(einkMode = enabled) }
         }
     }
 
@@ -100,6 +108,7 @@ data class SettingsUiState(
     val scheduleHour: Int = 22,
     val scheduleMinute: Int = 0,
     val minWordCount: Int = 0,
+    val einkMode: Boolean = false,
     val showTimePicker: Boolean = false,
     val isGenerating: Boolean = false,
     val digestTriggered: Boolean = false
