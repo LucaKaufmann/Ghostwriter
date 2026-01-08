@@ -42,7 +42,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +49,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.text.HtmlCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.DigestArticle
+import com.example.epilogue.ui.LocalEinkMode
+import com.example.epilogue.ui.components.EinkBookReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -68,6 +69,9 @@ fun DigestDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
+
+    // E-ink mode support
+    val einkMode = LocalEinkMode.current
 
     // Load digest when screen appears
     LaunchedEffect(digestId) {
@@ -145,63 +149,92 @@ fun DigestDetailScreen(
                 val briefings = uiState.articles.filter { it.isSummary }
                 val deepDives = uiState.articles.filter { !it.isSummary }
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    item { Spacer(modifier = Modifier.height(8.dp)) }
-
-                    // Briefings section
-                    if (briefings.isNotEmpty()) {
-                        item {
-                            Text(
-                                text = "The Briefing",
-                                style = MaterialTheme.typography.headlineMedium
-                            )
-                            Text(
-                                text = "AI-generated summaries for quick catch-up",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        items(briefings, key = { it.id }) { article ->
-                            ArticleCard(article = article)
-                        }
-                    }
-
-                    // Deep Dives section
-                    if (deepDives.isNotEmpty()) {
-                        if (briefings.isNotEmpty()) {
-                            item {
-                                Divider(modifier = Modifier.padding(vertical = 8.dp))
-                            }
-                        }
-
-                        item {
-                            Text(
-                                text = "Deep Dives",
-                                style = MaterialTheme.typography.headlineMedium
-                            )
-                            Text(
-                                text = "Full articles for in-depth reading",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        items(deepDives, key = { it.id }) { article ->
-                            ArticleCard(article = article)
-                        }
-                    }
-
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
+                if (einkMode) {
+                    // E-ink mode: Book-style reader with all articles as chapters
+                    EinkBookReader(
+                        articles = briefings + deepDives,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                    )
+                } else {
+                    // Standard mode: Scrollable list
+                    ScrollableArticleList(
+                        briefings = briefings,
+                        deepDives = deepDives,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .padding(horizontal = 16.dp)
+                    )
                 }
             }
         }
+    }
+}
+
+/**
+ * Standard scrollable article list (non-e-ink mode).
+ */
+@Composable
+fun ScrollableArticleList(
+    briefings: List<DigestArticle>,
+    deepDives: List<DigestArticle>,
+    modifier: Modifier = Modifier
+) {
+    val einkMode = LocalEinkMode.current
+
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item { Spacer(modifier = Modifier.height(8.dp)) }
+
+        // Briefings section
+        if (briefings.isNotEmpty()) {
+            item {
+                Text(
+                    text = "The Briefing",
+                    style = MaterialTheme.typography.headlineMedium
+                )
+                Text(
+                    text = "AI-generated summaries for quick catch-up",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            items(briefings, key = { it.id }) { article ->
+                ArticleCard(article = article, einkMode = einkMode)
+            }
+        }
+
+        // Deep Dives section
+        if (deepDives.isNotEmpty()) {
+            if (briefings.isNotEmpty()) {
+                item {
+                    Divider(modifier = Modifier.padding(vertical = 8.dp))
+                }
+            }
+
+            item {
+                Text(
+                    text = "Deep Dives",
+                    style = MaterialTheme.typography.headlineMedium
+                )
+                Text(
+                    text = "Full articles for in-depth reading",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            items(deepDives, key = { it.id }) { article ->
+                ArticleCard(article = article, einkMode = einkMode)
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
     }
 }
 
@@ -211,7 +244,8 @@ fun DigestDetailScreen(
 @Composable
 fun ArticleCard(
     article: DigestArticle,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    einkMode: Boolean = false
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
@@ -220,7 +254,7 @@ fun ArticleCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize()
+            .then(if (einkMode) Modifier else Modifier.animateContentSize())
             .clickable { expanded = !expanded },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
