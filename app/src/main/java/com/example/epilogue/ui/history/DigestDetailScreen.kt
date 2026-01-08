@@ -151,11 +151,12 @@ fun DigestDetailScreen(
 
                 if (einkMode) {
                     // E-ink mode: Book-style reader with all articles as chapters
+                    // Only apply top padding (for app bar), ignore bottom system padding
                     EinkBookReader(
                         articles = briefings + deepDives,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(innerPadding)
+                            .padding(top = innerPadding.calculateTopPadding())
                     )
                 } else {
                     // Standard mode: Scrollable list

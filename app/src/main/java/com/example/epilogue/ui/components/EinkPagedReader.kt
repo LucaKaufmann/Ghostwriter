@@ -82,6 +82,7 @@ fun EinkPagedReader(
     val density = LocalDensity.current
 
     var currentPage by rememberSaveable { mutableIntStateOf(0) }
+    var showNavigationBar by rememberSaveable { mutableStateOf(true) }
     var viewportHeight by remember { mutableStateOf(0) }
 
     // Build flat list of all content items
@@ -123,7 +124,7 @@ fun EinkPagedReader(
     }
 
     // Handle volume key events
-    LaunchedEffect(volumeKeyHandler) {
+    LaunchedEffect(volumeKeyHandler, totalPages) {
         volumeKeyHandler?.events?.collect { event ->
             when (event) {
                 VolumeKeyEvent.VolumeUp -> {
@@ -164,6 +165,7 @@ fun EinkPagedReader(
                         when {
                             offset.x < width / 3 && currentPage > 0 -> currentPage--
                             offset.x > width * 2 / 3 && currentPage < totalPages - 1 -> currentPage++
+                            else -> showNavigationBar = !showNavigationBar
                         }
                     }
                 }
@@ -174,7 +176,7 @@ fun EinkPagedReader(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)
             ) {
                 currentPageContent.forEach { item ->
                     when (item) {
@@ -196,14 +198,16 @@ fun EinkPagedReader(
             }
         }
 
-        // Navigation bar
-        PageNavigationBar(
-            currentPage = currentPage,
-            totalPages = totalPages,
-            onPrevious = { if (currentPage > 0) currentPage-- },
-            onNext = { if (currentPage < totalPages - 1) currentPage++ },
-            modifier = Modifier.fillMaxWidth()
-        )
+        // Navigation bar (toggle with center tap)
+        if (showNavigationBar) {
+            PageNavigationBar(
+                currentPage = currentPage,
+                totalPages = totalPages,
+                onPrevious = { if (currentPage > 0) currentPage-- },
+                onNext = { if (currentPage < totalPages - 1) currentPage++ },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 
@@ -353,50 +357,47 @@ private fun PageNavigationBar(
     onNext: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedButton(
-            onClick = onPrevious,
-            enabled = currentPage > 0,
-            modifier = Modifier.height(56.dp)
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                contentDescription = "Previous page",
-                modifier = Modifier.size(24.dp)
-            )
-            Text("Prev")
-        }
+    Column(modifier = modifier.background(MaterialTheme.colorScheme.surface)) {
+        Divider(color = MaterialTheme.colorScheme.outline)
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = onPrevious,
+                enabled = currentPage > 0,
+                modifier = Modifier.height(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = "Previous page",
+                    modifier = Modifier.size(20.dp)
+                )
+                Text("Prev")
+            }
+
             Text(
-                text = "${currentPage + 1} of $totalPages",
-                style = MaterialTheme.typography.titleMedium,
+                text = "${currentPage + 1} / $totalPages",
+                style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center
             )
-            Text(
-                text = "Tap sides to turn",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
 
-        OutlinedButton(
-            onClick = onNext,
-            enabled = currentPage < totalPages - 1,
-            modifier = Modifier.height(56.dp)
-        ) {
-            Text("Next")
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "Next page",
-                modifier = Modifier.size(24.dp)
-            )
+            OutlinedButton(
+                onClick = onNext,
+                enabled = currentPage < totalPages - 1,
+                modifier = Modifier.height(40.dp)
+            ) {
+                Text("Next")
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "Next page",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
