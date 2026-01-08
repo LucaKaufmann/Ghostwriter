@@ -11,23 +11,33 @@ import android.text.style.StyleSpan
 import android.util.TypedValue
 import android.widget.TextView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,7 +53,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.epilogue.domain.model.DigestArticle
@@ -56,7 +68,16 @@ import com.example.epilogue.ui.VolumeKeyEvent
  */
 private data class BookPage(
     val text: CharSequence,
-    val pageNumber: Int
+    val pageNumber: Int,
+    val chapterIndex: Int
+)
+
+/**
+ * Result of pagination including pages and chapter start positions.
+ */
+private data class PaginationResult(
+    val pages: List<BookPage>,
+    val chapterStartPages: List<Int>  // Index = chapter index, Value = first page number (0-indexed)
 )
 
 /**
@@ -90,6 +111,7 @@ fun EinkBookReader(
 
     var currentPage by rememberSaveable { mutableIntStateOf(0) }
     var showNavigationBar by rememberSaveable { mutableStateOf(true) }
+    var showChapterDialog by rememberSaveable { mutableStateOf(false) }
     var viewportWidth by remember { mutableStateOf(0) }
     var viewportHeight by remember { mutableStateOf(0) }
 
@@ -102,9 +124,9 @@ fun EinkBookReader(
 
     // Calculate pages when viewport dimensions are known
     // Each chapter starts on a new page
-    val pages = remember(chapters, viewportWidth, viewportHeight, density) {
+    val paginationResult = remember(chapters, viewportWidth, viewportHeight, density) {
         if (viewportWidth <= 0 || viewportHeight <= 0) {
-            emptyList()
+            PaginationResult(emptyList(), emptyList())
         } else {
             val textSizePx = with(density) { 17.dp.toPx() }
             paginateChapters(
@@ -118,7 +140,14 @@ fun EinkBookReader(
         }
     }
 
+    val pages = paginationResult.pages
+    val chapterStartPages = paginationResult.chapterStartPages
     val totalPages = pages.size.coerceAtLeast(1)
+
+    // Derive current chapter from current page
+    val currentChapterIndex = remember(currentPage, pages) {
+        pages.getOrNull(currentPage)?.chapterIndex ?: 0
+    }
 
     // Ensure currentPage is within bounds
     LaunchedEffect(totalPages) {
@@ -222,9 +251,24 @@ fun EinkBookReader(
                 totalPages = totalPages,
                 onPrevious = { if (currentPage > 0) currentPage-- },
                 onNext = { if (currentPage < totalPages - 1) currentPage++ },
+                onContentsClick = { showChapterDialog = true },
                 modifier = Modifier.fillMaxWidth()
             )
         }
+    }
+
+    // Chapter list dialog
+    if (showChapterDialog) {
+        ChapterListDialog(
+            articles = articles,
+            currentChapterIndex = currentChapterIndex,
+            chapterStartPages = chapterStartPages,
+            onChapterSelected = { pageIndex ->
+                currentPage = pageIndex
+                showChapterDialog = false
+            },
+            onDismiss = { showChapterDialog = false }
+        )
     }
 }
 
@@ -343,6 +387,7 @@ private fun stripHtmlTags(html: String): String {
 /**
  * Paginates chapters into pages, ensuring each chapter starts on a new page.
  * Uses StaticLayout to accurately measure text.
+ * Returns both pages and chapter start positions for navigation.
  */
 private fun paginateChapters(
     chapters: List<Chapter>,
@@ -351,10 +396,11 @@ private fun paginateChapters(
     textSizePx: Float,
     lineSpacingMultiplier: Float,
     lineSpacingExtra: Float
-): List<BookPage> {
-    if (chapters.isEmpty()) return emptyList()
+): PaginationResult {
+    if (chapters.isEmpty()) return PaginationResult(emptyList(), emptyList())
 
     val pages = mutableListOf<BookPage>()
+    val chapterStartPages = mutableListOf<Int>()
     var pageNumber = 1
 
     // Create TextPaint matching the TextView configuration
@@ -371,9 +417,12 @@ private fun paginateChapters(
     val availableHeight = (viewportHeight - paddingVertical).toInt().coerceAtLeast(100)
 
     // Process each chapter separately - each chapter starts on a new page
-    for (chapter in chapters) {
+    for ((chapterIndex, chapter) in chapters.withIndex()) {
         val content = chapter.content
         if (content.isEmpty()) continue
+
+        // Record the start page for this chapter (0-indexed)
+        chapterStartPages.add(pages.size)
 
         var currentStart = 0
 
@@ -418,7 +467,7 @@ private fun paginateChapters(
 
             // Extract the page content
             val pageText = remainingContent.subSequence(0, endOffset)
-            pages.add(BookPage(pageText, pageNumber))
+            pages.add(BookPage(pageText, pageNumber, chapterIndex))
 
             currentStart += endOffset
             pageNumber++
@@ -428,11 +477,11 @@ private fun paginateChapters(
         }
     }
 
-    return pages
+    return PaginationResult(pages, chapterStartPages)
 }
 
 /**
- * Navigation bar for the book reader with page controls.
+ * Navigation bar for the book reader with page controls and contents button.
  */
 @Composable
 private fun BookNavigationBar(
@@ -440,6 +489,7 @@ private fun BookNavigationBar(
     totalPages: Int,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onContentsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.background(MaterialTheme.colorScheme.surface)) {
@@ -465,11 +515,17 @@ private fun BookNavigationBar(
                 Text("Prev")
             }
 
-            Text(
-                text = "${currentPage + 1} / $totalPages",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center
-            )
+            OutlinedButton(
+                onClick = onContentsClick,
+                modifier = Modifier.height(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.List,
+                    contentDescription = "Contents",
+                    modifier = Modifier.size(20.dp)
+                )
+                Text("Contents")
+            }
 
             OutlinedButton(
                 onClick = onNext,
@@ -483,6 +539,195 @@ private fun BookNavigationBar(
                     modifier = Modifier.size(20.dp)
                 )
             }
+        }
+
+        // Page indicator below buttons
+        Text(
+            text = "${currentPage + 1} / $totalPages",
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 4.dp)
+        )
+    }
+}
+
+private const val CHAPTERS_PER_PAGE = 5
+
+/**
+ * Dialog showing the table of contents with all chapters (articles).
+ * Uses pagination instead of scrolling for e-ink friendliness.
+ */
+@Composable
+private fun ChapterListDialog(
+    articles: List<DigestArticle>,
+    currentChapterIndex: Int,
+    chapterStartPages: List<Int>,
+    onChapterSelected: (pageIndex: Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    // Start on the page containing the current chapter
+    val initialPage = currentChapterIndex / CHAPTERS_PER_PAGE
+    var currentListPage by rememberSaveable { mutableIntStateOf(initialPage) }
+    val totalListPages = ((articles.size + CHAPTERS_PER_PAGE - 1) / CHAPTERS_PER_PAGE).coerceAtLeast(1)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Contents",
+                style = MaterialTheme.typography.headlineSmall
+            )
+        },
+        text = {
+            if (articles.isEmpty()) {
+                Text("No chapters available")
+            } else {
+                Column {
+                    // Chapter items for current page
+                    val startIndex = currentListPage * CHAPTERS_PER_PAGE
+                    val endIndex = minOf(startIndex + CHAPTERS_PER_PAGE, articles.size)
+                    val pageArticles = articles.subList(startIndex, endIndex)
+
+                    pageArticles.forEachIndexed { localIndex, article ->
+                        val globalIndex = startIndex + localIndex
+                        ChapterListItem(
+                            article = article,
+                            chapterNumber = globalIndex + 1,
+                            isCurrentChapter = globalIndex == currentChapterIndex,
+                            onClick = {
+                                val targetPage = chapterStartPages.getOrElse(globalIndex) { 0 }
+                                onChapterSelected(targetPage)
+                            }
+                        )
+                        if (localIndex < pageArticles.lastIndex) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+
+                    // Pagination controls (only show if more than one page)
+                    if (totalListPages > 1) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Divider()
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = { currentListPage-- },
+                                enabled = currentListPage > 0,
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                    contentDescription = "Previous",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text("Prev")
+                            }
+
+                            Text(
+                                text = "${currentListPage + 1} / $totalListPages",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            OutlinedButton(
+                                onClick = { currentListPage++ },
+                                enabled = currentListPage < totalListPages - 1,
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Text("Next")
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = "Next",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+/**
+ * A single item in the chapter list.
+ */
+@Composable
+private fun ChapterListItem(
+    article: DigestArticle,
+    chapterNumber: Int,
+    isCurrentChapter: Boolean,
+    onClick: () -> Unit
+) {
+    val backgroundColor = if (isCurrentChapter) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+
+    val borderColor = if (isCurrentChapter) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(backgroundColor, RoundedCornerShape(8.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Chapter number
+        Text(
+            text = "$chapterNumber.",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(32.dp)
+        )
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Article info
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = article.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isCurrentChapter) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${article.feedName}${if (article.isSummary) " • Briefing" else ""}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // Current indicator
+        if (isCurrentChapter) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Reading",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }
