@@ -76,6 +76,27 @@ fun SettingsScreen(
         }
     }
 
+    LaunchedEffect(uiState.digestCompleted) {
+        if (uiState.digestCompleted) {
+            snackbarHostState.showSnackbar("Digest generated successfully")
+            viewModel.clearDigestCompletedFlag()
+        }
+    }
+
+    LaunchedEffect(uiState.digestFailed) {
+        if (uiState.digestFailed) {
+            snackbarHostState.showSnackbar("Digest generation failed")
+            viewModel.clearDigestFailedFlag()
+        }
+    }
+
+    LaunchedEffect(uiState.dataReset) {
+        if (uiState.dataReset) {
+            snackbarHostState.showSnackbar("All digests deleted and feed timestamps reset")
+            viewModel.clearDataResetFlag()
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -160,6 +181,48 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+            }
+
+            Divider()
+
+            // Developer Section
+            SettingsSection(title = "Developer") {
+                var showConfirmDialog by remember { mutableStateOf(false) }
+
+                OutlinedButton(
+                    onClick = { showConfirmDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Reset All Data")
+                }
+                Text(
+                    text = "Deletes all digests and resets feed timestamps (for testing)",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                if (showConfirmDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showConfirmDialog = false },
+                        title = { Text("Reset All Data?") },
+                        text = { Text("This will delete all digests and reset feed timestamps so all articles will be fetched again. This cannot be undone.") },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    viewModel.resetAllData()
+                                    showConfirmDialog = false
+                                }
+                            ) {
+                                Text("Reset")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showConfirmDialog = false }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
             }
         }
     }

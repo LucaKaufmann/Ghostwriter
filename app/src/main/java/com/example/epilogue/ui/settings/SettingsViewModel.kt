@@ -2,6 +2,9 @@ package com.example.epilogue.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import com.example.epilogue.data.repository.DigestRepository
+import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.service.DigestScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -15,7 +18,9 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val digestScheduler: DigestScheduler
+    private val digestScheduler: DigestScheduler,
+    private val digestRepository: DigestRepository,
+    private val feedRepository: FeedRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -76,17 +81,37 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun runDigestNow() {
-        _uiState.update { it.copy(isGenerating = true) }
+        _uiState.update { it.copy(isGenerating = true, digestTriggered = true) }
         digestScheduler.runNow(fetchAll = false)
-        // Note: In a real app, you'd observe WorkInfo to track completion
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(1000)
-            _uiState.update { it.copy(isGenerating = false, digestTriggered = true) }
+
+        // Observe work completion
+        digestScheduler.getImmediateWorkInfo().observeForever { workInfos ->
+            val workInfo = workInfos?.firstOrNull() ?: return@observeForever
+            when (workInfo.state) {
+                WorkInfo.State.SUCCEEDED -> {
+                    _uiState.update { it.copy(isGenerating = false, digestCompleted = true) }
+                }
+                WorkInfo.State.FAILED -> {
+                    _uiState.update { it.copy(isGenerating = false, digestFailed = true) }
+                }
+                WorkInfo.State.CANCELLED -> {
+                    _uiState.update { it.copy(isGenerating = false) }
+                }
+                else -> { /* Still running */ }
+            }
         }
     }
 
     fun clearDigestTriggeredFlag() {
         _uiState.update { it.copy(digestTriggered = false) }
+    }
+
+    fun clearDigestCompletedFlag() {
+        _uiState.update { it.copy(digestCompleted = false) }
+    }
+
+    fun clearDigestFailedFlag() {
+        _uiState.update { it.copy(digestFailed = false) }
     }
 
     fun clearApiKeySavedFlag() {
@@ -100,6 +125,18 @@ class SettingsViewModel @Inject constructor(
     fun hideTimePicker() {
         _uiState.update { it.copy(showTimePicker = false) }
     }
+
+    fun resetAllData() {
+        viewModelScope.launch {
+            digestRepository.deleteAllDigests()
+            feedRepository.resetAllLastFetched()
+            _uiState.update { it.copy(dataReset = true) }
+        }
+    }
+
+    fun clearDataResetFlag() {
+        _uiState.update { it.copy(dataReset = false) }
+    }
 }
 
 data class SettingsUiState(
@@ -111,5 +148,8 @@ data class SettingsUiState(
     val einkMode: Boolean = false,
     val showTimePicker: Boolean = false,
     val isGenerating: Boolean = false,
-    val digestTriggered: Boolean = false
+    val digestTriggered: Boolean = false,
+    val digestCompleted: Boolean = false,
+    val digestFailed: Boolean = false,
+    val dataReset: Boolean = false
 )
