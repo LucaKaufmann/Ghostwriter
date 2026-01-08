@@ -13,6 +13,7 @@ import android.widget.TextView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -202,6 +203,22 @@ fun EinkBookReader(
                             else -> showNavigationBar = !showNavigationBar
                         }
                     }
+                }
+                .pointerInput(totalPages, currentPage) {
+                    var totalDrag = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDrag = 0f },
+                        onDragEnd = {
+                            val swipeThreshold = size.width * 0.15f
+                            when {
+                                totalDrag > swipeThreshold && currentPage > 0 -> currentPage--
+                                totalDrag < -swipeThreshold && currentPage < totalPages - 1 -> currentPage++
+                            }
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            totalDrag += dragAmount
+                        }
+                    )
                 }
         ) {
             if (pages.isNotEmpty() && currentPage < pages.size) {
