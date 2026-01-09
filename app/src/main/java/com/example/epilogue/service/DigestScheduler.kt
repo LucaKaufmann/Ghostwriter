@@ -1,12 +1,14 @@
 package com.example.epilogue.service
 
 import android.content.Context
+import android.util.Log
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.epilogue.data.repository.SettingsRepository
@@ -26,6 +28,7 @@ class DigestScheduler @Inject constructor(
 ) {
 
     companion object {
+        private const val TAG = "DigestScheduler"
         private const val PERIODIC_WORK_NAME = "daily_digest_periodic"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
     }
@@ -36,16 +39,16 @@ class DigestScheduler @Inject constructor(
     /**
      * Constraints for digest generation:
      * - Requires network connectivity
-     * - Battery should not be low
+     * - No battery constraint (e-ink devices often report low battery)
      */
     private val workConstraints = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
-        .setRequiresBatteryNotLow(true)
         .build()
 
     /**
      * Schedules the daily digest to run at the configured time.
-     * Uses a periodic work request that runs approximately every 24 hours.
+     * Uses a periodic work request that runs every 24 hours.
+     * No flex interval - we want predictable timing for daily digests.
      */
     fun scheduleDailyDigest() {
         val hour = settingsRepository.getScheduleHour()
@@ -59,13 +62,19 @@ class DigestScheduler @Inject constructor(
         )
             .setConstraints(workConstraints)
             .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
+            .addTag(DailyDigestWorker.TAG)
             .build()
 
         workManager.enqueueUniquePeriodicWork(
             PERIODIC_WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
             periodicWorkRequest
         )
+
+        val delayHours = initialDelay / (1000 * 60 * 60)
+        val delayMinutes = (initialDelay / (1000 * 60)) % 60
+        Log.i(TAG, "Scheduled daily digest for ${hour}:${minute.toString().padStart(2, '0')}, " +
+                "initial delay: ${delayHours}h ${delayMinutes}m")
     }
 
     /**
@@ -77,11 +86,13 @@ class DigestScheduler @Inject constructor(
 
     /**
      * Triggers an immediate digest generation.
-     * Useful for "Run Now" functionality.
+     * Uses expedited work for higher priority execution.
      *
      * @param fetchAll If true, fetches all articles regardless of lastFetched timestamp
      */
     fun runNow(fetchAll: Boolean = false) {
+        Log.i(TAG, "Triggering immediate digest generation (fetchAll=$fetchAll)")
+
         val inputData = Data.Builder()
             .putBoolean(DailyDigestWorker.KEY_FETCH_ALL, fetchAll)
             .putBoolean(DailyDigestWorker.KEY_IS_MANUAL, true)
@@ -90,6 +101,8 @@ class DigestScheduler @Inject constructor(
         val oneTimeWorkRequest = OneTimeWorkRequestBuilder<DailyDigestWorker>()
             .setConstraints(workConstraints)
             .setInputData(inputData)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag(DailyDigestWorker.TAG)
             .build()
 
         workManager.enqueueUniqueWork(

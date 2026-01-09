@@ -1,16 +1,24 @@
 package com.example.epilogue.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import com.example.epilogue.R
 import com.example.epilogue.data.repository.ArticleRepository
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.domain.model.TriggerType
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import java.io.IOException
 import java.util.Date
 
 /**
@@ -36,10 +44,20 @@ class DailyDigestWorker @AssistedInject constructor(
         // Input data keys
         const val KEY_FETCH_ALL = "fetch_all"  // If true, fetch all articles (not just new)
         const val KEY_IS_MANUAL = "is_manual"  // If true, triggered manually (not scheduled)
+
+        // Notification constants for foreground service
+        const val NOTIFICATION_CHANNEL_ID = "digest_generation"
+        const val NOTIFICATION_ID = 1001
+
+        // Retry configuration
+        const val MAX_RETRY_ATTEMPTS = 3
     }
 
     override suspend fun doWork(): Result {
-        Log.i(TAG, "Starting daily digest generation")
+        Log.i(TAG, "Starting daily digest generation (attempt ${runAttemptCount})")
+
+        // Set foreground for long-running work
+        setForeground(createForegroundInfo())
 
         return try {
             val fetchOnlyNew = !inputData.getBoolean(KEY_FETCH_ALL, false)
@@ -88,11 +106,71 @@ class DailyDigestWorker @AssistedInject constructor(
                 Result.success()
             } else {
                 Log.e(TAG, "Failed to generate EPUB")
-                Result.failure()
+                retryOrFail()
             }
+        } catch (e: IOException) {
+            // Network errors are retriable
+            Log.e(TAG, "Network error generating digest", e)
+            retryOrFail()
         } catch (e: Exception) {
             Log.e(TAG, "Error generating digest", e)
             Result.failure()
         }
+    }
+
+    /**
+     * Returns Result.retry() if under max attempts, otherwise Result.failure()
+     */
+    private fun retryOrFail(): Result {
+        return if (runAttemptCount < MAX_RETRY_ATTEMPTS) {
+            Log.i(TAG, "Scheduling retry (attempt ${runAttemptCount + 1}/$MAX_RETRY_ATTEMPTS)")
+            Result.retry()
+        } else {
+            Log.e(TAG, "Max retry attempts reached, failing")
+            Result.failure()
+        }
+    }
+
+    /**
+     * Required for expedited work - provides notification for foreground service.
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        return createForegroundInfo()
+    }
+
+    private fun createForegroundInfo(): ForegroundInfo {
+        createNotificationChannel()
+
+        val notification = NotificationCompat.Builder(applicationContext, NOTIFICATION_CHANNEL_ID)
+            .setContentTitle("Generating Digest")
+            .setContentText("Fetching articles and creating EPUB...")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            NOTIFICATION_CHANNEL_ID,
+            "Digest Generation",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Shows progress while generating daily digest"
+        }
+
+        val notificationManager = applicationContext
+            .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
     }
 }
