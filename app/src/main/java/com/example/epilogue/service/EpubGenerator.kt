@@ -12,6 +12,9 @@ import io.documentnode.epub4j.domain.Author
 import io.documentnode.epub4j.domain.Book
 import io.documentnode.epub4j.domain.Resource
 import io.documentnode.epub4j.epub.EpubWriter
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import org.jsoup.nodes.Entities
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -125,7 +128,7 @@ class EpubGenerator @Inject constructor(
                 if (article.author.isNotBlank()) {
                     append("<p class=\"byline\">${escapeHtml(article.author)}</p>\n")
                 }
-                append("<div class=\"content\">${article.content}</div>\n")
+                append("<div class=\"content\">${sanitizeHtmlToXhtml(article.content)}</div>\n")
                 append("<p class=\"source\"><a href=\"${escapeHtml(article.originalUrl)}\">Source</a></p>\n")
                 if (index < briefings.lastIndex) {
                     append("<hr/>\n")
@@ -171,7 +174,7 @@ class EpubGenerator @Inject constructor(
                 if (article.author.isNotBlank()) {
                     append("<p class=\"byline\">By ${escapeHtml(article.author)}</p>\n")
                 }
-                append("<div class=\"content\">${article.content}</div>\n")
+                append("<div class=\"content\">${sanitizeHtmlToXhtml(article.content)}</div>\n")
                 append("<p class=\"source\"><a href=\"${escapeHtml(article.originalUrl)}\">Original article</a></p>\n")
                 append("</article>\n")
                 append("</body>\n</html>")
@@ -378,4 +381,31 @@ class EpubGenerator @Inject constructor(
         .replace(">", "&gt;")
         .replace("\"", "&quot;")
         .replace("'", "&#39;")
+
+    /**
+     * Sanitizes HTML content to be valid XHTML for EPUB.
+     * Converts HTML to XHTML-compliant markup using Jsoup.
+     */
+    private fun sanitizeHtmlToXhtml(html: String): String {
+        if (html.isBlank()) return ""
+
+        val doc = Jsoup.parseBodyFragment(html)
+
+        // Configure output for XHTML
+        doc.outputSettings()
+            .syntax(Document.OutputSettings.Syntax.xml)
+            .escapeMode(Entities.EscapeMode.xhtml)
+            .charset("UTF-8")
+
+        // Remove potentially problematic elements
+        doc.select("script, style, iframe, object, embed, form, input, button").remove()
+
+        // Fix common issues: convert self-closing tags to XHTML format
+        // Jsoup handles this automatically with xml syntax
+
+        // Remove invalid attributes that might cause issues
+        doc.select("[onclick], [onload], [onerror]").forEach { it.clearAttributes() }
+
+        return doc.body().html()
+    }
 }
