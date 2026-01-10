@@ -28,6 +28,25 @@ Run a single test:
 ./gradlew test --tests "com.example.epilog.ExampleUnitTest"
 ```
 
+## ADB Commands
+
+ADB path on this machine:
+```bash
+adb
+```
+
+```bash
+adb devices                    # List connected devices
+adb install -r app/build/outputs/apk/debug/app-debug.apk  # Install debug APK
+adb shell am start -n com.example.epilogue/.ui.MainActivity  # Launch app
+adb logcat -s "Epilogue:*"     # View app logs
+```
+
+For targeting a specific device (e.g., Palma 2), use `-s <device_id>`:
+```bash
+adb -s <device_id> install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
 ## Tech Stack
 
 - **Language:** Kotlin
