@@ -1,5 +1,6 @@
 package com.example.epilogue.service
 
+import android.util.Log
 import com.example.epilogue.data.remote.openai.ChatCompletionRequest
 import com.example.epilogue.data.remote.openai.ChatMessage
 import com.example.epilogue.data.remote.openai.OpenAIApi
@@ -21,6 +22,7 @@ class OpenAIService @Inject constructor(
 ) {
 
     companion object {
+        private const val TAG = "OpenAIService"
         private const val MODEL = "gpt-4o-mini"
         private const val MAX_TOKENS = 512
         private const val TEMPERATURE = 0.7
@@ -52,6 +54,13 @@ class OpenAIService @Inject constructor(
             - Keep the total summary under 150 words
             - Format using Markdown with **bold** headers
             - Do not include the article title in your response
+
+            IMPORTANT - Promotional content handling:
+            - Completely ignore any promotional content, deals, discounts, affiliate links, or advertisements
+            - Do not mention prices, discount percentages, coupon codes, or special offers
+            - If an article is primarily promotional (e.g., "X is Y% off"), respond with only: "PROMOTIONAL_CONTENT"
+            - If an article contains some promotional elements mixed with news, focus only on the newsworthy content
+            - Never recommend products or services based on price or deals
         """.trimIndent()
     }
 
@@ -125,7 +134,7 @@ class OpenAIService @Inject constructor(
      * Summarizes an article and returns a ProcessedArticle with isSummary = true.
      *
      * @param originalArticle The original full article
-     * @return ProcessedArticle with summary content, or null if summarization fails
+     * @return ProcessedArticle with summary content, or null if summarization fails or content is promotional
      */
     suspend fun summarizeArticle(originalArticle: ProcessedArticle): ProcessedArticle? {
         val result = summarize(
@@ -136,6 +145,11 @@ class OpenAIService @Inject constructor(
 
         return when (result) {
             is SummaryResult.Success -> {
+                // Filter out articles the AI identified as promotional
+                if (result.summary.trim().equals("PROMOTIONAL_CONTENT", ignoreCase = true)) {
+                    Log.i(TAG, "AI identified promotional content: ${originalArticle.title}")
+                    return null
+                }
                 ProcessedArticle(
                     title = originalArticle.title,
                     author = originalArticle.author,

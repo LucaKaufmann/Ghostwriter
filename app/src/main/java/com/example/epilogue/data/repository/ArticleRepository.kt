@@ -6,6 +6,7 @@ import com.example.epilogue.domain.model.ProcessedArticle
 import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.service.ContentProcessor
 import com.example.epilogue.service.OpenAIService
+import com.example.epilogue.service.PromotionalContentFilter
 import com.example.epilogue.service.RssService
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -23,7 +24,8 @@ class ArticleRepository @Inject constructor(
     private val contentProcessor: ContentProcessor,
     private val openAIService: OpenAIService,
     private val feedRepository: FeedRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val promotionalFilter: PromotionalContentFilter
 ) {
     companion object {
         private const val TAG = "ArticleRepository"
@@ -56,6 +58,18 @@ class ArticleRepository @Inject constructor(
 
         var rssItems = rssService.fetchNewArticles(feed.url, since)
         Log.d(TAG, "Feed ${feed.name}: got ${rssItems.size} RSS items after date filter (since=$since)")
+
+        // Filter out promotional content before processing
+        val nonPromotionalItems = rssItems.filter { item ->
+            val filterResult = promotionalFilter.isPromotional(
+                url = item.link,
+                title = item.title,
+                content = item.content ?: item.description
+            )
+            !filterResult.isPromotional
+        }
+        Log.d(TAG, "Feed ${feed.name}: filtered ${rssItems.size - nonPromotionalItems.size} promotional items")
+        rssItems = nonPromotionalItems
 
         // Apply per-feed max articles limit before processing
         if (feed.maxArticles > 0) {
