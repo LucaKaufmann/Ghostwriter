@@ -8,6 +8,11 @@ Epilogue is an Android application that aggregates RSS/Atom feeds, processes con
 
 ## Build Commands
 
+**Important:** Set JAVA_HOME to Android Studio's bundled JDK before running Gradle:
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+```
+
 ```bash
 ./gradlew build              # Build the project
 ./gradlew assembleDebug      # Build debug APK

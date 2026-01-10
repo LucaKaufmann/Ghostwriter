@@ -12,6 +12,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.epilogue.data.repository.SettingsRepository
+import com.example.epilogue.domain.model.DigestPeriod
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
@@ -20,6 +21,7 @@ import javax.inject.Singleton
 
 /**
  * Manages scheduling of the daily digest generation using WorkManager.
+ * Supports multiple time periods (morning, noon, evening) with independent scheduling.
  */
 @Singleton
 class DigestScheduler @Inject constructor(
@@ -29,7 +31,7 @@ class DigestScheduler @Inject constructor(
 
     companion object {
         private const val TAG = "DigestScheduler"
-        private const val PERIODIC_WORK_NAME = "daily_digest_periodic"
+        private const val WORK_NAME_PREFIX = "daily_digest_"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
     }
 
@@ -46,15 +48,39 @@ class DigestScheduler @Inject constructor(
         .build()
 
     /**
-     * Schedules the daily digest to run at the configured time.
-     * Uses a periodic work request that runs every 24 hours.
-     * No flex interval - we want predictable timing for daily digests.
+     * Returns the unique work name for a given period.
      */
-    fun scheduleDailyDigest() {
-        val hour = settingsRepository.getScheduleHour()
-        val minute = settingsRepository.getScheduleMinute()
+    private fun getWorkName(period: DigestPeriod): String {
+        return "$WORK_NAME_PREFIX${period.name}"
+    }
 
-        val initialDelay = calculateInitialDelay(hour, minute)
+    /**
+     * Schedules digests for all selected periods.
+     * Cancels any previously scheduled periods that are no longer selected.
+     */
+    fun scheduleAllPeriods() {
+        val selectedPeriods = settingsRepository.getSchedulePeriods()
+
+        // Schedule selected periods
+        for (period in selectedPeriods) {
+            schedulePeriod(period)
+        }
+
+        // Cancel unselected periods
+        for (period in DigestPeriod.entries) {
+            if (period !in selectedPeriods) {
+                cancelPeriod(period)
+            }
+        }
+
+        Log.i(TAG, "Scheduled periods: ${selectedPeriods.joinToString { it.name }}")
+    }
+
+    /**
+     * Schedules a digest for a specific period.
+     */
+    fun schedulePeriod(period: DigestPeriod) {
+        val initialDelay = calculateInitialDelay(period.hour, 0)
 
         val periodicWorkRequest = PeriodicWorkRequestBuilder<DailyDigestWorker>(
             repeatInterval = 24,
@@ -63,25 +89,48 @@ class DigestScheduler @Inject constructor(
             .setConstraints(workConstraints)
             .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
             .addTag(DailyDigestWorker.TAG)
+            .addTag(period.name)
             .build()
 
         workManager.enqueueUniquePeriodicWork(
-            PERIODIC_WORK_NAME,
+            getWorkName(period),
             ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
             periodicWorkRequest
         )
 
         val delayHours = initialDelay / (1000 * 60 * 60)
         val delayMinutes = (initialDelay / (1000 * 60)) % 60
-        Log.i(TAG, "Scheduled daily digest for ${hour}:${minute.toString().padStart(2, '0')}, " +
+        Log.i(TAG, "Scheduled ${period.name} digest for ${period.hour}:00, " +
                 "initial delay: ${delayHours}h ${delayMinutes}m")
     }
 
     /**
-     * Cancels the scheduled daily digest.
+     * Cancels the scheduled digest for a specific period.
      */
-    fun cancelDailyDigest() {
-        workManager.cancelUniqueWork(PERIODIC_WORK_NAME)
+    fun cancelPeriod(period: DigestPeriod) {
+        workManager.cancelUniqueWork(getWorkName(period))
+        Log.i(TAG, "Cancelled ${period.name} digest")
+    }
+
+    /**
+     * Cancels all scheduled digests.
+     */
+    fun cancelAllPeriods() {
+        for (period in DigestPeriod.entries) {
+            cancelPeriod(period)
+        }
+    }
+
+    /**
+     * Updates scheduling for a specific period based on enabled state.
+     */
+    suspend fun updatePeriod(period: DigestPeriod, enabled: Boolean) {
+        settingsRepository.toggleSchedulePeriod(period, enabled)
+        if (enabled) {
+            schedulePeriod(period)
+        } else {
+            cancelPeriod(period)
+        }
     }
 
     /**
@@ -113,17 +162,6 @@ class DigestScheduler @Inject constructor(
     }
 
     /**
-     * Updates the schedule time and reschedules the work.
-     *
-     * @param hour Hour of day (0-23)
-     * @param minute Minute of hour (0-59)
-     */
-    suspend fun updateScheduleTime(hour: Int, minute: Int) {
-        settingsRepository.setScheduleTime(hour, minute)
-        scheduleDailyDigest()
-    }
-
-    /**
      * Calculates the initial delay until the next occurrence of the scheduled time.
      *
      * @param targetHour Target hour (0-23)
@@ -146,11 +184,6 @@ class DigestScheduler @Inject constructor(
 
         return target.timeInMillis - now.timeInMillis
     }
-
-    /**
-     * Gets the current work status for the daily digest.
-     */
-    fun getWorkInfo() = workManager.getWorkInfosForUniqueWorkLiveData(PERIODIC_WORK_NAME)
 
     /**
      * Gets the work status for immediate digest generation.

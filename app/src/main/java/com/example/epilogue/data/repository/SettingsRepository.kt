@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.epilogue.domain.model.DigestPeriod
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -27,8 +28,10 @@ class SettingsRepository @Inject constructor(
         private const val ENCRYPTED_PREFS_NAME = "epilog_secure_settings"
 
         // Regular settings keys
-        private const val KEY_SCHEDULE_HOUR = "schedule_hour"
-        private const val KEY_SCHEDULE_MINUTE = "schedule_minute"
+        private const val KEY_SCHEDULE_HOUR = "schedule_hour"  // Legacy, for migration
+        private const val KEY_SCHEDULE_MINUTE = "schedule_minute"  // Legacy, for migration
+        private const val KEY_SCHEDULE_PERIODS = "schedule_periods"
+        private const val KEY_SCHEDULE_MIGRATED = "schedule_migrated"
         private const val KEY_MIN_WORD_COUNT = "min_word_count"
         private const val KEY_EINK_MODE = "eink_mode"
         private const val KEY_CUSTOM_EXPORT_URI = "custom_export_uri"
@@ -38,8 +41,6 @@ class SettingsRepository @Inject constructor(
         private const val KEY_OPENAI_API_KEY = "openai_api_key"
 
         // Defaults
-        private const val DEFAULT_SCHEDULE_HOUR = 22  // 10:00 PM
-        private const val DEFAULT_SCHEDULE_MINUTE = 0
         private const val DEFAULT_MIN_WORD_COUNT = 0
         private const val DEFAULT_EINK_MODE = false
         private const val DEFAULT_CUSTOM_EXPORT_ENABLED = false
@@ -119,27 +120,73 @@ class SettingsRepository @Inject constructor(
     // ===== Schedule Settings =====
 
     /**
-     * Sets the daily digest schedule time.
+     * Gets the selected digest periods.
+     * Performs migration from legacy hour/minute settings if needed.
      */
-    suspend fun setScheduleTime(hour: Int, minute: Int) = withContext(Dispatchers.IO) {
+    fun getSchedulePeriods(): Set<DigestPeriod> {
+        // Check if migration is needed
+        if (!prefs.getBoolean(KEY_SCHEDULE_MIGRATED, false)) {
+            migrateScheduleSettings()
+        }
+
+        val periodsString = prefs.getString(KEY_SCHEDULE_PERIODS, null)
+        if (periodsString.isNullOrEmpty()) {
+            // Default to Evening if nothing selected
+            return setOf(DigestPeriod.EVENING)
+        }
+
+        return periodsString.split(",")
+            .mapNotNull { name ->
+                try {
+                    DigestPeriod.valueOf(name)
+                } catch (e: IllegalArgumentException) {
+                    null
+                }
+            }
+            .toSet()
+    }
+
+    /**
+     * Sets the selected digest periods.
+     */
+    suspend fun setSchedulePeriods(periods: Set<DigestPeriod>) = withContext(Dispatchers.IO) {
+        val periodsString = periods.joinToString(",") { it.name }
         prefs.edit()
-            .putInt(KEY_SCHEDULE_HOUR, hour.coerceIn(0, 23))
-            .putInt(KEY_SCHEDULE_MINUTE, minute.coerceIn(0, 59))
+            .putString(KEY_SCHEDULE_PERIODS, periodsString)
             .apply()
     }
 
     /**
-     * Gets the scheduled hour (0-23).
+     * Toggles a specific period on or off.
      */
-    fun getScheduleHour(): Int {
-        return prefs.getInt(KEY_SCHEDULE_HOUR, DEFAULT_SCHEDULE_HOUR)
+    suspend fun toggleSchedulePeriod(period: DigestPeriod, enabled: Boolean) = withContext(Dispatchers.IO) {
+        val currentPeriods = getSchedulePeriods().toMutableSet()
+        if (enabled) {
+            currentPeriods.add(period)
+        } else {
+            currentPeriods.remove(period)
+        }
+        setSchedulePeriods(currentPeriods)
     }
 
     /**
-     * Gets the scheduled minute (0-59).
+     * Migrates legacy hour/minute schedule to period-based schedule.
      */
-    fun getScheduleMinute(): Int {
-        return prefs.getInt(KEY_SCHEDULE_MINUTE, DEFAULT_SCHEDULE_MINUTE)
+    private fun migrateScheduleSettings() {
+        val legacyHour = prefs.getInt(KEY_SCHEDULE_HOUR, -1)
+        if (legacyHour != -1) {
+            // User had a schedule set, migrate to nearest period
+            val period = DigestPeriod.fromHour(legacyHour)
+            prefs.edit()
+                .putString(KEY_SCHEDULE_PERIODS, period.name)
+                .putBoolean(KEY_SCHEDULE_MIGRATED, true)
+                .apply()
+        } else {
+            // No legacy schedule, just mark as migrated
+            prefs.edit()
+                .putBoolean(KEY_SCHEDULE_MIGRATED, true)
+                .apply()
+        }
     }
 
     // ===== Content Settings =====

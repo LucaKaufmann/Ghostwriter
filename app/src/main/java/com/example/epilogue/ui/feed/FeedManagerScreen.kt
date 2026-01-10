@@ -113,7 +113,7 @@ fun FeedManagerScreen(
                 onFeedDelete = { viewModel.deleteFeed(it) },
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .padding(top = innerPadding.calculateTopPadding())
             )
         } else {
             // Standard mode: Scrollable list
@@ -178,12 +178,13 @@ fun PaginatedFeedList(
         currentPage = totalPages - 1
     }
 
-    Column(modifier = modifier) {
+    Box(modifier = modifier) {
         // Feed items
         Column(
             modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 16.dp),
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = if (totalPages > 1) 56.dp else 0.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Spacer(modifier = Modifier.height(8.dp))
@@ -201,7 +202,8 @@ fun PaginatedFeedList(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {

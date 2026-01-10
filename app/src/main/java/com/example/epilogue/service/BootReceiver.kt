@@ -23,7 +23,7 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 Log.d(TAG, "Rescheduling digest after ${intent.action}")
-                digestScheduler.scheduleDailyDigest()
+                digestScheduler.scheduleAllPeriods()
             }
         }
     }

@@ -36,10 +36,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import com.example.epilogue.domain.model.DigestPeriod
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -136,8 +135,8 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp)
+                .padding(top = innerPadding.calculateTopPadding())
+                .padding(horizontal = 16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -154,13 +153,9 @@ fun SettingsScreen(
 
             // Schedule Section
             SettingsSection(title = "Daily Schedule") {
-                ScheduleInput(
-                    hour = uiState.scheduleHour,
-                    minute = uiState.scheduleMinute,
-                    showTimePicker = uiState.showTimePicker,
-                    onShowTimePicker = viewModel::showTimePicker,
-                    onHideTimePicker = viewModel::hideTimePicker,
-                    onTimeSelected = viewModel::updateScheduleTime
+                PeriodSelection(
+                    selectedPeriods = uiState.selectedPeriods,
+                    onTogglePeriod = viewModel::togglePeriod
                 )
             }
 
@@ -338,95 +333,56 @@ fun ApiKeyInput(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScheduleInput(
-    hour: Int,
-    minute: Int,
-    showTimePicker: Boolean,
-    onShowTimePicker: () -> Unit,
-    onHideTimePicker: () -> Unit,
-    onTimeSelected: (Int, Int) -> Unit
+fun PeriodSelection(
+    selectedPeriods: Set<DigestPeriod>,
+    onTogglePeriod: (DigestPeriod, Boolean) -> Unit
 ) {
-    val formattedTime = String.format("%02d:%02d", hour, minute)
-
     Column {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
+        Text(
+            text = "Generate digests at:",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        DigestPeriod.entries.forEach { period ->
+            val isSelected = period in selectedPeriods
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "Daily digest at",
+                    text = "${period.name.lowercase().replaceFirstChar { it.uppercase() }} - ${period.displayTime}",
                     style = MaterialTheme.typography.bodyLarge
                 )
-                Text(
-                    text = formattedTime,
-                    style = MaterialTheme.typography.headlineMedium
+                Switch(
+                    checked = isSelected,
+                    onCheckedChange = { enabled ->
+                        onTogglePeriod(period, enabled)
+                    }
                 )
             }
-
-            OutlinedButton(onClick = onShowTimePicker) {
-                Text("Change")
-            }
         }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "EPUB will be generated daily at this time",
+            text = if (selectedPeriods.isEmpty()) {
+                "Select at least one time period"
+            } else {
+                "EPUB will be generated at selected times"
+            },
             style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-    }
-
-    if (showTimePicker) {
-        TimePickerDialog(
-            initialHour = hour,
-            initialMinute = minute,
-            onDismiss = onHideTimePicker,
-            onConfirm = { selectedHour, selectedMinute ->
-                onTimeSelected(selectedHour, selectedMinute)
-                onHideTimePicker()
+            color = if (selectedPeriods.isEmpty()) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurface
             }
         )
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TimePickerDialog(
-    initialHour: Int,
-    initialMinute: Int,
-    onDismiss: () -> Unit,
-    onConfirm: (Int, Int) -> Unit
-) {
-    val timePickerState = rememberTimePickerState(
-        initialHour = initialHour,
-        initialMinute = initialMinute,
-        is24Hour = true
-    )
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Select Time") },
-        text = {
-            TimePicker(state = timePickerState)
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onConfirm(timePickerState.hour, timePickerState.minute)
-                }
-            ) {
-                Text("OK")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }
 
 @Composable
