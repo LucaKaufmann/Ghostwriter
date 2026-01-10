@@ -7,6 +7,7 @@ import androidx.work.WorkInfo
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.SettingsRepository
+import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.service.DigestScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,8 +37,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 apiKey = settingsRepository.getOpenAIApiKey() ?: "",
-                scheduleHour = settingsRepository.getScheduleHour(),
-                scheduleMinute = settingsRepository.getScheduleMinute(),
+                selectedPeriods = settingsRepository.getSchedulePeriods(),
                 minWordCount = settingsRepository.getMinWordCount(),
                 einkMode = settingsRepository.getEinkMode(),
                 customExportUri = customExportUri,
@@ -59,15 +59,16 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun updateScheduleTime(hour: Int, minute: Int) {
+    fun togglePeriod(period: DigestPeriod, enabled: Boolean) {
         viewModelScope.launch {
-            digestScheduler.updateScheduleTime(hour, minute)
-            _uiState.update { state ->
-                state.copy(
-                    scheduleHour = hour,
-                    scheduleMinute = minute
-                )
+            digestScheduler.updatePeriod(period, enabled)
+            val updatedPeriods = _uiState.value.selectedPeriods.toMutableSet()
+            if (enabled) {
+                updatedPeriods.add(period)
+            } else {
+                updatedPeriods.remove(period)
             }
+            _uiState.update { it.copy(selectedPeriods = updatedPeriods) }
         }
     }
 
@@ -121,14 +122,6 @@ class SettingsViewModel @Inject constructor(
 
     fun clearApiKeySavedFlag() {
         _uiState.update { it.copy(apiKeySaved = false) }
-    }
-
-    fun showTimePicker() {
-        _uiState.update { it.copy(showTimePicker = true) }
-    }
-
-    fun hideTimePicker() {
-        _uiState.update { it.copy(showTimePicker = false) }
     }
 
     fun resetAllData() {
@@ -207,11 +200,9 @@ class SettingsViewModel @Inject constructor(
 data class SettingsUiState(
     val apiKey: String = "",
     val apiKeySaved: Boolean = false,
-    val scheduleHour: Int = 22,
-    val scheduleMinute: Int = 0,
+    val selectedPeriods: Set<DigestPeriod> = setOf(DigestPeriod.EVENING),
     val minWordCount: Int = 0,
     val einkMode: Boolean = false,
-    val showTimePicker: Boolean = false,
     val isGenerating: Boolean = false,
     val digestTriggered: Boolean = false,
     val digestCompleted: Boolean = false,

@@ -37,9 +37,9 @@ class EpilogueApplication : Application(), Configuration.Provider {
     }
 
     private fun initializeDigestScheduler() {
-        // Schedule daily digest generation at the configured time
-        // This ensures the worker is scheduled even after app updates or device reboots
-        digestScheduler.scheduleDailyDigest()
+        // Schedule digest generation for all selected periods
+        // This ensures the workers are scheduled even after app updates or device reboots
+        digestScheduler.scheduleAllPeriods()
     }
 
     private fun validateExportPermissions() {
