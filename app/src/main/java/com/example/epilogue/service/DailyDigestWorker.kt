@@ -15,6 +15,7 @@ import com.example.epilogue.R
 import com.example.epilogue.data.repository.ArticleRepository
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
+import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.domain.model.TriggerType
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -44,6 +45,7 @@ class DailyDigestWorker @AssistedInject constructor(
         // Input data keys
         const val KEY_FETCH_ALL = "fetch_all"  // If true, fetch all articles (not just new)
         const val KEY_IS_MANUAL = "is_manual"  // If true, triggered manually (not scheduled)
+        const val KEY_PERIOD = "period"  // Period name (MORNING, NOON, EVENING) for scheduled digests
 
         // Notification constants for foreground service
         const val NOTIFICATION_CHANNEL_ID = "digest_generation"
@@ -62,6 +64,14 @@ class DailyDigestWorker @AssistedInject constructor(
         return try {
             val fetchOnlyNew = !inputData.getBoolean(KEY_FETCH_ALL, false)
             val isManual = inputData.getBoolean(KEY_IS_MANUAL, false)
+            val periodName = inputData.getString(KEY_PERIOD)
+            val period = periodName?.let {
+                try {
+                    DigestPeriod.valueOf(it)
+                } catch (e: IllegalArgumentException) {
+                    null
+                }
+            }
 
             // Get all feeds for later reference
             val feeds = feedRepository.getAllFeedsList()
@@ -76,8 +86,8 @@ class DailyDigestWorker @AssistedInject constructor(
 
             Log.i(TAG, "Fetched ${articles.size} articles")
 
-            // Generate EPUB
-            val result = epubGenerator.generate(articles, Date())
+            // Generate EPUB with optional period for filename
+            val result = epubGenerator.generate(articles, Date(), period)
 
             if (result != null) {
                 Log.i(TAG, "Generated EPUB: ${result.file.absolutePath}")
