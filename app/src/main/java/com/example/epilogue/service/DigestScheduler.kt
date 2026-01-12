@@ -82,12 +82,17 @@ class DigestScheduler @Inject constructor(
     fun schedulePeriod(period: DigestPeriod) {
         val initialDelay = calculateInitialDelay(period.hour, 0)
 
+        val inputData = Data.Builder()
+            .putString(DailyDigestWorker.KEY_PERIOD, period.name)
+            .build()
+
         val periodicWorkRequest = PeriodicWorkRequestBuilder<DailyDigestWorker>(
             repeatInterval = 24,
             repeatIntervalTimeUnit = TimeUnit.HOURS
         )
             .setConstraints(workConstraints)
             .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
+            .setInputData(inputData)
             .addTag(DailyDigestWorker.TAG)
             .addTag(period.name)
             .build()

@@ -3,6 +3,7 @@ package com.example.epilogue.service
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.os.Environment
+import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.domain.model.ProcessedArticle
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -55,17 +56,19 @@ class EpubGenerator @Inject constructor(
      *
      * @param articles List of articles to include
      * @param date Date for the digest (defaults to today)
+     * @param period Optional period (MORNING, NOON, EVENING) for scheduled digests
      * @return Result containing the generated EPUB file and articles, or null if generation fails
      */
     suspend fun generate(
         articles: List<ProcessedArticle>,
-        date: Date = Date()
+        date: Date = Date(),
+        period: DigestPeriod? = null
     ): EpubGenerationResult? = withContext(Dispatchers.IO) {
         if (articles.isEmpty()) return@withContext null
 
         try {
-            val book = createBook(articles, date)
-            val outputFile = writeEpub(book, date)
+            val book = createBook(articles, date, period)
+            val outputFile = writeEpub(book, date, period)
             scanFile(outputFile)
             EpubGenerationResult(outputFile, articles)
         } catch (e: Exception) {
@@ -76,21 +79,24 @@ class EpubGenerator @Inject constructor(
     /**
      * Creates an EPUB book from articles.
      */
-    private fun createBook(articles: List<ProcessedArticle>, date: Date): Book {
+    private fun createBook(articles: List<ProcessedArticle>, date: Date, period: DigestPeriod?): Book {
         val book = Book()
         val formattedDate = displayDateFormat.format(date)
+        val periodText = period?.name?.lowercase()?.replaceFirstChar { it.uppercase() }
+        val titleSuffix = periodText?.let { " - $it" } ?: ""
+        val descriptionSuffix = periodText?.let { " ($it digest)" } ?: ""
 
         // Metadata
-        book.metadata.addTitle("Epilogue - $formattedDate")
+        book.metadata.addTitle("Epilogue - $formattedDate$titleSuffix")
         book.metadata.addAuthor(Author("Epilogue"))
-        book.metadata.addDescription("Daily digest for $formattedDate")
+        book.metadata.addDescription("Daily digest for $formattedDate$descriptionSuffix")
 
         // Add stylesheet
         val css = createStylesheet()
         book.resources.add(Resource(css.toByteArray(), "style.css"))
 
         // Add cover page
-        val coverHtml = createCoverPage(formattedDate)
+        val coverHtml = createCoverPage(formattedDate, period)
         val coverResource = Resource(coverHtml.toByteArray(), "cover.xhtml")
         book.coverPage = coverResource
         book.addSection("Cover", coverResource)
@@ -191,12 +197,16 @@ class EpubGenerator @Inject constructor(
     /**
      * Creates the cover page HTML.
      */
-    private fun createCoverPage(formattedDate: String): String = buildString {
+    private fun createCoverPage(formattedDate: String, period: DigestPeriod?): String = buildString {
         append(createHtmlHeader("Epilogue"))
         append("<body class=\"cover\">\n")
         append("<div class=\"cover-content\">\n")
         append("<h1>Epilogue</h1>\n")
         append("<p class=\"date\">$formattedDate</p>\n")
+        if (period != null) {
+            val periodName = period.name.lowercase().replaceFirstChar { it.uppercase() }
+            append("<p class=\"period\">$periodName Digest</p>\n")
+        }
         append("<p class=\"tagline\">Your Daily Reading Digest</p>\n")
         append("</div>\n")
         append("</body>\n</html>")
@@ -253,6 +263,12 @@ class EpubGenerator @Inject constructor(
         .cover .date {
             font-size: 1.25em;
             margin-top: 1em;
+        }
+
+        .cover .period {
+            font-size: 1.1em;
+            font-weight: bold;
+            margin-top: 0.5em;
         }
 
         .cover .tagline {
@@ -330,12 +346,14 @@ class EpubGenerator @Inject constructor(
 
     /**
      * Writes the EPUB book to a file.
+     * If a period is provided, includes it in the filename (e.g., "Epilogue_2024-01-11_morning.epub").
      */
-    private fun writeEpub(book: Book, date: Date): File {
+    private fun writeEpub(book: Book, date: Date, period: DigestPeriod?): File {
         val outputDir = getOutputDirectory()
         outputDir.mkdirs()
 
-        val filename = "Epilogue_${dateFormat.format(date)}.epub"
+        val periodSuffix = period?.let { "_${it.name.lowercase()}" } ?: ""
+        val filename = "Epilogue_${dateFormat.format(date)}${periodSuffix}.epub"
         val outputFile = File(outputDir, filename)
 
         FileOutputStream(outputFile).use { fos ->
