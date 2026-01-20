@@ -1,0 +1,315 @@
+package com.example.epilogue.data.repository
+
+import android.content.Context
+import android.util.Log
+import com.example.epilogue.data.remote.ghostwriter.DigestResponse
+import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.DigestTriggerRequest
+import com.example.epilogue.data.remote.ghostwriter.DigestTriggerResponse
+import com.example.epilogue.data.remote.ghostwriter.FeedSyncRequest
+import com.example.epilogue.data.remote.ghostwriter.FeedSyncResponse
+import com.example.epilogue.data.remote.ghostwriter.GhostwriterApi
+import com.example.epilogue.data.remote.ghostwriter.HealthResponse
+import com.example.epilogue.di.GhostwriterApiFactory
+import com.example.epilogue.domain.model.Feed
+import com.example.epilogue.domain.model.ProcessingMode
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Repository for interacting with the Ghostwriter backend service.
+ *
+ * Handles:
+ * - Feed synchronization
+ * - Digest triggering and status polling
+ * - EPUB downloads
+ * - Health checks
+ */
+@Singleton
+class GhostwriterRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val settingsRepository: SettingsRepository,
+    private val apiFactory: GhostwriterApiFactory
+) {
+    companion object {
+        private const val TAG = "GhostwriterRepository"
+    }
+
+    /**
+     * Result wrapper for Ghostwriter operations.
+     */
+    sealed class GhostwriterResult<out T> {
+        data class Success<T>(val data: T) : GhostwriterResult<T>()
+        data class Error(val message: String, val code: Int? = null) : GhostwriterResult<Nothing>()
+        data object NotConfigured : GhostwriterResult<Nothing>()
+    }
+
+    /**
+     * Get the API instance if Ghostwriter is configured.
+     */
+    private fun getApi(): GhostwriterApi? {
+        val url = settingsRepository.getGhostwriterUrl()
+        if (url.isNullOrBlank() || !settingsRepository.isGhostwriterEnabled()) {
+            return null
+        }
+        return apiFactory.create(url)
+    }
+
+    /**
+     * Get the authorization header value.
+     */
+    private fun getAuthHeader(): String? {
+        val apiKey = settingsRepository.getGhostwriterApiKey()
+        return if (!apiKey.isNullOrBlank()) "Bearer $apiKey" else null
+    }
+
+    /**
+     * Check if Ghostwriter is configured and enabled.
+     */
+    fun isConfigured(): Boolean {
+        return settingsRepository.isGhostwriterConfigured()
+    }
+
+    /**
+     * Check the health of the Ghostwriter server.
+     */
+    suspend fun checkHealth(): GhostwriterResult<HealthResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getHealth()
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Health check failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Health check failed", e)
+            GhostwriterResult.Error("Connection failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Sync local feeds to the Ghostwriter backend.
+     * This performs a full sync - feeds not in the list will be deactivated on the server.
+     */
+    suspend fun syncFeeds(feeds: List<Feed>): GhostwriterResult<FeedSyncResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val syncRequests = feeds.map { feed ->
+                FeedSyncRequest(
+                    url = feed.url,
+                    title = feed.name,
+                    isActive = true,
+                    mode = when (feed.mode) {
+                        ProcessingMode.BRIEFING -> "summarize"
+                        ProcessingMode.FIDELITY -> "raw"
+                    },
+                    maxArticles = if (feed.maxArticles > 0) feed.maxArticles else 10
+                )
+            }
+
+            val response = api.syncFeeds(getAuthHeader(), syncRequests)
+            if (response.isSuccessful && response.body() != null) {
+                Log.i(TAG, "Synced ${response.body()!!.synced} feeds to Ghostwriter")
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Feed sync failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Feed sync failed", e)
+            GhostwriterResult.Error("Sync failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Trigger a digest generation on the backend.
+     *
+     * @param period The time period: "morning", "noon", "evening", or "manual"
+     * @return The digest ID if successful, or an error
+     */
+    suspend fun triggerDigest(period: String = "manual"): GhostwriterResult<DigestTriggerResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = DigestTriggerRequest(period = period)
+            val response = api.triggerDigest(getAuthHeader(), request)
+
+            if (response.isSuccessful && response.body() != null) {
+                Log.i(TAG, "Triggered digest generation: ${response.body()!!.id}")
+                GhostwriterResult.Success(response.body()!!)
+            } else if (response.code() == 409) {
+                GhostwriterResult.Error(
+                    message = "A digest is already being generated",
+                    code = 409
+                )
+            } else {
+                GhostwriterResult.Error(
+                    message = "Trigger failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Trigger digest failed", e)
+            GhostwriterResult.Error("Trigger failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Get the status of a running digest job.
+     */
+    suspend fun getDigestStatus(digestId: String): GhostwriterResult<DigestStatusResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getDigestStatus(getAuthHeader(), digestId)
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Status check failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get digest status failed", e)
+            GhostwriterResult.Error("Status check failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Get the most recent completed digest.
+     */
+    suspend fun getLatestDigest(): GhostwriterResult<DigestResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getLatestDigest(getAuthHeader())
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else if (response.code() == 404) {
+                GhostwriterResult.Error(
+                    message = "No completed digests found",
+                    code = 404
+                )
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to get latest digest: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get latest digest failed", e)
+            GhostwriterResult.Error("Failed to get latest digest: ${e.message}")
+        }
+    }
+
+    /**
+     * List all available digests.
+     */
+    suspend fun listDigests(): GhostwriterResult<List<DigestResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listDigests(getAuthHeader())
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to list digests: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "List digests failed", e)
+            GhostwriterResult.Error("Failed to list digests: ${e.message}")
+        }
+    }
+
+    /**
+     * Download a digest EPUB file from the backend.
+     *
+     * @param filename The EPUB filename (e.g., "2024-01-20_manual.epub")
+     * @return The local file path if successful
+     */
+    suspend fun downloadDigest(filename: String): GhostwriterResult<File> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.downloadDigest(getAuthHeader(), filename)
+
+            if (response.isSuccessful && response.body() != null) {
+                // Save to the app's documents directory
+                val documentsDir = File(context.getExternalFilesDir(null), "Epilogue")
+                if (!documentsDir.exists()) {
+                    documentsDir.mkdirs()
+                }
+
+                val outputFile = File(documentsDir, filename)
+                response.body()!!.byteStream().use { input ->
+                    outputFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                Log.i(TAG, "Downloaded digest to: ${outputFile.absolutePath}")
+                GhostwriterResult.Success(outputFile)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Download failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Download digest failed", e)
+            GhostwriterResult.Error("Download failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Delete a feed on the backend by URL.
+     *
+     * @param feedUrl The URL of the feed to delete
+     * @return Success if deleted, Error otherwise
+     */
+    suspend fun deleteFeedByUrl(feedUrl: String): GhostwriterResult<Unit> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            // URL-encode the feed URL for the path
+            val encodedUrl = java.net.URLEncoder.encode(feedUrl, "UTF-8")
+            val response = api.deleteFeedByUrl(getAuthHeader(), encodedUrl)
+
+            if (response.isSuccessful) {
+                Log.i(TAG, "Deleted feed: $feedUrl")
+                GhostwriterResult.Success(Unit)
+            } else if (response.code() == 404) {
+                // Feed doesn't exist on backend - treat as success
+                Log.w(TAG, "Feed not found on backend: $feedUrl")
+                GhostwriterResult.Success(Unit)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Delete failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Delete feed failed", e)
+            GhostwriterResult.Error("Delete failed: ${e.message}")
+        }
+    }
+}

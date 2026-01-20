@@ -3,6 +3,7 @@ package com.example.epilogue.ui.settings
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,16 +18,19 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -55,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,6 +117,27 @@ fun SettingsScreen(
         if (uiState.dataReset) {
             snackbarHostState.showSnackbar("All digests deleted and feed timestamps reset")
             viewModel.clearDataResetFlag()
+        }
+    }
+
+    LaunchedEffect(uiState.ghostwriterUrlSaved) {
+        if (uiState.ghostwriterUrlSaved) {
+            snackbarHostState.showSnackbar("Server URL saved")
+            viewModel.clearGhostwriterUrlSavedFlag()
+        }
+    }
+
+    LaunchedEffect(uiState.ghostwriterApiKeySaved) {
+        if (uiState.ghostwriterApiKeySaved) {
+            snackbarHostState.showSnackbar("API key saved")
+            viewModel.clearGhostwriterApiKeySavedFlag()
+        }
+    }
+
+    LaunchedEffect(uiState.ghostwriterTestResult) {
+        uiState.ghostwriterTestResult?.let { result ->
+            snackbarHostState.showSnackbar(result)
+            viewModel.clearGhostwriterTestResult()
         }
     }
 
@@ -194,19 +220,32 @@ fun SettingsScreen(
 
             Divider()
 
+            // Ghostwriter Backend Section
+            SettingsSection(title = "Ghostwriter Backend") {
+                GhostwriterInput(
+                    enabled = uiState.ghostwriterEnabled,
+                    url = uiState.ghostwriterUrl,
+                    apiKey = uiState.ghostwriterApiKey,
+                    isTesting = uiState.ghostwriterTesting,
+                    onEnabledChange = viewModel::updateGhostwriterEnabled,
+                    onUrlChange = viewModel::updateGhostwriterUrl,
+                    onSaveUrl = viewModel::saveGhostwriterUrl,
+                    onApiKeyChange = viewModel::updateGhostwriterApiKey,
+                    onSaveApiKey = viewModel::saveGhostwriterApiKey,
+                    onTestConnection = viewModel::testGhostwriterConnection
+                )
+            }
+
+            Divider()
+
             // Manual Run Section
             SettingsSection(title = "Manual Generation") {
-                Button(
-                    onClick = viewModel::runDigestNow,
-                    enabled = !uiState.isGenerating,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (uiState.isGenerating) "Generating..." else "Run Now")
-                }
-                Text(
-                    text = "Generate digest immediately with current settings",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp)
+                ManualGenerationInput(
+                    isGenerating = uiState.isGenerating,
+                    ghostwriterEnabled = uiState.ghostwriterEnabled && uiState.ghostwriterUrl.isNotBlank(),
+                    progress = uiState.ghostwriterProgress,
+                    error = uiState.ghostwriterError,
+                    onRunNow = viewModel::runDigestNow
                 )
             }
 
@@ -542,6 +581,229 @@ fun CustomExportInput(
 
         Text(
             text = "EPUBs will be automatically copied to this folder (e.g., KOReader)",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+fun GhostwriterInput(
+    enabled: Boolean,
+    url: String,
+    apiKey: String,
+    isTesting: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onUrlChange: (String) -> Unit,
+    onSaveUrl: () -> Unit,
+    onApiKeyChange: (String) -> Unit,
+    onSaveApiKey: () -> Unit,
+    onTestConnection: () -> Unit
+) {
+    var showApiKey by remember { mutableStateOf(false) }
+
+    Column {
+        // Enable toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Use Ghostwriter server",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "Offload digest generation to a backend server",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onEnabledChange
+            )
+        }
+
+        // Configuration fields (shown when enabled)
+        AnimatedVisibility(visible = enabled) {
+            Column {
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Server URL
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = onUrlChange,
+                    label = { Text("Server URL") },
+                    placeholder = { Text("http://your-server-ip:8080") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Filled.Cloud, contentDescription = null)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onSaveUrl,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Save URL")
+                    }
+
+                    Button(
+                        onClick = onTestConnection,
+                        enabled = url.isNotBlank() && !isTesting,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (isTesting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.height(16.dp).width(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Test")
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // API Key (optional)
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = onApiKeyChange,
+                    label = { Text("API Key (optional)") },
+                    placeholder = { Text("Leave blank if not required") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = if (showApiKey) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { showApiKey = !showApiKey }) {
+                            Icon(
+                                imageVector = if (showApiKey) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (showApiKey) "Hide" else "Show"
+                            )
+                        }
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Button(onClick = onSaveApiKey) {
+                        Text("Save Key")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Run Ghostwriter on your home server or NAS. Supports local AI (Ollama) or cloud providers.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ManualGenerationInput(
+    isGenerating: Boolean,
+    ghostwriterEnabled: Boolean,
+    progress: DigestStatusResponse?,
+    error: String?,
+    onRunNow: () -> Unit
+) {
+    Column {
+        Button(
+            onClick = onRunNow,
+            enabled = !isGenerating,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isGenerating) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.height(16.dp).width(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Text("Generating...")
+                }
+            } else {
+                Text("Run Now")
+            }
+        }
+
+        // Progress indicator for Ghostwriter
+        if (isGenerating && ghostwriterEnabled && progress != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Stage indicator
+            Text(
+                text = "Stage: ${progress.stage ?: "starting"}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Progress bar
+            val progressValue = if (progress.progress.totalArticles > 0) {
+                progress.progress.articlesEnriched.toFloat() / progress.progress.totalArticles
+            } else if (progress.progress.totalFeeds > 0) {
+                progress.progress.feedsFetched.toFloat() / progress.progress.totalFeeds
+            } else {
+                0f
+            }
+
+            LinearProgressIndicator(
+                progress = progressValue,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Detailed progress
+            Text(
+                text = "Feeds: ${progress.progress.feedsFetched}/${progress.progress.totalFeeds} | " +
+                        "Articles: ${progress.progress.articlesEnriched}/${progress.progress.totalArticles}",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        // Error message
+        if (error != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = if (ghostwriterEnabled) {
+                "Generate digest using Ghostwriter server"
+            } else {
+                "Generate digest locally on this device"
+            },
             style = MaterialTheme.typography.bodySmall
         )
     }
