@@ -2,6 +2,7 @@ package com.example.epilogue.data.repository
 
 import android.content.Context
 import android.util.Log
+import com.example.epilogue.data.remote.ghostwriter.ClientStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestTriggerRequest
@@ -9,7 +10,10 @@ import com.example.epilogue.data.remote.ghostwriter.DigestTriggerResponse
 import com.example.epilogue.data.remote.ghostwriter.FeedSyncRequest
 import com.example.epilogue.data.remote.ghostwriter.FeedSyncResponse
 import com.example.epilogue.data.remote.ghostwriter.GhostwriterApi
+import com.example.epilogue.data.remote.ghostwriter.HeartbeatResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
+import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
+import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
 import com.example.epilogue.di.GhostwriterApiFactory
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
@@ -310,6 +314,116 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Delete feed failed", e)
             GhostwriterResult.Error("Delete failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Get all schedule configurations.
+     */
+    suspend fun getSchedules(): GhostwriterResult<List<ScheduleResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listSchedules(getAuthHeader())
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to get schedules: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get schedules failed", e)
+            GhostwriterResult.Error("Failed to get schedules: ${e.message}")
+        }
+    }
+
+    /**
+     * Update a schedule configuration.
+     *
+     * @param period The period to update (morning, noon, evening)
+     * @param enabled Whether the schedule should be enabled
+     * @param hour Optional hour in 24h format
+     * @param minute Optional minute
+     */
+    suspend fun updateSchedule(
+        period: String,
+        enabled: Boolean? = null,
+        hour: Int? = null,
+        minute: Int? = null
+    ): GhostwriterResult<ScheduleResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = ScheduleUpdateRequest(
+                enabled = enabled,
+                hour = hour,
+                minute = minute
+            )
+            val response = api.updateSchedule(getAuthHeader(), period.lowercase(), request)
+
+            if (response.isSuccessful && response.body() != null) {
+                Log.i(TAG, "Updated schedule for $period: enabled=$enabled")
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to update schedule: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Update schedule failed", e)
+            GhostwriterResult.Error("Failed to update schedule: ${e.message}")
+        }
+    }
+
+    /**
+     * Send a heartbeat to indicate the app is active.
+     * This prevents auto-disable of schedules due to inactivity.
+     */
+    suspend fun sendHeartbeat(): GhostwriterResult<HeartbeatResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.sendHeartbeat(getAuthHeader())
+
+            if (response.isSuccessful && response.body() != null) {
+                Log.d(TAG, "Heartbeat sent successfully")
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Heartbeat failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Heartbeat failed", e)
+            GhostwriterResult.Error("Heartbeat failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Get client status including activity tracking info.
+     */
+    suspend fun getClientStatus(): GhostwriterResult<ClientStatusResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getClientStatus(getAuthHeader())
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to get client status: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get client status failed", e)
+            GhostwriterResult.Error("Failed to get client status: ${e.message}")
         }
     }
 }

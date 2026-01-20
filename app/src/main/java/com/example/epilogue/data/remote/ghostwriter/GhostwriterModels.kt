@@ -101,3 +101,48 @@ data class HealthResponse(
     @SerializedName("ai_provider") val aiProvider: String,
     @SerializedName("ai_model") val aiModel: String
 )
+
+/**
+ * Schedule response from Ghostwriter.
+ */
+data class ScheduleResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("period") val period: String,
+    @SerializedName("hour") val hour: Int,
+    @SerializedName("minute") val minute: Int,
+    @SerializedName("enabled") val enabled: Boolean,
+    @SerializedName("timezone") val timezone: String,
+    @SerializedName("next_run_at") val nextRunAt: String?
+)
+
+/**
+ * Schedule update request.
+ */
+data class ScheduleUpdateRequest(
+    @SerializedName("hour") val hour: Int? = null,
+    @SerializedName("minute") val minute: Int? = null,
+    @SerializedName("enabled") val enabled: Boolean? = null,
+    @SerializedName("timezone") val timezone: String? = null
+)
+
+/**
+ * Client status response.
+ */
+data class ClientStatusResponse(
+    @SerializedName("last_heartbeat_at") val lastHeartbeatAt: String?,
+    @SerializedName("last_download_at") val lastDownloadAt: String?,
+    @SerializedName("auto_disable_enabled") val autoDisableEnabled: Boolean,
+    @SerializedName("auto_disable_after_days") val autoDisableAfterDays: Int,
+    @SerializedName("schedules_auto_disabled") val schedulesAutoDisabled: Boolean,
+    @SerializedName("days_until_auto_disable") val daysUntilAutoDisable: Int?
+)
+
+/**
+ * Heartbeat response.
+ */
+data class HeartbeatResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("received_at") val receivedAt: String,
+    @SerializedName("schedules_active") val schedulesActive: Boolean,
+    @SerializedName("message") val message: String?
+)

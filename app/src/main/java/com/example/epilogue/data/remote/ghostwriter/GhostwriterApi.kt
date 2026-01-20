@@ -7,6 +7,7 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Streaming
 
@@ -105,4 +106,43 @@ interface GhostwriterApi {
         @Header("Authorization") authorization: String?,
         @Path("filename") filename: String
     ): Response<ResponseBody>
+
+    // ===== Schedules =====
+
+    /**
+     * List all schedule configurations.
+     */
+    @GET("schedules")
+    suspend fun listSchedules(
+        @Header("Authorization") authorization: String?
+    ): Response<List<ScheduleResponse>>
+
+    /**
+     * Update a schedule configuration.
+     */
+    @PUT("schedules/{period}")
+    suspend fun updateSchedule(
+        @Header("Authorization") authorization: String?,
+        @Path("period") period: String,
+        @Body request: ScheduleUpdateRequest
+    ): Response<ScheduleResponse>
+
+    // ===== Client =====
+
+    /**
+     * Send a heartbeat to indicate the app is active.
+     * Prevents auto-disable of schedules.
+     */
+    @POST("client/heartbeat")
+    suspend fun sendHeartbeat(
+        @Header("Authorization") authorization: String?
+    ): Response<HeartbeatResponse>
+
+    /**
+     * Get client status including activity tracking.
+     */
+    @GET("client/status")
+    suspend fun getClientStatus(
+        @Header("Authorization") authorization: String?
+    ): Response<ClientStatusResponse>
 }
