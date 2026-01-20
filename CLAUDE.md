@@ -8,6 +8,11 @@ Epilogue is an Android application that aggregates RSS/Atom feeds, processes con
 
 ## Build Commands
 
+**Important:** Set JAVA_HOME to Android Studio's bundled JDK before running Gradle:
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+```
+
 ```bash
 ./gradlew build              # Build the project
 ./gradlew assembleDebug      # Build debug APK
@@ -21,6 +26,25 @@ Epilogue is an Android application that aggregates RSS/Atom feeds, processes con
 Run a single test:
 ```bash
 ./gradlew test --tests "com.example.epilog.ExampleUnitTest"
+```
+
+## ADB Commands
+
+ADB path on this machine:
+```bash
+adb
+```
+
+```bash
+adb devices                    # List connected devices
+adb install -r app/build/outputs/apk/debug/app-debug.apk  # Install debug APK
+adb shell am start -n com.example.epilogue/.ui.MainActivity  # Launch app
+adb logcat -s "Epilogue:*"     # View app logs
+```
+
+For targeting a specific device (e.g., Palma 2), use `-s <device_id>`:
+```bash
+adb -s <device_id> install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ## Tech Stack

@@ -144,4 +144,18 @@ class DigestRepository @Inject constructor(
             }
         }
     }
+
+    /**
+     * Delete all digests and their EPUB files.
+     * Used for development/testing purposes.
+     */
+    suspend fun deleteAllDigests() {
+        // Delete all EPUB files first
+        val digests = digestDao.getAllDigestsList()
+        digests.forEach { digest ->
+            File(digest.epubFilePath).delete()
+        }
+        // Delete all from database (cascade will remove articles)
+        digestDao.deleteAllDigests()
+    }
 }

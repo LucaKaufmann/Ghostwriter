@@ -53,4 +53,10 @@ interface DigestDao {
 
     @Query("SELECT * FROM digests ORDER BY generatedAt ASC LIMIT :limit")
     suspend fun getOldestDigests(limit: Int): List<DigestEntity>
+
+    @Query("SELECT * FROM digests")
+    suspend fun getAllDigestsList(): List<DigestEntity>
+
+    @Query("DELETE FROM digests")
+    suspend fun deleteAllDigests()
 }
