@@ -22,6 +22,7 @@ ebooklib>=0.18,<1.0.0
 
 # Scheduling
 apscheduler>=3.10.0,<4.0.0
+pytz>=2024.1
 
 # HTTP Client (for LiteLLM)
 httpx>=0.26.0,<1.0.0

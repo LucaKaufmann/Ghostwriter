@@ -41,6 +41,7 @@ class Digest(DigestBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: datetime | None = Field(default=None, description="Completion time")
+    downloaded_at: datetime | None = Field(default=None, description="When client downloaded this digest")
     locked_at: datetime | None = Field(default=None, description="Lock timestamp")
     locked_by: str | None = Field(default=None, description="Instance identifier")
 
@@ -71,6 +72,7 @@ class DigestRead(SQLModel):
     error_message: str | None
     created_at: datetime
     completed_at: datetime | None
+    downloaded_at: datetime | None = None
 
 
 class DigestStatus(SQLModel):

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -53,6 +53,14 @@ class DigestStatusResponse(BaseModel):
     eta_seconds: int | None = None
 
 
+class NewDigestsResponse(BaseModel):
+    """Response for checking new digests."""
+
+    has_new: bool
+    count: int
+    digests: list[DigestRead]
+
+
 @router.post("/trigger", response_model=TriggerResponse, dependencies=[Depends(verify_api_key)])
 async def trigger_digest(
     request: TriggerRequest,
@@ -82,19 +90,67 @@ async def list_digests(
     session: Session = Depends(get_session),
     limit: int = 20,
     offset: int = 0,
+    since: datetime | None = Query(default=None, description="Filter digests created after this datetime (UTC)"),
+    status_filter: str | None = Query(default=None, alias="status", description="Filter by status (completed, failed, processing)"),
+    period: str | None = Query(default=None, description="Filter by period (morning, noon, evening, manual)"),
 ) -> list[Digest]:
     """
     List available digests.
 
     Returns digests ordered by creation date, newest first.
+    Supports filtering by creation date, status, and period.
     """
+    statement = select(Digest)
+
+    # Apply filters
+    if since:
+        statement = statement.where(Digest.created_at > since)
+    if status_filter:
+        statement = statement.where(Digest.status == status_filter)
+    if period:
+        statement = statement.where(Digest.period == period)
+
     statement = (
-        select(Digest)
+        statement
         .order_by(Digest.created_at.desc())
         .offset(offset)
         .limit(limit)
     )
     return list(session.exec(statement).all())
+
+
+@router.get("/new", response_model=NewDigestsResponse, dependencies=[Depends(verify_api_key)])
+async def get_new_digests(
+    session: Session = Depends(get_session),
+    last_known_id: UUID | None = Query(default=None, description="ID of the last digest the client knows about"),
+    since: datetime | None = Query(default=None, description="Return digests created after this datetime (UTC)"),
+) -> NewDigestsResponse:
+    """
+    Check for new completed digests.
+
+    Returns digests that are newer than the client's last known digest.
+    Use either last_known_id OR since parameter to specify the cutoff.
+
+    This endpoint is optimized for clients polling for new digests.
+    """
+    statement = select(Digest).where(Digest.status == "completed")
+
+    if last_known_id:
+        # Get the creation time of the last known digest
+        last_digest = session.get(Digest, last_known_id)
+        if last_digest:
+            statement = statement.where(Digest.created_at > last_digest.created_at)
+    elif since:
+        statement = statement.where(Digest.created_at > since)
+
+    statement = statement.order_by(Digest.created_at.desc())
+    digests = list(session.exec(statement).all())
+
+    return NewDigestsResponse(
+        has_new=len(digests) > 0,
+        count=len(digests),
+        digests=digests,
+    )
 
 
 @router.get("/latest", response_model=DigestRead, dependencies=[Depends(verify_api_key)])
@@ -174,6 +230,7 @@ async def download_digest(
     Download a digest EPUB file.
 
     The filename should be the EPUB filename (e.g., 2024-10-24_morning.epub).
+    This also records download activity for inactivity tracking.
     """
     # Validate filename to prevent path traversal
     if ".." in filename or "/" in filename or "\\" in filename:
@@ -195,6 +252,17 @@ async def download_digest(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Digest file not found",
         )
+
+    # Record download activity and mark digest as downloaded
+    from app.services import activity_tracker
+    activity_tracker.record_download()
+
+    # Mark the specific digest as downloaded
+    digest = session.exec(select(Digest).where(Digest.filename == filename)).first()
+    if digest and not digest.downloaded_at:
+        digest.downloaded_at = datetime.utcnow()
+        session.add(digest)
+        session.commit()
 
     return FileResponse(
         path=file_path,

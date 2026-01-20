@@ -22,6 +22,11 @@ import javax.inject.Singleton
 /**
  * Manages scheduling of the daily digest generation using WorkManager.
  * Supports multiple time periods (morning, noon, evening) with independent scheduling.
+ *
+ * When Ghostwriter is configured, scheduled digests are still handled locally
+ * (WorkManager triggers at the scheduled time), but the actual generation
+ * can be delegated to the backend. Manual triggers from the UI are handled
+ * by the ViewModel which decides between local and backend generation.
  */
 @Singleton
 class DigestScheduler @Inject constructor(
@@ -194,4 +199,12 @@ class DigestScheduler @Inject constructor(
      * Gets the work status for immediate digest generation.
      */
     fun getImmediateWorkInfo() = workManager.getWorkInfosForUniqueWorkLiveData(IMMEDIATE_WORK_NAME)
+
+    /**
+     * Checks if Ghostwriter backend should be used for digest generation.
+     * Returns true if Ghostwriter is enabled and has a valid URL configured.
+     */
+    fun shouldUseGhostwriter(): Boolean {
+        return settingsRepository.isGhostwriterConfigured()
+    }
 }

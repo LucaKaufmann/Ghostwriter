@@ -20,7 +20,7 @@ class SyncResponse(BaseModel):
     synced: int
     created: int
     updated: int
-    deleted: int
+    unchanged: int
 
 
 @router.get("", response_model=list[FeedRead], dependencies=[Depends(verify_api_key)])
@@ -44,30 +44,45 @@ async def sync_feeds(
     """
     Sync feed configuration from the client.
 
-    This performs a full replacement: feeds not in the input list will be
-    deactivated (not deleted, to preserve history). Existing feeds are
-    updated, new feeds are created.
+    This performs an ADDITIVE merge: new feeds are created, existing feeds
+    are updated, but feeds not in the list are LEFT UNCHANGED. This allows
+    both the app and web UI to manage feeds without conflicts.
+
+    To delete a feed, use DELETE /feeds/{id} explicitly.
+
+    This also records feed sync activity for inactivity tracking.
     """
+    # Record feed sync activity
+    from app.services import activity_tracker
+    activity_tracker.record_feed_sync()
+
     created = 0
     updated = 0
+    unchanged = 0
 
     # Get existing feeds by URL
     existing_statement = select(Feed)
     existing_feeds = {f.url: f for f in session.exec(existing_statement).all()}
-    incoming_urls = {f.url for f in feeds}
 
-    # Update or create feeds
+    # Update or create feeds from the sync list
     for feed_data in feeds:
         if feed_data.url in existing_feeds:
-            # Update existing
             feed = existing_feeds[feed_data.url]
-            feed.title = feed_data.title
-            feed.is_active = feed_data.is_active
-            feed.mode = feed_data.mode
-            feed.max_articles = feed_data.max_articles
-            feed.updated_at = datetime.utcnow()
-            session.add(feed)
-            updated += 1
+            # Check if anything actually changed
+            if (feed.title != feed_data.title or
+                feed.is_active != feed_data.is_active or
+                feed.mode != feed_data.mode or
+                feed.max_articles != feed_data.max_articles):
+                # Update existing
+                feed.title = feed_data.title
+                feed.is_active = feed_data.is_active
+                feed.mode = feed_data.mode
+                feed.max_articles = feed_data.max_articles
+                feed.updated_at = datetime.utcnow()
+                session.add(feed)
+                updated += 1
+            else:
+                unchanged += 1
         else:
             # Create new
             feed = Feed(
@@ -80,14 +95,8 @@ async def sync_feeds(
             session.add(feed)
             created += 1
 
-    # Deactivate feeds not in the sync list
-    deleted = 0
-    for url, feed in existing_feeds.items():
-        if url not in incoming_urls and feed.is_active:
-            feed.is_active = False
-            feed.updated_at = datetime.utcnow()
-            session.add(feed)
-            deleted += 1
+    # NOTE: We intentionally do NOT deactivate feeds missing from the sync list.
+    # This allows feeds added via web UI to coexist with app-synced feeds.
 
     session.commit()
 
@@ -95,7 +104,7 @@ async def sync_feeds(
         synced=len(feeds),
         created=created,
         updated=updated,
-        deleted=deleted,
+        unchanged=unchanged,
     )
 
 
@@ -154,7 +163,7 @@ async def delete_feed(
     session: Session = Depends(get_session),
 ) -> dict:
     """
-    Delete a feed.
+    Delete a feed by ID.
 
     This performs a soft delete by setting is_active to False.
     """
@@ -171,3 +180,31 @@ async def delete_feed(
     session.commit()
 
     return {"status": "deleted", "id": str(feed_id)}
+
+
+@router.delete("/by-url/{feed_url:path}", dependencies=[Depends(verify_api_key)])
+async def delete_feed_by_url(
+    feed_url: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    """
+    Delete a feed by URL.
+
+    This performs a soft delete by setting is_active to False.
+    Useful when the client doesn't know the backend's UUID for the feed.
+    """
+    statement = select(Feed).where(Feed.url == feed_url)
+    feed = session.exec(statement).first()
+
+    if not feed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Feed not found",
+        )
+
+    feed.is_active = False
+    feed.updated_at = datetime.utcnow()
+    session.add(feed)
+    session.commit()
+
+    return {"status": "deleted", "url": feed_url}

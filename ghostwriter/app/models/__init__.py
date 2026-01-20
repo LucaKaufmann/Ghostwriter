@@ -1,7 +1,9 @@
 """Database models."""
 
+from app.models.client_settings import ClientSettings
 from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
+from app.models.schedule import Schedule
 from app.models.seen_article import SeenArticle
 
-__all__ = ["Feed", "Digest", "DigestArticle", "SeenArticle"]
+__all__ = ["ClientSettings", "Feed", "Digest", "DigestArticle", "Schedule", "SeenArticle"]

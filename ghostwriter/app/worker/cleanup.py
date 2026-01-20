@@ -1,4 +1,4 @@
-"""Cleanup tasks for old digests and seen articles."""
+"""Cleanup tasks for old digests, seen articles, and inactivity checking."""
 
 import logging
 import os
@@ -12,6 +12,28 @@ from app.models.digest import Digest
 from app.models.seen_article import SeenArticle
 
 logger = logging.getLogger(__name__)
+
+
+async def check_client_inactivity() -> bool:
+    """
+    Check for client inactivity and auto-disable schedules if needed.
+
+    This should be called daily to check if the client has been
+    inactive for too long (no heartbeats, downloads, or feed syncs).
+
+    Returns:
+        True if schedules were disabled due to inactivity.
+    """
+    from app.services import activity_tracker
+
+    try:
+        disabled = activity_tracker.check_inactivity()
+        if disabled:
+            logger.warning("Schedules auto-disabled due to client inactivity")
+        return disabled
+    except Exception as e:
+        logger.error(f"Error checking client inactivity: {e}")
+        return False
 
 
 async def cleanup_old_digests() -> int:
