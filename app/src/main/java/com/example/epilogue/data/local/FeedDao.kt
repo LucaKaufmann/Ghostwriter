@@ -30,4 +30,7 @@ interface FeedDao {
 
     @Query("UPDATE feeds SET lastFetched = :timestamp WHERE url = :url")
     suspend fun updateLastFetched(url: String, timestamp: Long)
+
+    @Query("UPDATE feeds SET lastFetched = 0")
+    suspend fun resetAllLastFetched()
 }

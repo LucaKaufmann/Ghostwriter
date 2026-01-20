@@ -1,5 +1,8 @@
 package com.example.epilogue.ui.settings
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,15 +31,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import com.example.epilogue.domain.model.DigestPeriod
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,9 +47,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -60,6 +65,20 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
+    // SAF directory picker launcher
+    val directoryPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            // Take persistable permission
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(it, flags)
+            viewModel.setCustomExportUri(it)
+        }
+    }
 
     LaunchedEffect(uiState.apiKeySaved) {
         if (uiState.apiKeySaved) {
@@ -72,6 +91,27 @@ fun SettingsScreen(
         if (uiState.digestTriggered) {
             snackbarHostState.showSnackbar("Digest generation started")
             viewModel.clearDigestTriggeredFlag()
+        }
+    }
+
+    LaunchedEffect(uiState.digestCompleted) {
+        if (uiState.digestCompleted) {
+            snackbarHostState.showSnackbar("Digest generated successfully")
+            viewModel.clearDigestCompletedFlag()
+        }
+    }
+
+    LaunchedEffect(uiState.digestFailed) {
+        if (uiState.digestFailed) {
+            snackbarHostState.showSnackbar("Digest generation failed")
+            viewModel.clearDigestFailedFlag()
+        }
+    }
+
+    LaunchedEffect(uiState.dataReset) {
+        if (uiState.dataReset) {
+            snackbarHostState.showSnackbar("All digests deleted and feed timestamps reset")
+            viewModel.clearDataResetFlag()
         }
     }
 
@@ -95,8 +135,8 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp)
+                .padding(top = innerPadding.calculateTopPadding())
+                .padding(horizontal = 16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -113,13 +153,9 @@ fun SettingsScreen(
 
             // Schedule Section
             SettingsSection(title = "Daily Schedule") {
-                ScheduleInput(
-                    hour = uiState.scheduleHour,
-                    minute = uiState.scheduleMinute,
-                    showTimePicker = uiState.showTimePicker,
-                    onShowTimePicker = viewModel::showTimePicker,
-                    onHideTimePicker = viewModel::hideTimePicker,
-                    onTimeSelected = viewModel::updateScheduleTime
+                PeriodSelection(
+                    selectedPeriods = uiState.selectedPeriods,
+                    onTogglePeriod = viewModel::togglePeriod
                 )
             }
 
@@ -130,6 +166,29 @@ fun SettingsScreen(
                 MinWordCountInput(
                     minWordCount = uiState.minWordCount,
                     onMinWordCountChange = viewModel::updateMinWordCount
+                )
+            }
+
+            Divider()
+
+            // E-ink Mode Section
+            SettingsSection(title = "E-ink Mode") {
+                EinkModeInput(
+                    enabled = uiState.einkMode,
+                    onEnabledChange = viewModel::updateEinkMode
+                )
+            }
+
+            Divider()
+
+            // Export Directory Section
+            SettingsSection(title = "Export Directory") {
+                CustomExportInput(
+                    enabled = uiState.customExportEnabled,
+                    displayPath = uiState.customExportDisplayPath,
+                    onToggle = viewModel::toggleCustomExport,
+                    onSelectDirectory = { directoryPickerLauncher.launch(null) },
+                    onClearDirectory = viewModel::clearCustomExportDirectory
                 )
             }
 
@@ -149,6 +208,48 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+            }
+
+            Divider()
+
+            // Developer Section
+            SettingsSection(title = "Developer") {
+                var showConfirmDialog by remember { mutableStateOf(false) }
+
+                OutlinedButton(
+                    onClick = { showConfirmDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Reset All Data")
+                }
+                Text(
+                    text = "Deletes all digests and resets feed timestamps (for testing)",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                if (showConfirmDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showConfirmDialog = false },
+                        title = { Text("Reset All Data?") },
+                        text = { Text("This will delete all digests and reset feed timestamps so all articles will be fetched again. This cannot be undone.") },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    viewModel.resetAllData()
+                                    showConfirmDialog = false
+                                }
+                            ) {
+                                Text("Reset")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showConfirmDialog = false }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -232,95 +333,56 @@ fun ApiKeyInput(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScheduleInput(
-    hour: Int,
-    minute: Int,
-    showTimePicker: Boolean,
-    onShowTimePicker: () -> Unit,
-    onHideTimePicker: () -> Unit,
-    onTimeSelected: (Int, Int) -> Unit
+fun PeriodSelection(
+    selectedPeriods: Set<DigestPeriod>,
+    onTogglePeriod: (DigestPeriod, Boolean) -> Unit
 ) {
-    val formattedTime = String.format("%02d:%02d", hour, minute)
-
     Column {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
+        Text(
+            text = "Generate digests at:",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        DigestPeriod.entries.forEach { period ->
+            val isSelected = period in selectedPeriods
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "Daily digest at",
+                    text = "${period.name.lowercase().replaceFirstChar { it.uppercase() }} - ${period.displayTime}",
                     style = MaterialTheme.typography.bodyLarge
                 )
-                Text(
-                    text = formattedTime,
-                    style = MaterialTheme.typography.headlineMedium
+                Switch(
+                    checked = isSelected,
+                    onCheckedChange = { enabled ->
+                        onTogglePeriod(period, enabled)
+                    }
                 )
             }
-
-            OutlinedButton(onClick = onShowTimePicker) {
-                Text("Change")
-            }
         }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "EPUB will be generated daily at this time",
+            text = if (selectedPeriods.isEmpty()) {
+                "Select at least one time period"
+            } else {
+                "EPUB will be generated at selected times"
+            },
             style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-    }
-
-    if (showTimePicker) {
-        TimePickerDialog(
-            initialHour = hour,
-            initialMinute = minute,
-            onDismiss = onHideTimePicker,
-            onConfirm = { selectedHour, selectedMinute ->
-                onTimeSelected(selectedHour, selectedMinute)
-                onHideTimePicker()
+            color = if (selectedPeriods.isEmpty()) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurface
             }
         )
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TimePickerDialog(
-    initialHour: Int,
-    initialMinute: Int,
-    onDismiss: () -> Unit,
-    onConfirm: (Int, Int) -> Unit
-) {
-    val timePickerState = rememberTimePickerState(
-        initialHour = initialHour,
-        initialMinute = initialMinute,
-        is24Hour = true
-    )
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Select Time") },
-        text = {
-            TimePicker(state = timePickerState)
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onConfirm(timePickerState.hour, timePickerState.minute)
-                }
-            ) {
-                Text("OK")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }
 
 @Composable
@@ -329,35 +391,158 @@ fun MinWordCountInput(
     onMinWordCountChange: (Int) -> Unit
 ) {
     Column {
+        Text(
+            text = "Minimum word count",
+            style = MaterialTheme.typography.bodyLarge
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Stepper control - easier for e-ink than slider
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = {
+                    val newValue = (minWordCount - 100).coerceAtLeast(0)
+                    onMinWordCountChange(newValue)
+                },
+                enabled = minWordCount > 0,
+                modifier = Modifier.height(48.dp)
+            ) {
+                Text("-", style = MaterialTheme.typography.titleLarge)
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Text(
+                text = if (minWordCount == 0) "Off" else "$minWordCount",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.width(100.dp),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            OutlinedButton(
+                onClick = {
+                    val newValue = (minWordCount + 100).coerceAtMost(1000)
+                    onMinWordCountChange(newValue)
+                },
+                enabled = minWordCount < 1000,
+                modifier = Modifier.height(48.dp)
+            ) {
+                Text("+", style = MaterialTheme.typography.titleLarge)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Skip articles shorter than this (0 = include all)",
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun EinkModeInput(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Minimum word count",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Text(
-                text = if (minWordCount == 0) "Off" else "$minWordCount",
-                style = MaterialTheme.typography.bodyLarge
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Enable E-ink optimizations",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onEnabledChange
             )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Slider(
-            value = minWordCount.toFloat(),
-            onValueChange = { onMinWordCountChange(it.toInt()) },
-            valueRange = 0f..1000f,
-            steps = 9,
-            modifier = Modifier.fillMaxWidth()
+        Text(
+            text = "Optimizes for e-ink displays: page-based navigation, volume button support, larger touch targets, no animations",
+            style = MaterialTheme.typography.bodySmall
         )
+    }
+}
+
+@Composable
+fun CustomExportInput(
+    enabled: Boolean,
+    displayPath: String?,
+    onToggle: (Boolean) -> Unit,
+    onSelectDirectory: () -> Unit,
+    onClearDirectory: () -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Export to custom folder",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                if (displayPath != null) {
+                    Text(
+                        text = displayPath,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Switch(
+                checked = enabled && displayPath != null,
+                onCheckedChange = onToggle,
+                enabled = displayPath != null
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onSelectDirectory,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(if (displayPath == null) "Select Folder" else "Change")
+            }
+
+            if (displayPath != null) {
+                OutlinedButton(
+                    onClick = onClearDirectory,
+                ) {
+                    Text("Clear")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Skip articles shorter than this (0 = include all)",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 4.dp)
+            text = "EPUBs will be automatically copied to this folder (e.g., KOReader)",
+            style = MaterialTheme.typography.bodySmall
         )
     }
 }

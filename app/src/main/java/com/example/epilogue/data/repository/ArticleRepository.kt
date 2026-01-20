@@ -1,10 +1,12 @@
 package com.example.epilogue.data.repository
 
+import android.util.Log
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessedArticle
 import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.service.ContentProcessor
 import com.example.epilogue.service.OpenAIService
+import com.example.epilogue.service.PromotionalContentFilter
 import com.example.epilogue.service.RssService
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -22,8 +24,12 @@ class ArticleRepository @Inject constructor(
     private val contentProcessor: ContentProcessor,
     private val openAIService: OpenAIService,
     private val feedRepository: FeedRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val promotionalFilter: PromotionalContentFilter
 ) {
+    companion object {
+        private const val TAG = "ArticleRepository"
+    }
 
     /**
      * Result of fetching articles for a single feed.
@@ -46,10 +52,24 @@ class ArticleRepository @Inject constructor(
      * @return FeedResult containing processed articles
      */
     suspend fun fetchArticles(feed: Feed, onlyNew: Boolean = true): FeedResult {
+        Log.d(TAG, "Fetching articles from feed: ${feed.name} (${feed.url}), onlyNew=$onlyNew, lastFetched=${feed.lastFetched}")
         val minWordCount = settingsRepository.getMinWordCount()
         val since = if (onlyNew) feed.lastFetched else 0L
 
         var rssItems = rssService.fetchNewArticles(feed.url, since)
+        Log.d(TAG, "Feed ${feed.name}: got ${rssItems.size} RSS items after date filter (since=$since)")
+
+        // Filter out promotional content before processing
+        val nonPromotionalItems = rssItems.filter { item ->
+            val filterResult = promotionalFilter.isPromotional(
+                url = item.link,
+                title = item.title,
+                content = item.content ?: item.description
+            )
+            !filterResult.isPromotional
+        }
+        Log.d(TAG, "Feed ${feed.name}: filtered ${rssItems.size - nonPromotionalItems.size} promotional items")
+        rssItems = nonPromotionalItems
 
         // Apply per-feed max articles limit before processing
         if (feed.maxArticles > 0) {
@@ -93,6 +113,7 @@ class ArticleRepository @Inject constructor(
             feedRepository.updateLastFetched(feed.url, System.currentTimeMillis())
         }
 
+        Log.d(TAG, "Feed ${feed.name}: processed ${articles.size} articles successfully, $errorCount errors")
         return FeedResult(feed, articles, errorCount)
     }
 
@@ -108,12 +129,19 @@ class ArticleRepository @Inject constructor(
         feeds: List<Feed>,
         onlyNew: Boolean = true
     ): List<ProcessedArticle> = coroutineScope {
+        Log.d(TAG, "Fetching articles from ${feeds.size} feeds, onlyNew=$onlyNew")
+
         val results = feeds.map { feed ->
             async { fetchArticles(feed, onlyNew) }
         }.awaitAll()
 
         // Combine all articles, summaries first
         val allArticles = results.flatMap { it.articles }
+
+        Log.d(TAG, "Total articles from all feeds: ${allArticles.size}")
+        results.forEach { result ->
+            Log.d(TAG, "  - ${result.feed.name}: ${result.articles.size} articles, ${result.errors} errors")
+        }
 
         allArticles.sortedByDescending { it.isSummary }
     }

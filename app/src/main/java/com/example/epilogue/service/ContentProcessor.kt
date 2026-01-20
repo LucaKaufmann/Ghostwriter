@@ -83,7 +83,18 @@ class ContentProcessor @Inject constructor(
                 ContentAnalyzer.ContentType.PREVIEW -> {
                     // RSS is just a preview - fetch full article
                     Log.d(TAG, "RSS content is preview, fetching full article from: $url")
-                    fetchAndProcess(url, minWordCount)
+                    fetchAndProcess(url, minWordCount) ?: run {
+                        // Fallback: use truncated RSS content if URL fetch fails
+                        // This ensures we still get some content even if the site blocks scraping
+                        Log.d(TAG, "URL fetch failed, falling back to RSS content for: $url")
+                        processRssContent(
+                            url = url,
+                            htmlContent = rssContent ?: rssDescription ?: "",
+                            rssTitle = rssTitle,
+                            rssAuthor = rssAuthor,
+                            minWordCount = 0  // Don't apply word count filter for fallback content
+                        )
+                    }
                 }
 
                 ContentAnalyzer.ContentType.UNCERTAIN -> {
@@ -261,12 +272,32 @@ class ContentProcessor @Inject constructor(
 
     /**
      * Fetches HTML document from URL using Jsoup.
+     * Includes browser-like headers to improve success rate with sites that block scrapers.
      */
     private fun fetchDocument(url: String): Document {
+        // Extract domain for Referer header
+        val referer = try {
+            val uri = java.net.URI(url)
+            "${uri.scheme}://${uri.host}/"
+        } catch (e: Exception) {
+            url
+        }
+
         return Jsoup.connect(url)
             .userAgent(USER_AGENT)
             .timeout(DEFAULT_TIMEOUT_MS)
             .followRedirects(true)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Accept-Encoding", "gzip, deflate")
+            .header("DNT", "1")
+            .header("Connection", "keep-alive")
+            .header("Upgrade-Insecure-Requests", "1")
+            .header("Referer", referer)
+            .header("Sec-Fetch-Dest", "document")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-User", "?1")
             .get()
     }
 
