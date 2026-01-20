@@ -86,6 +86,23 @@ class SettingsViewModel @Inject constructor(
                 updatedPeriods.remove(period)
             }
             _uiState.update { it.copy(selectedPeriods = updatedPeriods) }
+
+            // Sync schedule to Ghostwriter if enabled
+            if (settingsRepository.isGhostwriterConfigured()) {
+                val result = ghostwriterRepository.updateSchedule(
+                    period = period.name.lowercase(),
+                    enabled = enabled
+                )
+                when (result) {
+                    is GhostwriterResult.Success -> {
+                        Log.i(TAG, "Synced schedule ${period.name} to Ghostwriter: enabled=$enabled")
+                    }
+                    is GhostwriterResult.Error -> {
+                        Log.w(TAG, "Failed to sync schedule to Ghostwriter: ${result.message}")
+                    }
+                    is GhostwriterResult.NotConfigured -> { }
+                }
+            }
         }
     }
 
@@ -397,6 +414,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setGhostwriterEnabled(enabled)
             _uiState.update { it.copy(ghostwriterEnabled = enabled) }
+
+            // If enabling and already configured, perform initial sync
+            if (enabled && settingsRepository.isGhostwriterConfigured()) {
+                performInitialGhostwriterSync()
+            }
         }
     }
 
@@ -436,23 +458,25 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(ghostwriterTesting = true, ghostwriterTestResult = null) }
 
-            // Save URL first if changed
+            // Save URL and API key first if changed
             val url = _uiState.value.ghostwriterUrl.trim()
             if (url.isNotBlank()) {
                 settingsRepository.setGhostwriterUrl(url)
             }
+            val apiKey = _uiState.value.ghostwriterApiKey.trim()
+            settingsRepository.setGhostwriterApiKey(apiKey.ifBlank { null })
 
             val result = ghostwriterRepository.checkHealth()
 
-            val testResult = when (result) {
+            val (testResult, connectionSuccessful) = when (result) {
                 is GhostwriterResult.Success -> {
-                    "Connected! Server v${result.data.version}, AI: ${result.data.aiProvider}"
+                    Pair("Connected! Server v${result.data.version}, AI: ${result.data.aiProvider}", true)
                 }
                 is GhostwriterResult.Error -> {
-                    "Error: ${result.message}"
+                    Pair("Error: ${result.message}", false)
                 }
                 is GhostwriterResult.NotConfigured -> {
-                    "Please enter a server URL"
+                    Pair("Please enter a server URL", false)
                 }
             }
 
@@ -462,11 +486,107 @@ class SettingsViewModel @Inject constructor(
                     ghostwriterTestResult = testResult
                 )
             }
+
+            // If connection successful and Ghostwriter is enabled, perform initial sync
+            if (connectionSuccessful && _uiState.value.ghostwriterEnabled) {
+                performInitialGhostwriterSync()
+            }
         }
     }
 
     fun clearGhostwriterTestResult() {
         _uiState.update { it.copy(ghostwriterTestResult = null) }
+    }
+
+    fun clearGhostwriterSyncResult() {
+        _uiState.update { it.copy(ghostwriterSyncResult = null) }
+    }
+
+    /**
+     * Perform initial sync to Ghostwriter when first enabled.
+     * Syncs feeds and schedule preferences.
+     */
+    private fun performInitialGhostwriterSync() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(ghostwriterSyncing = true, ghostwriterSyncResult = null) }
+
+            var syncStatus = mutableListOf<String>()
+            var hasError = false
+
+            // 1. Sync feeds
+            val feeds = feedRepository.getAllFeedsList()
+            if (feeds.isNotEmpty()) {
+                val feedResult = ghostwriterRepository.syncFeeds(feeds)
+                when (feedResult) {
+                    is GhostwriterResult.Success -> {
+                        syncStatus.add("${feedResult.data.synced} feeds synced")
+                        Log.i(TAG, "Initial sync: ${feedResult.data.synced} feeds synced")
+                    }
+                    is GhostwriterResult.Error -> {
+                        syncStatus.add("Feed sync failed")
+                        hasError = true
+                        Log.e(TAG, "Initial sync: feed sync failed: ${feedResult.message}")
+                    }
+                    is GhostwriterResult.NotConfigured -> {
+                        hasError = true
+                    }
+                }
+            } else {
+                syncStatus.add("No feeds to sync")
+            }
+
+            // 2. Sync schedule preferences
+            val selectedPeriods = _uiState.value.selectedPeriods
+            val scheduleSyncResults = mutableListOf<String>()
+
+            for (period in DigestPeriod.entries) {
+                val enabled = period in selectedPeriods
+                val scheduleResult = ghostwriterRepository.updateSchedule(
+                    period = period.name.lowercase(),
+                    enabled = enabled
+                )
+                when (scheduleResult) {
+                    is GhostwriterResult.Success -> {
+                        if (enabled) {
+                            scheduleSyncResults.add(period.name.lowercase())
+                        }
+                    }
+                    is GhostwriterResult.Error -> {
+                        Log.w(TAG, "Failed to sync schedule for ${period.name}: ${scheduleResult.message}")
+                    }
+                    is GhostwriterResult.NotConfigured -> { }
+                }
+            }
+
+            if (scheduleSyncResults.isNotEmpty()) {
+                syncStatus.add("Schedules: ${scheduleSyncResults.joinToString(", ")}")
+            }
+
+            // 3. Send initial heartbeat
+            val heartbeatResult = ghostwriterRepository.sendHeartbeat()
+            when (heartbeatResult) {
+                is GhostwriterResult.Success -> {
+                    Log.i(TAG, "Initial sync: heartbeat sent")
+                }
+                is GhostwriterResult.Error -> {
+                    Log.w(TAG, "Initial sync: heartbeat failed: ${heartbeatResult.message}")
+                }
+                is GhostwriterResult.NotConfigured -> { }
+            }
+
+            val resultMessage = if (hasError) {
+                "Sync completed with errors"
+            } else {
+                syncStatus.joinToString(". ")
+            }
+
+            _uiState.update {
+                it.copy(
+                    ghostwriterSyncing = false,
+                    ghostwriterSyncResult = resultMessage
+                )
+            }
+        }
     }
 
     override fun onCleared() {
@@ -498,5 +618,7 @@ data class SettingsUiState(
     val ghostwriterTesting: Boolean = false,
     val ghostwriterTestResult: String? = null,
     val ghostwriterProgress: DigestStatusResponse? = null,
-    val ghostwriterError: String? = null
+    val ghostwriterError: String? = null,
+    val ghostwriterSyncing: Boolean = false,
+    val ghostwriterSyncResult: String? = null
 )
