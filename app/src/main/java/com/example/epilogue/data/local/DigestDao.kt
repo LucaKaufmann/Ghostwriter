@@ -59,4 +59,10 @@ interface DigestDao {
 
     @Query("DELETE FROM digests")
     suspend fun deleteAllDigests()
+
+    @Query("SELECT EXISTS(SELECT 1 FROM digests WHERE remoteId = :remoteId)")
+    suspend fun existsByRemoteId(remoteId: String): Boolean
+
+    @Query("SELECT remoteId FROM digests WHERE remoteId IS NOT NULL")
+    suspend fun getAllRemoteIds(): List<String>
 }

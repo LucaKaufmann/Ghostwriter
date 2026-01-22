@@ -33,6 +33,7 @@ class EpilogueApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         initializeDigestScheduler()
+        initializeGhostwriterSync()
         validateExportPermissions()
     }
 
@@ -40,6 +41,15 @@ class EpilogueApplication : Application(), Configuration.Provider {
         // Schedule digest generation for all selected periods
         // This ensures the workers are scheduled even after app updates or device reboots
         digestScheduler.scheduleAllPeriods()
+    }
+
+    private fun initializeGhostwriterSync() {
+        // If Ghostwriter is configured, schedule periodic sync and trigger immediate sync
+        if (settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter configured, initializing digest sync")
+            digestScheduler.scheduleDigestSync()
+            digestScheduler.syncDigestsNow()
+        }
     }
 
     private fun validateExportPermissions() {

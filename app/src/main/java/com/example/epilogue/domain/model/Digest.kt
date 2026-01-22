@@ -11,5 +11,6 @@ data class Digest(
     val briefingCount: Int,
     val fidelityCount: Int,
     val triggerType: TriggerType,
-    val feedNames: List<String>
+    val feedNames: List<String>,
+    val remoteId: String? = null  // Ghostwriter digest ID if synced from backend
 )

@@ -158,4 +158,58 @@ class DigestRepository @Inject constructor(
         // Delete all from database (cascade will remove articles)
         digestDao.deleteAllDigests()
     }
+
+    /**
+     * Check if a digest with the given remote ID already exists.
+     */
+    suspend fun existsByRemoteId(remoteId: String): Boolean =
+        digestDao.existsByRemoteId(remoteId)
+
+    /**
+     * Get all remote IDs of synced digests.
+     */
+    suspend fun getAllRemoteIds(): List<String> =
+        digestDao.getAllRemoteIds()
+
+    /**
+     * Save a digest downloaded from Ghostwriter backend.
+     * Unlike locally generated digests, these don't have individual article records.
+     *
+     * @param remoteId The Ghostwriter digest ID (UUID)
+     * @param epubFilePath The local path to the downloaded EPUB
+     * @param articleCount Number of articles in the digest
+     * @param generatedAt Timestamp when the digest was created
+     * @param period The period (morning, noon, evening, manual)
+     * @return The ID of the created digest
+     */
+    suspend fun saveRemoteDigest(
+        remoteId: String,
+        epubFilePath: String,
+        articleCount: Int,
+        generatedAt: Long,
+        period: String
+    ): Long {
+        val triggerType = when (period.lowercase()) {
+            "manual" -> TriggerType.MANUAL
+            else -> TriggerType.SCHEDULED
+        }
+
+        val digestEntity = DigestEntity(
+            generatedAt = generatedAt,
+            epubFilePath = epubFilePath,
+            articleCount = articleCount,
+            briefingCount = 0,  // Not tracked for remote digests
+            fidelityCount = 0,  // Not tracked for remote digests
+            triggerType = triggerType,
+            feedNames = "",  // Not tracked for remote digests
+            remoteId = remoteId
+        )
+
+        val digestId = digestDao.insertDigest(digestEntity)
+
+        // Cleanup old digests if we exceed the limit
+        cleanupOldDigests()
+
+        return digestId
+    }
 }
