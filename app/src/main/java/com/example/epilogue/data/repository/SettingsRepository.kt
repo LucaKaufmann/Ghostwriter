@@ -45,6 +45,9 @@ class SettingsRepository @Inject constructor(
         private const val KEY_OPENAI_API_KEY = "openai_api_key"
         private const val KEY_GHOSTWRITER_API_KEY = "ghostwriter_api_key"
 
+        // Sync tracking
+        private const val KEY_LAST_DIGEST_SYNC = "last_digest_sync"
+
         // Defaults
         private const val DEFAULT_MIN_WORD_COUNT = 0
         private const val DEFAULT_EINK_MODE = false
@@ -347,5 +350,24 @@ class SettingsRepository @Inject constructor(
      */
     fun isGhostwriterConfigured(): Boolean {
         return isGhostwriterEnabled() && !getGhostwriterUrl().isNullOrBlank()
+    }
+
+    // ===== Sync Tracking =====
+
+    /**
+     * Sets the last digest sync timestamp.
+     */
+    suspend fun setLastDigestSyncTime(timestamp: Long) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putLong(KEY_LAST_DIGEST_SYNC, timestamp)
+            .apply()
+    }
+
+    /**
+     * Gets the last digest sync timestamp.
+     * Returns 0 if never synced.
+     */
+    fun getLastDigestSyncTime(): Long {
+        return prefs.getLong(KEY_LAST_DIGEST_SYNC, 0L)
     }
 }

@@ -415,9 +415,14 @@ class SettingsViewModel @Inject constructor(
             settingsRepository.setGhostwriterEnabled(enabled)
             _uiState.update { it.copy(ghostwriterEnabled = enabled) }
 
-            // If enabling and already configured, perform initial sync
             if (enabled && settingsRepository.isGhostwriterConfigured()) {
+                // Start periodic digest sync and perform initial sync
+                digestScheduler.scheduleDigestSync()
+                digestScheduler.syncDigestsNow()
                 performInitialGhostwriterSync()
+            } else if (!enabled) {
+                // Stop periodic digest sync when Ghostwriter is disabled
+                digestScheduler.cancelDigestSync()
             }
         }
     }
@@ -489,6 +494,8 @@ class SettingsViewModel @Inject constructor(
 
             // If connection successful and Ghostwriter is enabled, perform initial sync
             if (connectionSuccessful && _uiState.value.ghostwriterEnabled) {
+                digestScheduler.scheduleDigestSync()
+                digestScheduler.syncDigestsNow()
                 performInitialGhostwriterSync()
             }
         }
