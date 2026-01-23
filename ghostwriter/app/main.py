@@ -13,14 +13,12 @@ from app.api.health import set_startup_time
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.database import init_db
+from app.core.logging import configure_logging, digest_logger
 from app.worker.scheduler import setup_scheduler, shutdown_scheduler
 
-# Configure logging
+# Configure logging (both standard and digest activity logging)
 settings = get_settings()
-logging.basicConfig(
-    level=getattr(logging, settings.log_level.upper()),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +36,7 @@ async def lifespan(app: FastAPI):
     # Ensure directories exist
     os.makedirs(settings.data_dir, exist_ok=True)
     os.makedirs(settings.output_dir, exist_ok=True)
+    os.makedirs(settings.logs_dir, exist_ok=True)
 
     # Initialize database
     init_db()

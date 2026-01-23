@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     # Paths
     data_dir: str = Field(default="/app/data", description="Database directory")
     output_dir: str = Field(default="/app/output", description="EPUB output directory")
+    logs_dir: str = Field(default="/app/logs", description="Digest activity logs directory")
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

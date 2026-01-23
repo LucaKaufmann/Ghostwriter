@@ -137,3 +137,123 @@ WorkManager `PeriodicWorkRequest` with constraints:
 ## API Key Storage
 
 Store OpenAI API key in `EncryptedSharedPreferences`.
+
+## Ghostwriter Backend
+
+The `ghostwriter/` directory contains a Python FastAPI backend that runs on a server (Synology NAS) to generate digests remotely.
+
+### Local Development
+
+```bash
+cd ghostwriter
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8080
+```
+
+### Docker Build & Deploy (Synology DS920+)
+
+Build the Docker image:
+```bash
+cd ghostwriter
+docker build -t ghostwriter:latest -t ghostwriter:$(date +%Y%m%d) .
+```
+
+Save as tar for transfer to NAS:
+```bash
+docker save ghostwriter:latest | gzip > ghostwriter.tar.gz
+```
+
+Transfer to Synology and load:
+```bash
+# Copy to NAS (via SSH, SMB, or Synology web UI)
+scp ghostwriter.tar.gz user@your-server:/path/to/docker/
+
+# SSH into NAS and load image
+ssh user@your-server
+docker load < /path/to/ghostwriter.tar.gz
+```
+
+Run with docker-compose on the NAS:
+```bash
+cd /path/to/ghostwriter
+docker-compose up -d
+```
+
+Or run directly:
+```bash
+docker run -d \
+  --name ghostwriter \
+  --restart unless-stopped \
+  -p 8158:8080 \
+  -v ghostwriter_data:/app/data \
+  -v ghostwriter_epubs:/app/output \
+  -v ghostwriter_logs:/app/logs \
+  -e API_KEY=your-api-key \
+  -e AI_PROVIDER=gemini \
+  -e GEMINI_API_KEY=your-gemini-key \
+  ghostwriter:latest
+```
+
+### Database Migrations
+
+After updating the codebase, run migrations before deploying:
+```bash
+cd ghostwriter
+python scripts/migrate_add_article_content.py
+```
+
+On Docker, exec into the container:
+```bash
+docker exec -it ghostwriter python scripts/migrate_add_article_content.py
+```
+
+### API Endpoints
+
+- `GET /health` - Health check
+- `GET /feeds` - List feeds
+- `POST /feeds/sync` - Sync feeds from app
+- `POST /digests/trigger` - Trigger digest generation
+- `GET /digests` - List digests
+- `GET /digests/{id}/articles` - Get articles with content
+- `GET /digests/{filename}` - Download EPUB
+
+### Digest Activity Logs
+
+Ghostwriter writes detailed activity logs to `/app/logs/` (Docker volume: `ghostwriter_logs`). Logs are:
+- One file per day: `ghostwriter-YYYY-MM-DD.log`
+- Retained for 30 days
+- Structured for both human reading and AI analysis
+
+**Log format:**
+```
+[2024-01-20 07:00:00 UTC] [INFO] [scheduler] [triggered] Scheduled morning digest triggered
+  Context: {"period": "morning", "digest_id": "abc-123"}
+```
+
+**Components logged:**
+- `scheduler` - Schedule triggers, updates, skips
+- `pipeline` - Digest generation stages and completion
+- `feeds` - Feed fetch results (total/new articles, timing)
+- `articles` - Extraction and summarization results
+- `epub` - EPUB generation
+- `maintenance` - Daily cleanup tasks
+
+**Accessing logs on Docker:**
+```bash
+# View recent logs
+docker exec -it ghostwriter tail -100 /app/logs/ghostwriter.log
+
+# Copy logs to host
+docker cp ghostwriter:/app/logs/. ./ghostwriter-logs/
+
+# On Synology, logs volume is at:
+# /path/to/ghostwriter_logs/
+```
+
+**Using logs for debugging:**
+When investigating issues, the logs show:
+1. Whether scheduled digests triggered
+2. Which feeds were fetched and article counts
+3. Which articles failed extraction or summarization
+4. EPUB generation success and file size
+5. Pipeline duration and any errors with stack traces

@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.database import engine
+from app.core.logging import digest_logger
 from app.models.schedule import Schedule
 from app.worker.bindery import generate_digest
 
@@ -39,6 +40,11 @@ def setup_scheduler() -> None:
 
     if not settings.schedule_enabled:
         logger.info("Scheduled runs disabled via config")
+        digest_logger.info(
+            "Scheduler disabled via SCHEDULE_ENABLED=false",
+            component="scheduler",
+            event="disabled",
+        )
         return
 
     # Ensure default schedules exist in database
@@ -60,6 +66,20 @@ def setup_scheduler() -> None:
     scheduler.start()
     logger.info("Scheduler started")
 
+    # Log all configured schedules for visibility
+    all_schedules = get_all_schedules()
+    schedule_info = []
+    for s in all_schedules:
+        next_run = get_next_run_time(s)
+        schedule_info.append({
+            "period": s.period,
+            "time": f"{s.hour:02d}:{s.minute:02d}",
+            "timezone": s.timezone,
+            "enabled": s.enabled,
+            "next_run": next_run.isoformat() if next_run else None,
+        })
+    digest_logger.schedule_startup(schedule_info)
+
 
 async def _daily_maintenance() -> None:
     """
@@ -77,18 +97,29 @@ async def _daily_maintenance() -> None:
     )
 
     logger.info("Running daily maintenance")
+    digest_logger.maintenance_started()
 
     try:
         # Check for client inactivity first
         await check_client_inactivity()
 
         # Run cleanup tasks
-        await cleanup_old_digests()
-        await cleanup_seen_articles()
+        digests_deleted = await cleanup_old_digests()
+        articles_cleaned = await cleanup_seen_articles()
 
         logger.info("Daily maintenance completed")
+        digest_logger.maintenance_completed(
+            digests_deleted=digests_deleted or 0,
+            articles_cleaned=articles_cleaned or 0,
+        )
     except Exception as e:
         logger.exception(f"Daily maintenance failed: {e}")
+        digest_logger.error(
+            f"Daily maintenance failed: {e}",
+            component="maintenance",
+            event="failed",
+            exc_info=True,
+        )
 
 
 def _ensure_default_schedules() -> None:
@@ -201,16 +232,27 @@ async def _scheduled_digest(period: str) -> None:
         period: The period name.
     """
     logger.info(f"Running scheduled {period} digest")
+    digest_logger.schedule_triggered(period)
+
     try:
         digest_id = await generate_digest(period)
         if digest_id:
             logger.info(f"Scheduled {period} digest started: {digest_id}")
+            digest_logger.pipeline_started(str(digest_id), period, trigger="scheduled")
             # Update last run time
             _update_last_run(period, digest_id)
         else:
             logger.warning(f"Could not start scheduled {period} digest (job running?)")
+            digest_logger.schedule_skipped(period, "Another digest job is already running")
     except Exception as e:
         logger.exception(f"Scheduled {period} digest failed: {e}")
+        digest_logger.error(
+            f"Scheduled {period} digest failed to start: {e}",
+            component="scheduler",
+            event="start_failed",
+            exc_info=True,
+            context={"period": period},
+        )
 
 
 def _update_last_run(period: str, digest_id: UUID) -> None:
@@ -284,6 +326,13 @@ def update_schedule(
             _remove_schedule_job(period)
 
         logger.info(f"Updated schedule for {period}: {schedule.hour:02d}:{schedule.minute:02d} enabled={schedule.enabled}")
+        digest_logger.schedule_updated(
+            period=period,
+            hour=schedule.hour,
+            minute=schedule.minute,
+            enabled=schedule.enabled,
+            timezone=schedule.timezone,
+        )
         return schedule
 
 

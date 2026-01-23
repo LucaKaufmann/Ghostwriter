@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.database import engine
+from app.core.logging import digest_logger
 from app.models.digest import Digest
 from app.models.seen_article import SeenArticle
 
@@ -28,8 +29,10 @@ async def check_client_inactivity() -> bool:
 
     try:
         disabled = activity_tracker.check_inactivity()
+        days_inactive = activity_tracker.get_days_since_activity()
         if disabled:
             logger.warning("Schedules auto-disabled due to client inactivity")
+        digest_logger.client_inactivity_check(days_inactive, disabled)
         return disabled
     except Exception as e:
         logger.error(f"Error checking client inactivity: {e}")

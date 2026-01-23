@@ -96,13 +96,28 @@ class DigestSyncWorker @AssistedInject constructor(
                                     System.currentTimeMillis()
                                 }
 
+                                // Fetch articles for in-app display
+                                val articlesResult = ghostwriterRepository.getDigestArticles(digest.id)
+                                val articles = when (articlesResult) {
+                                    is GhostwriterResult.Success -> {
+                                        Log.i(TAG, "Fetched ${articlesResult.data.articleCount} articles for digest ${digest.id}")
+                                        articlesResult.data.articles
+                                    }
+                                    is GhostwriterResult.Error -> {
+                                        Log.w(TAG, "Could not fetch articles: ${articlesResult.message}")
+                                        null
+                                    }
+                                    is GhostwriterResult.NotConfigured -> null
+                                }
+
                                 // Save to local database
                                 digestRepository.saveRemoteDigest(
                                     remoteId = digest.id,
                                     epubFilePath = file.absolutePath,
                                     articleCount = digest.articleCount,
                                     generatedAt = generatedAt,
-                                    period = digest.period
+                                    period = digest.period,
+                                    articles = articles
                                 )
 
                                 // Export to custom directory if configured

@@ -146,3 +146,28 @@ data class HeartbeatResponse(
     @SerializedName("schedules_active") val schedulesActive: Boolean,
     @SerializedName("message") val message: String?
 )
+
+/**
+ * Digest article with content - for syncing article content to the app.
+ */
+data class DigestArticleResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("mode") val mode: String,
+    @SerializedName("word_count") val wordCount: Int,
+    @SerializedName("content") val content: String,
+    @SerializedName("author") val author: String?,
+    @SerializedName("feed_title") val feedTitle: String,
+    @SerializedName("sort_order") val sortOrder: Int,
+    @SerializedName("ai_failed") val aiFailed: Boolean
+)
+
+/**
+ * Response containing all articles for a digest.
+ */
+data class DigestArticlesResponse(
+    @SerializedName("digest_id") val digestId: String,
+    @SerializedName("article_count") val articleCount: Int,
+    @SerializedName("articles") val articles: List<DigestArticleResponse>
+)
