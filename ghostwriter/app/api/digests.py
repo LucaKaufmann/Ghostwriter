@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.core.security import verify_api_key
-from app.models.digest import Digest, DigestRead, DigestStatus
+from app.models.digest import Digest, DigestArticle, DigestRead, DigestStatus
 from app.worker.bindery import generate_digest
 
 router = APIRouter()
@@ -59,6 +59,29 @@ class NewDigestsResponse(BaseModel):
     has_new: bool
     count: int
     digests: list[DigestRead]
+
+
+class DigestArticleRead(BaseModel):
+    """Schema for reading a digest article with content."""
+
+    id: UUID
+    title: str
+    url: str
+    mode: str
+    word_count: int
+    content: str
+    author: str | None
+    feed_title: str
+    sort_order: int
+    ai_failed: bool
+
+
+class DigestArticlesResponse(BaseModel):
+    """Response for fetching all articles in a digest."""
+
+    digest_id: UUID
+    article_count: int
+    articles: list[DigestArticleRead]
 
 
 @router.post("/trigger", response_model=TriggerResponse, dependencies=[Depends(verify_api_key)])
@@ -217,6 +240,53 @@ async def get_digest_status(
         ),
         started_at=digest.created_at,
         eta_seconds=eta,
+    )
+
+
+@router.get("/{digest_id}/articles", response_model=DigestArticlesResponse, dependencies=[Depends(verify_api_key)])
+async def get_digest_articles(
+    digest_id: UUID,
+    session: Session = Depends(get_session),
+) -> DigestArticlesResponse:
+    """
+    Get all articles for a digest with their content.
+
+    Returns article content for syncing to clients.
+    """
+    # Verify digest exists
+    digest = session.get(Digest, digest_id)
+    if not digest:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Digest not found",
+        )
+
+    # Query articles
+    statement = (
+        select(DigestArticle)
+        .where(DigestArticle.digest_id == digest_id)
+        .order_by(DigestArticle.sort_order)
+    )
+    articles = list(session.exec(statement).all())
+
+    return DigestArticlesResponse(
+        digest_id=digest_id,
+        article_count=len(articles),
+        articles=[
+            DigestArticleRead(
+                id=article.id,
+                title=article.title,
+                url=article.url,
+                mode=article.mode,
+                word_count=article.word_count,
+                content=article.content,
+                author=article.author,
+                feed_title=article.feed_title,
+                sort_order=article.sort_order,
+                ai_failed=article.ai_failed,
+            )
+            for article in articles
+        ],
     )
 
 

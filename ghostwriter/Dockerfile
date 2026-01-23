@@ -39,20 +39,22 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
+COPY --chown=ghostwriter:ghostwriter scripts/ ./scripts/
 
-# Create data directories
-RUN mkdir -p /app/data /app/output && \
-    chown -R ghostwriter:ghostwriter /app
+# Create data directories and pre-compile Python bytecode for faster startup
+RUN mkdir -p /app/data /app/output /app/logs && \
+    chown -R ghostwriter:ghostwriter /app && \
+    python -m compileall -q /opt/venv/lib/ app/ 2>/dev/null || true
 
 # Switch to non-root user
 USER ghostwriter
 
 # Environment defaults
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
     LOG_LEVEL=INFO \
     DATA_DIR=/app/data \
-    OUTPUT_DIR=/app/output
+    OUTPUT_DIR=/app/output \
+    LOGS_DIR=/app/logs
 
 # Expose port
 EXPOSE 8080
@@ -61,5 +63,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run the application with optimized Python (-OO strips docstrings and asserts)
+CMD ["python", "-OO", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -3,6 +3,7 @@ package com.example.epilogue.data.repository
 import android.content.Context
 import android.util.Log
 import com.example.epilogue.data.remote.ghostwriter.ClientStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.DigestArticlesResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestTriggerRequest
@@ -190,6 +191,35 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Get digest status failed", e)
             GhostwriterResult.Error("Status check failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Get all articles for a digest with their content.
+     * Used for syncing article content to display in-app.
+     */
+    suspend fun getDigestArticles(digestId: String): GhostwriterResult<DigestArticlesResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getDigestArticles(getAuthHeader(), digestId)
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else if (response.code() == 404) {
+                GhostwriterResult.Error(
+                    message = "Digest not found",
+                    code = 404
+                )
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to get articles: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get digest articles failed", e)
+            GhostwriterResult.Error("Failed to get articles: ${e.message}")
         }
     }
 

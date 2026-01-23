@@ -57,6 +57,7 @@ services:
     volumes:
       - ghostwriter_data:/app/data
       - ghostwriter_epubs:/app/output
+      - ghostwriter_logs:/app/logs
     depends_on:
       ollama:
         condition: service_started
@@ -95,5 +96,7 @@ volumes:
     name: ghostwriter_data
   ghostwriter_epubs:
     name: ghostwriter_epubs
+  ghostwriter_logs:
+    name: ghostwriter_logs
   ollama_data:
     name: ollama_data

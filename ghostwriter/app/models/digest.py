@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, String
+from sqlalchemy import Column, String, Text
 from sqlmodel import Field, SQLModel
 
 
@@ -98,6 +98,20 @@ class DigestArticleBase(SQLModel):
     word_count: int = Field(default=0, description="Word count")
     ai_failed: bool = Field(default=False, description="True if fell back to raw")
     processing_ms: int = Field(default=0, description="Processing time in ms")
+
+    # Article content for syncing to clients
+    content: str = Field(
+        default="",
+        sa_column=Column(Text, nullable=False, server_default=""),
+        description="Full article content (HTML or Markdown)",
+    )
+    author: str | None = Field(default=None, description="Article author")
+    feed_title: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=""),
+        description="Title of the source feed",
+    )
+    sort_order: int = Field(default=0, description="Order within the digest")
 
 
 class DigestArticle(DigestArticleBase, table=True):

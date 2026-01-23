@@ -98,6 +98,16 @@ interface GhostwriterApi {
     ): Response<DigestStatusResponse>
 
     /**
+     * Get all articles for a digest with their content.
+     * Used for syncing article content to display in-app.
+     */
+    @GET("digests/{digestId}/articles")
+    suspend fun getDigestArticles(
+        @Header("Authorization") authorization: String?,
+        @Path("digestId") digestId: String
+    ): Response<DigestArticlesResponse>
+
+    /**
      * Download a digest EPUB file.
      */
     @Streaming

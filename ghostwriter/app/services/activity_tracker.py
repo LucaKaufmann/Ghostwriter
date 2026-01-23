@@ -270,6 +270,22 @@ def get_days_until_auto_disable() -> int | None:
     return max(0, days_remaining)
 
 
+def get_days_since_activity() -> int:
+    """
+    Get the number of days since last client activity.
+
+    Returns:
+        Number of days since any client activity, or days since creation if no activity.
+    """
+    settings = get_client_settings()
+    last_activity = _get_last_activity_time(settings)
+
+    if last_activity is None:
+        last_activity = settings.created_at
+
+    return (datetime.utcnow() - last_activity).days
+
+
 def _get_last_activity_time(settings: ClientSettings) -> datetime | None:
     """Get the most recent activity timestamp."""
     timestamps = [

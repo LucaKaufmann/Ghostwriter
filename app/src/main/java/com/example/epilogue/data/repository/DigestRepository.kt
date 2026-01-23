@@ -3,6 +3,7 @@ package com.example.epilogue.data.repository
 import com.example.epilogue.data.local.DigestArticleEntity
 import com.example.epilogue.data.local.DigestDao
 import com.example.epilogue.data.local.DigestEntity
+import com.example.epilogue.data.remote.ghostwriter.DigestArticleResponse
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.DigestArticle
 import com.example.epilogue.domain.model.Feed
@@ -173,13 +174,14 @@ class DigestRepository @Inject constructor(
 
     /**
      * Save a digest downloaded from Ghostwriter backend.
-     * Unlike locally generated digests, these don't have individual article records.
+     * Now supports syncing individual article records for in-app display.
      *
      * @param remoteId The Ghostwriter digest ID (UUID)
      * @param epubFilePath The local path to the downloaded EPUB
      * @param articleCount Number of articles in the digest
      * @param generatedAt Timestamp when the digest was created
      * @param period The period (morning, noon, evening, manual)
+     * @param articles Optional list of articles with content from Ghostwriter
      * @return The ID of the created digest
      */
     suspend fun saveRemoteDigest(
@@ -187,25 +189,49 @@ class DigestRepository @Inject constructor(
         epubFilePath: String,
         articleCount: Int,
         generatedAt: Long,
-        period: String
+        period: String,
+        articles: List<DigestArticleResponse>? = null
     ): Long {
         val triggerType = when (period.lowercase()) {
             "manual" -> TriggerType.MANUAL
             else -> TriggerType.SCHEDULED
         }
 
+        // Extract feed names and counts from articles if available
+        val feedNames = articles?.map { it.feedTitle }?.distinct() ?: emptyList()
+        val briefingCount = articles?.count { it.mode == "summarized" } ?: 0
+        val fidelityCount = articles?.count { it.mode == "raw" } ?: 0
+
         val digestEntity = DigestEntity(
             generatedAt = generatedAt,
             epubFilePath = epubFilePath,
             articleCount = articleCount,
-            briefingCount = 0,  // Not tracked for remote digests
-            fidelityCount = 0,  // Not tracked for remote digests
+            briefingCount = briefingCount,
+            fidelityCount = fidelityCount,
             triggerType = triggerType,
-            feedNames = "",  // Not tracked for remote digests
+            feedNames = feedNames.joinToString(","),
             remoteId = remoteId
         )
 
-        val digestId = digestDao.insertDigest(digestEntity)
+        val digestId = if (articles != null && articles.isNotEmpty()) {
+            // Convert articles and insert with digest
+            val articleEntities = articles.map { article ->
+                DigestArticleEntity(
+                    digestId = 0, // Will be set by transaction
+                    title = article.title,
+                    author = article.author ?: "",
+                    content = article.content,
+                    originalUrl = article.url,
+                    isSummary = article.mode == "summarized",
+                    feedName = article.feedTitle,
+                    sortOrder = article.sortOrder
+                )
+            }
+            digestDao.insertDigestWithArticles(digestEntity, articleEntities)
+        } else {
+            // No articles - insert digest only (backwards compatibility)
+            digestDao.insertDigest(digestEntity)
+        }
 
         // Cleanup old digests if we exceed the limit
         cleanupOldDigests()
