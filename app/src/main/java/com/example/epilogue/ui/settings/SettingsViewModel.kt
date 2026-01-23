@@ -416,6 +416,8 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(ghostwriterEnabled = enabled) }
 
             if (enabled && settingsRepository.isGhostwriterConfigured()) {
+                // Cancel local scheduled generation - backend handles it
+                digestScheduler.cancelAllPeriods()
                 // Start periodic digest sync and perform initial sync
                 digestScheduler.scheduleDigestSync()
                 digestScheduler.syncDigestsNow()
@@ -423,6 +425,8 @@ class SettingsViewModel @Inject constructor(
             } else if (!enabled) {
                 // Stop periodic digest sync when Ghostwriter is disabled
                 digestScheduler.cancelDigestSync()
+                // Re-enable local scheduled generation
+                digestScheduler.scheduleAllPeriods()
             }
         }
     }

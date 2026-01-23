@@ -38,9 +38,15 @@ class EpilogueApplication : Application(), Configuration.Provider {
     }
 
     private fun initializeDigestScheduler() {
-        // Schedule digest generation for all selected periods
-        // This ensures the workers are scheduled even after app updates or device reboots
-        digestScheduler.scheduleAllPeriods()
+        // If Ghostwriter is configured, don't schedule local generation
+        // Backend handles scheduled digests, we just sync them
+        if (settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter configured, skipping local digest scheduling")
+            digestScheduler.cancelAllPeriods()
+        } else {
+            // Schedule local digest generation for all selected periods
+            digestScheduler.scheduleAllPeriods()
+        }
     }
 
     private fun initializeGhostwriterSync() {
