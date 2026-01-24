@@ -5,5 +5,8 @@ data class Feed(
     val name: String,
     val mode: ProcessingMode,
     val lastFetched: Long = 0L,
-    val maxArticles: Int = 0  // 0 = unlimited
+    val maxArticles: Int = 0,  // 0 = unlimited
+    // Sync fields for bi-directional sync with Ghostwriter
+    val serverUpdatedAt: Long? = null,    // Server's updated_at timestamp (millis)
+    val locallyModified: Boolean = false   // Needs push to server
 )

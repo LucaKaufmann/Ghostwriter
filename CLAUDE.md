@@ -152,10 +152,12 @@ uvicorn app.main:app --reload --port 8080
 
 ### Docker Build & Deploy (Synology DS920+)
 
+**Important:** The Synology DS920+ uses an Intel x86_64 CPU (linux/amd64). When building on Apple Silicon (M1/M2/M3), you must specify the target platform explicitly.
+
 Build the Docker image:
 ```bash
 cd ghostwriter
-docker build -t ghostwriter:latest -t ghostwriter:$(date +%Y%m%d) .
+docker build --platform linux/amd64 -t ghostwriter:latest -t ghostwriter:$(date +%Y%m%d) .
 ```
 
 Save as tar for transfer to NAS:

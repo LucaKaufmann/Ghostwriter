@@ -171,3 +171,23 @@ data class DigestArticlesResponse(
     @SerializedName("article_count") val articleCount: Int,
     @SerializedName("articles") val articles: List<DigestArticleResponse>
 )
+
+// ===== Feed Sync Models =====
+
+/**
+ * Tombstone for a deleted feed (from server).
+ */
+data class FeedTombstoneResponse(
+    @SerializedName("url") val url: String,
+    @SerializedName("deleted_at") val deletedAt: String
+)
+
+/**
+ * Response for feed changes (incremental sync).
+ * Used for bi-directional feed sync with Ghostwriter.
+ */
+data class FeedChangesResponse(
+    @SerializedName("feeds") val feeds: List<FeedResponse>,
+    @SerializedName("tombstones") val tombstones: List<FeedTombstoneResponse>,
+    @SerializedName("server_timestamp") val serverTimestamp: String
+)

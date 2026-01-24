@@ -382,13 +382,23 @@ class DigestActivityLogger:
             event="started",
         )
 
-    def maintenance_completed(self, digests_deleted: int = 0, articles_cleaned: int = 0) -> None:
+    def maintenance_completed(
+        self,
+        digests_deleted: int = 0,
+        articles_cleaned: int = 0,
+        tombstones_cleaned: int = 0,
+    ) -> None:
         """Log daily maintenance completion."""
         self.info(
-            f"Daily maintenance completed: {digests_deleted} digests deleted, {articles_cleaned} seen articles cleaned",
+            f"Daily maintenance completed: {digests_deleted} digests deleted, "
+            f"{articles_cleaned} seen articles cleaned, {tombstones_cleaned} tombstones cleaned",
             component="maintenance",
             event="completed",
-            context={"digests_deleted": digests_deleted, "articles_cleaned": articles_cleaned},
+            context={
+                "digests_deleted": digests_deleted,
+                "articles_cleaned": articles_cleaned,
+                "tombstones_cleaned": tombstones_cleaned,
+            },
         )
 
     def client_inactivity_check(self, days_inactive: int, schedules_disabled: bool) -> None:

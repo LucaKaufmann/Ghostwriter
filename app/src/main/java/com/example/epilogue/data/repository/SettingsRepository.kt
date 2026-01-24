@@ -47,6 +47,7 @@ class SettingsRepository @Inject constructor(
 
         // Sync tracking
         private const val KEY_LAST_DIGEST_SYNC = "last_digest_sync"
+        private const val KEY_LAST_FEED_SYNC = "last_feed_sync"
 
         // Defaults
         private const val DEFAULT_MIN_WORD_COUNT = 0
@@ -369,5 +370,25 @@ class SettingsRepository @Inject constructor(
      */
     fun getLastDigestSyncTime(): Long {
         return prefs.getLong(KEY_LAST_DIGEST_SYNC, 0L)
+    }
+
+    // ===== Feed Sync Tracking =====
+
+    /**
+     * Sets the last feed sync timestamp.
+     * This is the server_timestamp from the last successful feed sync.
+     */
+    suspend fun setLastFeedSyncTime(timestamp: Long) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putLong(KEY_LAST_FEED_SYNC, timestamp)
+            .apply()
+    }
+
+    /**
+     * Gets the last feed sync timestamp.
+     * Returns 0 if never synced (triggers initial full sync).
+     */
+    fun getLastFeedSyncTime(): Long {
+        return prefs.getLong(KEY_LAST_FEED_SYNC, 0L)
     }
 }

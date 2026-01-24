@@ -40,6 +40,8 @@ class DigestScheduler @Inject constructor(
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
         private const val SYNC_WORK_NAME = "digest_sync_periodic"
         private const val SYNC_INTERVAL_MINUTES = 30L
+        private const val FEED_SYNC_WORK_NAME = "feed_sync_periodic"
+        private const val FEED_SYNC_INTERVAL_MINUTES = 15L
     }
 
     private val workManager: WorkManager
@@ -268,6 +270,69 @@ class DigestScheduler @Inject constructor(
 
         workManager.enqueueUniqueWork(
             DigestSyncWorker.WORK_NAME_IMMEDIATE,
+            ExistingWorkPolicy.REPLACE,
+            oneTimeWorkRequest
+        )
+    }
+
+    // ===== Feed Sync with Ghostwriter =====
+
+    /**
+     * Schedules periodic bi-directional feed sync with Ghostwriter.
+     * Should be called when Ghostwriter is enabled.
+     */
+    fun scheduleFeedSync() {
+        if (!settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter not configured, not scheduling feed sync")
+            return
+        }
+
+        val periodicWorkRequest = PeriodicWorkRequestBuilder<FeedSyncWorker>(
+            repeatInterval = FEED_SYNC_INTERVAL_MINUTES,
+            repeatIntervalTimeUnit = TimeUnit.MINUTES
+        )
+            .setConstraints(workConstraints)
+            .addTag(FeedSyncWorker.TAG)
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            FEED_SYNC_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            periodicWorkRequest
+        )
+
+        Log.i(TAG, "Scheduled periodic feed sync every $FEED_SYNC_INTERVAL_MINUTES minutes")
+    }
+
+    /**
+     * Cancels periodic feed sync.
+     * Should be called when Ghostwriter is disabled.
+     */
+    fun cancelFeedSync() {
+        workManager.cancelUniqueWork(FEED_SYNC_WORK_NAME)
+        Log.i(TAG, "Cancelled periodic feed sync")
+    }
+
+    /**
+     * Triggers an immediate bi-directional feed sync with Ghostwriter.
+     * Useful on app launch, after local feed changes, or on manual refresh.
+     */
+    fun syncFeedsNow() {
+        if (!settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter not configured, not syncing feeds")
+            return
+        }
+
+        Log.i(TAG, "Triggering immediate feed sync")
+
+        val oneTimeWorkRequest = OneTimeWorkRequestBuilder<FeedSyncWorker>()
+            .setConstraints(workConstraints)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag(FeedSyncWorker.TAG)
+            .build()
+
+        workManager.enqueueUniqueWork(
+            FeedSyncWorker.WORK_NAME_IMMEDIATE,
             ExistingWorkPolicy.REPLACE,
             oneTimeWorkRequest
         )

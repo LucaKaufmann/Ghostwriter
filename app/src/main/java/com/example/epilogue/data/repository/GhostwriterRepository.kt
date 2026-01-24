@@ -8,6 +8,7 @@ import com.example.epilogue.data.remote.ghostwriter.DigestResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestTriggerRequest
 import com.example.epilogue.data.remote.ghostwriter.DigestTriggerResponse
+import com.example.epilogue.data.remote.ghostwriter.FeedChangesResponse
 import com.example.epilogue.data.remote.ghostwriter.FeedSyncRequest
 import com.example.epilogue.data.remote.ghostwriter.FeedSyncResponse
 import com.example.epilogue.data.remote.ghostwriter.GhostwriterApi
@@ -15,6 +16,9 @@ import com.example.epilogue.data.remote.ghostwriter.HeartbeatResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import com.example.epilogue.di.GhostwriterApiFactory
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
@@ -135,6 +139,40 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Feed sync failed", e)
             GhostwriterResult.Error("Sync failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Get feed changes from the Ghostwriter backend for incremental sync.
+     *
+     * @param since Timestamp in milliseconds. If null, returns all feeds (initial sync).
+     * @return Feed changes including updated feeds and tombstones for deleted feeds.
+     */
+    suspend fun getFeedChanges(since: Long?): GhostwriterResult<FeedChangesResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            // Convert timestamp to ISO 8601 format for the API
+            val sinceStr = since?.let {
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+                sdf.timeZone = TimeZone.getTimeZone("UTC")
+                sdf.format(java.util.Date(it))
+            }
+
+            val response = api.getFeedChanges(getAuthHeader(), sinceStr)
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                Log.i(TAG, "Got feed changes: ${body.feeds.size} feeds, ${body.tombstones.size} tombstones")
+                GhostwriterResult.Success(body)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Get feed changes failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get feed changes failed", e)
+            GhostwriterResult.Error("Get feed changes failed: ${e.message}")
         }
     }
 

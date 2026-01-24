@@ -20,6 +20,10 @@ class FeedBase(SQLModel):
         description="Processing mode: raw or summarize",
     )
     max_articles: int = Field(default=10, description="Max articles per run")
+    deleted_at: datetime | None = Field(
+        default=None,
+        description="Tombstone timestamp for deleted feeds"
+    )
 
 
 class Feed(FeedBase, table=True):
@@ -59,6 +63,7 @@ class FeedRead(SQLModel):
     max_articles: int
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None = None
 
 
 class FeedSync(SQLModel):
