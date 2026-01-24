@@ -52,7 +52,11 @@ class EpilogueApplication : Application(), Configuration.Provider {
     private fun initializeGhostwriterSync() {
         // If Ghostwriter is configured, schedule periodic sync and trigger immediate sync
         if (settingsRepository.isGhostwriterConfigured()) {
-            Log.i(TAG, "Ghostwriter configured, initializing digest sync")
+            Log.i(TAG, "Ghostwriter configured, initializing sync")
+            // Schedule and trigger feed sync (bi-directional)
+            digestScheduler.scheduleFeedSync()
+            digestScheduler.syncFeedsNow()
+            // Schedule and trigger digest sync
             digestScheduler.scheduleDigestSync()
             digestScheduler.syncDigestsNow()
         }

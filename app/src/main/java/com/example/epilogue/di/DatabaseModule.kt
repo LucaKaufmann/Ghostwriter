@@ -83,6 +83,15 @@ object DatabaseModule {
         }
     }
 
+    private val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            // Add period field to digests (morning, noon, evening, manual)
+            database.execSQL(
+                "ALTER TABLE digests ADD COLUMN period TEXT DEFAULT NULL"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): EpilogueDatabase {
@@ -91,7 +100,7 @@ object DatabaseModule {
             EpilogueDatabase::class.java,
             "epilog_database"
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
     }
 
