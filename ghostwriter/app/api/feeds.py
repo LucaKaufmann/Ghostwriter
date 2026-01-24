@@ -1,9 +1,10 @@
 """Feed management endpoints."""
 
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -23,6 +24,21 @@ class SyncResponse(BaseModel):
     unchanged: int
 
 
+class FeedTombstone(BaseModel):
+    """Tombstone for a deleted feed."""
+
+    url: str
+    deleted_at: datetime
+
+
+class FeedChangesResponse(BaseModel):
+    """Response for feed changes (incremental sync)."""
+
+    feeds: list[FeedRead]           # Active/updated feeds
+    tombstones: list[FeedTombstone]  # Deleted feeds
+    server_timestamp: datetime       # For next sync request
+
+
 @router.get("", response_model=list[FeedRead], dependencies=[Depends(verify_api_key)])
 async def list_feeds(
     session: Session = Depends(get_session),
@@ -30,10 +46,63 @@ async def list_feeds(
     """
     List all configured feeds.
 
-    Returns all feeds regardless of active status.
+    Returns all feeds regardless of active status (excludes tombstoned feeds).
     """
-    statement = select(Feed).order_by(Feed.title)
+    statement = select(Feed).where(Feed.deleted_at == None).order_by(Feed.title)  # noqa: E711
     return list(session.exec(statement).all())
+
+
+@router.get("/changes", response_model=FeedChangesResponse, dependencies=[Depends(verify_api_key)])
+async def get_feed_changes(
+    since: Optional[datetime] = Query(None, description="Get changes since this timestamp"),
+    session: Session = Depends(get_session),
+) -> FeedChangesResponse:
+    """
+    Get feed changes for incremental sync.
+
+    If since is not provided, returns all active feeds (initial sync).
+    If since is provided, returns feeds updated after that time and tombstones
+    for deleted feeds.
+
+    This endpoint is designed for bi-directional sync with the Android app.
+    """
+    server_timestamp = datetime.utcnow()
+
+    if since is None:
+        # Initial sync: return all active (non-deleted) feeds
+        statement = select(Feed).where(Feed.deleted_at == None).order_by(Feed.title)  # noqa: E711
+        feeds = list(session.exec(statement).all())
+        return FeedChangesResponse(
+            feeds=feeds,
+            tombstones=[],
+            server_timestamp=server_timestamp,
+        )
+
+    # Incremental sync: return changed feeds and tombstones
+    # Get feeds updated since the given timestamp (excluding tombstoned)
+    feeds_statement = select(Feed).where(
+        Feed.updated_at > since,
+        Feed.deleted_at == None,  # noqa: E711
+    ).order_by(Feed.title)
+    feeds = list(session.exec(feeds_statement).all())
+
+    # Get tombstones created since the given timestamp
+    tombstones_statement = select(Feed).where(
+        Feed.deleted_at != None,  # noqa: E711
+        Feed.deleted_at > since,
+    )
+    tombstoned_feeds = session.exec(tombstones_statement).all()
+    tombstones = [
+        FeedTombstone(url=f.url, deleted_at=f.deleted_at)
+        for f in tombstoned_feeds
+        if f.deleted_at is not None
+    ]
+
+    return FeedChangesResponse(
+        feeds=feeds,
+        tombstones=tombstones,
+        server_timestamp=server_timestamp,
+    )
 
 
 @router.post("/sync", response_model=SyncResponse, dependencies=[Depends(verify_api_key)])
@@ -165,7 +234,8 @@ async def delete_feed(
     """
     Delete a feed by ID.
 
-    This performs a soft delete by setting is_active to False.
+    This performs a soft delete by setting is_active to False and
+    creating a tombstone (deleted_at timestamp) for sync purposes.
     """
     feed = session.get(Feed, feed_id)
     if not feed:
@@ -174,8 +244,10 @@ async def delete_feed(
             detail="Feed not found",
         )
 
+    now = datetime.utcnow()
     feed.is_active = False
-    feed.updated_at = datetime.utcnow()
+    feed.deleted_at = now
+    feed.updated_at = now
     session.add(feed)
     session.commit()
 
@@ -190,7 +262,8 @@ async def delete_feed_by_url(
     """
     Delete a feed by URL.
 
-    This performs a soft delete by setting is_active to False.
+    This performs a soft delete by setting is_active to False and
+    creating a tombstone (deleted_at timestamp) for sync purposes.
     Useful when the client doesn't know the backend's UUID for the feed.
     """
     statement = select(Feed).where(Feed.url == feed_url)
@@ -202,8 +275,10 @@ async def delete_feed_by_url(
             detail="Feed not found",
         )
 
+    now = datetime.utcnow()
     feed.is_active = False
-    feed.updated_at = datetime.utcnow()
+    feed.deleted_at = now
+    feed.updated_at = now
     session.add(feed)
     session.commit()
 

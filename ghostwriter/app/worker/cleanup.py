@@ -1,4 +1,4 @@
-"""Cleanup tasks for old digests, seen articles, and inactivity checking."""
+"""Cleanup tasks for old digests, seen articles, tombstones, and inactivity checking."""
 
 import logging
 import os
@@ -10,9 +10,13 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging import digest_logger
 from app.models.digest import Digest
+from app.models.feed import Feed
 from app.models.seen_article import SeenArticle
 
 logger = logging.getLogger(__name__)
+
+# Tombstones are kept for 30 days before hard deletion
+TOMBSTONE_RETENTION_DAYS = 30
 
 
 async def check_client_inactivity() -> bool:
@@ -98,4 +102,36 @@ async def cleanup_seen_articles() -> int:
         session.commit()
 
     logger.info(f"Cleaned up {cleaned} old seen article records")
+    return cleaned
+
+
+async def cleanup_old_tombstones() -> int:
+    """
+    Hard delete feed tombstones older than TOMBSTONE_RETENTION_DAYS.
+
+    Tombstones are kept for 30 days to allow clients to sync deletions.
+    After that, they are permanently removed from the database.
+
+    Returns:
+        Number of tombstones cleaned up.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=TOMBSTONE_RETENTION_DAYS)
+    cleaned = 0
+
+    with Session(engine) as session:
+        statement = select(Feed).where(
+            Feed.deleted_at != None,  # noqa: E711
+            Feed.deleted_at < cutoff,
+        )
+
+        for feed in session.exec(statement).all():
+            logger.info(f"Hard deleting tombstoned feed: {feed.url}")
+            session.delete(feed)
+            cleaned += 1
+
+        session.commit()
+
+    if cleaned > 0:
+        logger.info(f"Cleaned up {cleaned} old feed tombstones")
+
     return cleaned

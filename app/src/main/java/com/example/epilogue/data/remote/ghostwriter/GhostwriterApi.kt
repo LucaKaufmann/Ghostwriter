@@ -9,6 +9,7 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
+import retrofit2.http.Query
 import retrofit2.http.Streaming
 
 /**
@@ -59,6 +60,17 @@ interface GhostwriterApi {
         @Header("Authorization") authorization: String?,
         @Path("feedUrl", encoded = true) feedUrl: String
     ): Response<Unit>
+
+    /**
+     * Get feed changes for incremental sync.
+     * If since is not provided, returns all active feeds (initial sync).
+     * If since is provided, returns feeds updated after that time and tombstones.
+     */
+    @GET("feeds/changes")
+    suspend fun getFeedChanges(
+        @Header("Authorization") authorization: String?,
+        @Query("since") since: String? = null
+    ): Response<FeedChangesResponse>
 
     // ===== Digests =====
 

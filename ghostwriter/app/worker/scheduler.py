@@ -89,10 +89,12 @@ async def _daily_maintenance() -> None:
     - Checking for client inactivity
     - Cleaning up old digests
     - Cleaning up old seen article records
+    - Cleaning up old feed tombstones
     """
     from app.worker.cleanup import (
         check_client_inactivity,
         cleanup_old_digests,
+        cleanup_old_tombstones,
         cleanup_seen_articles,
     )
 
@@ -106,11 +108,13 @@ async def _daily_maintenance() -> None:
         # Run cleanup tasks
         digests_deleted = await cleanup_old_digests()
         articles_cleaned = await cleanup_seen_articles()
+        tombstones_cleaned = await cleanup_old_tombstones()
 
         logger.info("Daily maintenance completed")
         digest_logger.maintenance_completed(
             digests_deleted=digests_deleted or 0,
             articles_cleaned=articles_cleaned or 0,
+            tombstones_cleaned=tombstones_cleaned or 0,
         )
     except Exception as e:
         logger.exception(f"Daily maintenance failed: {e}")
