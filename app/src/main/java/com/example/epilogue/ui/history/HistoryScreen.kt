@@ -221,17 +221,30 @@ fun DigestHistoryItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                // Date
-                Text(
-                    text = dateFormat.format(Date(digest.generatedAt)),
-                    style = MaterialTheme.typography.titleMedium
-                )
+                // Date and period
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = dateFormat.format(Date(digest.generatedAt)),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = digest.periodDisplay,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
-                // Time and trigger type
+                // Time and source
                 Text(
-                    text = "${timeFormat.format(Date(digest.generatedAt))} - ${
-                        if (digest.triggerType == TriggerType.SCHEDULED) "Scheduled" else "Manual"
-                    }",
+                    text = buildString {
+                        append(timeFormat.format(Date(digest.generatedAt)))
+                        if (digest.isFromGhostwriter) {
+                            append(" · Ghostwriter")
+                        }
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

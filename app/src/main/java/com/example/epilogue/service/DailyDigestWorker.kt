@@ -105,13 +105,15 @@ class DailyDigestWorker @AssistedInject constructor(
 
                 // Save to digest history
                 val triggerType = if (isManual) TriggerType.MANUAL else TriggerType.SCHEDULED
+                val periodString = period?.name?.lowercase() ?: if (isManual) "manual" else null
                 digestRepository.saveDigest(
                     articles = result.articles,
                     feeds = feeds,
                     epubFilePath = result.file.absolutePath,
-                    triggerType = triggerType
+                    triggerType = triggerType,
+                    period = periodString
                 )
-                Log.i(TAG, "Saved digest to history")
+                Log.i(TAG, "Saved digest to history (period: $periodString)")
 
                 Result.success()
             } else {
