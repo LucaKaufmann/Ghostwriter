@@ -27,7 +27,8 @@ let project = Project(
             sources: ["Sources/**"],
             resources: ["Resources/**"],
             dependencies: [
-                .project(target: "Domain", path: "../Modules/Domain")
+                .project(target: "Domain", path: "../Modules/Domain"),
+                .project(target: "Data", path: "../Modules/Data")
             ]
         ),
         .target(

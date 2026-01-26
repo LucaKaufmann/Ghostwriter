@@ -7,12 +7,17 @@
 //
 
 import SwiftUI
+import SwiftData
+import Data
 
 @main
 struct EpilogueApp: App {
+    let persistenceController = PersistenceController.shared
+
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(persistenceController.container)
     }
 }
