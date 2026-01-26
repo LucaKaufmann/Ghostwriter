@@ -48,6 +48,7 @@ class SettingsRepository @Inject constructor(
         // Sync tracking
         private const val KEY_LAST_DIGEST_SYNC = "last_digest_sync"
         private const val KEY_LAST_FEED_SYNC = "last_feed_sync"
+        private const val KEY_CONFIG_UPDATED_AT = "config_updated_at"  // Server's updated_at timestamp
 
         // Defaults
         private const val DEFAULT_MIN_WORD_COUNT = 0
@@ -390,5 +391,27 @@ class SettingsRepository @Inject constructor(
      */
     fun getLastFeedSyncTime(): Long {
         return prefs.getLong(KEY_LAST_FEED_SYNC, 0L)
+    }
+
+    // ===== Config Sync Tracking =====
+
+    /**
+     * Sets the server's config updated_at timestamp.
+     * Used for conflict detection during config sync.
+     */
+    suspend fun setConfigUpdatedAt(timestamp: String?) = withContext(Dispatchers.IO) {
+        if (timestamp.isNullOrBlank()) {
+            prefs.edit().remove(KEY_CONFIG_UPDATED_AT).apply()
+        } else {
+            prefs.edit().putString(KEY_CONFIG_UPDATED_AT, timestamp).apply()
+        }
+    }
+
+    /**
+     * Gets the server's config updated_at timestamp.
+     * Returns null if never synced.
+     */
+    fun getConfigUpdatedAt(): String? {
+        return prefs.getString(KEY_CONFIG_UPDATED_AT, null)
     }
 }

@@ -191,3 +191,35 @@ data class FeedChangesResponse(
     @SerializedName("tombstones") val tombstones: List<FeedTombstoneResponse>,
     @SerializedName("server_timestamp") val serverTimestamp: String
 )
+
+// ===== Client Config Models =====
+
+/**
+ * Response model for client configuration (shared settings).
+ */
+data class ClientConfigResponse(
+    @SerializedName("min_word_count") val minWordCount: Int,
+    @SerializedName("morning_hour") val morningHour: Int,
+    @SerializedName("morning_minute") val morningMinute: Int,
+    @SerializedName("noon_hour") val noonHour: Int,
+    @SerializedName("noon_minute") val noonMinute: Int,
+    @SerializedName("evening_hour") val eveningHour: Int,
+    @SerializedName("evening_minute") val eveningMinute: Int,
+    @SerializedName("timezone") val timezone: String,
+    @SerializedName("updated_at") val updatedAt: String
+)
+
+/**
+ * Request model for updating client configuration.
+ */
+data class ClientConfigUpdateRequest(
+    @SerializedName("min_word_count") val minWordCount: Int? = null,
+    @SerializedName("morning_hour") val morningHour: Int? = null,
+    @SerializedName("morning_minute") val morningMinute: Int? = null,
+    @SerializedName("noon_hour") val noonHour: Int? = null,
+    @SerializedName("noon_minute") val noonMinute: Int? = null,
+    @SerializedName("evening_hour") val eveningHour: Int? = null,
+    @SerializedName("evening_minute") val eveningMinute: Int? = null,
+    @SerializedName("timezone") val timezone: String? = null,
+    @SerializedName("client_updated_at") val clientUpdatedAt: String? = null
+)
