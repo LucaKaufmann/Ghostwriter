@@ -34,6 +34,14 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         static let lastFeedSyncTime = "ghostwriter_last_feed_sync"
         static let lastDigestSyncTime = "ghostwriter_last_digest_sync"
         static let ghostwriterConfigUpdatedAt = "ghostwriter_config_updated_at"
+        // Ghostwriter schedule (synced from server)
+        static let ghostwriterMorningHour = "ghostwriter_morning_hour"
+        static let ghostwriterMorningMinute = "ghostwriter_morning_minute"
+        static let ghostwriterNoonHour = "ghostwriter_noon_hour"
+        static let ghostwriterNoonMinute = "ghostwriter_noon_minute"
+        static let ghostwriterEveningHour = "ghostwriter_evening_hour"
+        static let ghostwriterEveningMinute = "ghostwriter_evening_minute"
+        static let ghostwriterTimezone = "ghostwriter_timezone"
     }
 
     // Default values
@@ -226,6 +234,41 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         let enabled = try await isGhostwriterEnabled()
         let url = try await getGhostwriterURL()
         return enabled && url != nil && !url!.isEmpty
+    }
+
+    public func setGhostwriterSchedule(
+        morningHour: Int,
+        morningMinute: Int,
+        noonHour: Int,
+        noonMinute: Int,
+        eveningHour: Int,
+        eveningMinute: Int,
+        timezone: String
+    ) async throws {
+        userDefaults.set(morningHour, forKey: DefaultsKeys.ghostwriterMorningHour)
+        userDefaults.set(morningMinute, forKey: DefaultsKeys.ghostwriterMorningMinute)
+        userDefaults.set(noonHour, forKey: DefaultsKeys.ghostwriterNoonHour)
+        userDefaults.set(noonMinute, forKey: DefaultsKeys.ghostwriterNoonMinute)
+        userDefaults.set(eveningHour, forKey: DefaultsKeys.ghostwriterEveningHour)
+        userDefaults.set(eveningMinute, forKey: DefaultsKeys.ghostwriterEveningMinute)
+        userDefaults.set(timezone, forKey: DefaultsKeys.ghostwriterTimezone)
+    }
+
+    public func getGhostwriterSchedule() async throws -> GhostwriterSchedule? {
+        // Check if we have schedule data (timezone is required)
+        guard let timezone = userDefaults.string(forKey: DefaultsKeys.ghostwriterTimezone) else {
+            return nil
+        }
+
+        return GhostwriterSchedule(
+            morningHour: userDefaults.integer(forKey: DefaultsKeys.ghostwriterMorningHour),
+            morningMinute: userDefaults.integer(forKey: DefaultsKeys.ghostwriterMorningMinute),
+            noonHour: userDefaults.integer(forKey: DefaultsKeys.ghostwriterNoonHour),
+            noonMinute: userDefaults.integer(forKey: DefaultsKeys.ghostwriterNoonMinute),
+            eveningHour: userDefaults.integer(forKey: DefaultsKeys.ghostwriterEveningHour),
+            eveningMinute: userDefaults.integer(forKey: DefaultsKeys.ghostwriterEveningMinute),
+            timezone: timezone
+        )
     }
 }
 

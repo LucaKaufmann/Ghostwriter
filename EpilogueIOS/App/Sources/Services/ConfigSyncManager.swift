@@ -115,10 +115,21 @@ public final class ConfigSyncManager {
         // Apply min word count
         try await settingsRepository.setMinWordCount(config.minWordCount)
 
+        // Apply schedule times (for display - server handles actual scheduling)
+        try await settingsRepository.setGhostwriterSchedule(
+            morningHour: config.morningHour,
+            morningMinute: config.morningMinute,
+            noonHour: config.noonHour,
+            noonMinute: config.noonMinute,
+            eveningHour: config.eveningHour,
+            eveningMinute: config.eveningMinute,
+            timezone: config.timezone
+        )
+
         // Save server's updated_at timestamp for future comparisons
         try await settingsRepository.setGhostwriterConfigUpdatedAt(config.updatedAt)
 
-        logger.info("Applied server config: minWordCount=\(config.minWordCount)")
+        logger.info("Applied server config: minWordCount=\(config.minWordCount), schedule times synced")
     }
 
     private func pushLocalConfig(client: GhostwriterClient) async throws {
