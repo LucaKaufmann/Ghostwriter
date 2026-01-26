@@ -32,11 +32,15 @@ struct HistoryView: View {
                 } else {
                     List {
                         ForEach(digests) { digest in
-                            DigestRow(
-                                digest: digest,
-                                onOpenExternal: { openInExternalReader(digest) },
-                                onDelete: { digestToDelete = digest }
-                            )
+                            NavigationLink {
+                                DigestDetailView(digest: digest)
+                            } label: {
+                                DigestRow(
+                                    digest: digest,
+                                    onOpenExternal: { openInExternalReader(digest) },
+                                    onDelete: { digestToDelete = digest }
+                                )
+                            }
                         }
                     }
                 }
