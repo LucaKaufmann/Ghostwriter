@@ -107,6 +107,62 @@ public protocol SettingsRepositoryProtocol: Sendable {
 
     /// Checks if Ghostwriter is configured (enabled + has URL)
     func isGhostwriterConfigured() async throws -> Bool
+
+    /// Sets the Ghostwriter server schedule times (for display purposes)
+    func setGhostwriterSchedule(
+        morningHour: Int,
+        morningMinute: Int,
+        noonHour: Int,
+        noonMinute: Int,
+        eveningHour: Int,
+        eveningMinute: Int,
+        timezone: String
+    ) async throws
+
+    /// Gets the Ghostwriter server schedule
+    func getGhostwriterSchedule() async throws -> GhostwriterSchedule?
+}
+
+/// Server schedule times synced from Ghostwriter
+public struct GhostwriterSchedule: Sendable {
+    public let morningHour: Int
+    public let morningMinute: Int
+    public let noonHour: Int
+    public let noonMinute: Int
+    public let eveningHour: Int
+    public let eveningMinute: Int
+    public let timezone: String
+
+    public init(
+        morningHour: Int,
+        morningMinute: Int,
+        noonHour: Int,
+        noonMinute: Int,
+        eveningHour: Int,
+        eveningMinute: Int,
+        timezone: String
+    ) {
+        self.morningHour = morningHour
+        self.morningMinute = morningMinute
+        self.noonHour = noonHour
+        self.noonMinute = noonMinute
+        self.eveningHour = eveningHour
+        self.eveningMinute = eveningMinute
+        self.timezone = timezone
+    }
+
+    /// Format a schedule time as "HH:mm"
+    public func formattedMorning() -> String {
+        String(format: "%02d:%02d", morningHour, morningMinute)
+    }
+
+    public func formattedNoon() -> String {
+        String(format: "%02d:%02d", noonHour, noonMinute)
+    }
+
+    public func formattedEvening() -> String {
+        String(format: "%02d:%02d", eveningHour, eveningMinute)
+    }
 }
 
 /// Available AI service providers

@@ -141,6 +141,16 @@ struct GhostwriterSettingsView: View {
                 }
             }
 
+            // MARK: - Server Schedule
+            if viewModel.isConfigured, let schedule = viewModel.serverSchedule {
+                Section("Server Schedule") {
+                    LabeledContent("Morning", value: schedule.formattedMorning())
+                    LabeledContent("Noon", value: schedule.formattedNoon())
+                    LabeledContent("Evening", value: schedule.formattedEvening())
+                    LabeledContent("Timezone", value: schedule.timezone)
+                }
+            }
+
             // MARK: - Status
             if viewModel.isConfigured {
                 Section("Status") {
@@ -215,6 +225,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var connectionError: String?
     @Published var serverHealth: HealthResponse?
     @Published var clientStatus: ClientStatusResponse?
+    @Published var serverSchedule: GhostwriterSchedule?
     @Published var lastSyncTime: Date?
     @Published var isTesting = false
     @Published var isSyncing = false
@@ -234,6 +245,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
             serverURL = try await settingsRepository.getGhostwriterURL() ?? ""
             hasAPIKey = (try await settingsRepository.getGhostwriterAPIKey()) != nil
             lastSyncTime = try await settingsRepository.getLastFeedSyncTime()
+            serverSchedule = try await settingsRepository.getGhostwriterSchedule()
 
             if isConfigured {
                 await refreshClientStatus()
@@ -371,4 +383,8 @@ private class MockSettingsRepository: SettingsRepositoryProtocol {
     func getGhostwriterConfigUpdatedAt() async throws -> String? { nil }
     func setGhostwriterConfigUpdatedAt(_ timestamp: String?) async throws {}
     func isGhostwriterConfigured() async throws -> Bool { true }
+    func setGhostwriterSchedule(morningHour: Int, morningMinute: Int, noonHour: Int, noonMinute: Int, eveningHour: Int, eveningMinute: Int, timezone: String) async throws {}
+    func getGhostwriterSchedule() async throws -> GhostwriterSchedule? {
+        GhostwriterSchedule(morningHour: 7, morningMinute: 0, noonHour: 12, noonMinute: 0, eveningHour: 18, eveningMinute: 0, timezone: "Europe/Helsinki")
+    }
 }
