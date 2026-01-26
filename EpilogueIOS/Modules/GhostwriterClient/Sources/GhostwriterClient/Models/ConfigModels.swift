@@ -107,7 +107,7 @@ extension ISO8601DateFormatter {
     }()
 }
 
-extension String {
+public extension String {
     /// Parse ISO 8601 date string to Date
     func toISO8601Date() -> Date? {
         ISO8601DateFormatter.flexibleFormatter.date(from: self)
