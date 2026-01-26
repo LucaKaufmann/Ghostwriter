@@ -24,16 +24,29 @@ public protocol SettingsRepositoryProtocol: Sendable {
 
     // MARK: - Schedule Settings
 
-    /// Gets the scheduled digest generation time (hour in 24-hour format)
-    func getScheduledHour() async throws -> Int
+    /// Gets the enabled digest periods (morning, noon, evening)
+    func getEnabledPeriods() async throws -> Set<DigestPeriod>
 
-    /// Sets the scheduled digest generation time (hour in 24-hour format, 0-23)
-    func setScheduledHour(_ hour: Int) async throws
+    /// Sets the enabled digest periods
+    func setEnabledPeriods(_ periods: Set<DigestPeriod>) async throws
 
-    /// Gets whether scheduled digest generation is enabled
+    /// Toggle a specific period on/off
+    func togglePeriod(_ period: DigestPeriod, enabled: Bool) async throws
+
+    /// Check if a specific period is enabled
+    func isPeriodEnabled(_ period: DigestPeriod) async throws -> Bool
+
+    /// Gets whether any scheduled digest generation is enabled
     func isScheduleEnabled() async throws -> Bool
 
-    /// Sets whether scheduled digest generation is enabled
+    // Legacy support - deprecated, use getEnabledPeriods instead
+    @available(*, deprecated, message: "Use getEnabledPeriods instead")
+    func getScheduledHour() async throws -> Int
+
+    @available(*, deprecated, message: "Use setEnabledPeriods instead")
+    func setScheduledHour(_ hour: Int) async throws
+
+    @available(*, deprecated, message: "Use setEnabledPeriods instead")
     func setScheduleEnabled(_ enabled: Bool) async throws
 
     // MARK: - Content Filters

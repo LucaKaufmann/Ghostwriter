@@ -356,10 +356,17 @@ private class MockSettingsRepository: SettingsRepositoryProtocol {
     func getOpenAIKey() async throws -> String? { nil }
     func setOpenAIKey(_ key: String) async throws {}
     func deleteOpenAIKey() async throws {}
+
+    // Schedule
+    func getEnabledPeriods() async throws -> Set<DigestPeriod> { [.morning] }
+    func setEnabledPeriods(_ periods: Set<DigestPeriod>) async throws {}
+    func togglePeriod(_ period: DigestPeriod, enabled: Bool) async throws {}
+    func isPeriodEnabled(_ period: DigestPeriod) async throws -> Bool { period == .morning }
+    func isScheduleEnabled() async throws -> Bool { true }
     func getScheduledHour() async throws -> Int { 6 }
     func setScheduledHour(_ hour: Int) async throws {}
-    func isScheduleEnabled() async throws -> Bool { true }
     func setScheduleEnabled(_ enabled: Bool) async throws {}
+
     func getMinWordCount() async throws -> Int { 300 }
     func setMinWordCount(_ count: Int) async throws {}
     func getAIProvider() async throws -> AIProvider { .openAI }

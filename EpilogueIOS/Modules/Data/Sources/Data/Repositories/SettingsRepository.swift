@@ -22,8 +22,9 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     // UserDefaults keys
     private enum DefaultsKeys {
-        static let scheduledHour = "scheduled_hour"
-        static let scheduleEnabled = "schedule_enabled"
+        static let scheduledHour = "scheduled_hour" // Deprecated
+        static let scheduleEnabled = "schedule_enabled" // Deprecated
+        static let enabledPeriods = "enabled_periods" // New: Set<String>
         static let minWordCount = "min_word_count"
         static let aiProvider = "ai_provider"
         static let aiModel = "ai_model"
@@ -78,12 +79,47 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     // MARK: - Schedule Settings
 
+    public func getEnabledPeriods() async throws -> Set<DigestPeriod> {
+        guard let rawValues = userDefaults.stringArray(forKey: DefaultsKeys.enabledPeriods) else {
+            // Default: morning enabled
+            return [.morning]
+        }
+        return Set(rawValues.compactMap { DigestPeriod(rawValue: $0) })
+    }
+
+    public func setEnabledPeriods(_ periods: Set<DigestPeriod>) async throws {
+        let rawValues = periods.map { $0.rawValue }
+        userDefaults.set(rawValues, forKey: DefaultsKeys.enabledPeriods)
+    }
+
+    public func togglePeriod(_ period: DigestPeriod, enabled: Bool) async throws {
+        var periods = try await getEnabledPeriods()
+        if enabled {
+            periods.insert(period)
+        } else {
+            periods.remove(period)
+        }
+        try await setEnabledPeriods(periods)
+    }
+
+    public func isPeriodEnabled(_ period: DigestPeriod) async throws -> Bool {
+        let periods = try await getEnabledPeriods()
+        return periods.contains(period)
+    }
+
+    public func isScheduleEnabled() async throws -> Bool {
+        let periods = try await getEnabledPeriods()
+        return !periods.isEmpty
+    }
+
+    // Legacy support - deprecated
+    @available(*, deprecated, message: "Use getEnabledPeriods instead")
     public func getScheduledHour() async throws -> Int {
         let hour = userDefaults.integer(forKey: DefaultsKeys.scheduledHour)
-        // If not set (0), return default
         return hour == 0 ? Defaults.scheduledHour : hour
     }
 
+    @available(*, deprecated, message: "Use setEnabledPeriods instead")
     public func setScheduledHour(_ hour: Int) async throws {
         guard hour >= 0 && hour <= 23 else {
             throw SettingsRepositoryError.invalidHour
@@ -91,14 +127,7 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         userDefaults.set(hour, forKey: DefaultsKeys.scheduledHour)
     }
 
-    public func isScheduleEnabled() async throws -> Bool {
-        // Check if key exists
-        if userDefaults.object(forKey: DefaultsKeys.scheduleEnabled) == nil {
-            return Defaults.scheduleEnabled
-        }
-        return userDefaults.bool(forKey: DefaultsKeys.scheduleEnabled)
-    }
-
+    @available(*, deprecated, message: "Use setEnabledPeriods instead")
     public func setScheduleEnabled(_ enabled: Bool) async throws {
         userDefaults.set(enabled, forKey: DefaultsKeys.scheduleEnabled)
     }
