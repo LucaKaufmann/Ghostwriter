@@ -43,6 +43,14 @@ public final class Digest {
     /// Error message if generation failed
     public var errorMessage: String?
 
+    // MARK: - Ghostwriter Sync Fields
+
+    /// Remote ID from Ghostwriter server (nil if locally generated)
+    public var remoteId: String?
+
+    /// Period of the digest (morning, noon, evening, manual)
+    public var period: String?
+
     /// Relationship to articles in this digest
     @Relationship(deleteRule: .cascade, inverse: \DigestArticle.digest)
     public var articles: [DigestArticle]
@@ -58,6 +66,8 @@ public final class Digest {
         fileSizeBytes: Int64 = 0,
         isComplete: Bool = false,
         errorMessage: String? = nil,
+        remoteId: String? = nil,
+        period: String? = nil,
         articles: [DigestArticle] = []
     ) {
         self.id = id
@@ -70,6 +80,8 @@ public final class Digest {
         self.fileSizeBytes = fileSizeBytes
         self.isComplete = isComplete
         self.errorMessage = errorMessage
+        self.remoteId = remoteId
+        self.period = period
         self.articles = articles
     }
 }

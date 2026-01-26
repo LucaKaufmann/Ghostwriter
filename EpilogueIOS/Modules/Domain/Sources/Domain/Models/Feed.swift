@@ -34,6 +34,14 @@ public final class Feed {
     /// Timestamp when this feed was added
     public var createdAt: Date
 
+    // MARK: - Ghostwriter Sync Fields
+
+    /// Timestamp of when the server last updated this feed (for sync)
+    public var serverUpdatedAt: Date?
+
+    /// Whether this feed has been modified locally and needs to be synced
+    public var locallyModified: Bool
+
     public init(
         url: String,
         name: String,
@@ -41,7 +49,9 @@ public final class Feed {
         lastFetched: Int64 = 0,
         maxArticles: Int = 0,
         isEnabled: Bool = true,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        serverUpdatedAt: Date? = nil,
+        locallyModified: Bool = false
     ) {
         self.url = url
         self.name = name
@@ -50,5 +60,7 @@ public final class Feed {
         self.maxArticles = maxArticles
         self.isEnabled = isEnabled
         self.createdAt = createdAt
+        self.serverUpdatedAt = serverUpdatedAt
+        self.locallyModified = locallyModified
     }
 }
