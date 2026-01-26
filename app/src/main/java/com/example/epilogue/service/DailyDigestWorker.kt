@@ -15,6 +15,7 @@ import com.example.epilogue.R
 import com.example.epilogue.data.repository.ArticleRepository
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
+import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.domain.model.TriggerType
 import dagger.assisted.Assisted
@@ -34,6 +35,7 @@ class DailyDigestWorker @AssistedInject constructor(
     private val articleRepository: ArticleRepository,
     private val feedRepository: FeedRepository,
     private val digestRepository: DigestRepository,
+    private val settingsRepository: SettingsRepository,
     private val epubGenerator: EpubGenerator,
     private val epubExporter: EpubExporter
 ) : CoroutineWorker(context, workerParams) {
@@ -57,6 +59,13 @@ class DailyDigestWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         Log.i(TAG, "Starting daily digest generation (attempt ${runAttemptCount})")
+
+        // Skip local generation if Ghostwriter is configured
+        // This is a safety check in case scheduled work wasn't cancelled properly
+        if (settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter is configured, skipping local digest generation")
+            return Result.success()
+        }
 
         // Set foreground for long-running work
         setForeground(createForegroundInfo())
