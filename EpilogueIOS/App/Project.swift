@@ -21,7 +21,13 @@ let project = Project(
                     "UISupportedInterfaceOrientations": [
                         "UIInterfaceOrientationPortrait"
                     ],
-                    "UIUserInterfaceStyle": "Light"
+                    "UIUserInterfaceStyle": "Light",
+                    "BGTaskSchedulerPermittedIdentifiers": [
+                        "com.epilogue.app.digestgeneration"
+                    ],
+                    "UIBackgroundModes": [
+                        "processing"
+                    ]
                 ]
             ),
             sources: ["Sources/**"],
