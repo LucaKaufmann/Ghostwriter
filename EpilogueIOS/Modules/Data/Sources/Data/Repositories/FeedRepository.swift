@@ -80,6 +80,63 @@ public final class FeedRepository: FeedRepositoryProtocol {
         let count = try modelContext.fetchCount(descriptor)
         return count > 0
     }
+
+    // MARK: - Ghostwriter Sync
+
+    public func upsertAll(_ feeds: [Feed]) async throws {
+        for feed in feeds {
+            if let existingFeed = try await getFeed(url: feed.url) {
+                // Update existing feed
+                existingFeed.name = feed.name
+                existingFeed.mode = feed.mode
+                existingFeed.maxArticles = feed.maxArticles
+                existingFeed.isEnabled = feed.isEnabled
+                existingFeed.serverUpdatedAt = feed.serverUpdatedAt
+                existingFeed.locallyModified = feed.locallyModified
+            } else {
+                // Insert new feed
+                modelContext.insert(feed)
+            }
+        }
+        try modelContext.save()
+    }
+
+    public func deleteByURLs(_ urls: [String]) async throws {
+        for url in urls {
+            if let feed = try await getFeed(url: url) {
+                modelContext.delete(feed)
+            }
+        }
+        try modelContext.save()
+    }
+
+    public func clearAllLocallyModified() async throws {
+        let descriptor = FetchDescriptor<Feed>(
+            predicate: #Predicate { $0.locallyModified == true }
+        )
+        let feeds = try modelContext.fetch(descriptor)
+
+        for feed in feeds {
+            feed.locallyModified = false
+        }
+        try modelContext.save()
+    }
+
+    public func getLocallyModifiedFeeds() async throws -> [Feed] {
+        let descriptor = FetchDescriptor<Feed>(
+            predicate: #Predicate { $0.locallyModified == true }
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    public func markAsLocallyModified(url: String) async throws {
+        guard let feed = try await getFeed(url: url) else {
+            throw FeedRepositoryError.feedNotFound
+        }
+
+        feed.locallyModified = true
+        try modelContext.save()
+    }
 }
 
 // MARK: - Errors

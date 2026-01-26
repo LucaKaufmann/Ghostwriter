@@ -40,4 +40,57 @@ public protocol DigestRepositoryProtocol: Sendable {
     /// Deletes digests older than the specified count limit
     /// Used to enforce the 30-digest retention policy
     func enforceRetentionPolicy(maxDigests: Int) async throws
+
+    // MARK: - Ghostwriter Sync
+
+    /// Get all remote IDs of digests synced from Ghostwriter
+    func getAllRemoteIds() async throws -> [String]
+
+    /// Get a digest by its remote ID
+    func getDigestByRemoteId(_ remoteId: String) async throws -> Digest?
+
+    /// Save a digest that was synced from Ghostwriter
+    func saveRemoteDigest(
+        remoteId: String,
+        epubFilePath: String,
+        articleCount: Int,
+        generatedAt: Date,
+        period: String,
+        articles: [DigestArticleData]?
+    ) async throws -> Digest
+}
+
+/// Data transfer object for digest articles from Ghostwriter
+public struct DigestArticleData: Sendable {
+    public let id: String
+    public let title: String
+    public let url: String
+    public let mode: String
+    public let wordCount: Int
+    public let content: String
+    public let author: String?
+    public let feedTitle: String
+    public let sortOrder: Int
+
+    public init(
+        id: String,
+        title: String,
+        url: String,
+        mode: String,
+        wordCount: Int,
+        content: String,
+        author: String?,
+        feedTitle: String,
+        sortOrder: Int
+    ) {
+        self.id = id
+        self.title = title
+        self.url = url
+        self.mode = mode
+        self.wordCount = wordCount
+        self.content = content
+        self.author = author
+        self.feedTitle = feedTitle
+        self.sortOrder = sortOrder
+    }
 }

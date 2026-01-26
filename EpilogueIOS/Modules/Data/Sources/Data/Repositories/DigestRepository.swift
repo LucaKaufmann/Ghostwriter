@@ -114,6 +114,87 @@ public final class DigestRepository: DigestRepositoryProtocol {
         try modelContext.save()
     }
 
+    // MARK: - Ghostwriter Sync
+
+    public func getAllRemoteIds() async throws -> [String] {
+        let descriptor = FetchDescriptor<Digest>(
+            predicate: #Predicate { $0.remoteId != nil }
+        )
+        let digests = try modelContext.fetch(descriptor)
+        return digests.compactMap { $0.remoteId }
+    }
+
+    public func getDigestByRemoteId(_ remoteId: String) async throws -> Digest? {
+        let descriptor = FetchDescriptor<Digest>(
+            predicate: #Predicate { $0.remoteId == remoteId }
+        )
+        return try modelContext.fetch(descriptor).first
+    }
+
+    public func saveRemoteDigest(
+        remoteId: String,
+        epubFilePath: String,
+        articleCount: Int,
+        generatedAt: Date,
+        period: String,
+        articles: [DigestArticleData]?
+    ) async throws -> Digest {
+        // Check if digest with this remote ID already exists
+        if let existingDigest = try await getDigestByRemoteId(remoteId) {
+            return existingDigest
+        }
+
+        // Create new digest
+        let digest = Digest(
+            generatedAt: generatedAt,
+            epubFilePath: epubFilePath,
+            articleCount: articleCount,
+            briefingCount: 0, // Will be calculated if we have articles
+            deepDiveCount: 0, // Will be calculated if we have articles
+            triggerType: .ghostwriter,
+            isComplete: true,
+            remoteId: remoteId,
+            period: period
+        )
+
+        // Add articles if provided
+        if let articlesData = articles {
+            var briefingCount = 0
+            var deepDiveCount = 0
+
+            for articleData in articlesData {
+                let article = DigestArticle(
+                    title: articleData.title,
+                    url: articleData.url,
+                    content: articleData.content,
+                    wordCount: articleData.wordCount,
+                    mode: articleData.mode == "summarize" ? .briefing : .fidelity,
+                    feedName: articleData.feedTitle,
+                    author: articleData.author
+                )
+
+                if articleData.mode == "summarize" {
+                    briefingCount += 1
+                } else {
+                    deepDiveCount += 1
+                }
+
+                digest.articles.append(article)
+            }
+
+            digest.briefingCount = briefingCount
+            digest.deepDiveCount = deepDiveCount
+        }
+
+        modelContext.insert(digest)
+        try modelContext.save()
+
+        // Enforce retention policy
+        try await enforceRetentionPolicy(maxDigests: maxDigests)
+
+        return digest
+    }
+
     // MARK: - Private Helpers
 
     private func deleteEPUBFile(at path: String) throws {

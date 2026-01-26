@@ -19,6 +19,9 @@ public enum TriggerType: String, Codable, CaseIterable, Sendable {
     /// Digest was generated as part of app testing or development
     case test = "TEST"
 
+    /// Digest was synced from Ghostwriter server
+    case ghostwriter = "GHOSTWRITER"
+
     /// Human-readable display name
     public var displayName: String {
         switch self {
@@ -28,6 +31,8 @@ public enum TriggerType: String, Codable, CaseIterable, Sendable {
             return "Manual"
         case .test:
             return "Test"
+        case .ghostwriter:
+            return "Ghostwriter"
         }
     }
 
@@ -40,6 +45,8 @@ public enum TriggerType: String, Codable, CaseIterable, Sendable {
             return "hand.tap"
         case .test:
             return "testtube.2"
+        case .ghostwriter:
+            return "cloud.fill"
         }
     }
 }

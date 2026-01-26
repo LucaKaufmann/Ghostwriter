@@ -33,4 +33,21 @@ public protocol FeedRepositoryProtocol: Sendable {
 
     /// Checks if a feed with the given URL exists
     func feedExists(url: String) async throws -> Bool
+
+    // MARK: - Ghostwriter Sync
+
+    /// Upsert multiple feeds (insert or update based on URL)
+    func upsertAll(_ feeds: [Feed]) async throws
+
+    /// Delete feeds by their URLs
+    func deleteByURLs(_ urls: [String]) async throws
+
+    /// Clear the locallyModified flag for all feeds
+    func clearAllLocallyModified() async throws
+
+    /// Get all feeds that have been locally modified
+    func getLocallyModifiedFeeds() async throws -> [Feed]
+
+    /// Mark a feed as locally modified
+    func markAsLocallyModified(url: String) async throws
 }
