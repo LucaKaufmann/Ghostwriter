@@ -17,6 +17,7 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
     // Keychain keys
     private enum KeychainKeys {
         static let openAIKey = "openai_api_key"
+        static let ghostwriterAPIKey = "ghostwriter_api_key"
     }
 
     // UserDefaults keys
@@ -27,6 +28,12 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         static let aiProvider = "ai_provider"
         static let aiModel = "ai_model"
         static let showNotifications = "show_notifications"
+        // Ghostwriter settings
+        static let ghostwriterEnabled = "ghostwriter_enabled"
+        static let ghostwriterURL = "ghostwriter_url"
+        static let lastFeedSyncTime = "ghostwriter_last_feed_sync"
+        static let lastDigestSyncTime = "ghostwriter_last_digest_sync"
+        static let ghostwriterConfigUpdatedAt = "ghostwriter_config_updated_at"
     }
 
     // Default values
@@ -141,6 +148,84 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     public func setShouldShowNotifications(_ enabled: Bool) async throws {
         userDefaults.set(enabled, forKey: DefaultsKeys.showNotifications)
+    }
+
+    // MARK: - Ghostwriter Settings
+
+    public func isGhostwriterEnabled() async throws -> Bool {
+        return userDefaults.bool(forKey: DefaultsKeys.ghostwriterEnabled)
+    }
+
+    public func setGhostwriterEnabled(_ enabled: Bool) async throws {
+        userDefaults.set(enabled, forKey: DefaultsKeys.ghostwriterEnabled)
+    }
+
+    public func getGhostwriterURL() async throws -> String? {
+        return userDefaults.string(forKey: DefaultsKeys.ghostwriterURL)
+    }
+
+    public func setGhostwriterURL(_ url: String?) async throws {
+        if let url = url {
+            userDefaults.set(url, forKey: DefaultsKeys.ghostwriterURL)
+        } else {
+            userDefaults.removeObject(forKey: DefaultsKeys.ghostwriterURL)
+        }
+    }
+
+    public func getGhostwriterAPIKey() async throws -> String? {
+        return try keychainService.retrieve(forKey: KeychainKeys.ghostwriterAPIKey)
+    }
+
+    public func setGhostwriterAPIKey(_ key: String?) async throws {
+        if let key = key, !key.isEmpty {
+            try keychainService.save(key, forKey: KeychainKeys.ghostwriterAPIKey)
+        } else {
+            try keychainService.delete(forKey: KeychainKeys.ghostwriterAPIKey)
+        }
+    }
+
+    public func getLastFeedSyncTime() async throws -> Date? {
+        let timestamp = userDefaults.double(forKey: DefaultsKeys.lastFeedSyncTime)
+        return timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : nil
+    }
+
+    public func setLastFeedSyncTime(_ date: Date?) async throws {
+        if let date = date {
+            userDefaults.set(date.timeIntervalSince1970, forKey: DefaultsKeys.lastFeedSyncTime)
+        } else {
+            userDefaults.removeObject(forKey: DefaultsKeys.lastFeedSyncTime)
+        }
+    }
+
+    public func getLastDigestSyncTime() async throws -> Date? {
+        let timestamp = userDefaults.double(forKey: DefaultsKeys.lastDigestSyncTime)
+        return timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : nil
+    }
+
+    public func setLastDigestSyncTime(_ date: Date?) async throws {
+        if let date = date {
+            userDefaults.set(date.timeIntervalSince1970, forKey: DefaultsKeys.lastDigestSyncTime)
+        } else {
+            userDefaults.removeObject(forKey: DefaultsKeys.lastDigestSyncTime)
+        }
+    }
+
+    public func getGhostwriterConfigUpdatedAt() async throws -> String? {
+        return userDefaults.string(forKey: DefaultsKeys.ghostwriterConfigUpdatedAt)
+    }
+
+    public func setGhostwriterConfigUpdatedAt(_ timestamp: String?) async throws {
+        if let timestamp = timestamp {
+            userDefaults.set(timestamp, forKey: DefaultsKeys.ghostwriterConfigUpdatedAt)
+        } else {
+            userDefaults.removeObject(forKey: DefaultsKeys.ghostwriterConfigUpdatedAt)
+        }
+    }
+
+    public func isGhostwriterConfigured() async throws -> Bool {
+        let enabled = try await isGhostwriterEnabled()
+        let url = try await getGhostwriterURL()
+        return enabled && url != nil && !url!.isEmpty
     }
 }
 

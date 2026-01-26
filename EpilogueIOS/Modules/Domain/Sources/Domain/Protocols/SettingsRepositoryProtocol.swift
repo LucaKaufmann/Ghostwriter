@@ -66,6 +66,47 @@ public protocol SettingsRepositoryProtocol: Sendable {
 
     /// Sets whether to show EPUB generation notifications
     func setShouldShowNotifications(_ enabled: Bool) async throws
+
+    // MARK: - Ghostwriter Settings
+
+    /// Gets whether Ghostwriter sync is enabled
+    func isGhostwriterEnabled() async throws -> Bool
+
+    /// Sets whether Ghostwriter sync is enabled
+    func setGhostwriterEnabled(_ enabled: Bool) async throws
+
+    /// Gets the Ghostwriter server URL
+    func getGhostwriterURL() async throws -> String?
+
+    /// Sets the Ghostwriter server URL
+    func setGhostwriterURL(_ url: String?) async throws
+
+    /// Gets the Ghostwriter API key from Keychain
+    func getGhostwriterAPIKey() async throws -> String?
+
+    /// Stores the Ghostwriter API key in Keychain
+    func setGhostwriterAPIKey(_ key: String?) async throws
+
+    /// Gets the timestamp of the last feed sync with Ghostwriter
+    func getLastFeedSyncTime() async throws -> Date?
+
+    /// Sets the timestamp of the last feed sync with Ghostwriter
+    func setLastFeedSyncTime(_ date: Date?) async throws
+
+    /// Gets the timestamp of the last digest sync with Ghostwriter
+    func getLastDigestSyncTime() async throws -> Date?
+
+    /// Sets the timestamp of the last digest sync with Ghostwriter
+    func setLastDigestSyncTime(_ date: Date?) async throws
+
+    /// Gets the server's config updated_at timestamp (for conflict detection)
+    func getGhostwriterConfigUpdatedAt() async throws -> String?
+
+    /// Sets the server's config updated_at timestamp
+    func setGhostwriterConfigUpdatedAt(_ timestamp: String?) async throws
+
+    /// Checks if Ghostwriter is configured (enabled + has URL)
+    func isGhostwriterConfigured() async throws -> Bool
 }
 
 /// Available AI service providers
