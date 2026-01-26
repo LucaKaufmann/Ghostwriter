@@ -128,6 +128,42 @@ data class ProcessedArticle(
 - No animations (disable `windowAnimationScale` or Compose animations)
 - High-legibility serif font (Merriweather recommended)
 
+## Jetpack Compose Layout Patterns
+
+### Scaffold innerPadding with Lists
+
+When using `Scaffold` with a `LazyColumn` that should extend to the bottom of the screen, **do not** apply the full `innerPadding` to the content container. The `innerPadding` includes both top padding (for the TopAppBar) and bottom padding (for system navigation bars), which creates a large gap at the bottom of scrollable lists.
+
+**Problem pattern (creates gap at bottom):**
+```kotlin
+Scaffold(topBar = { ... }) { innerPadding ->
+    Box(modifier = Modifier.padding(innerPadding)) {
+        LazyColumn { ... }
+    }
+}
+```
+
+**Correct pattern (list extends to bottom):**
+```kotlin
+Scaffold(topBar = { ... }) { innerPadding ->
+    Box(modifier = Modifier.padding(top = innerPadding.calculateTopPadding())) {
+        LazyColumn(
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 8.dp,
+                bottom = 8.dp  // Small fixed padding, not innerPadding.calculateBottomPadding()
+            )
+        ) { ... }
+    }
+}
+```
+
+This approach:
+1. Applies only top padding to the Box (accounts for TopAppBar)
+2. Uses small fixed bottom padding in LazyColumn's contentPadding
+3. Allows the list to scroll close to the navigation bar without a large gap
+
 ## Background Execution
 
 WorkManager `PeriodicWorkRequest` with constraints:

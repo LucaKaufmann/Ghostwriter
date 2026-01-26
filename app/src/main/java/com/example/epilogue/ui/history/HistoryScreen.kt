@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -118,7 +119,7 @@ fun HistoryScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(top = innerPadding.calculateTopPadding())
                 .nestedScroll(pullToRefreshState.nestedScrollConnection)
         ) {
             if (digests.isEmpty()) {
@@ -143,12 +144,15 @@ fun HistoryScreen(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 8.dp,
+                        bottom = 16.dp
+                    ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    item { Spacer(modifier = Modifier.height(8.dp)) }
                     items(digests, key = { it.id }) { digest ->
                         DigestHistoryItem(
                             digest = digest,
@@ -157,7 +161,6 @@ fun HistoryScreen(
                             onOpenExternal = { viewModel.openInExternalReader(digest) }
                         )
                     }
-                    item { Spacer(modifier = Modifier.height(8.dp)) }
                 }
             }
 

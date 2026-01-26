@@ -71,13 +71,16 @@ class DigestSyncWorker @AssistedInject constructor(
                     val remoteDigests = digestsResult.data
                     val existingRemoteIds = digestRepository.getAllRemoteIds().toSet()
 
+                    Log.d(TAG, "Remote digests from server: ${remoteDigests.map { "${it.id} (${it.period}, ${it.status})" }}")
+                    Log.d(TAG, "Existing remote IDs in local DB: $existingRemoteIds")
+
                     // Filter to only completed digests we don't have
                     val newDigests = remoteDigests.filter { digest ->
                         digest.status == "completed" &&
                         digest.id !in existingRemoteIds
                     }
 
-                    Log.i(TAG, "Found ${newDigests.size} new digests to download")
+                    Log.i(TAG, "Found ${newDigests.size} new digests to download: ${newDigests.map { it.id }}")
 
                     var downloadedCount = 0
                     for (digest in newDigests) {
