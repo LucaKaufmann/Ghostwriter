@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = Field(default="", description="OpenAI API key")
-    openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model")
+    openai_model: str = Field(default="gpt-5-nano", description="OpenAI model")
 
     # Gemini
     gemini_api_key: str = Field(default="", description="Google Gemini API key")

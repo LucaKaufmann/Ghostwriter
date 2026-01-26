@@ -167,4 +167,25 @@ interface GhostwriterApi {
     suspend fun getClientStatus(
         @Header("Authorization") authorization: String?
     ): Response<ClientStatusResponse>
+
+    // ===== Config =====
+
+    /**
+     * Get the shared client configuration.
+     * Used for syncing settings across devices.
+     */
+    @GET("config")
+    suspend fun getConfig(
+        @Header("Authorization") authorization: String?
+    ): Response<ClientConfigResponse>
+
+    /**
+     * Update the shared client configuration.
+     * Only provided fields are updated.
+     */
+    @PUT("config")
+    suspend fun updateConfig(
+        @Header("Authorization") authorization: String?,
+        @Body request: ClientConfigUpdateRequest
+    ): Response<ClientConfigResponse>
 }

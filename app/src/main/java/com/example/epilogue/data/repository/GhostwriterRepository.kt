@@ -2,6 +2,8 @@ package com.example.epilogue.data.repository
 
 import android.content.Context
 import android.util.Log
+import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
+import com.example.epilogue.data.remote.ghostwriter.ClientConfigUpdateRequest
 import com.example.epilogue.data.remote.ghostwriter.ClientStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestArticlesResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestResponse
@@ -492,6 +494,90 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Get client status failed", e)
             GhostwriterResult.Error("Failed to get client status: ${e.message}")
+        }
+    }
+
+    /**
+     * Get the shared client configuration from the server.
+     * Used for syncing settings across devices on app startup.
+     */
+    suspend fun getConfig(): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getConfig(getAuthHeader())
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to get config: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get config failed", e)
+            GhostwriterResult.Error("Failed to get config: ${e.message}")
+        }
+    }
+
+    /**
+     * Update the shared client configuration on the server.
+     *
+     * @param minWordCount Minimum word count filter (null to not update)
+     * @param morningHour Morning schedule hour (null to not update)
+     * @param morningMinute Morning schedule minute (null to not update)
+     * @param noonHour Noon schedule hour (null to not update)
+     * @param noonMinute Noon schedule minute (null to not update)
+     * @param eveningHour Evening schedule hour (null to not update)
+     * @param eveningMinute Evening schedule minute (null to not update)
+     * @param timezone IANA timezone (null to not update)
+     * @param clientUpdatedAt Client's last known server timestamp for conflict detection
+     */
+    suspend fun updateConfig(
+        minWordCount: Int? = null,
+        morningHour: Int? = null,
+        morningMinute: Int? = null,
+        noonHour: Int? = null,
+        noonMinute: Int? = null,
+        eveningHour: Int? = null,
+        eveningMinute: Int? = null,
+        timezone: String? = null,
+        clientUpdatedAt: String? = null
+    ): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = ClientConfigUpdateRequest(
+                minWordCount = minWordCount,
+                morningHour = morningHour,
+                morningMinute = morningMinute,
+                noonHour = noonHour,
+                noonMinute = noonMinute,
+                eveningHour = eveningHour,
+                eveningMinute = eveningMinute,
+                timezone = timezone,
+                clientUpdatedAt = clientUpdatedAt
+            )
+            val response = api.updateConfig(getAuthHeader(), request)
+
+            if (response.isSuccessful && response.body() != null) {
+                Log.i(TAG, "Updated config on server")
+                GhostwriterResult.Success(response.body()!!)
+            } else if (response.code() == 409) {
+                GhostwriterResult.Error(
+                    message = "Config was modified by another device",
+                    code = 409
+                )
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to update config: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Update config failed", e)
+            GhostwriterResult.Error("Failed to update config: ${e.message}")
         }
     }
 }

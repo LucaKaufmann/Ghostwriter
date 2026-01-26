@@ -12,6 +12,7 @@ import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.DigestPeriod
+import com.example.epilogue.service.ConfigSyncManager
 import com.example.epilogue.service.DigestScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -29,7 +30,8 @@ class SettingsViewModel @Inject constructor(
     private val digestScheduler: DigestScheduler,
     private val digestRepository: DigestRepository,
     private val feedRepository: FeedRepository,
-    private val ghostwriterRepository: GhostwriterRepository
+    private val ghostwriterRepository: GhostwriterRepository,
+    private val configSyncManager: ConfigSyncManager
 ) : ViewModel() {
 
     companion object {
@@ -110,6 +112,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setMinWordCount(count)
             _uiState.update { it.copy(minWordCount = count) }
+
+            // Sync to Ghostwriter if enabled
+            if (settingsRepository.isGhostwriterConfigured()) {
+                configSyncManager.pushMinWordCount(count)
+            }
         }
     }
 
