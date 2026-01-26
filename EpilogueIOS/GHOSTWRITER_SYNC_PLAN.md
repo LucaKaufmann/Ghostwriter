@@ -523,37 +523,37 @@ struct GhostwriterSettingsView: View {
 ## File Checklist
 
 ### New Module: GhostwriterClient
-- [ ] `Modules/GhostwriterClient/Project.swift`
-- [ ] `Sources/GhostwriterClient.swift`
-- [ ] `Sources/GhostwriterAPI.swift`
-- [ ] `Sources/GhostwriterError.swift`
-- [ ] `Sources/Models/FeedModels.swift`
-- [ ] `Sources/Models/DigestModels.swift`
-- [ ] `Sources/Models/ConfigModels.swift`
-- [ ] `Sources/Models/ClientModels.swift`
-- [ ] `Sources/Models/HealthModels.swift`
-- [ ] `Tests/GhostwriterClientTests.swift`
+- [x] `Modules/GhostwriterClient/Project.swift`
+- [x] `Sources/GhostwriterClient.swift`
+- [x] `Sources/GhostwriterError.swift`
+- [x] `Sources/Models/FeedModels.swift`
+- [x] `Sources/Models/DigestModels.swift`
+- [x] `Sources/Models/ConfigModels.swift`
+- [x] `Sources/Models/ClientModels.swift`
+- [x] `Sources/Models/HealthModels.swift`
+- [x] `Tests/GhostwriterClientTests.swift`
 
 ### Updates to Data Module
-- [ ] `GhostwriterSettings.swift`
-- [ ] `GhostwriterKeychain.swift`
-- [ ] Update `FeedEntity` (add `serverUpdatedAt`, `locallyModified`)
-- [ ] Update `DigestEntity` (add `remoteId`)
-- [ ] Update `FeedRepository` (upsert, delete by URLs, etc.)
-- [ ] Update `DigestRepository` (save remote digest)
+- [x] `KeychainService.swift` (Ghostwriter API key storage)
+- [x] Update `FeedEntity` (add `serverUpdatedAt`, `locallyModified`)
+- [x] Update `DigestEntity` (add `remoteId`, `period`)
+- [x] Update `FeedRepository` (upsert, delete by URLs, etc.)
+- [x] Update `DigestRepository` (save remote digest)
 
 ### Updates to Domain Module
-- [ ] Update `Feed` model
-- [ ] Update `Digest` model
+- [x] Update `Feed` model
+- [x] Update `Digest` model
 
 ### App Target
-- [ ] `Services/FeedSyncService.swift`
-- [ ] `Services/DigestSyncService.swift`
-- [ ] `Services/ConfigSyncManager.swift`
-- [ ] `Services/HeartbeatService.swift`
-- [ ] `Views/Settings/GhostwriterSettingsView.swift`
-- [ ] Update `Info.plist` (background task identifiers)
-- [ ] Register background tasks in app lifecycle
+- [x] `Services/FeedSyncService.swift`
+- [x] `Services/DigestSyncService.swift`
+- [x] `Services/ConfigSyncManager.swift`
+- [x] `Services/HeartbeatService.swift`
+- [x] `Services/GhostwriterSyncCoordinator.swift`
+- [x] `Services/GhostwriterBackgroundTasks.swift`
+- [x] `Views/GhostwriterSettingsView.swift`
+- [x] Update `Info.plist` (background task identifiers via Tuist Project.swift)
+- [x] Register background tasks in app lifecycle (EpilogueApp.swift)
 
 ---
 
