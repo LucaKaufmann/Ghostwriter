@@ -11,46 +11,143 @@ import SwiftData
 import Domain
 
 struct HistoryView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \Digest.generatedAt, order: .reverse) private var digests: [Digest]
+    @State private var digestToDelete: Digest?
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(digests) { digest in
-                    DigestRow(digest: digest)
+            Group {
+                if digests.isEmpty {
+                    // Empty state matching Android
+                    VStack(spacing: 8) {
+                        Spacer()
+                        Text("No digests yet")
+                            .font(.title2)
+                        Text("Generate your first digest from Settings")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                } else {
+                    List {
+                        ForEach(digests) { digest in
+                            DigestRow(
+                                digest: digest,
+                                onOpenExternal: { openInExternalReader(digest) },
+                                onDelete: { digestToDelete = digest }
+                            )
+                        }
+                    }
                 }
             }
-            .navigationTitle("History")
+            .navigationTitle("Digest History")
+            .alert("Delete Digest?", isPresented: Binding(
+                get: { digestToDelete != nil },
+                set: { if !$0 { digestToDelete = nil } }
+            )) {
+                Button("Cancel", role: .cancel) {
+                    digestToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    if let digest = digestToDelete {
+                        deleteDigest(digest)
+                    }
+                    digestToDelete = nil
+                }
+            } message: {
+                Text("This will permanently delete this digest and its EPUB file.")
+            }
+        }
+    }
+
+    private func deleteDigest(_ digest: Digest) {
+        // Delete EPUB file from disk
+        let fileURL = URL(fileURLWithPath: digest.epubFilePath)
+        try? FileManager.default.removeItem(at: fileURL)
+
+        // Delete from database
+        modelContext.delete(digest)
+        try? modelContext.save()
+    }
+
+    private func openInExternalReader(_ digest: Digest) {
+        let fileURL = URL(fileURLWithPath: digest.epubFilePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        // Open with system document picker / share sheet
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController {
+            let activityVC = UIActivityViewController(
+                activityItems: [fileURL],
+                applicationActivities: nil
+            )
+            rootViewController.present(activityVC, animated: true)
         }
     }
 }
 
 struct DigestRow: View {
     let digest: Digest
+    let onOpenExternal: () -> Void
+    let onDelete: () -> Void
+
+    private var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter
+    }
+
+    private var timeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(digest.generatedAt, style: .date)
-                .font(.headline)
-            HStack {
-                Label("\(digest.articleCount) articles", systemImage: "doc.text")
-                    .font(.caption)
-                Spacer()
-                Text(digest.triggerType.displayName)
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                // Date
+                Text(dateFormatter.string(from: digest.generatedAt))
+                    .font(.headline)
+
+                // Time and trigger type
+                Text("\(timeFormatter.string(from: digest.generatedAt)) - \(digest.triggerType.displayName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            if let error = digest.errorMessage {
-                Text(error)
+
+                // Article counts matching Android format
+                Text("\(digest.articleCount) articles (\(digest.briefingCount) briefings, \(digest.deepDiveCount) full)")
                     .font(.caption)
-                    .foregroundStyle(.red)
-            } else if digest.isComplete {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text("Complete")
+
+                // Feed names (if available from articles)
+                if !digest.articles.isEmpty {
+                    let feedNames = Array(Set(digest.articles.map { $0.feedName }))
+                    let feedText = feedNames.count <= 3
+                        ? feedNames.joined(separator: ", ")
+                        : feedNames.prefix(3).joined(separator: ", ") + " +\(feedNames.count - 3) more"
+                    Text(feedText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .font(.caption)
+            }
+
+            Spacer()
+
+            // Action buttons
+            HStack(spacing: 4) {
+                Button(action: onOpenExternal) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderless)
+
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.red)
             }
         }
         .padding(.vertical, 4)
