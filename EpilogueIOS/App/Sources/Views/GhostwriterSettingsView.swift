@@ -12,6 +12,7 @@ import GhostwriterClient
 
 /// Settings view for configuring Ghostwriter sync
 struct GhostwriterSettingsView: View {
+    @EnvironmentObject private var coordinator: GhostwriterSyncCoordinator
     @StateObject private var viewModel: GhostwriterSettingsViewModel
     @State private var showingAPIKeyAlert = false
 
@@ -102,17 +103,17 @@ struct GhostwriterSettingsView: View {
             // MARK: - Sync Actions
             Section("Sync") {
                 Button {
-                    Task { await viewModel.syncNow() }
+                    Task { await coordinator.performFullSync() }
                 } label: {
                     HStack {
                         Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
                         Spacer()
-                        if viewModel.isSyncing {
+                        if coordinator.isSyncing {
                             ProgressView()
                         }
                     }
                 }
-                .disabled(!viewModel.isConfigured || viewModel.isSyncing)
+                .disabled(!viewModel.isConfigured || coordinator.isSyncing)
 
                 Button {
                     Task { await viewModel.triggerDigest() }
@@ -127,10 +128,16 @@ struct GhostwriterSettingsView: View {
                 }
                 .disabled(!viewModel.isConfigured || viewModel.isTriggering)
 
-                if let lastSync = viewModel.lastSyncTime {
+                if let lastSync = coordinator.lastSyncTime ?? viewModel.lastSyncTime {
                     LabeledContent("Last Sync", value: lastSync.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+
+                if let error = coordinator.lastSyncError {
+                    Text("Sync error: \(error.localizedDescription)")
+                        .font(.caption)
+                        .foregroundColor(.red)
                 }
             }
 

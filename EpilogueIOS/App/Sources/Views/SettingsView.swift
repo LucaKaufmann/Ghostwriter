@@ -7,8 +7,12 @@
 //
 
 import SwiftUI
+import Domain
 
 struct SettingsView: View {
+    @Environment(\.settingsRepository) private var settingsRepository
+    @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
+
     @State private var apiKey = ""
     @State private var scheduledHour = 6
     @State private var scheduleEnabled = true
@@ -18,6 +22,30 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // MARK: - Ghostwriter Sync
+                Section {
+                    NavigationLink {
+                        GhostwriterSettingsView(settingsRepository: settingsRepository)
+                            .environmentObject(ghostwriterCoordinator)
+                    } label: {
+                        HStack {
+                            Label("Ghostwriter", systemImage: "cloud.fill")
+                            Spacer()
+                            if ghostwriterCoordinator.isSyncing {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else if ghostwriterCoordinator.lastSyncError != nil {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                    }
+                } footer: {
+                    if let lastSync = ghostwriterCoordinator.lastSyncTime {
+                        Text("Last sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))")
+                    }
+                }
+
                 Section("API Configuration") {
                     SecureField("OpenAI API Key", text: $apiKey)
                         .textInputAutocapitalization(.never)
