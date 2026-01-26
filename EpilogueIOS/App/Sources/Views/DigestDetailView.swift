@@ -1,0 +1,237 @@
+//
+//  DigestDetailView.swift
+//  Epilogue
+//
+//  Created on 2026-01-26.
+//  Copyright © 2026 Epilogue. All rights reserved.
+//
+
+import SwiftUI
+import SwiftData
+import Domain
+
+struct DigestDetailView: View {
+    let digest: Digest
+
+    private var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter
+    }
+
+    private var briefings: [DigestArticle] {
+        digest.articles.filter { $0.contentType == .briefing }
+            .sorted { $0.orderIndex < $1.orderIndex }
+    }
+
+    private var deepDives: [DigestArticle] {
+        digest.articles.filter { $0.contentType == .deepDive }
+            .sorted { $0.orderIndex < $1.orderIndex }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                // Briefings section
+                if !briefings.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("The Briefing")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text("AI-generated summaries for quick catch-up")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+
+                    ForEach(briefings) { article in
+                        ArticleCard(article: article)
+                            .padding(.horizontal)
+                    }
+                }
+
+                // Deep Dives section
+                if !deepDives.isEmpty {
+                    if !briefings.isEmpty {
+                        Divider()
+                            .padding(.vertical, 8)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Deep Dives")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text("Full articles for in-depth reading")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal)
+
+                    ForEach(deepDives) { article in
+                        ArticleCard(article: article)
+                            .padding(.horizontal)
+                    }
+                }
+
+                Spacer(minLength: 16)
+            }
+        }
+        .navigationTitle(dateFormatter.string(from: digest.generatedAt))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    openInExternalReader()
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+            }
+        }
+    }
+
+    private func openInExternalReader() {
+        let fileURL = URL(fileURLWithPath: digest.epubFilePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController {
+            let activityVC = UIActivityViewController(
+                activityItems: [fileURL],
+                applicationActivities: nil
+            )
+            rootViewController.present(activityVC, animated: true)
+        }
+    }
+}
+
+struct ArticleCard: View {
+    let article: DigestArticle
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Title
+            Text(article.title)
+                .font(.headline)
+
+            // Author
+            if !article.author.isEmpty {
+                Text("By \(article.author)")
+                    .font(.caption)
+                    .italic()
+                    .foregroundStyle(.secondary)
+            }
+
+            // Feed name
+            Text("From: \(article.feedName)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            // Content
+            if isExpanded {
+                // Full content - render HTML as attributed string
+                HTMLContentView(htmlContent: article.content)
+                    .padding(.top, 4)
+
+                Text("Tap to collapse")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                // Preview
+                Text(plainTextPreview)
+                    .font(.subheadline)
+                    .lineLimit(3)
+                    .foregroundStyle(.primary)
+
+                Text("Tap to expand")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(.separator), lineWidth: 0.5)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.toggle()
+            }
+        }
+    }
+
+    private var plainTextPreview: String {
+        // Strip HTML tags for preview
+        let stripped = article.content
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if stripped.count > 200 {
+            return String(stripped.prefix(200)) + "..."
+        }
+        return stripped
+    }
+}
+
+struct HTMLContentView: View {
+    let htmlContent: String
+
+    var body: some View {
+        Text(attributedString)
+            .font(.body)
+    }
+
+    private var attributedString: AttributedString {
+        // Convert HTML to AttributedString
+        let htmlData = Data(htmlContent.utf8)
+
+        if let nsAttributedString = try? NSAttributedString(
+            data: htmlData,
+            options: [
+                .documentType: NSAttributedString.DocumentType.html,
+                .characterEncoding: String.Encoding.utf8.rawValue
+            ],
+            documentAttributes: nil
+        ) {
+            // Convert to AttributedString and apply system font
+            var attributedString = AttributedString(nsAttributedString)
+
+            // Reset font to system font while preserving bold/italic
+            for run in attributedString.runs {
+                let range = run.range
+                attributedString[range].font = .body
+            }
+
+            return attributedString
+        }
+
+        // Fallback to plain text if HTML parsing fails
+        return AttributedString(htmlContent)
+    }
+}
+
+#Preview {
+    NavigationStack {
+        DigestDetailView(
+            digest: Digest(
+                generatedAt: Date(),
+                epubFilePath: "/path/to/file.epub",
+                articleCount: 5,
+                briefingCount: 3,
+                deepDiveCount: 2,
+                triggerType: .manual
+            )
+        )
+    }
+}
