@@ -4,7 +4,8 @@ let workspace = Workspace(
     name: "Epilogue",
     projects: [
         "App",
-        "Modules/Domain"
+        "Modules/Domain",
+        "Modules/Data"
     ],
     fileHeaderTemplate: .string(
         """

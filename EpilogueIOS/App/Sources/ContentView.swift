@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Domain
+import Data
 
 struct ContentView: View {
     var body: some View {
@@ -21,7 +22,7 @@ struct ContentView: View {
                     .font(.largeTitle)
                     .fontWeight(.bold)
 
-                Text("iOS App - Phase 1 Complete")
+                Text("iOS App - Phase 2 Complete")
                     .font(.title3)
                     .foregroundStyle(.secondary)
 
@@ -36,6 +37,15 @@ struct ContentView: View {
                         .foregroundStyle(.green)
 
                     Label("Tuist workspace configured", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+
+                    Label("SwiftData persistence ready", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+
+                    Label("Repository implementations done", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+
+                    Label("Keychain integration complete", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }
                 .font(.body)
