@@ -6,6 +6,7 @@ let workspace = Workspace(
         "App",
         "Modules/Domain",
         "Modules/Data",
+        "Modules/GhostwriterClient",
         "Modules/ContentProcessing",
         "Modules/AIServices",
         "Modules/EPUBGeneration"
