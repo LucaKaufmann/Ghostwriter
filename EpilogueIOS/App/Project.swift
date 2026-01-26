@@ -34,7 +34,8 @@ let project = Project(
             resources: ["Resources/**"],
             dependencies: [
                 .project(target: "Domain", path: "../Modules/Domain"),
-                .project(target: "Data", path: "../Modules/Data")
+                .project(target: "Data", path: "../Modules/Data"),
+                .project(target: "GhostwriterClient", path: "../Modules/GhostwriterClient")
             ]
         ),
         .target(
