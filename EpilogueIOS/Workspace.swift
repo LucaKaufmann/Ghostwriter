@@ -7,7 +7,8 @@ let workspace = Workspace(
         "Modules/Domain",
         "Modules/Data",
         "Modules/ContentProcessing",
-        "Modules/AIServices"
+        "Modules/AIServices",
+        "Modules/EPUBGeneration"
     ],
     fileHeaderTemplate: .string(
         """
