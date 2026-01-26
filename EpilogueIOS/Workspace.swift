@@ -5,7 +5,9 @@ let workspace = Workspace(
     projects: [
         "App",
         "Modules/Domain",
-        "Modules/Data"
+        "Modules/Data",
+        "Modules/ContentProcessing",
+        "Modules/AIServices"
     ],
     fileHeaderTemplate: .string(
         """
