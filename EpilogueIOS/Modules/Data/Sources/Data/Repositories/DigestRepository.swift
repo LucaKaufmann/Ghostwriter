@@ -162,18 +162,21 @@ public final class DigestRepository: DigestRepositoryProtocol {
             var briefingCount = 0
             var deepDiveCount = 0
 
-            for articleData in articlesData {
+            for (index, articleData) in articlesData.enumerated() {
+                let contentType: ContentType = articleData.mode == "summarize" ? .briefing : .deepDive
                 let article = DigestArticle(
                     title: articleData.title,
-                    url: articleData.url,
+                    author: articleData.author ?? "",
                     content: articleData.content,
-                    wordCount: articleData.wordCount,
-                    mode: articleData.mode == "summarize" ? .briefing : .fidelity,
+                    originalUrl: articleData.url,
+                    feedUrl: "", // Not provided by Ghostwriter API
                     feedName: articleData.feedTitle,
-                    author: articleData.author
+                    contentType: contentType,
+                    orderIndex: articleData.sortOrder > 0 ? articleData.sortOrder : index,
+                    wordCount: articleData.wordCount
                 )
 
-                if articleData.mode == "summarize" {
+                if contentType == .briefing {
                     briefingCount += 1
                 } else {
                     deepDiveCount += 1

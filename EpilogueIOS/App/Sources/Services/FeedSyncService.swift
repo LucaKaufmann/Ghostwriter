@@ -82,7 +82,12 @@ public final class FeedSyncService {
 
     /// Push local feeds to the server
     public func pushLocalFeeds(client: GhostwriterClient? = nil) async throws {
-        let ghostwriterClient = try await client ?? createClient()
+        let ghostwriterClient: GhostwriterClient
+        if let client {
+            ghostwriterClient = client
+        } else {
+            ghostwriterClient = try await createClient()
+        }
 
         let localFeeds = try await feedRepository.getAllFeeds()
 
