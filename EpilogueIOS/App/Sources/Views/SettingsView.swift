@@ -14,11 +14,13 @@ struct SettingsView: View {
     @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
 
     @State private var apiKey = ""
+    @State private var showApiKey = false
     @State private var enabledPeriods: Set<DigestPeriod> = [.morning]
     @State private var minWordCount = 300
     @State private var showNotifications = true
     @State private var ghostwriterEnabled = false
     @State private var isGenerating = false
+    @State private var apiKeySaved = false
 
     var body: some View {
         NavigationStack {
@@ -57,12 +59,38 @@ struct SettingsView: View {
                 // MARK: - API Configuration (only for local generation)
                 if !ghostwriterEnabled {
                     Section("OpenAI API Key") {
-                        SecureField("API Key", text: $apiKey)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        Text("Required for Briefing mode. Get your key at platform.openai.com")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack {
+                            if showApiKey {
+                                TextField("API Key", text: $apiKey)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            } else {
+                                SecureField("API Key", text: $apiKey)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
+                            Button {
+                                showApiKey.toggle()
+                            } label: {
+                                Image(systemName: showApiKey ? "eye.slash" : "eye")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        HStack {
+                            Text("Required for Briefing mode. Get your key at platform.openai.com")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Save") {
+                                Task { await saveApiKey() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
+                    .alert("API Key Saved", isPresented: $apiKeySaved) {
+                        Button("OK", role: .cancel) { }
                     }
                 }
 
@@ -101,8 +129,23 @@ struct SettingsView: View {
 
                 // MARK: - Content Filters
                 Section("Content Filters") {
-                    Stepper("Min Word Count: \(minWordCount)", value: $minWordCount, in: 0...1000, step: 50)
-                    Text("Articles shorter than this will be filtered out in Fidelity mode")
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Minimum word count")
+                            Spacer()
+                            Text(minWordCount == 0 ? "Off" : "\(minWordCount)")
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(
+                            value: Binding(
+                                get: { Double(minWordCount) },
+                                set: { minWordCount = Int($0) }
+                            ),
+                            in: 0...1000,
+                            step: 100
+                        )
+                    }
+                    Text("Skip articles shorter than this (0 = include all)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -157,6 +200,7 @@ struct SettingsView: View {
 
     private func loadSettings() async {
         do {
+            apiKey = try await settingsRepository.getOpenAIKey() ?? ""
             enabledPeriods = try await settingsRepository.getEnabledPeriods()
             minWordCount = try await settingsRepository.getMinWordCount()
             showNotifications = try await settingsRepository.shouldShowNotifications()
@@ -172,6 +216,15 @@ struct SettingsView: View {
             enabledPeriods = try await settingsRepository.getEnabledPeriods()
         } catch {
             // Revert on error
+        }
+    }
+
+    private func saveApiKey() async {
+        do {
+            try await settingsRepository.setOpenAIKey(apiKey)
+            apiKeySaved = true
+        } catch {
+            // Handle error
         }
     }
 
