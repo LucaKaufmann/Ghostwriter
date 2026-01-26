@@ -12,6 +12,9 @@ import UserNotifications
 import Domain
 
 /// Service for scheduling and managing background digest generation
+///
+/// When Ghostwriter is enabled, local digest generation is disabled.
+/// The Ghostwriter server handles scheduling according to the same periods.
 @MainActor
 public final class DigestScheduler {
     public static let taskIdentifier = "com.epilogue.app.digestgeneration"
@@ -41,21 +44,25 @@ public final class DigestScheduler {
     }
 
     /// Schedule the next background digest generation
+    /// Schedules tasks for all enabled periods (morning, noon, evening)
     public func scheduleNextDigest() async throws {
         // Cancel existing tasks
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
 
-        // Check if scheduling is enabled
-        let isEnabled = try await settingsRepository.isScheduleEnabled()
-        guard isEnabled else {
+        // Skip local scheduling if Ghostwriter is enabled
+        let ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
+        if ghostwriterEnabled {
+            return // Server handles scheduling
+        }
+
+        // Get enabled periods
+        let enabledPeriods = try await settingsRepository.getEnabledPeriods()
+        guard !enabledPeriods.isEmpty else {
             return
         }
 
-        // Get scheduled hour
-        let scheduledHour = try await settingsRepository.getScheduledHour()
-
-        // Calculate next run time
-        let nextRunDate = calculateNextRunDate(hour: scheduledHour)
+        // Find the next scheduled time from enabled periods
+        let nextRunDate = calculateNextRunDate(for: enabledPeriods)
 
         // Create background task request
         let request = BGProcessingTaskRequest(identifier: Self.taskIdentifier)
@@ -71,7 +78,15 @@ public final class DigestScheduler {
     }
 
     /// Generate digest manually (Run Now functionality)
-    public func generateDigestNow() async throws -> Digest {
+    /// Returns nil if Ghostwriter is enabled (use GhostwriterSyncCoordinator instead)
+    public func generateDigestNow() async throws -> Digest? {
+        // Check if Ghostwriter is enabled
+        let ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
+        if ghostwriterEnabled {
+            // Don't generate locally - caller should use GhostwriterSyncCoordinator
+            return nil
+        }
+
         let digest = try await digestGenerator.generateDigest(triggerType: .manual)
 
         // Send notification if enabled
@@ -86,12 +101,30 @@ public final class DigestScheduler {
         return digest
     }
 
+    /// Check if local generation is available (not using Ghostwriter)
+    public func isLocalGenerationEnabled() async throws -> Bool {
+        let ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
+        return !ghostwriterEnabled
+    }
+
     // MARK: - Private Helpers
 
     private func handleBackgroundTask(_ task: BGProcessingTask) async {
         // Set expiration handler
         task.expirationHandler = {
             task.setTaskCompleted(success: false)
+        }
+
+        // Skip if Ghostwriter is enabled
+        do {
+            let ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
+            if ghostwriterEnabled {
+                task.setTaskCompleted(success: true)
+                return
+            }
+        } catch {
+            task.setTaskCompleted(success: false)
+            return
         }
 
         do {
@@ -118,26 +151,36 @@ public final class DigestScheduler {
         }
     }
 
-    private func calculateNextRunDate(hour: Int) -> Date {
+    private func calculateNextRunDate(for periods: Set<DigestPeriod>) -> Date {
         let calendar = Calendar.current
         let now = Date()
 
-        // Get today at the scheduled hour
-        var components = calendar.dateComponents([.year, .month, .day], from: now)
-        components.hour = hour
-        components.minute = 0
-        components.second = 0
+        // Get all possible next run times for each enabled period
+        var nextDates: [Date] = []
 
-        guard let scheduledToday = calendar.date(from: components) else {
-            return now.addingTimeInterval(3600) // Fallback to 1 hour from now
+        for period in periods {
+            // Get today at the period's hour
+            var components = calendar.dateComponents([.year, .month, .day], from: now)
+            components.hour = period.hour
+            components.minute = period.minute
+            components.second = 0
+
+            guard let scheduledToday = calendar.date(from: components) else {
+                continue
+            }
+
+            // If scheduled time has passed today, use tomorrow
+            if scheduledToday <= now {
+                if let tomorrow = calendar.date(byAdding: .day, value: 1, to: scheduledToday) {
+                    nextDates.append(tomorrow)
+                }
+            } else {
+                nextDates.append(scheduledToday)
+            }
         }
 
-        // If scheduled time has passed today, schedule for tomorrow
-        if scheduledToday <= now {
-            return calendar.date(byAdding: .day, value: 1, to: scheduledToday) ?? scheduledToday
-        }
-
-        return scheduledToday
+        // Return the earliest next date
+        return nextDates.min() ?? now.addingTimeInterval(3600)
     }
 
     private func sendCompletionNotification(digest: Digest) async throws {
