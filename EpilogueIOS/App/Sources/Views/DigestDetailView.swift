@@ -31,19 +31,11 @@ struct DigestDetailView: View {
     var body: some View {
         EinkReaderView(
             articles: briefings + deepDives,
-            briefingCount: briefings.count
+            briefingCount: briefings.count,
+            epubFilePath: digest.epubFilePath
         )
         .navigationTitle(dateFormatter.string(from: digest.generatedAt))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    openInExternalReader()
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                }
-            }
-        }
     }
 
     private var scrollView: some View {
@@ -96,20 +88,6 @@ struct DigestDetailView: View {
         }
     }
 
-    private func openInExternalReader() {
-        let fileURL = URL(fileURLWithPath: digest.epubFilePath)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController {
-            let activityVC = UIActivityViewController(
-                activityItems: [fileURL],
-                applicationActivities: nil
-            )
-            rootViewController.present(activityVC, animated: true)
-        }
-    }
 }
 
 struct ArticleCard: View {
