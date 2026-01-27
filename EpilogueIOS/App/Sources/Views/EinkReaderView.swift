@@ -4,24 +4,175 @@
 //
 //  E-ink optimized paginated reader for digest content.
 //  No animations, tap/swipe navigation, serif typography.
+//  Text is split across pages using CoreText measurement.
 //
 
 import SwiftUI
+import CoreText
 import Domain
 
 // MARK: - Page Model
 
 private enum PageItem: Identifiable {
     case sectionHeader(title: String, subtitle: String)
-    case article(DigestArticle)
+    case articlePage(article: DigestArticle, attributedText: NSAttributedString, pageIndex: Int, totalArticlePages: Int)
 
     var id: String {
         switch self {
         case .sectionHeader(let title, _):
             return "header-\(title)"
-        case .article(let article):
-            return article.id.uuidString
+        case .articlePage(let article, _, let pageIndex, _):
+            return "\(article.id.uuidString)-p\(pageIndex)"
         }
+    }
+
+    var articleId: UUID? {
+        switch self {
+        case .articlePage(let article, _, _, _): return article.id
+        default: return nil
+        }
+    }
+}
+
+// MARK: - Text Paginator
+
+private struct TextPaginator {
+    /// Splits an NSAttributedString into page-sized chunks using CoreText.
+    static func paginate(
+        attributedString: NSAttributedString,
+        size: CGSize
+    ) -> [NSAttributedString] {
+        guard attributedString.length > 0, size.width > 0, size.height > 0 else {
+            return [attributedString]
+        }
+
+        var pages: [NSAttributedString] = []
+        let framesetter = CTFramesetterCreateWithAttributedString(attributedString)
+        var currentIndex = 0
+        let totalLength = attributedString.length
+
+        while currentIndex < totalLength {
+            let path = CGPath(rect: CGRect(origin: .zero, size: size), transform: nil)
+            let frame = CTFramesetterCreateFrame(
+                framesetter,
+                CFRangeMake(currentIndex, 0),
+                path,
+                nil
+            )
+
+            let visibleRange = CTFrameGetVisibleStringRange(frame)
+            if visibleRange.length == 0 {
+                // Safety: avoid infinite loop if nothing fits
+                break
+            }
+
+            let pageText = attributedString.attributedSubstring(
+                from: NSRange(location: visibleRange.location, length: visibleRange.length)
+            )
+            pages.append(pageText)
+            currentIndex += visibleRange.length
+        }
+
+        return pages.isEmpty ? [attributedString] : pages
+    }
+
+    /// Builds a styled NSAttributedString for an article's header (title, author, source).
+    static func buildArticleHeader(article: DigestArticle) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+
+        // Title
+        let titleFont = UIFont(name: "Georgia-Bold", size: 22) ?? UIFont.boldSystemFont(ofSize: 22)
+        result.append(NSAttributedString(
+            string: article.title + "\n",
+            attributes: [
+                .font: titleFont,
+                .foregroundColor: UIColor.label
+            ]
+        ))
+
+        // Author
+        if !article.author.isEmpty {
+            let authorFont = UIFont(name: "Georgia-Italic", size: 14) ?? UIFont.italicSystemFont(ofSize: 14)
+            result.append(NSAttributedString(
+                string: "By \(article.author)\n",
+                attributes: [
+                    .font: authorFont,
+                    .foregroundColor: UIColor.secondaryLabel
+                ]
+            ))
+        }
+
+        // Feed name
+        let feedFont = UIFont(name: "Georgia", size: 12) ?? UIFont.systemFont(ofSize: 12)
+        result.append(NSAttributedString(
+            string: article.feedName + "\n\n",
+            attributes: [
+                .font: feedFont,
+                .foregroundColor: UIColor.secondaryLabel
+            ]
+        ))
+
+        return result
+    }
+
+    /// Builds a styled NSAttributedString for the article body from HTML content.
+    static func buildArticleBody(html: String) -> NSAttributedString {
+        let bodyFont = UIFont(name: "Georgia", size: 17) ?? UIFont.systemFont(ofSize: 17)
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 8
+
+        // Try HTML parsing
+        if let htmlData = html.data(using: .utf8),
+           let parsed = try? NSMutableAttributedString(
+            data: htmlData,
+            options: [
+                .documentType: NSAttributedString.DocumentType.html,
+                .characterEncoding: String.Encoding.utf8.rawValue
+            ],
+            documentAttributes: nil
+           ) {
+            // Apply serif font and line spacing throughout
+            let range = NSRange(location: 0, length: parsed.length)
+            parsed.enumerateAttribute(.font, in: range) { value, subRange, _ in
+                if let existingFont = value as? UIFont {
+                    var traits = existingFont.fontDescriptor.symbolicTraits
+                    var newFont = bodyFont
+                    if traits.contains(.traitBold) {
+                        newFont = UIFont(name: "Georgia-Bold", size: 17) ?? bodyFont
+                    }
+                    if traits.contains(.traitItalic) {
+                        newFont = UIFont(name: "Georgia-Italic", size: 17) ?? bodyFont
+                    }
+                    if traits.contains(.traitBold) && traits.contains(.traitItalic) {
+                        newFont = UIFont(name: "Georgia-BoldItalic", size: 17) ?? bodyFont
+                    }
+                    parsed.addAttribute(.font, value: newFont, range: subRange)
+                } else {
+                    parsed.addAttribute(.font, value: bodyFont, range: subRange)
+                }
+            }
+            parsed.addAttribute(.paragraphStyle, value: style, range: range)
+            parsed.addAttribute(.foregroundColor, value: UIColor.label, range: range)
+            return parsed
+        }
+
+        // Fallback: plain text
+        return NSAttributedString(
+            string: html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression),
+            attributes: [
+                .font: bodyFont,
+                .paragraphStyle: style,
+                .foregroundColor: UIColor.label
+            ]
+        )
+    }
+
+    /// Combines header + body into one attributed string for an article.
+    static func buildFullArticle(article: DigestArticle) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        result.append(buildArticleHeader(article: article))
+        result.append(buildArticleBody(html: article.content))
+        return result
     }
 }
 
@@ -34,34 +185,11 @@ struct EinkReaderView: View {
     @State private var currentPage = 0
     @State private var showNavigationBar = true
     @State private var showTableOfContents = false
-    @State private var viewWidth: CGFloat = 0
+    @State private var viewportSize: CGSize = .zero
+    @State private var paginatedPages: [PageItem] = []
+    @State private var articleFirstPageIndex: [UUID: Int] = [:]
 
-    private var pages: [PageItem] {
-        var result: [PageItem] = []
-
-        let briefings = Array(articles.prefix(briefingCount))
-        let deepDives = Array(articles.dropFirst(briefingCount))
-
-        if !briefings.isEmpty {
-            result.append(.sectionHeader(
-                title: "The Briefing",
-                subtitle: "AI-generated summaries"
-            ))
-            briefings.forEach { result.append(.article($0)) }
-        }
-
-        if !deepDives.isEmpty {
-            result.append(.sectionHeader(
-                title: "Deep Dives",
-                subtitle: "Full articles for in-depth reading"
-            ))
-            deepDives.forEach { result.append(.article($0)) }
-        }
-
-        return result
-    }
-
-    private var totalPages: Int { max(pages.count, 1) }
+    private var totalPages: Int { max(paginatedPages.count, 1) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -69,25 +197,20 @@ struct EinkReaderView: View {
             GeometryReader { geometry in
                 ZStack {
                     // Page content
-                    if !pages.isEmpty, currentPage < pages.count {
-                        pageView(for: pages[currentPage])
+                    if !paginatedPages.isEmpty, currentPage < paginatedPages.count {
+                        pageView(for: paginatedPages[currentPage])
                     } else {
                         emptyView
                     }
 
                     // Invisible tap zones
                     HStack(spacing: 0) {
-                        // Left third - previous
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture { goToPreviousPage() }
-
-                        // Center third - toggle nav bar
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture { showNavigationBar.toggle() }
-
-                        // Right third - next
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture { goToNextPage() }
@@ -104,7 +227,16 @@ struct EinkReaderView: View {
                             }
                         }
                 )
-                .onAppear { viewWidth = geometry.size.width }
+                .onChange(of: geometry.size) { _, newSize in
+                    if newSize != viewportSize {
+                        viewportSize = newSize
+                        rebuildPages()
+                    }
+                }
+                .onAppear {
+                    viewportSize = geometry.size
+                    rebuildPages()
+                }
             }
 
             // Navigation bar
@@ -117,15 +249,81 @@ struct EinkReaderView: View {
         }
     }
 
-    // MARK: - Pages
+    // MARK: - Pagination
+
+    private func rebuildPages() {
+        guard viewportSize.width > 0, viewportSize.height > 0 else { return }
+
+        let padding: CGFloat = 32 // 16pt on each side
+        let textSize = CGSize(
+            width: viewportSize.width - padding,
+            height: viewportSize.height - padding
+        )
+
+        var result: [PageItem] = []
+        var firstPageMap: [UUID: Int] = [:]
+
+        let briefings = Array(articles.prefix(briefingCount))
+        let deepDives = Array(articles.dropFirst(briefingCount))
+
+        if !briefings.isEmpty {
+            result.append(.sectionHeader(title: "The Briefing", subtitle: "AI-generated summaries"))
+
+            for article in briefings {
+                firstPageMap[article.id] = result.count
+                let fullText = TextPaginator.buildFullArticle(article: article)
+                let articlePages = TextPaginator.paginate(attributedString: fullText, size: textSize)
+                for (i, pageText) in articlePages.enumerated() {
+                    result.append(.articlePage(
+                        article: article,
+                        attributedText: pageText,
+                        pageIndex: i,
+                        totalArticlePages: articlePages.count
+                    ))
+                }
+            }
+        }
+
+        if !deepDives.isEmpty {
+            result.append(.sectionHeader(title: "Deep Dives", subtitle: "Full articles for in-depth reading"))
+
+            for article in deepDives {
+                firstPageMap[article.id] = result.count
+                let fullText = TextPaginator.buildFullArticle(article: article)
+                let articlePages = TextPaginator.paginate(attributedString: fullText, size: textSize)
+                for (i, pageText) in articlePages.enumerated() {
+                    result.append(.articlePage(
+                        article: article,
+                        attributedText: pageText,
+                        pageIndex: i,
+                        totalArticlePages: articlePages.count
+                    ))
+                }
+            }
+        }
+
+        paginatedPages = result
+        articleFirstPageIndex = firstPageMap
+
+        // Keep current page in bounds
+        if currentPage >= result.count {
+            currentPage = max(result.count - 1, 0)
+        }
+    }
+
+    // MARK: - Page Views
 
     @ViewBuilder
     private func pageView(for item: PageItem) -> some View {
         switch item {
         case .sectionHeader(let title, let subtitle):
             sectionHeaderPage(title: title, subtitle: subtitle)
-        case .article(let article):
-            articlePage(article: article)
+        case .articlePage(_, let attributedText, let pageIndex, let totalArticlePages):
+            articlePageView(
+                attributedText: attributedText,
+                pageIndex: pageIndex,
+                totalArticlePages: totalArticlePages
+            )
         }
     }
 
@@ -144,37 +342,25 @@ struct EinkReaderView: View {
         .padding()
     }
 
-    private func articlePage(article: DigestArticle) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                // Title
-                Text(article.title)
-                    .font(.custom("Georgia", size: 22))
-                    .fontWeight(.bold)
+    private func articlePageView(
+        attributedText: NSAttributedString,
+        pageIndex: Int,
+        totalArticlePages: Int
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Render the attributed text
+            AttributedTextView(attributedString: attributedText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                // Author
-                if !article.author.isEmpty {
-                    Text("By \(article.author)")
-                        .font(.custom("Georgia", size: 14))
-                        .italic()
-                        .foregroundStyle(.secondary)
-                }
-
-                // Feed name
-                Text(article.feedName)
-                    .font(.custom("Georgia", size: 12))
-                    .foregroundStyle(.secondary)
-
-                Divider()
-                    .padding(.vertical, 4)
-
-                // Content
-                HTMLContentView(htmlContent: article.content, useSerifFont: true)
-                    .lineSpacing(8)
+            // Page indicator for multi-page articles
+            if totalArticlePages > 1 {
+                Text("Page \(pageIndex + 1) of \(totalArticlePages)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding()
-            .padding(.bottom, 60)
         }
+        .padding(16)
     }
 
     private var emptyView: some View {
@@ -242,7 +428,9 @@ struct EinkReaderView: View {
             List {
                 ForEach(Array(articles.enumerated()), id: \.element.id) { index, article in
                     Button {
-                        currentPage = pageIndexForArticle(at: index)
+                        if let pageIdx = articleFirstPageIndex[article.id] {
+                            currentPage = pageIdx
+                        }
                         showTableOfContents = false
                     } label: {
                         HStack {
@@ -260,7 +448,9 @@ struct EinkReaderView: View {
                                 .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            if currentPage == pageIndexForArticle(at: index) {
+                            if let firstPage = articleFirstPageIndex[article.id],
+                               let currentArticleId = paginatedPages[safe: currentPage]?.articleId,
+                               currentArticleId == article.id {
                                 Text("Reading")
                                     .font(.caption2)
                                     .foregroundStyle(.blue)
@@ -292,21 +482,31 @@ struct EinkReaderView: View {
             currentPage -= 1
         }
     }
+}
 
-    private func pageIndexForArticle(at articleIndex: Int) -> Int {
-        // Account for section headers
-        if articleIndex < briefingCount {
-            // Briefing article: header page + article index
-            return (briefingCount > 0 ? 1 : 0) + articleIndex
-        } else {
-            // Deep dive article: briefing header + briefings + deep dive header + offset
-            let deepDiveOffset = articleIndex - briefingCount
-            var page = 0
-            if briefingCount > 0 { page += 1 + briefingCount } // briefing header + articles
-            let hasDeepDives = articles.count > briefingCount
-            if hasDeepDives { page += 1 } // deep dive header
-            page += deepDiveOffset
-            return page
-        }
+// MARK: - UIKit Text Rendering
+
+/// UIViewRepresentable that renders an NSAttributedString without scrolling.
+private struct AttributedTextView: UIViewRepresentable {
+    let attributedString: NSAttributedString
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.setContentHuggingPriority(.required, for: .vertical)
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) {
+        label.attributedText = attributedString
+    }
+}
+
+// MARK: - Collection Extension
+
+private extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
