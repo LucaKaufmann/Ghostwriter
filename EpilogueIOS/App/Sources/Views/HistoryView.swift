@@ -12,6 +12,7 @@ import Domain
 
 struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
     @Query(sort: \Digest.generatedAt, order: .reverse) private var digests: [Digest]
     @State private var digestToDelete: Digest?
 
@@ -37,15 +38,24 @@ struct HistoryView: View {
                             } label: {
                                 DigestRow(
                                     digest: digest,
-                                    onOpenExternal: { openInExternalReader(digest) },
-                                    onDelete: { digestToDelete = digest }
+                                    onOpenExternal: { openInExternalReader(digest) }
                                 )
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    digestToDelete = digest
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
                 }
             }
             .navigationTitle("Digest History")
+            .refreshable {
+                await ghostwriterCoordinator.performFullSync()
+            }
             .alert("Delete Digest?", isPresented: Binding(
                 get: { digestToDelete != nil },
                 set: { if !$0 { digestToDelete = nil } }
@@ -95,12 +105,22 @@ struct HistoryView: View {
 struct DigestRow: View {
     let digest: Digest
     let onOpenExternal: () -> Void
-    let onDelete: () -> Void
 
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, yyyy"
         return formatter
+    }
+
+    private var periodLabel: String {
+        guard let period = digest.period, !period.isEmpty else { return "" }
+        switch period {
+        case "morning": return " Morning"
+        case "noon": return " Noon"
+        case "evening": return " Evening"
+        case "manual": return " Manual"
+        default: return " \(period.capitalized)"
+        }
     }
 
     private var timeFormatter: DateFormatter {
@@ -116,8 +136,8 @@ struct DigestRow: View {
                 Text(dateFormatter.string(from: digest.generatedAt))
                     .font(.headline)
 
-                // Time and trigger type
-                Text("\(timeFormatter.string(from: digest.generatedAt)) - \(digest.triggerType.displayName)")
+                // Time, period, and trigger type
+                Text("\(timeFormatter.string(from: digest.generatedAt))\(periodLabel) - \(digest.triggerType.displayName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -140,19 +160,10 @@ struct DigestRow: View {
 
             Spacer()
 
-            // Action buttons
-            HStack(spacing: 4) {
-                Button(action: onOpenExternal) {
-                    Image(systemName: "square.and.arrow.up")
-                }
-                .buttonStyle(.borderless)
-
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.red)
+            Button(action: onOpenExternal) {
+                Image(systemName: "square.and.arrow.up")
             }
+            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
     }

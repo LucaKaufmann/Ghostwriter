@@ -11,6 +11,7 @@ import SwiftData
 import Domain
 
 /// SwiftData implementation of FeedRepositoryProtocol
+@MainActor
 public final class FeedRepository: FeedRepositoryProtocol {
     private let modelContext: ModelContext
 

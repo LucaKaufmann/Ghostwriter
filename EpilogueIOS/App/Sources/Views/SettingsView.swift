@@ -155,6 +155,31 @@ struct SettingsView: View {
                     Toggle("Show Digest Completion", isOn: $showNotifications)
                 }
 
+                // MARK: - Sync (only when Ghostwriter enabled)
+                if ghostwriterEnabled {
+                    Section {
+                        Button {
+                            Task { await syncNow() }
+                        } label: {
+                            HStack {
+                                Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                                Spacer()
+                                if ghostwriterCoordinator.isSyncing {
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(ghostwriterCoordinator.isSyncing)
+                    } footer: {
+                        if let error = ghostwriterCoordinator.lastSyncError {
+                            Text("Sync error: \(error.localizedDescription)")
+                                .foregroundColor(.red)
+                        } else if let lastSync = ghostwriterCoordinator.lastSyncTime {
+                            Text("Last sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))")
+                        }
+                    }
+                }
+
                 // MARK: - Manual Generation
                 Section {
                     Button {
@@ -172,7 +197,7 @@ struct SettingsView: View {
                             Spacer()
                         }
                     }
-                    .disabled(isGenerating)
+                    .disabled(isGenerating || ghostwriterCoordinator.isSyncing)
                 } footer: {
                     if ghostwriterEnabled {
                         Text("Will trigger digest generation on the Ghostwriter server")
@@ -226,6 +251,10 @@ struct SettingsView: View {
         } catch {
             // Handle error
         }
+    }
+
+    private func syncNow() async {
+        await ghostwriterCoordinator.performFullSync()
     }
 
     private func generateDigestNow() async {

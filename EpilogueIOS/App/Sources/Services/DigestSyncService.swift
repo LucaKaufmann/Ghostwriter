@@ -73,10 +73,16 @@ public final class DigestSyncService {
                 logger.info("Downloaded: \(localURL.lastPathComponent)")
 
                 // Fetch articles for in-app display
-                let articlesData = try? await fetchArticles(client: client, digestId: digest.id)
+                var articlesData: [DigestArticleData]?
+                do {
+                    articlesData = try await fetchArticles(client: client, digestId: digest.id)
+                } catch {
+                    logger.error("Failed to fetch articles for digest \(digest.id): \(error.localizedDescription)")
+                }
 
-                // Parse generation date
-                let generatedAt = digest.completedAt?.toISO8601Date() ?? Date()
+                // Parse generation date (use server's createdAt timestamp)
+                let generatedAt = digest.createdAt.toISO8601Date() ?? digest.completedAt?.toISO8601Date() ?? Date()
+                logger.debug("Digest \(digest.id) createdAt='\(digest.createdAt)' completedAt='\(digest.completedAt ?? "nil")' parsed=\(generatedAt)")
 
                 // Save to local database
                 _ = try await digestRepository.saveRemoteDigest(
