@@ -173,6 +173,7 @@ struct EinkReaderView: View {
                     .lineSpacing(8)
             }
             .padding()
+            .padding(.bottom, 60)
         }
     }
 
