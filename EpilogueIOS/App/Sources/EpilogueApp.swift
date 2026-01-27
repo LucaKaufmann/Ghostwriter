@@ -55,6 +55,7 @@ struct EpilogueApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .tint(.primary)
                 .environmentObject(ghostwriterCoordinator)
                 .environment(\.settingsRepository, settingsRepository)
                 .environment(\.feedRepository, feedRepository)

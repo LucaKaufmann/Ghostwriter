@@ -102,7 +102,9 @@ extension Settings {
             base: [
                 "SWIFT_VERSION": "5.9",
                 "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
-                "ENABLE_PREVIEWS": "YES"
+                "ENABLE_PREVIEWS": "YES",
+                "DEVELOPMENT_TEAM": "6Y9C574C9M",
+                "CODE_SIGN_STYLE": "Automatic"
             ],
             configurations: [
                 .debug(name: .debug),
