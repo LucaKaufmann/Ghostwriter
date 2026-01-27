@@ -11,6 +11,7 @@ import SwiftData
 import Domain
 
 /// SwiftData implementation of DigestRepositoryProtocol with 30-digest retention policy
+@MainActor
 public final class DigestRepository: DigestRepositoryProtocol {
     private let modelContext: ModelContext
     private let maxDigests: Int
@@ -163,7 +164,8 @@ public final class DigestRepository: DigestRepositoryProtocol {
             var deepDiveCount = 0
 
             for (index, articleData) in articlesData.enumerated() {
-                let contentType: ContentType = articleData.mode == "summarize" ? .briefing : .deepDive
+                let isBriefing = articleData.mode == "summarized" || articleData.mode == "summarize" || articleData.mode == "briefing"
+                let contentType: ContentType = isBriefing ? .briefing : .deepDive
                 let article = DigestArticle(
                     title: articleData.title,
                     author: articleData.author ?? "",

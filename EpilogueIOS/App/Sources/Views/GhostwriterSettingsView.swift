@@ -43,6 +43,9 @@ struct GhostwriterSettingsView: View {
                     .onSubmit {
                         Task { await viewModel.saveServerURL() }
                     }
+                    .onChange(of: viewModel.serverURL) {
+                        viewModel.scheduleSaveURL()
+                    }
 
                 HStack {
                     if viewModel.hasAPIKey {
@@ -187,6 +190,9 @@ struct GhostwriterSettingsView: View {
         .task {
             await viewModel.load()
         }
+        .onDisappear {
+            Task { await viewModel.saveServerURL() }
+        }
     }
 
     @ViewBuilder
@@ -231,6 +237,8 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var isSyncing = false
     @Published var isTriggering = false
 
+    private var saveURLTask: Task<Void, Never>?
+
     var isConfigured: Bool {
         isEnabled && !serverURL.isEmpty
     }
@@ -263,7 +271,17 @@ class GhostwriterSettingsViewModel: ObservableObject {
         }
     }
 
+    func scheduleSaveURL() {
+        saveURLTask?.cancel()
+        saveURLTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            await saveServerURL()
+        }
+    }
+
     func saveServerURL() async {
+        saveURLTask?.cancel()
         do {
             try await settingsRepository.setGhostwriterURL(serverURL.isEmpty ? nil : serverURL)
         } catch {
@@ -283,6 +301,8 @@ class GhostwriterSettingsViewModel: ObservableObject {
 
     func testConnection() async {
         guard !serverURL.isEmpty else { return }
+
+        await saveServerURL()
 
         isTesting = true
         connectionError = nil
