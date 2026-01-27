@@ -199,6 +199,7 @@ struct EinkReaderView: View {
     let articles: [DigestArticle]
     let briefingCount: Int
 
+    @Environment(\.dismiss) private var dismiss
     @State private var currentPage = 0
     @State private var showNavigationBar = true
     @State private var showTableOfContents = false
@@ -259,6 +260,19 @@ struct EinkReaderView: View {
             // Navigation bar
             if showNavigationBar {
                 navigationBar
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Back")
+                    }
+                }
             }
         }
         .sheet(isPresented: $showTableOfContents) {
