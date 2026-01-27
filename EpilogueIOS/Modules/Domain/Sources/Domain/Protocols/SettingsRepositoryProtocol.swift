@@ -80,6 +80,14 @@ public protocol SettingsRepositoryProtocol: Sendable {
     /// Sets whether to show EPUB generation notifications
     func setShouldShowNotifications(_ enabled: Bool) async throws
 
+    // MARK: - Display Settings
+
+    /// Gets whether e-ink reader mode is enabled
+    func isEinkModeEnabled() async throws -> Bool
+
+    /// Sets whether e-ink reader mode is enabled
+    func setEinkModeEnabled(_ enabled: Bool) async throws
+
     // MARK: - Ghostwriter Settings
 
     /// Gets whether Ghostwriter sync is enabled

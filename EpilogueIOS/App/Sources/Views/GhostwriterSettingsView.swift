@@ -396,6 +396,10 @@ private class MockSettingsRepository: SettingsRepositoryProtocol {
     func shouldShowNotifications() async throws -> Bool { true }
     func setShouldShowNotifications(_ enabled: Bool) async throws {}
 
+    // Display
+    func isEinkModeEnabled() async throws -> Bool { false }
+    func setEinkModeEnabled(_ enabled: Bool) async throws {}
+
     // Ghostwriter
     func isGhostwriterEnabled() async throws -> Bool { true }
     func setGhostwriterEnabled(_ enabled: Bool) async throws {}

@@ -12,6 +12,8 @@ import Domain
 
 struct DigestDetailView: View {
     let digest: Digest
+    @Environment(\.settingsRepository) private var settingsRepository
+    @State private var einkMode = false
 
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -30,6 +32,40 @@ struct DigestDetailView: View {
     }
 
     var body: some View {
+        Group {
+            if einkMode {
+                EinkReaderView(
+                    articles: briefings + deepDives,
+                    briefingCount: briefings.count
+                )
+            } else {
+                scrollView
+            }
+        }
+        .navigationTitle(dateFormatter.string(from: digest.generatedAt))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 12) {
+                    Button {
+                        einkMode.toggle()
+                    } label: {
+                        Image(systemName: einkMode ? "book.fill" : "book")
+                    }
+                    Button {
+                        openInExternalReader()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+        }
+        .task {
+            einkMode = (try? await settingsRepository.isEinkModeEnabled()) ?? false
+        }
+    }
+
+    private var scrollView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 // Briefings section
@@ -75,17 +111,6 @@ struct DigestDetailView: View {
                 }
 
                 Spacer(minLength: 16)
-            }
-        }
-        .navigationTitle(dateFormatter.string(from: digest.generatedAt))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    openInExternalReader()
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                }
             }
         }
     }
@@ -186,10 +211,11 @@ struct ArticleCard: View {
 
 struct HTMLContentView: View {
     let htmlContent: String
+    var useSerifFont: Bool = false
 
     var body: some View {
         Text(attributedString)
-            .font(.body)
+            .font(useSerifFont ? .custom("Georgia", size: 17) : .body)
     }
 
     private var attributedString: AttributedString {
@@ -204,13 +230,17 @@ struct HTMLContentView: View {
             ],
             documentAttributes: nil
         ) {
-            // Convert to AttributedString and apply system font
+            // Convert to AttributedString and apply appropriate font
             var attributedString = AttributedString(nsAttributedString)
 
-            // Reset font to system font while preserving bold/italic
+            // Reset font while preserving bold/italic
             for run in attributedString.runs {
                 let range = run.range
-                attributedString[range].font = .body
+                if useSerifFont {
+                    attributedString[range].font = .custom("Georgia", size: 17)
+                } else {
+                    attributedString[range].font = .body
+                }
             }
 
             return attributedString
