@@ -121,8 +121,25 @@ private struct TextPaginator {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 8
 
+        // If content looks like plain text (no HTML tags), convert newlines to <br> tags
+        let containsHtmlTags = html.range(of: "<[a-zA-Z][^>]*>", options: .regularExpression) != nil
+        let htmlContent: String
+        if containsHtmlTags {
+            htmlContent = html
+        } else {
+            // Plain text: wrap in basic HTML to preserve line breaks
+            let escaped = html
+                .replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+            htmlContent = "<p>" + escaped
+                .components(separatedBy: "\n\n")
+                .joined(separator: "</p><p>")
+                .replacingOccurrences(of: "\n", with: "<br>") + "</p>"
+        }
+
         // Try HTML parsing
-        if let htmlData = html.data(using: .utf8),
+        if let htmlData = htmlContent.data(using: .utf8),
            let parsed = try? NSMutableAttributedString(
             data: htmlData,
             options: [
@@ -495,11 +512,14 @@ private struct AttributedTextView: UIViewRepresentable {
         label.numberOfLines = 0
         label.lineBreakMode = .byWordWrapping
         label.setContentHuggingPriority(.required, for: .vertical)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.preferredMaxLayoutWidth = UIScreen.main.bounds.width - 32
         return label
     }
 
     func updateUIView(_ label: UILabel, context: Context) {
         label.attributedText = attributedString
+        label.preferredMaxLayoutWidth = label.bounds.width > 0 ? label.bounds.width : UIScreen.main.bounds.width - 32
     }
 }
 
