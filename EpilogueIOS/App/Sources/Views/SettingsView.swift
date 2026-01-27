@@ -21,7 +21,6 @@ struct SettingsView: View {
     @State private var ghostwriterEnabled = false
     @State private var isGenerating = false
     @State private var apiKeySaved = false
-    @State private var einkMode = false
 
     var body: some View {
         NavigationStack {
@@ -151,21 +150,6 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // MARK: - Display
-                Section("Display") {
-                    Toggle("E-ink Reader Mode", isOn: $einkMode)
-                        .onChange(of: einkMode) { _, newValue in
-                            Task {
-                                try? await settingsRepository.setEinkModeEnabled(newValue)
-                            }
-                        }
-                    if einkMode {
-                        Text("Optimized for e-ink displays: paginated reading, no animations, high contrast serif typography")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
                 // MARK: - Notifications
                 Section("Notifications") {
                     Toggle("Show Digest Completion", isOn: $showNotifications)
@@ -246,7 +230,6 @@ struct SettingsView: View {
             minWordCount = try await settingsRepository.getMinWordCount()
             showNotifications = try await settingsRepository.shouldShowNotifications()
             ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
-            einkMode = try await settingsRepository.isEinkModeEnabled()
         } catch {
             // Use defaults on error
         }
