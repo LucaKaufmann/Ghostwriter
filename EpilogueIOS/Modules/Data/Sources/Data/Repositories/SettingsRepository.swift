@@ -29,6 +29,7 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         static let aiProvider = "ai_provider"
         static let aiModel = "ai_model"
         static let showNotifications = "show_notifications"
+        static let einkMode = "eink_mode"
         // Ghostwriter settings
         static let ghostwriterEnabled = "ghostwriter_enabled"
         static let ghostwriterURL = "ghostwriter_url"
@@ -185,6 +186,16 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     public func setShouldShowNotifications(_ enabled: Bool) async throws {
         userDefaults.set(enabled, forKey: DefaultsKeys.showNotifications)
+    }
+
+    // MARK: - Display Settings
+
+    public func isEinkModeEnabled() async throws -> Bool {
+        userDefaults.bool(forKey: DefaultsKeys.einkMode)
+    }
+
+    public func setEinkModeEnabled(_ enabled: Bool) async throws {
+        userDefaults.set(enabled, forKey: DefaultsKeys.einkMode)
     }
 
     // MARK: - Ghostwriter Settings
