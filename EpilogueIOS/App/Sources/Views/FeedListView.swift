@@ -12,6 +12,7 @@ import Domain
 
 struct FeedListView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
     @Query(sort: \Feed.createdAt, order: .reverse) private var feeds: [Feed]
     @State private var showingAddFeed = false
     @State private var editingFeed: Feed?
@@ -46,10 +47,16 @@ struct FeedListView: View {
             .navigationTitle("Feed Manager")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    SyncStatusBanner(coordinator: ghostwriterCoordinator)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { showingAddFeed = true }) {
                         Image(systemName: "plus")
                     }
                 }
+            }
+            .refreshable {
+                await ghostwriterCoordinator.performFullSync()
             }
             .sheet(isPresented: $showingAddFeed) {
                 AddFeedView()

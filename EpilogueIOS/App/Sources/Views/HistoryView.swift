@@ -53,6 +53,11 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("Digest History")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    SyncStatusBanner(coordinator: ghostwriterCoordinator)
+                }
+            }
             .refreshable {
                 await ghostwriterCoordinator.performFullSyncIncludingDigests()
             }
