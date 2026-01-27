@@ -12,9 +12,6 @@ import Domain
 
 struct DigestDetailView: View {
     let digest: Digest
-    @Environment(\.settingsRepository) private var settingsRepository
-    @State private var einkMode = false
-
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, yyyy"
@@ -32,36 +29,20 @@ struct DigestDetailView: View {
     }
 
     var body: some View {
-        Group {
-            if einkMode {
-                EinkReaderView(
-                    articles: briefings + deepDives,
-                    briefingCount: briefings.count
-                )
-            } else {
-                scrollView
-            }
-        }
+        EinkReaderView(
+            articles: briefings + deepDives,
+            briefingCount: briefings.count
+        )
         .navigationTitle(dateFormatter.string(from: digest.generatedAt))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    Button {
-                        einkMode.toggle()
-                    } label: {
-                        Image(systemName: einkMode ? "book.fill" : "book")
-                    }
-                    Button {
-                        openInExternalReader()
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                    }
+                Button {
+                    openInExternalReader()
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
                 }
             }
-        }
-        .task {
-            einkMode = (try? await settingsRepository.isEinkModeEnabled()) ?? false
         }
     }
 
