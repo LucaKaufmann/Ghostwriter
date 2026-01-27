@@ -54,7 +54,7 @@ struct HistoryView: View {
             }
             .navigationTitle("Digest History")
             .refreshable {
-                await ghostwriterCoordinator.performFullSync()
+                await ghostwriterCoordinator.performFullSyncIncludingDigests()
             }
             .alert("Delete Digest?", isPresented: Binding(
                 get: { digestToDelete != nil },
