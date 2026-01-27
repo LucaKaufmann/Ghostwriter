@@ -66,8 +66,12 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         }
     }
 
+    /// Minimum interval between digest syncs (1 hour)
+    private static let digestSyncInterval: TimeInterval = 3600
+
     /// Perform a full sync with Ghostwriter
-    /// This syncs config, feeds, and digests
+    /// Config, schedule, and feeds sync every time.
+    /// Digest sync only runs if enough time has passed since the last one.
     public func performFullSync() async {
         guard await isConfigured() else {
             logger.debug("Ghostwriter not configured, skipping sync")
@@ -83,38 +87,81 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         lastSyncError = nil
 
         do {
-            logger.info("Starting full Ghostwriter sync")
+            logger.info("Starting Ghostwriter sync")
 
             // 1. Send heartbeat
             do {
                 _ = try await heartbeatService.sendHeartbeat()
             } catch {
                 logger.warning("Heartbeat failed: \(error.localizedDescription)")
-                // Continue with sync even if heartbeat fails
             }
 
-            // 2. Sync config
+            // 2. Sync config (always)
             do {
                 _ = try await configSyncManager.sync()
             } catch {
                 logger.warning("Config sync failed: \(error.localizedDescription)")
-                // Continue with other syncs
             }
 
-            // 3. Sync feeds
+            // 3. Sync feeds (always)
             try await feedSyncService.sync()
 
-            // 4. Sync digests
-            try await digestSyncService.sync()
+            // 4. Sync digests (only if stale)
+            let shouldSyncDigests = await shouldRunDigestSync()
+            if shouldSyncDigests {
+                logger.info("Digest sync is due, running...")
+                try await digestSyncService.sync()
+            } else {
+                logger.info("Digest sync skipped — last sync was recent")
+            }
 
             lastSyncTime = Date()
-            logger.info("Full Ghostwriter sync completed successfully")
+            logger.info("Ghostwriter sync completed successfully")
         } catch {
             logger.error("Ghostwriter sync failed: \(error.localizedDescription)")
             lastSyncError = error
         }
 
         isSyncing = false
+    }
+
+    /// Force a full sync including digests regardless of timing
+    public func performFullSyncIncludingDigests() async {
+        guard await isConfigured() else { return }
+        guard !isSyncing else { return }
+
+        isSyncing = true
+        lastSyncError = nil
+
+        do {
+            logger.info("Starting forced full Ghostwriter sync (including digests)")
+
+            do { _ = try await heartbeatService.sendHeartbeat() } catch {}
+            do { _ = try await configSyncManager.sync() } catch {}
+            try await feedSyncService.sync()
+            try await digestSyncService.sync()
+
+            lastSyncTime = Date()
+            logger.info("Forced full sync completed")
+        } catch {
+            logger.error("Forced full sync failed: \(error.localizedDescription)")
+            lastSyncError = error
+        }
+
+        isSyncing = false
+    }
+
+    /// Check if enough time has passed since the last digest sync
+    private func shouldRunDigestSync() async -> Bool {
+        do {
+            guard let lastDigestSync = try await settingsRepository.getLastDigestSyncTime() else {
+                return true // Never synced
+            }
+            let elapsed = Date().timeIntervalSince(lastDigestSync)
+            return elapsed >= Self.digestSyncInterval
+        } catch {
+            return true // On error, sync to be safe
+        }
     }
 
     /// Sync only feeds
