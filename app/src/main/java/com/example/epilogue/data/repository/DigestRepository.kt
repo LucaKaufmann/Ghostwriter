@@ -1,8 +1,10 @@
 package com.example.epilogue.data.repository
 
+import android.util.Log
 import com.example.epilogue.data.local.DigestArticleEntity
 import com.example.epilogue.data.local.DigestDao
 import com.example.epilogue.data.local.DigestEntity
+import com.example.epilogue.data.remote.ghostwriter.DigestArticleResponse
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.DigestArticle
 import com.example.epilogue.domain.model.Feed
@@ -60,36 +62,33 @@ class DigestRepository @Inject constructor(
      * @param feeds The feeds that were used (for feed name display)
      * @param epubFilePath The path to the generated EPUB file
      * @param triggerType Whether this was scheduled or manual
+     * @param period The digest period (morning, noon, evening, manual)
      * @return The ID of the created digest
      */
     suspend fun saveDigest(
         articles: List<ProcessedArticle>,
         feeds: List<Feed>,
         epubFilePath: String,
-        triggerType: TriggerType
+        triggerType: TriggerType,
+        period: String? = null
     ): Long {
+        // Prevent duplicate saves by checking if a digest with similar content was created recently
+        val recentCutoff = System.currentTimeMillis() - (5 * 60 * 1000) // 5 minutes
+        if (digestDao.existsRecentDigest(recentCutoff, articles.size)) {
+            Log.d("DigestRepository", "Similar digest (${articles.size} articles) created recently, skipping")
+            return -1
+        }
+
         val briefingCount = articles.count { it.isSummary }
         val fidelityCount = articles.count { !it.isSummary }
 
-        // Get unique feed names from the feeds list
-        val feedNames = feeds.map { it.name }.distinct()
-
-        val digestEntity = DigestEntity(
-            generatedAt = System.currentTimeMillis(),
-            epubFilePath = epubFilePath,
-            articleCount = articles.size,
-            briefingCount = briefingCount,
-            fidelityCount = fidelityCount,
-            triggerType = triggerType,
-            feedNames = feedNames.joinToString(",")
-        )
-
-        // Map articles to entities
+        // Map articles to entities and determine feed names from actual articles
         // We try to match articles to feeds by URL, but fall back to "Unknown" if no match
         val articleEntities = articles.mapIndexed { index, article ->
             val feedName = feeds.find { feed ->
-                article.originalUrl.contains(feed.url.removePrefix("https://").removePrefix("http://").split("/").firstOrNull() ?: "")
-            }?.name ?: feedNames.firstOrNull() ?: "Unknown"
+                val feedDomain = feed.url.removePrefix("https://").removePrefix("http://").split("/").firstOrNull() ?: ""
+                article.originalUrl.contains(feedDomain)
+            }?.name ?: "Unknown"
 
             DigestArticleEntity(
                 digestId = 0, // Will be set by transaction
@@ -102,6 +101,20 @@ class DigestRepository @Inject constructor(
                 sortOrder = index
             )
         }
+
+        // Get unique feed names only from articles that are actually in this digest
+        val feedNames = articleEntities.map { it.feedName }.distinct().filter { it != "Unknown" }
+
+        val digestEntity = DigestEntity(
+            generatedAt = System.currentTimeMillis(),
+            epubFilePath = epubFilePath,
+            articleCount = articles.size,
+            briefingCount = briefingCount,
+            fidelityCount = fidelityCount,
+            triggerType = triggerType,
+            feedNames = feedNames.joinToString(","),
+            period = period ?: if (triggerType == TriggerType.MANUAL) "manual" else null
+        )
 
         val digestId = digestDao.insertDigestWithArticles(digestEntity, articleEntities)
 
@@ -157,5 +170,91 @@ class DigestRepository @Inject constructor(
         }
         // Delete all from database (cascade will remove articles)
         digestDao.deleteAllDigests()
+    }
+
+    /**
+     * Check if a digest with the given remote ID already exists.
+     */
+    suspend fun existsByRemoteId(remoteId: String): Boolean =
+        digestDao.existsByRemoteId(remoteId)
+
+    /**
+     * Get all remote IDs of synced digests.
+     */
+    suspend fun getAllRemoteIds(): List<String> =
+        digestDao.getAllRemoteIds()
+
+    /**
+     * Save a digest downloaded from Ghostwriter backend.
+     * Now supports syncing individual article records for in-app display.
+     *
+     * @param remoteId The Ghostwriter digest ID (UUID)
+     * @param epubFilePath The local path to the downloaded EPUB
+     * @param articleCount Number of articles in the digest
+     * @param generatedAt Timestamp when the digest was created
+     * @param period The period (morning, noon, evening, manual)
+     * @param articles Optional list of articles with content from Ghostwriter
+     * @return The ID of the created digest
+     */
+    suspend fun saveRemoteDigest(
+        remoteId: String,
+        epubFilePath: String,
+        articleCount: Int,
+        generatedAt: Long,
+        period: String,
+        articles: List<DigestArticleResponse>? = null
+    ): Long {
+        // Check if this digest already exists (prevents race condition duplicates)
+        if (existsByRemoteId(remoteId)) {
+            Log.d("DigestRepository", "Digest with remoteId=$remoteId already exists, skipping")
+            return -1
+        }
+
+        val triggerType = when (period.lowercase()) {
+            "manual" -> TriggerType.MANUAL
+            else -> TriggerType.SCHEDULED
+        }
+
+        // Extract feed names and counts from articles if available
+        val feedNames = articles?.map { it.feedTitle }?.distinct() ?: emptyList()
+        val briefingCount = articles?.count { it.mode == "summarized" } ?: 0
+        val fidelityCount = articles?.count { it.mode == "raw" } ?: 0
+
+        val digestEntity = DigestEntity(
+            generatedAt = generatedAt,
+            epubFilePath = epubFilePath,
+            articleCount = articleCount,
+            briefingCount = briefingCount,
+            fidelityCount = fidelityCount,
+            triggerType = triggerType,
+            feedNames = feedNames.joinToString(","),
+            remoteId = remoteId,
+            period = period
+        )
+
+        val digestId = if (articles != null && articles.isNotEmpty()) {
+            // Convert articles and insert with digest
+            val articleEntities = articles.map { article ->
+                DigestArticleEntity(
+                    digestId = 0, // Will be set by transaction
+                    title = article.title,
+                    author = article.author ?: "",
+                    content = article.content,
+                    originalUrl = article.url,
+                    isSummary = article.mode == "summarized",
+                    feedName = article.feedTitle,
+                    sortOrder = article.sortOrder
+                )
+            }
+            digestDao.insertDigestWithArticles(digestEntity, articleEntities)
+        } else {
+            // No articles - insert digest only (backwards compatibility)
+            digestDao.insertDigest(digestEntity)
+        }
+
+        // Cleanup old digests if we exceed the limit
+        cleanupOldDigests()
+
+        return digestId
     }
 }

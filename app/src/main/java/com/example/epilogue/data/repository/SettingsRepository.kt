@@ -37,13 +37,24 @@ class SettingsRepository @Inject constructor(
         private const val KEY_CUSTOM_EXPORT_URI = "custom_export_uri"
         private const val KEY_CUSTOM_EXPORT_ENABLED = "custom_export_enabled"
 
+        // Ghostwriter settings keys
+        private const val KEY_GHOSTWRITER_ENABLED = "ghostwriter_enabled"
+        private const val KEY_GHOSTWRITER_URL = "ghostwriter_url"
+
         // Encrypted settings keys
         private const val KEY_OPENAI_API_KEY = "openai_api_key"
+        private const val KEY_GHOSTWRITER_API_KEY = "ghostwriter_api_key"
+
+        // Sync tracking
+        private const val KEY_LAST_DIGEST_SYNC = "last_digest_sync"
+        private const val KEY_LAST_FEED_SYNC = "last_feed_sync"
+        private const val KEY_CONFIG_UPDATED_AT = "config_updated_at"  // Server's updated_at timestamp
 
         // Defaults
         private const val DEFAULT_MIN_WORD_COUNT = 0
         private const val DEFAULT_EINK_MODE = false
         private const val DEFAULT_CUSTOM_EXPORT_ENABLED = false
+        private const val DEFAULT_GHOSTWRITER_ENABLED = false
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -79,6 +90,16 @@ class SettingsRepository @Inject constructor(
     private val _customExportEnabledFlow = MutableStateFlow(false)
     val customExportEnabledFlow: Flow<Boolean> = _customExportEnabledFlow.asStateFlow()
 
+    // Ghostwriter state flows
+    private val _ghostwriterEnabledFlow = MutableStateFlow(false)
+    val ghostwriterEnabledFlow: Flow<Boolean> = _ghostwriterEnabledFlow.asStateFlow()
+
+    private val _ghostwriterUrlFlow = MutableStateFlow<String?>(null)
+    val ghostwriterUrlFlow: Flow<String?> = _ghostwriterUrlFlow.asStateFlow()
+
+    private val _ghostwriterApiKeyFlow = MutableStateFlow<String?>(null)
+    val ghostwriterApiKeyFlow: Flow<String?> = _ghostwriterApiKeyFlow.asStateFlow()
+
     init {
         // Initialize API key flow
         _apiKeyFlow.value = getOpenAIApiKey()
@@ -87,6 +108,10 @@ class SettingsRepository @Inject constructor(
         // Initialize custom export flows
         _customExportUriFlow.value = getCustomExportUri()
         _customExportEnabledFlow.value = isCustomExportEnabled()
+        // Initialize Ghostwriter flows
+        _ghostwriterEnabledFlow.value = isGhostwriterEnabled()
+        _ghostwriterUrlFlow.value = getGhostwriterUrl()
+        _ghostwriterApiKeyFlow.value = getGhostwriterApiKey()
     }
 
     // ===== OpenAI API Key (Encrypted) =====
@@ -263,5 +288,130 @@ class SettingsRepository @Inject constructor(
      */
     fun isCustomExportEnabled(): Boolean {
         return prefs.getBoolean(KEY_CUSTOM_EXPORT_ENABLED, DEFAULT_CUSTOM_EXPORT_ENABLED)
+    }
+
+    // ===== Ghostwriter Settings =====
+
+    /**
+     * Sets whether Ghostwriter backend is enabled.
+     */
+    suspend fun setGhostwriterEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putBoolean(KEY_GHOSTWRITER_ENABLED, enabled)
+            .apply()
+        _ghostwriterEnabledFlow.value = enabled
+    }
+
+    /**
+     * Gets whether Ghostwriter backend is enabled.
+     */
+    fun isGhostwriterEnabled(): Boolean {
+        return prefs.getBoolean(KEY_GHOSTWRITER_ENABLED, DEFAULT_GHOSTWRITER_ENABLED)
+    }
+
+    /**
+     * Sets the Ghostwriter server URL.
+     */
+    suspend fun setGhostwriterUrl(url: String?) = withContext(Dispatchers.IO) {
+        if (url.isNullOrBlank()) {
+            prefs.edit().remove(KEY_GHOSTWRITER_URL).apply()
+        } else {
+            prefs.edit().putString(KEY_GHOSTWRITER_URL, url.trim()).apply()
+        }
+        _ghostwriterUrlFlow.value = url?.trim()
+    }
+
+    /**
+     * Gets the Ghostwriter server URL.
+     */
+    fun getGhostwriterUrl(): String? {
+        return prefs.getString(KEY_GHOSTWRITER_URL, null)
+    }
+
+    /**
+     * Saves the Ghostwriter API key securely.
+     */
+    suspend fun setGhostwriterApiKey(apiKey: String?) = withContext(Dispatchers.IO) {
+        if (apiKey.isNullOrBlank()) {
+            encryptedPrefs.edit().remove(KEY_GHOSTWRITER_API_KEY).apply()
+        } else {
+            encryptedPrefs.edit().putString(KEY_GHOSTWRITER_API_KEY, apiKey.trim()).apply()
+        }
+        _ghostwriterApiKeyFlow.value = apiKey?.trim()
+    }
+
+    /**
+     * Retrieves the Ghostwriter API key.
+     */
+    fun getGhostwriterApiKey(): String? {
+        return encryptedPrefs.getString(KEY_GHOSTWRITER_API_KEY, null)
+    }
+
+    /**
+     * Checks if Ghostwriter is fully configured and enabled.
+     */
+    fun isGhostwriterConfigured(): Boolean {
+        return isGhostwriterEnabled() && !getGhostwriterUrl().isNullOrBlank()
+    }
+
+    // ===== Sync Tracking =====
+
+    /**
+     * Sets the last digest sync timestamp.
+     */
+    suspend fun setLastDigestSyncTime(timestamp: Long) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putLong(KEY_LAST_DIGEST_SYNC, timestamp)
+            .apply()
+    }
+
+    /**
+     * Gets the last digest sync timestamp.
+     * Returns 0 if never synced.
+     */
+    fun getLastDigestSyncTime(): Long {
+        return prefs.getLong(KEY_LAST_DIGEST_SYNC, 0L)
+    }
+
+    // ===== Feed Sync Tracking =====
+
+    /**
+     * Sets the last feed sync timestamp.
+     * This is the server_timestamp from the last successful feed sync.
+     */
+    suspend fun setLastFeedSyncTime(timestamp: Long) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putLong(KEY_LAST_FEED_SYNC, timestamp)
+            .apply()
+    }
+
+    /**
+     * Gets the last feed sync timestamp.
+     * Returns 0 if never synced (triggers initial full sync).
+     */
+    fun getLastFeedSyncTime(): Long {
+        return prefs.getLong(KEY_LAST_FEED_SYNC, 0L)
+    }
+
+    // ===== Config Sync Tracking =====
+
+    /**
+     * Sets the server's config updated_at timestamp.
+     * Used for conflict detection during config sync.
+     */
+    suspend fun setConfigUpdatedAt(timestamp: String?) = withContext(Dispatchers.IO) {
+        if (timestamp.isNullOrBlank()) {
+            prefs.edit().remove(KEY_CONFIG_UPDATED_AT).apply()
+        } else {
+            prefs.edit().putString(KEY_CONFIG_UPDATED_AT, timestamp).apply()
+        }
+    }
+
+    /**
+     * Gets the server's config updated_at timestamp.
+     * Returns null if never synced.
+     */
+    fun getConfigUpdatedAt(): String? {
+        return prefs.getString(KEY_CONFIG_UPDATED_AT, null)
     }
 }

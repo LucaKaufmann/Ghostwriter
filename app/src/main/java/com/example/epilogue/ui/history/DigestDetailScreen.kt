@@ -48,9 +48,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.text.HtmlCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.DigestArticle
 import com.example.epilogue.ui.LocalEinkMode
 import com.example.epilogue.ui.components.EinkBookReader
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -146,10 +149,22 @@ fun DigestDetailScreen(
                 }
             }
             else -> {
+                val digest = uiState.digest!!
+                val isRemoteDigest = digest.remoteId != null
                 val briefings = uiState.articles.filter { it.isSummary }
                 val deepDives = uiState.articles.filter { !it.isSummary }
 
-                if (einkMode) {
+                // For remote digests (synced from Ghostwriter), show prompt to open EPUB
+                // since we don't have individual article records
+                if (isRemoteDigest && uiState.articles.isEmpty()) {
+                    RemoteDigestContent(
+                        digest = digest,
+                        onOpenInReader = { viewModel.openInExternalReader() },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                    )
+                } else if (einkMode) {
                     // E-ink mode: Book-style reader with all articles as chapters
                     // Only apply top padding (for app bar), ignore bottom system padding
                     EinkBookReader(
@@ -351,5 +366,63 @@ fun ArticleCard(
                 )
             }
         }
+    }
+}
+
+/**
+ * Content displayed for digests synced from Ghostwriter.
+ * Since we don't have individual article records, prompts user to open the EPUB.
+ */
+@Composable
+fun RemoteDigestContent(
+    digest: Digest,
+    onOpenInReader: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = Icons.Default.OpenInNew,
+            contentDescription = null,
+            modifier = Modifier.padding(bottom = 16.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+
+        Text(
+            text = "Synced from Ghostwriter",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Text(
+            text = "This digest contains ${digest.articleCount} articles.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 24.dp)
+        )
+
+        Button(
+            onClick = onOpenInReader,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Default.OpenInNew,
+                contentDescription = null,
+                modifier = Modifier.padding(end = 8.dp)
+            )
+            Text("Open in Reader")
+        }
+
+        Text(
+            text = "The EPUB file will open in your preferred reader app.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(top = 16.dp)
+        )
     }
 }
