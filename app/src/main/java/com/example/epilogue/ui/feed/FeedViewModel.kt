@@ -1,8 +1,11 @@
 package com.example.epilogue.ui.feed
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.epilogue.data.repository.FeedRepository
+import com.example.epilogue.data.repository.GhostwriterRepository
+import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -15,8 +18,14 @@ import javax.inject.Inject
 
 @HiltViewModel
 class FeedViewModel @Inject constructor(
-    private val feedRepository: FeedRepository
+    private val feedRepository: FeedRepository,
+    private val ghostwriterRepository: GhostwriterRepository,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "FeedViewModel"
+    }
 
     val feeds: StateFlow<List<Feed>> = feedRepository.getAllFeeds()
         .stateIn(
@@ -48,7 +57,24 @@ class FeedViewModel @Inject constructor(
 
     fun deleteFeed(feed: Feed) {
         viewModelScope.launch {
+            // Delete locally
             feedRepository.deleteFeed(feed)
+
+            // Also delete on Ghostwriter if enabled
+            if (settingsRepository.isGhostwriterConfigured()) {
+                val result = ghostwriterRepository.deleteFeedByUrl(feed.url)
+                when (result) {
+                    is GhostwriterRepository.GhostwriterResult.Success -> {
+                        Log.i(TAG, "Feed deleted on Ghostwriter: ${feed.name}")
+                    }
+                    is GhostwriterRepository.GhostwriterResult.Error -> {
+                        Log.w(TAG, "Failed to delete feed on Ghostwriter: ${result.message}")
+                    }
+                    is GhostwriterRepository.GhostwriterResult.NotConfigured -> {
+                        // Ignore - Ghostwriter not configured
+                    }
+                }
+            }
         }
     }
 

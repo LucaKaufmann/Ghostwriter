@@ -8,9 +8,9 @@ package com.example.epilogue.domain.model
  * @property displayTime User-friendly approximate delivery time (generation takes time)
  */
 enum class DigestPeriod(val hour: Int, val displayTime: String) {
-    MORNING(7, "8:00"),
-    NOON(11, "12:00"),
-    EVENING(21, "22:00");
+    MORNING(7, "7:00"),
+    NOON(12, "12:00"),
+    EVENING(18, "18:00");
 
     companion object {
         /**

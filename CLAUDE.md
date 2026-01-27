@@ -128,6 +128,42 @@ data class ProcessedArticle(
 - No animations (disable `windowAnimationScale` or Compose animations)
 - High-legibility serif font (Merriweather recommended)
 
+## Jetpack Compose Layout Patterns
+
+### Scaffold innerPadding with Lists
+
+When using `Scaffold` with a `LazyColumn` that should extend to the bottom of the screen, **do not** apply the full `innerPadding` to the content container. The `innerPadding` includes both top padding (for the TopAppBar) and bottom padding (for system navigation bars), which creates a large gap at the bottom of scrollable lists.
+
+**Problem pattern (creates gap at bottom):**
+```kotlin
+Scaffold(topBar = { ... }) { innerPadding ->
+    Box(modifier = Modifier.padding(innerPadding)) {
+        LazyColumn { ... }
+    }
+}
+```
+
+**Correct pattern (list extends to bottom):**
+```kotlin
+Scaffold(topBar = { ... }) { innerPadding ->
+    Box(modifier = Modifier.padding(top = innerPadding.calculateTopPadding())) {
+        LazyColumn(
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 8.dp,
+                bottom = 8.dp  // Small fixed padding, not innerPadding.calculateBottomPadding()
+            )
+        ) { ... }
+    }
+}
+```
+
+This approach:
+1. Applies only top padding to the Box (accounts for TopAppBar)
+2. Uses small fixed bottom padding in LazyColumn's contentPadding
+3. Allows the list to scroll close to the navigation bar without a large gap
+
 ## Background Execution
 
 WorkManager `PeriodicWorkRequest` with constraints:
@@ -137,3 +173,125 @@ WorkManager `PeriodicWorkRequest` with constraints:
 ## API Key Storage
 
 Store OpenAI API key in `EncryptedSharedPreferences`.
+
+## Ghostwriter Backend
+
+The `ghostwriter/` directory contains a Python FastAPI backend that runs on a server (Synology NAS) to generate digests remotely.
+
+### Local Development
+
+```bash
+cd ghostwriter
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8080
+```
+
+### Docker Build & Deploy (Synology DS920+)
+
+**Important:** The Synology DS920+ uses an Intel x86_64 CPU (linux/amd64). When building on Apple Silicon (M1/M2/M3), you must specify the target platform explicitly.
+
+Build the Docker image:
+```bash
+cd ghostwriter
+docker build --platform linux/amd64 -t ghostwriter:latest -t ghostwriter:$(date +%Y%m%d) .
+```
+
+Save as tar for transfer to NAS:
+```bash
+docker save ghostwriter:latest | gzip > ghostwriter.tar.gz
+```
+
+Transfer to Synology and load:
+```bash
+# Copy to NAS (via SSH, SMB, or Synology web UI)
+scp ghostwriter.tar.gz user@synology:/volume1/docker/
+
+# SSH into NAS and load image
+ssh user@synology
+docker load < /volume1/docker/ghostwriter.tar.gz
+```
+
+Run with docker-compose on the NAS:
+```bash
+cd /volume1/docker/ghostwriter
+docker-compose up -d
+```
+
+Or run directly:
+```bash
+docker run -d \
+  --name ghostwriter \
+  --restart unless-stopped \
+  -p 8158:8080 \
+  -v ghostwriter_data:/app/data \
+  -v ghostwriter_epubs:/app/output \
+  -v ghostwriter_logs:/app/logs \
+  -e API_KEY=your-api-key \
+  -e AI_PROVIDER=gemini \
+  -e GEMINI_API_KEY=your-gemini-key \
+  ghostwriter:latest
+```
+
+### Database Migrations
+
+After updating the codebase, run migrations before deploying:
+```bash
+cd ghostwriter
+python scripts/migrate_add_article_content.py
+```
+
+On Docker, exec into the container:
+```bash
+docker exec -it ghostwriter python scripts/migrate_add_article_content.py
+```
+
+### API Endpoints
+
+- `GET /health` - Health check
+- `GET /feeds` - List feeds
+- `POST /feeds/sync` - Sync feeds from app
+- `POST /digests/trigger` - Trigger digest generation
+- `GET /digests` - List digests
+- `GET /digests/{id}/articles` - Get articles with content
+- `GET /digests/{filename}` - Download EPUB
+
+### Digest Activity Logs
+
+Ghostwriter writes detailed activity logs to `/app/logs/` (Docker volume: `ghostwriter_logs`). Logs are:
+- One file per day: `ghostwriter-YYYY-MM-DD.log`
+- Retained for 30 days
+- Structured for both human reading and AI analysis
+
+**Log format:**
+```
+[2024-01-20 07:00:00 UTC] [INFO] [scheduler] [triggered] Scheduled morning digest triggered
+  Context: {"period": "morning", "digest_id": "abc-123"}
+```
+
+**Components logged:**
+- `scheduler` - Schedule triggers, updates, skips
+- `pipeline` - Digest generation stages and completion
+- `feeds` - Feed fetch results (total/new articles, timing)
+- `articles` - Extraction and summarization results
+- `epub` - EPUB generation
+- `maintenance` - Daily cleanup tasks
+
+**Accessing logs on Docker:**
+```bash
+# View recent logs
+docker exec -it ghostwriter tail -100 /app/logs/ghostwriter.log
+
+# Copy logs to host
+docker cp ghostwriter:/app/logs/. ./ghostwriter-logs/
+
+# On Synology, logs volume is at:
+# /volume1/docker/ghostwriter_logs/
+```
+
+**Using logs for debugging:**
+When investigating issues, the logs show:
+1. Whether scheduled digests triggered
+2. Which feeds were fetched and article counts
+3. Which articles failed extraction or summarization
+4. EPUB generation success and file size
+5. Pipeline duration and any errors with stack traces

@@ -64,6 +64,34 @@ object DatabaseModule {
         }
     }
 
+    private val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            // Add remoteId column to digests table for Ghostwriter sync
+            database.execSQL("ALTER TABLE digests ADD COLUMN remoteId TEXT DEFAULT NULL")
+        }
+    }
+
+    private val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            // Add sync fields for bi-directional feed sync with Ghostwriter
+            database.execSQL(
+                "ALTER TABLE feeds ADD COLUMN serverUpdatedAt INTEGER DEFAULT NULL"
+            )
+            database.execSQL(
+                "ALTER TABLE feeds ADD COLUMN locallyModified INTEGER NOT NULL DEFAULT 0"
+            )
+        }
+    }
+
+    private val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            // Add period field to digests (morning, noon, evening, manual)
+            database.execSQL(
+                "ALTER TABLE digests ADD COLUMN period TEXT DEFAULT NULL"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): EpilogueDatabase {
@@ -72,7 +100,7 @@ object DatabaseModule {
             EpilogueDatabase::class.java,
             "epilog_database"
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
     }
 

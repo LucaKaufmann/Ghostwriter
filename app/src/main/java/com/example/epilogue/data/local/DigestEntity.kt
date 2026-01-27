@@ -17,7 +17,9 @@ data class DigestEntity(
     val briefingCount: Int,
     val fidelityCount: Int,
     val triggerType: TriggerType,
-    val feedNames: String  // Comma-separated feed names
+    val feedNames: String,  // Comma-separated feed names
+    val remoteId: String? = null,  // Ghostwriter digest ID (UUID) if synced from backend
+    val period: String? = null      // morning, noon, evening, or manual
 ) {
     fun toDomain(): Digest = Digest(
         id = id,
@@ -27,7 +29,9 @@ data class DigestEntity(
         briefingCount = briefingCount,
         fidelityCount = fidelityCount,
         triggerType = triggerType,
-        feedNames = if (feedNames.isBlank()) emptyList() else feedNames.split(",").map { it.trim() }
+        feedNames = if (feedNames.isBlank()) emptyList() else feedNames.split(",").map { it.trim() },
+        remoteId = remoteId,
+        period = period
     )
 
     companion object {
@@ -39,7 +43,9 @@ data class DigestEntity(
             briefingCount = digest.briefingCount,
             fidelityCount = digest.fidelityCount,
             triggerType = digest.triggerType,
-            feedNames = digest.feedNames.joinToString(",")
+            feedNames = digest.feedNames.joinToString(","),
+            remoteId = digest.remoteId,
+            period = digest.period
         )
     }
 }

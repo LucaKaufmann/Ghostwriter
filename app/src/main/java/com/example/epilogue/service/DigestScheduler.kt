@@ -22,6 +22,11 @@ import javax.inject.Singleton
 /**
  * Manages scheduling of the daily digest generation using WorkManager.
  * Supports multiple time periods (morning, noon, evening) with independent scheduling.
+ *
+ * When Ghostwriter is configured, scheduled digests are still handled locally
+ * (WorkManager triggers at the scheduled time), but the actual generation
+ * can be delegated to the backend. Manual triggers from the UI are handled
+ * by the ViewModel which decides between local and backend generation.
  */
 @Singleton
 class DigestScheduler @Inject constructor(
@@ -33,6 +38,10 @@ class DigestScheduler @Inject constructor(
         private const val TAG = "DigestScheduler"
         private const val WORK_NAME_PREFIX = "daily_digest_"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
+        private const val SYNC_WORK_NAME = "digest_sync_periodic"
+        private const val SYNC_INTERVAL_MINUTES = 30L
+        private const val FEED_SYNC_WORK_NAME = "feed_sync_periodic"
+        private const val FEED_SYNC_INTERVAL_MINUTES = 15L
     }
 
     private val workManager: WorkManager
@@ -194,4 +203,138 @@ class DigestScheduler @Inject constructor(
      * Gets the work status for immediate digest generation.
      */
     fun getImmediateWorkInfo() = workManager.getWorkInfosForUniqueWorkLiveData(IMMEDIATE_WORK_NAME)
+
+    /**
+     * Checks if Ghostwriter backend should be used for digest generation.
+     * Returns true if Ghostwriter is enabled and has a valid URL configured.
+     */
+    fun shouldUseGhostwriter(): Boolean {
+        return settingsRepository.isGhostwriterConfigured()
+    }
+
+    // ===== Digest Sync from Ghostwriter =====
+
+    /**
+     * Schedules periodic sync of digests from Ghostwriter.
+     * Should be called when Ghostwriter is enabled.
+     */
+    fun scheduleDigestSync() {
+        if (!settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter not configured, not scheduling sync")
+            return
+        }
+
+        val periodicWorkRequest = PeriodicWorkRequestBuilder<DigestSyncWorker>(
+            repeatInterval = SYNC_INTERVAL_MINUTES,
+            repeatIntervalTimeUnit = TimeUnit.MINUTES
+        )
+            .setConstraints(workConstraints)
+            .addTag(DigestSyncWorker.TAG)
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            SYNC_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            periodicWorkRequest
+        )
+
+        Log.i(TAG, "Scheduled periodic digest sync every $SYNC_INTERVAL_MINUTES minutes")
+    }
+
+    /**
+     * Cancels periodic digest sync.
+     * Should be called when Ghostwriter is disabled.
+     */
+    fun cancelDigestSync() {
+        workManager.cancelUniqueWork(SYNC_WORK_NAME)
+        Log.i(TAG, "Cancelled periodic digest sync")
+    }
+
+    /**
+     * Triggers an immediate digest sync from Ghostwriter.
+     * Useful on app launch or when user manually requests sync.
+     */
+    fun syncDigestsNow() {
+        if (!settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter not configured, not syncing")
+            return
+        }
+
+        Log.i(TAG, "Triggering immediate digest sync")
+
+        val oneTimeWorkRequest = OneTimeWorkRequestBuilder<DigestSyncWorker>()
+            .setConstraints(workConstraints)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag(DigestSyncWorker.TAG)
+            .build()
+
+        workManager.enqueueUniqueWork(
+            DigestSyncWorker.WORK_NAME_IMMEDIATE,
+            ExistingWorkPolicy.REPLACE,
+            oneTimeWorkRequest
+        )
+    }
+
+    // ===== Feed Sync with Ghostwriter =====
+
+    /**
+     * Schedules periodic bi-directional feed sync with Ghostwriter.
+     * Should be called when Ghostwriter is enabled.
+     */
+    fun scheduleFeedSync() {
+        if (!settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter not configured, not scheduling feed sync")
+            return
+        }
+
+        val periodicWorkRequest = PeriodicWorkRequestBuilder<FeedSyncWorker>(
+            repeatInterval = FEED_SYNC_INTERVAL_MINUTES,
+            repeatIntervalTimeUnit = TimeUnit.MINUTES
+        )
+            .setConstraints(workConstraints)
+            .addTag(FeedSyncWorker.TAG)
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            FEED_SYNC_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            periodicWorkRequest
+        )
+
+        Log.i(TAG, "Scheduled periodic feed sync every $FEED_SYNC_INTERVAL_MINUTES minutes")
+    }
+
+    /**
+     * Cancels periodic feed sync.
+     * Should be called when Ghostwriter is disabled.
+     */
+    fun cancelFeedSync() {
+        workManager.cancelUniqueWork(FEED_SYNC_WORK_NAME)
+        Log.i(TAG, "Cancelled periodic feed sync")
+    }
+
+    /**
+     * Triggers an immediate bi-directional feed sync with Ghostwriter.
+     * Useful on app launch, after local feed changes, or on manual refresh.
+     */
+    fun syncFeedsNow() {
+        if (!settingsRepository.isGhostwriterConfigured()) {
+            Log.i(TAG, "Ghostwriter not configured, not syncing feeds")
+            return
+        }
+
+        Log.i(TAG, "Triggering immediate feed sync")
+
+        val oneTimeWorkRequest = OneTimeWorkRequestBuilder<FeedSyncWorker>()
+            .setConstraints(workConstraints)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag(FeedSyncWorker.TAG)
+            .build()
+
+        workManager.enqueueUniqueWork(
+            FeedSyncWorker.WORK_NAME_IMMEDIATE,
+            ExistingWorkPolicy.REPLACE,
+            oneTimeWorkRequest
+        )
+    }
 }

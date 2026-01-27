@@ -8,8 +8,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.domain.model.Digest
+import com.example.epilogue.service.DigestScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +28,7 @@ import javax.inject.Inject
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
     private val digestRepository: DigestRepository,
+    private val digestScheduler: DigestScheduler,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -104,6 +107,25 @@ class HistoryViewModel @Inject constructor(
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
+
+    /**
+     * Refresh digests from Ghostwriter.
+     * Triggers a sync and shows a brief loading indicator.
+     */
+    fun refresh() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true) }
+
+            // Trigger digest sync from Ghostwriter
+            digestScheduler.syncDigestsNow()
+
+            // Give the sync worker a moment to start and complete
+            // The actual digest list updates via Flow from the database
+            delay(2000)
+
+            _uiState.update { it.copy(isRefreshing = false) }
+        }
+    }
 }
 
 /**
@@ -112,5 +134,6 @@ class HistoryViewModel @Inject constructor(
 data class HistoryUiState(
     val digestToDelete: Digest? = null,
     val isLoading: Boolean = false,
+    val isRefreshing: Boolean = false,
     val error: String? = null
 )
