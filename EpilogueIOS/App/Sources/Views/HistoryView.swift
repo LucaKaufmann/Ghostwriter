@@ -15,6 +15,7 @@ struct HistoryView: View {
     @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
     @Query(sort: \Digest.generatedAt, order: .reverse) private var digests: [Digest]
     @State private var digestToDelete: Digest?
+    @State private var digestToShare: Digest?
 
     var body: some View {
         NavigationStack {
@@ -36,10 +37,7 @@ struct HistoryView: View {
                             NavigationLink {
                                 DigestDetailView(digest: digest)
                             } label: {
-                                DigestRow(
-                                    digest: digest,
-                                    onOpenExternal: { openInExternalReader(digest) }
-                                )
+                                DigestRow(digest: digest)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
@@ -47,6 +45,14 @@ struct HistoryView: View {
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button {
+                                    digestToShare = digest
+                                } label: {
+                                    Label("Share", systemImage: "square.and.arrow.up")
+                                }
+                                .tint(.gray)
                             }
                         }
                     }
@@ -77,6 +83,15 @@ struct HistoryView: View {
             } message: {
                 Text("This will permanently delete this digest and its EPUB file.")
             }
+            .sheet(isPresented: Binding(
+                get: { digestToShare != nil },
+                set: { if !$0 { digestToShare = nil } }
+            )) {
+                if let digest = digestToShare {
+                    let fileURL = URL(fileURLWithPath: digest.epubFilePath)
+                    ActivityViewController(activityItems: [fileURL])
+                }
+            }
         }
     }
 
@@ -90,26 +105,10 @@ struct HistoryView: View {
         try? modelContext.save()
     }
 
-    private func openInExternalReader(_ digest: Digest) {
-        let fileURL = URL(fileURLWithPath: digest.epubFilePath)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-
-        // Open with system document picker / share sheet
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController {
-            let activityVC = UIActivityViewController(
-                activityItems: [fileURL],
-                applicationActivities: nil
-            )
-            rootViewController.present(activityVC, animated: true)
-        }
-    }
 }
 
 struct DigestRow: View {
     let digest: Digest
-    let onOpenExternal: () -> Void
 
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -162,14 +161,19 @@ struct DigestRow: View {
                         .lineLimit(1)
                 }
             }
-
-            Spacer()
-
-            Button(action: onOpenExternal) {
-                Image(systemName: "square.and.arrow.up")
-            }
-            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
     }
+}
+
+// MARK: - UIKit Share Sheet Wrapper
+
+private struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

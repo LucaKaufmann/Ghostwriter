@@ -198,6 +198,7 @@ private struct TextPaginator {
 struct EinkReaderView: View {
     let articles: [DigestArticle]
     let briefingCount: Int
+    var epubFilePath: String? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var currentPage = 0
@@ -271,6 +272,13 @@ struct EinkReaderView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
                         Text("Back")
+                    }
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if epubFilePath != nil {
+                    ShareLink(item: URL(fileURLWithPath: epubFilePath!)) {
+                        Image(systemName: "square.and.arrow.up")
                     }
                 }
             }
