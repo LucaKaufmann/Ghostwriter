@@ -214,8 +214,31 @@ struct EinkReaderView: View {
     @State private var viewportSize: CGSize = .zero
     @State private var paginatedPages: [PageItem] = []
     @State private var articleFirstPageIndex: [UUID: Int] = [:]
+    @State private var isBuilding = true
+    @State private var loadingPhrase = Self.randomLoadingPhrase()
 
     private var totalPages: Int { max(paginatedPages.count, 1) }
+
+    private static let loadingPhrases = [
+        "Typesetting your daily wisdom…",
+        "Convincing pixels to form words…",
+        "Brewing a fresh pot of paragraphs…",
+        "Herding articles into pages…",
+        "Folding digital paper…",
+        "Teaching electrons to read…",
+        "Sharpening the serif fonts…",
+        "Assembling your personal newspaper…",
+        "Laying out the broadsheet…",
+        "Inking the virtual press…",
+        "Gutenberg would be proud…",
+        "Arranging words in a pleasing manner…",
+        "Calibrating the reading experience…",
+        "Your digest is doing stretches…",
+    ]
+
+    private static func randomLoadingPhrase() -> String {
+        loadingPhrases.randomElement() ?? "Loading…"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -223,7 +246,16 @@ struct EinkReaderView: View {
             GeometryReader { geometry in
                 ZStack {
                     // Page content
-                    if !paginatedPages.isEmpty, currentPage < paginatedPages.count {
+                    if isBuilding {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text(loadingPhrase)
+                                .font(.custom("Georgia-Italic", size: 15))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
+                        }
+                    } else if !paginatedPages.isEmpty, currentPage < paginatedPages.count {
                         pageView(for: paginatedPages[currentPage])
                     } else {
                         emptyView
@@ -260,8 +292,10 @@ struct EinkReaderView: View {
                     }
                 }
                 .onAppear {
-                    viewportSize = geometry.size
-                    rebuildPages()
+                    if paginatedPages.isEmpty {
+                        viewportSize = geometry.size
+                        rebuildPages()
+                    }
                 }
             }
 
@@ -299,6 +333,11 @@ struct EinkReaderView: View {
 
     private func rebuildPages() {
         guard viewportSize.width > 0, viewportSize.height > 0 else { return }
+        if paginatedPages.isEmpty {
+            loadingPhrase = Self.randomLoadingPhrase()
+            isBuilding = true
+        }
+        defer { isBuilding = false }
 
         let padding: CGFloat = 32 // 16pt on each side
         let textSize = CGSize(
