@@ -38,7 +38,7 @@ public final class ArticleRepository: ArticleRepositoryProtocol {
 
     public func fetchAndProcessArticles(from feed: Feed) async throws -> [ProcessedArticle] {
         // Fetch raw articles from feed
-        let rawArticles = try await fetchFeedArticles(feedUrl: feed.url)
+        let rawArticles = try await feedParser.parseFeed(url: feed.url, feedName: feed.name)
 
         // Apply maxArticles limit if set
         let articlesToProcess = feed.maxArticles > 0
