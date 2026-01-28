@@ -121,27 +121,29 @@ private struct TextPaginator {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 8
 
-        // If content looks like plain text (no HTML tags), convert newlines to <br> tags
-        let containsHtmlTags = html.range(of: "<[a-zA-Z][^>]*>", options: .regularExpression) != nil
+        // Convert markdown formatting to HTML first (AI models often return **bold**, *italic*, ## headings)
+        // Must happen on raw text before HTML wrapping so line-start anchors work
+        var processed = html
+            .replacingOccurrences(of: "(?m)^#{3,}\\s*(.+)$", with: "<strong>$1</strong>", options: .regularExpression)
+            .replacingOccurrences(of: "(?m)^##\\s*(.+)$", with: "<strong>$1</strong>", options: .regularExpression)
+            .replacingOccurrences(of: "(?m)^#\\s*(.+)$", with: "<strong>$1</strong>", options: .regularExpression)
+            .replacingOccurrences(of: "\\*\\*(.+?)\\*\\*", with: "<strong>$1</strong>", options: .regularExpression)
+            .replacingOccurrences(of: "(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)", with: "<em>$1</em>", options: .regularExpression)
+
+        // If content looks like plain text (no HTML tags beyond our markdown conversions), convert newlines
+        let containsHtmlTags = processed.range(of: "<(?!/?(?:strong|em)[ >/])[a-zA-Z][^>]*>", options: .regularExpression) != nil
         var htmlContent: String
         if containsHtmlTags {
-            htmlContent = html
+            htmlContent = processed
         } else {
-            // Plain text: wrap in basic HTML to preserve line breaks
-            let escaped = html
-                .replacingOccurrences(of: "&", with: "&amp;")
-                .replacingOccurrences(of: "<", with: "&lt;")
-                .replacingOccurrences(of: ">", with: "&gt;")
-            htmlContent = "<p>" + escaped
+            // Plain text with possible <strong>/<em>: escape & then wrap to preserve line breaks
+            // Don't escape < and > since we already have <strong>/<em> tags
+            htmlContent = "<p>" + processed
+                .replacingOccurrences(of: "&(?!amp;|lt;|gt;|quot;|#)", with: "&amp;", options: .regularExpression)
                 .components(separatedBy: "\n\n")
                 .joined(separator: "</p><p>")
                 .replacingOccurrences(of: "\n", with: "<br>") + "</p>"
         }
-
-        // Convert markdown formatting to HTML (AI models often return **bold** and *italic*)
-        htmlContent = htmlContent
-            .replacingOccurrences(of: "\\*\\*(.+?)\\*\\*", with: "<strong>$1</strong>", options: .regularExpression)
-            .replacingOccurrences(of: "(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)", with: "<em>$1</em>", options: .regularExpression)
 
         // Try HTML parsing
         if let htmlData = htmlContent.data(using: .utf8),
