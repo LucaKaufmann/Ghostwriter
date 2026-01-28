@@ -16,7 +16,7 @@ class SeenArticle(SQLModel, table=True):
     __tablename__ = "seen_articles"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    feed_id: UUID = Field(foreign_key="feeds.id", index=True)
+    feed_id: UUID | None = Field(default=None, foreign_key="feeds.id", index=True)
     guid: str = Field(index=True, description="RSS GUID or URL hash")
     url: str = Field(description="Original article URL")
     title: str = Field(description="Article title for debugging")

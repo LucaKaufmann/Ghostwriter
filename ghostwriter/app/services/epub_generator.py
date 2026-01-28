@@ -87,6 +87,7 @@ class EpubGenerator:
         articles: list[ExtractedArticle],
         period: str,
         date: datetime | None = None,
+        saved_articles: list[ExtractedArticle] | None = None,
     ) -> str:
         """
         Generate an EPUB file from extracted articles.
@@ -136,15 +137,28 @@ class EpubGenerator:
             book.add_item(chapter)
             chapters.append(chapter)
 
+        # Saved Articles section (Wallabag etc.)
+        saved_chapters = []
+        if saved_articles:
+            divider = self._create_section_divider("Saved Articles", css)
+            book.add_item(divider)
+            saved_chapters.append(divider)
+
+            offset = len(articles) + 1
+            for i, article in enumerate(saved_articles, offset):
+                chapter = self._create_chapter(article, i, css)
+                book.add_item(chapter)
+                saved_chapters.append(chapter)
+
         # Build table of contents
-        book.toc = [cover] + chapters
+        book.toc = [cover] + chapters + saved_chapters
 
         # Add navigation files
         book.add_item(epub.EpubNcx())
         book.add_item(epub.EpubNav())
 
         # Set spine (reading order)
-        book.spine = ["nav", cover] + chapters
+        book.spine = ["nav", cover] + chapters + saved_chapters
 
         # Generate filename and save
         filename = f"{date.strftime('%Y-%m-%d')}_{period}.epub"
@@ -186,6 +200,31 @@ class EpubGenerator:
     </div>
 </body>
 </html>"""
+
+    def _create_section_divider(self, title: str, css: epub.EpubItem) -> epub.EpubHtml:
+        """Create a section divider page."""
+        html_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>{title}</title>
+    <link rel="stylesheet" type="text/css" href="style/main.css"/>
+</head>
+<body>
+    <div class="cover">
+        <h1>{title}</h1>
+    </div>
+</body>
+</html>"""
+
+        page = epub.EpubHtml(
+            title=title,
+            file_name="section_saved.xhtml",
+            lang="en",
+        )
+        page.content = html_content.encode("utf-8")
+        page.add_item(css)
+        return page
 
     def _create_chapter(
         self, article: ExtractedArticle, index: int, css: epub.EpubItem
