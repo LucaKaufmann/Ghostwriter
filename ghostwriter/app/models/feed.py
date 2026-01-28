@@ -76,3 +76,14 @@ class FeedSync(SQLModel):
         default="raw", description="Processing mode"
     )
     max_articles: int = Field(default=10, description="Max articles per run")
+
+
+class FeedUpdate(SQLModel):
+    """Schema for updating an existing feed (partial update)."""
+
+    title: str | None = Field(default=None, description="Feed display title")
+    is_active: bool | None = Field(default=None, description="Whether feed is active")
+    mode: Literal["raw", "summarize"] | None = Field(
+        default=None, description="Processing mode"
+    )
+    max_articles: int | None = Field(default=None, description="Max articles per run")

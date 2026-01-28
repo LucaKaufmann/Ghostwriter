@@ -6,9 +6,14 @@ uvicorn[standard]>=0.27.0,<1.0.0
 
 # Database
 sqlmodel>=0.0.14,<1.0.0
+alembic>=1.13.0,<2.0.0
 
 # Configuration
 pydantic-settings>=2.1.0,<3.0.0
+
+# Authentication
+passlib[bcrypt]>=1.7.4,<2.0.0
+python-jose[cryptography]>=3.3.0,<4.0.0
 
 # AI Orchestration
 litellm>=1.30.0,<2.0.0
