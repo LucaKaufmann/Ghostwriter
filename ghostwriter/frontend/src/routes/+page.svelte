@@ -246,11 +246,13 @@
 					{/if}
 				</Button>
 				{#if latestDigest?.filename}
-					<Button variant="outline" asChild>
-						<a href={api.getDigestDownloadUrl(latestDigest.filename)} download>
-							<Download class="mr-2 h-4 w-4" />
-							Download Latest
-						</a>
+					<Button variant="outline">
+						{#snippet child({ props })}
+							<a {...props} href={api.getDigestDownloadUrl(latestDigest.filename)} download>
+								<Download class="mr-2 h-4 w-4" />
+								Download Latest
+							</a>
+						{/snippet}
 					</Button>
 				{/if}
 			</Card.Content>
@@ -376,10 +378,12 @@
 									{digest.status}
 								</Badge>
 								{#if digest.filename && digest.status === 'completed'}
-									<Button variant="ghost" size="icon" asChild>
-										<a href={api.getDigestDownloadUrl(digest.filename)} download>
-											<Download class="h-4 w-4" />
-										</a>
+									<Button variant="ghost" size="icon">
+										{#snippet child({ props })}
+											<a {...props} href={api.getDigestDownloadUrl(digest.filename)} download>
+												<Download class="h-4 w-4" />
+											</a>
+										{/snippet}
 									</Button>
 								{/if}
 							</div>
@@ -389,8 +393,10 @@
 			{/if}
 		</Card.Content>
 		<Card.Footer>
-			<Button variant="outline" class="w-full" asChild>
-				<a href="/digests">View All Digests</a>
+			<Button variant="outline" class="w-full">
+				{#snippet child({ props })}
+					<a {...props} href="/digests">View All Digests</a>
+				{/snippet}
 			</Button>
 		</Card.Footer>
 	</Card.Root>
