@@ -165,16 +165,6 @@ public final class DigestGenerator {
     }
 }
 
-// MARK: - Protocol
-
-public protocol EPUBBuilderProtocol: Sendable {
-    func generateEPUB(
-        articles: [ProcessedArticle],
-        outputPath: String,
-        date: Date
-    ) throws -> URL
-}
-
 // MARK: - Errors
 
 public enum DigestGeneratorError: LocalizedError {

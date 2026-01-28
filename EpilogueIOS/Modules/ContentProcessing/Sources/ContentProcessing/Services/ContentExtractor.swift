@@ -8,9 +8,10 @@
 
 import Foundation
 import SwiftSoup
+import Domain
 
 /// Service for extracting and cleaning article content from HTML
-public final class ContentExtractor: Sendable {
+public final class ContentExtractor: ContentExtractorProtocol, Sendable {
     private let session: URLSession
     private let minWordCount: Int
 
@@ -104,7 +105,7 @@ public final class ContentExtractor: Sendable {
 
         for selector in contentSelectors {
             let elements = try doc.select(selector)
-            if let element = elements.first(), !element.text().isEmpty {
+            if let element = elements.first(), !(try element.text()).isEmpty {
                 return element
             }
         }

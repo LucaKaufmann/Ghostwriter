@@ -11,7 +11,7 @@ import ZIPFoundation
 import Domain
 
 /// Service for building EPUB files from processed articles
-public final class EPUBBuilder {
+public final class EPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
     private let fileManager = FileManager.default
 
     public init() {}

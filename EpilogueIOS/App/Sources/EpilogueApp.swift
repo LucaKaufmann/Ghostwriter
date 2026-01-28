@@ -23,6 +23,7 @@ struct EpilogueApp: App {
 
     // Ghostwriter sync
     @StateObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
+    @StateObject private var localDigestService: LocalDigestService
     @State private var backgroundTaskManager: GhostwriterBackgroundTaskManager?
 
     init() {
@@ -46,6 +47,14 @@ struct EpilogueApp: App {
         )
         _ghostwriterCoordinator = StateObject(wrappedValue: coordinator)
 
+        // Initialize local digest service
+        let localDigest = LocalDigestService(
+            feedRepository: feeds,
+            digestRepository: digests,
+            settingsRepository: settings
+        )
+        _localDigestService = StateObject(wrappedValue: localDigest)
+
         // Register background tasks
         let taskManager = GhostwriterBackgroundTaskManager(coordinator: coordinator)
         taskManager.registerBackgroundTasks()
@@ -57,6 +66,7 @@ struct EpilogueApp: App {
             ContentView()
                 .tint(.primary)
                 .environmentObject(ghostwriterCoordinator)
+                .environmentObject(localDigestService)
                 .environment(\.settingsRepository, settingsRepository)
                 .environment(\.feedRepository, feedRepository)
                 .environment(\.digestRepository, digestRepository)

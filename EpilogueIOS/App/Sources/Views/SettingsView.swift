@@ -12,6 +12,7 @@ import Domain
 struct SettingsView: View {
     @Environment(\.settingsRepository) private var settingsRepository
     @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
+    @EnvironmentObject private var localDigestService: LocalDigestService
 
     @State private var apiKey = ""
     @State private var showApiKey = false
@@ -187,20 +188,25 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             Spacer()
-                            if isGenerating {
+                            if isGenerating || localDigestService.isGenerating {
                                 ProgressView()
                                     .padding(.trailing, 8)
-                                Text("Generating...")
+                                Text(localDigestService.generationStatus.isEmpty ? "Generating..." : localDigestService.generationStatus)
                             } else {
                                 Text("Generate Digest Now")
                             }
                             Spacer()
                         }
                     }
-                    .disabled(isGenerating || ghostwriterCoordinator.isSyncing)
+                    .disabled(isGenerating || localDigestService.isGenerating || ghostwriterCoordinator.isSyncing)
                 } footer: {
                     if ghostwriterEnabled {
                         Text("Will trigger digest generation on the Ghostwriter server")
+                    } else if let error = localDigestService.generationError {
+                        Text("Last error: \(error.localizedDescription)")
+                            .foregroundColor(.red)
+                    } else if let digest = localDigestService.lastGeneratedDigest {
+                        Text("Last digest: \(digest.articleCount) articles")
                     } else {
                         Text("Will generate a digest locally on this device")
                     }
@@ -258,21 +264,18 @@ struct SettingsView: View {
     }
 
     private func generateDigestNow() async {
-        isGenerating = true
-        defer { isGenerating = false }
-
         if ghostwriterEnabled {
             // Trigger on Ghostwriter server
+            isGenerating = true
+            defer { isGenerating = false }
             do {
                 _ = try await ghostwriterCoordinator.triggerDigest(period: "manual")
-                // Could poll for status here
             } catch {
                 // Handle error
             }
         } else {
-            // Local generation - would call DigestGenerator
-            // For now just simulate
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            // Local generation
+            await localDigestService.generateDigest()
         }
     }
 }

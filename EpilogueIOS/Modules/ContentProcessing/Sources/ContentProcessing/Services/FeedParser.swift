@@ -11,7 +11,7 @@ import FeedKit
 import Domain
 
 /// Service for parsing RSS and Atom feeds
-public final class FeedParser: Sendable {
+public final class EpilogueFeedParser: Sendable {
     private let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -33,7 +33,7 @@ public final class FeedParser: Sendable {
         }
 
         // Parse feed
-        let parser = FeedParser(data: data)
+        let parser = FeedKit.FeedParser(data: data)
         let result = parser.parse()
 
         switch result {
@@ -57,7 +57,7 @@ public final class FeedParser: Sendable {
             return false
         }
 
-        let parser = FeedParser(data: data)
+        let parser = FeedKit.FeedParser(data: data)
         let result = parser.parse()
 
         switch result {
@@ -71,7 +71,7 @@ public final class FeedParser: Sendable {
     // MARK: - Private Helpers
 
     private func extractArticles(
-        from feed: Feed,
+        from feed: FeedKit.Feed,
         feedUrl: String,
         feedName: String
     ) throws -> [RawArticle] {
@@ -147,13 +147,13 @@ public final class FeedParser: Sendable {
     ) -> [RawArticle] {
         guard let items = feed.items else { return [] }
 
-        return items.compactMap { item in
+        return items.compactMap { item -> RawArticle? in
             guard let title = item.title,
                   let url = item.url else {
                 return nil
             }
 
-            let author = item.authors?.first?.name ?? item.author?.name ?? ""
+            let author = item.author?.name ?? ""
             let publishedAt = item.datePublished
 
             return RawArticle(
