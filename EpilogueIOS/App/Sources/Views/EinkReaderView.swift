@@ -123,7 +123,7 @@ private struct TextPaginator {
 
         // If content looks like plain text (no HTML tags), convert newlines to <br> tags
         let containsHtmlTags = html.range(of: "<[a-zA-Z][^>]*>", options: .regularExpression) != nil
-        let htmlContent: String
+        var htmlContent: String
         if containsHtmlTags {
             htmlContent = html
         } else {
@@ -137,6 +137,11 @@ private struct TextPaginator {
                 .joined(separator: "</p><p>")
                 .replacingOccurrences(of: "\n", with: "<br>") + "</p>"
         }
+
+        // Convert markdown formatting to HTML (AI models often return **bold** and *italic*)
+        htmlContent = htmlContent
+            .replacingOccurrences(of: "\\*\\*(.+?)\\*\\*", with: "<strong>$1</strong>", options: .regularExpression)
+            .replacingOccurrences(of: "(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)", with: "<em>$1</em>", options: .regularExpression)
 
         // Try HTML parsing
         if let htmlData = htmlContent.data(using: .utf8),
