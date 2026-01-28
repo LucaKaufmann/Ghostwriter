@@ -174,6 +174,46 @@ struct GhostwriterSettingsView: View {
                     }
                 }
             }
+
+            // MARK: - Integrations
+            if viewModel.wallabagIntegration != nil || viewModel.newslettersIntegration != nil {
+                Section("Integrations") {
+                    if let wallabag = viewModel.wallabagIntegration {
+                        HStack {
+                            Label("Wallabag", systemImage: "bookmark.fill")
+                            Spacer()
+                            if wallabag.enabled {
+                                Text("Enabled")
+                                    .foregroundColor(.green)
+                            } else {
+                                Text("Not configured")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    if let newsletters = viewModel.newslettersIntegration {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Label("Newsletters", systemImage: "envelope.fill")
+                                Spacer()
+                                if newsletters.enabled {
+                                    Text("Enabled")
+                                        .foregroundColor(.green)
+                                } else {
+                                    Text("Not configured")
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            if newsletters.enabled, let label = newsletters.label {
+                                Text("Gmail label: \(label)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
         }
         .navigationTitle("Ghostwriter")
         .alert("API Key", isPresented: $showingAPIKeyAlert) {
@@ -232,6 +272,8 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var serverHealth: HealthResponse?
     @Published var clientStatus: ClientStatusResponse?
     @Published var serverSchedule: GhostwriterSchedule?
+    @Published var wallabagIntegration: IntegrationStatus?
+    @Published var newslettersIntegration: IntegrationStatus?
     @Published var lastSyncTime: Date?
     @Published var isTesting = false
     @Published var isSyncing = false
@@ -317,8 +359,9 @@ class GhostwriterSettingsViewModel: ObservableObject {
             serverHealth = health
             connectionStatus = health.isHealthy ? .connected : .failed
 
-            // Also get client status
+            // Also get client status and integrations
             await refreshClientStatus()
+            await fetchIntegrationStatus()
         } catch {
             connectionStatus = .failed
             connectionError = error.localizedDescription
@@ -359,6 +402,18 @@ class GhostwriterSettingsViewModel: ObservableObject {
             clientStatus = try await client.getClientStatus()
         } catch {
             // Ignore status errors
+        }
+    }
+
+    private func fetchIntegrationStatus() async {
+        do {
+            let apiKey = try await settingsRepository.getGhostwriterAPIKey()
+            let client = try GhostwriterClient(baseURLString: serverURL, apiKey: apiKey)
+            let config = try await client.getConfig()
+            wallabagIntegration = config.wallabag
+            newslettersIntegration = config.newsletters
+        } catch {
+            // Ignore integration status errors
         }
     }
 }

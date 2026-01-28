@@ -5,8 +5,9 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app import __version__
 from app.api.health import set_startup_time
@@ -20,6 +21,33 @@ from app.worker.scheduler import setup_scheduler, shutdown_scheduler
 settings = get_settings()
 configure_logging()
 logger = logging.getLogger(__name__)
+
+
+class ProxyHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to handle proxy headers (X-Forwarded-Proto, X-Forwarded-Host).
+
+    This ensures that URL generation (e.g., for OAuth callbacks) uses the
+    correct scheme (https) when behind a reverse proxy like Cloudflare or nginx.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        # Check for X-Forwarded-Proto header
+        forwarded_proto = request.headers.get("x-forwarded-proto")
+        if forwarded_proto:
+            # Update the scope to use the forwarded scheme
+            request.scope["scheme"] = forwarded_proto
+
+        # Check for X-Forwarded-Host header
+        forwarded_host = request.headers.get("x-forwarded-host")
+        if forwarded_host:
+            # Update headers to use forwarded host for URL generation
+            # This modifies the scope so request.url uses the correct host
+            headers = dict(request.scope["headers"])
+            headers[b"host"] = forwarded_host.encode()
+            request.scope["headers"] = list(headers.items())
+
+        return await call_next(request)
 
 
 @asynccontextmanager
@@ -64,6 +92,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Proxy headers middleware (for correct URL generation behind reverse proxy)
+app.add_middleware(ProxyHeadersMiddleware)
 
 # CORS middleware (for development/debugging)
 app.add_middleware(

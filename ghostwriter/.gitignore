@@ -60,6 +60,11 @@ output/
 # Docker
 .docker/
 
+# Deploy settings (contains local settings)
+deploy.sh
+.env.deploy
+ghostwriter.tar.gz
+
 # OS
 .DS_Store
 Thumbs.db
