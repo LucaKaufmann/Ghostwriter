@@ -11,6 +11,8 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.models.digest import Digest
 from app.services.llm_service import LLMService
+from app.services.newsletter_service import NewsletterService
+from app.services.wallabag_service import WallabagService
 
 router = APIRouter()
 
@@ -27,6 +29,13 @@ class HealthResponse(BaseModel):
     ai_status: str | None = None
 
 
+class IntegrationStatus(BaseModel):
+    """Status of an external integration."""
+
+    enabled: bool
+    label: str | None = None  # For newsletters, the Gmail label
+
+
 class ConfigResponse(BaseModel):
     """Configuration response."""
 
@@ -39,6 +48,9 @@ class ConfigResponse(BaseModel):
     schedule_evening: str
     digest_retention_days: int
     max_articles_per_digest: int
+    # Integrations
+    wallabag: IntegrationStatus | None = None
+    newsletters: IntegrationStatus | None = None
 
 
 # Track startup time
@@ -96,9 +108,19 @@ async def get_config(
     """
     Get current service configuration.
 
-    Returns schedule settings, AI configuration, and retention policies.
-    Does not require authentication.
+    Returns schedule settings, AI configuration, retention policies,
+    and integration status. Does not require authentication.
     """
+    # Check integration status
+    wallabag_service = WallabagService(settings)
+    newsletter_service = NewsletterService(settings)
+
+    wallabag_status = IntegrationStatus(enabled=wallabag_service.is_configured)
+    newsletter_status = IntegrationStatus(
+        enabled=newsletter_service.is_configured,
+        label=settings.gmail_label if newsletter_service.is_configured else None,
+    )
+
     return ConfigResponse(
         timezone=settings.timezone,
         ai_provider=settings.ai_provider,
@@ -109,4 +131,6 @@ async def get_config(
         schedule_evening=settings.schedule_evening,
         digest_retention_days=settings.digest_retention_days,
         max_articles_per_digest=settings.max_articles_per_digest,
+        wallabag=wallabag_status,
+        newsletters=newsletter_status,
     )
