@@ -24,6 +24,7 @@ struct EpilogueApp: App {
     // Ghostwriter sync
     @StateObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
     @StateObject private var localDigestService: LocalDigestService
+    @State private var localDigestScheduler: LocalDigestScheduler?
     @State private var backgroundTaskManager: GhostwriterBackgroundTaskManager?
 
     init() {
@@ -59,6 +60,15 @@ struct EpilogueApp: App {
         let taskManager = GhostwriterBackgroundTaskManager(coordinator: coordinator)
         taskManager.registerBackgroundTasks()
         _backgroundTaskManager = State(initialValue: taskManager)
+
+        // Register local digest scheduler
+        let scheduler = LocalDigestScheduler(
+            feedRepository: feeds,
+            digestRepository: digests,
+            settingsRepository: settings
+        )
+        scheduler.registerBackgroundTask()
+        _localDigestScheduler = State(initialValue: scheduler)
     }
 
     var body: some Scene {
@@ -77,6 +87,9 @@ struct EpilogueApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
                     // Schedule background tasks when app goes to background
                     backgroundTaskManager?.scheduleBackgroundTasks()
+                    Task {
+                        await localDigestScheduler?.scheduleNextDigest()
+                    }
                 }
         }
         .modelContainer(persistenceController.container)
