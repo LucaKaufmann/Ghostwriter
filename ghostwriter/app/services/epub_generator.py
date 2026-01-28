@@ -88,6 +88,7 @@ class EpubGenerator:
         period: str,
         date: datetime | None = None,
         saved_articles: list[ExtractedArticle] | None = None,
+        newsletter_articles: list[ExtractedArticle] | None = None,
     ) -> str:
         """
         Generate an EPUB file from extracted articles.
@@ -150,15 +151,29 @@ class EpubGenerator:
                 book.add_item(chapter)
                 saved_chapters.append(chapter)
 
+        # Newsletter section
+        newsletter_chapters = []
+        if newsletter_articles:
+            divider = self._create_section_divider(
+                "Newsletters", css, file_name="section_newsletters.xhtml"
+            )
+            book.add_item(divider)
+            newsletter_chapters.append(divider)
+
+            for i, article in enumerate(newsletter_articles):
+                chapter = self._create_newsletter_chapter(article, i, css)
+                book.add_item(chapter)
+                newsletter_chapters.append(chapter)
+
         # Build table of contents
-        book.toc = [cover] + chapters + saved_chapters
+        book.toc = [cover] + chapters + saved_chapters + newsletter_chapters
 
         # Add navigation files
         book.add_item(epub.EpubNcx())
         book.add_item(epub.EpubNav())
 
         # Set spine (reading order)
-        book.spine = ["nav", cover] + chapters + saved_chapters
+        book.spine = ["nav", cover] + chapters + saved_chapters + newsletter_chapters
 
         # Generate filename and save
         filename = f"{date.strftime('%Y-%m-%d')}_{period}.epub"
@@ -201,7 +216,9 @@ class EpubGenerator:
 </body>
 </html>"""
 
-    def _create_section_divider(self, title: str, css: epub.EpubItem) -> epub.EpubHtml:
+    def _create_section_divider(
+        self, title: str, css: epub.EpubItem, file_name: str = "section_saved.xhtml"
+    ) -> epub.EpubHtml:
         """Create a section divider page."""
         html_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -219,7 +236,7 @@ class EpubGenerator:
 
         page = epub.EpubHtml(
             title=title,
-            file_name="section_saved.xhtml",
+            file_name=file_name,
             lang="en",
         )
         page.content = html_content.encode("utf-8")
@@ -282,6 +299,50 @@ class EpubGenerator:
         chapter = epub.EpubHtml(
             title=article.title,
             file_name=f"chapter_{index:03d}.xhtml",
+            lang="en",
+        )
+        chapter.content = html_content.encode("utf-8")
+        chapter.add_item(css)
+
+        return chapter
+
+    def _create_newsletter_chapter(
+        self, article: ExtractedArticle, index: int, css: epub.EpubItem
+    ) -> epub.EpubHtml:
+        """
+        Create a chapter for a newsletter article.
+
+        Inserts article content as raw HTML (already cleaned) rather than escaping it.
+        """
+        def escape_html(text: str) -> str:
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        title = escape_html(article.title)
+
+        html_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>{title}</title>
+    <link rel="stylesheet" type="text/css" href="style/main.css"/>
+</head>
+<body>
+    <div class="article">
+        <h1>{title}<span class="summary-badge">Newsletter</span></h1>
+        <div class="article-meta">
+            {f'<span>From {escape_html(article.author)}</span> | ' if article.author else ''}
+            <span>{article.word_count} words</span>
+        </div>
+        <div class="article-content">
+            {article.content}
+        </div>
+    </div>
+</body>
+</html>"""
+
+        chapter = epub.EpubHtml(
+            title=article.title,
+            file_name=f"newsletter_{index:03d}.xhtml",
             lang="en",
         )
         chapter.content = html_content.encode("utf-8")
