@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 
 from app.core.database import get_session
 from app.core.security import verify_api_key
-from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync
+from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync, FeedUpdate
 
 router = APIRouter()
 
@@ -223,6 +223,37 @@ async def get_feed(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Feed not found",
         )
+    return feed
+
+
+@router.put("/{feed_id}", response_model=FeedRead, dependencies=[Depends(verify_api_key)])
+async def update_feed(
+    feed_id: UUID,
+    feed_data: FeedUpdate,
+    session: Session = Depends(get_session),
+) -> Feed:
+    """
+    Update an existing feed.
+
+    Only provided fields will be updated (partial update).
+    """
+    feed = session.get(Feed, feed_id)
+    if not feed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Feed not found",
+        )
+
+    # Update only provided fields
+    update_data = feed_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(feed, field, value)
+
+    feed.updated_at = datetime.utcnow()
+    session.add(feed)
+    session.commit()
+    session.refresh(feed)
+
     return feed
 
 
