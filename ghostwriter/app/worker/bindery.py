@@ -19,6 +19,7 @@ from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
 from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
+from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,36 @@ class BinderyPipeline:
                         context={"error": str(e)},
                     )
 
-            if not all_articles and not wallabag_articles:
+            # Fetch newsletter emails from Gmail
+            newsletter_articles: list[ExtractedArticle] = []
+            newsletter_message_ids: list[str] = []
+            newsletter_service = NewsletterService(self.settings)
+
+            if newsletter_service.is_configured:
+                try:
+                    # Get message IDs before fetching (for mark_processed later)
+                    newsletter_message_ids = await newsletter_service.get_fetched_message_ids()
+                    nl_raw = await newsletter_service.fetch_newsletters()
+                    digest_logger.info(
+                        f"Newsletters: fetched {len(nl_raw)} emails",
+                        component="feeds",
+                        event="newsletters_fetched",
+                        context={"count": len(nl_raw)},
+                    )
+                    for nl in nl_raw:
+                        if not await self._is_seen_wallabag(nl.guid):
+                            newsletter_articles.append(nl)
+                            await self._mark_seen_wallabag(nl.guid, nl.url, nl.title)
+                except Exception as e:
+                    logger.warning(f"Newsletter fetch failed, continuing without: {e}")
+                    digest_logger.error(
+                        f"Newsletter fetch failed: {e}",
+                        component="feeds",
+                        event="newsletters_failed",
+                        context={"error": str(e)},
+                    )
+
+            if not all_articles and not wallabag_articles and not newsletter_articles:
                 logger.warning("No new articles found")
                 digest_logger.pipeline_no_articles(str(self.digest_id), "No new articles found across all feeds")
                 await self._complete(0)
@@ -258,7 +288,7 @@ class BinderyPipeline:
                         enriched_wallabag.append(article)
                 wallabag_articles = enriched_wallabag
 
-            if not extracted_articles and not wallabag_articles:
+            if not extracted_articles and not wallabag_articles and not newsletter_articles:
                 logger.warning("No articles extracted successfully")
                 digest_logger.pipeline_no_articles(str(self.digest_id), "All article extractions failed")
                 await self._complete(0)
@@ -266,7 +296,7 @@ class BinderyPipeline:
 
             # Stage 4: Compile EPUB
             await self._update_stage("compiling")
-            total_count = len(extracted_articles) + len(wallabag_articles)
+            total_count = len(extracted_articles) + len(wallabag_articles) + len(newsletter_articles)
             digest_logger.epub_generation_started(str(self.digest_id), total_count)
 
             # Get just the articles for EPUB generation
@@ -276,6 +306,7 @@ class BinderyPipeline:
                 articles_for_epub,
                 period=period,
                 saved_articles=wallabag_articles if wallabag_articles else None,
+                newsletter_articles=newsletter_articles if newsletter_articles else None,
             )
 
             # Log EPUB file size
@@ -292,6 +323,19 @@ class BinderyPipeline:
             if wallabag_articles:
                 await self._save_wallabag_article_records(wallabag_articles, len(extracted_articles))
 
+            # Save newsletter article records
+            if newsletter_articles:
+                await self._save_newsletter_article_records(
+                    newsletter_articles, len(extracted_articles) + len(wallabag_articles)
+                )
+
+            # Mark newsletter emails as read
+            if newsletter_service.is_configured and newsletter_message_ids:
+                try:
+                    await newsletter_service.mark_processed(newsletter_message_ids)
+                except Exception:
+                    logger.warning("Failed to mark newsletter emails as read")
+
             # Mark Wallabag entries as processed
             if wallabag_service.is_configured and wallabag_entry_ids:
                 for entry_id in wallabag_entry_ids:
@@ -300,7 +344,10 @@ class BinderyPipeline:
                     except Exception:
                         logger.warning(f"Failed to mark wallabag entry {entry_id} as processed")
 
-            await self._complete(len(extracted_articles) + len(wallabag_articles), epub_path)
+            await self._complete(
+                len(extracted_articles) + len(wallabag_articles) + len(newsletter_articles),
+                epub_path,
+            )
 
         except Exception as e:
             logger.exception(f"Pipeline failed: {e}")
@@ -415,6 +462,29 @@ class BinderyPipeline:
                     content=article.content,
                     author=article.author,
                     feed_title="Wallabag",
+                    sort_order=sort_order,
+                )
+                session.add(record)
+            session.commit()
+
+    async def _save_newsletter_article_records(
+        self, articles: list[ExtractedArticle], offset: int
+    ) -> None:
+        """Save DigestArticle records for newsletter articles."""
+        with Session(engine) as session:
+            for sort_order, article in enumerate(articles, offset):
+                record = DigestArticle(
+                    digest_id=self.digest_id,
+                    feed_id=None,
+                    title=article.title,
+                    url=article.url,
+                    mode="raw",
+                    word_count=article.word_count,
+                    ai_failed=False,
+                    processing_ms=article.processing_ms,
+                    content=article.content,
+                    author=article.author,
+                    feed_title="Newsletter",
                     sort_order=sort_order,
                 )
                 session.add(record)
