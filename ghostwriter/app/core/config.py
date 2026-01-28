@@ -66,6 +66,16 @@ class Settings(BaseSettings):
     webhook_on_complete: bool = Field(default=True, description="Notify on success")
     webhook_on_failure: bool = Field(default=True, description="Notify on failure")
 
+    # Wallabag
+    wallabag_url: str = Field(default="", description="Wallabag instance URL")
+    wallabag_client_id: str = Field(default="", description="Wallabag OAuth client ID")
+    wallabag_client_secret: str = Field(default="", description="Wallabag OAuth client secret")
+    wallabag_username: str = Field(default="", description="Wallabag username")
+    wallabag_password: str = Field(default="", description="Wallabag password")
+    wallabag_mode: str = Field(default="raw", description="Processing mode: raw or summarize")
+    wallabag_max_articles: int = Field(default=20, description="Max Wallabag articles per digest")
+    wallabag_tag_on_process: str = Field(default="ghostwriter", description="Tag added after processing")
+
     # Paths
     data_dir: str = Field(default="/app/data", description="Database directory")
     output_dir: str = Field(default="/app/output", description="EPUB output directory")

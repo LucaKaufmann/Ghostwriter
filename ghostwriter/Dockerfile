@@ -40,6 +40,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
 COPY --chown=ghostwriter:ghostwriter scripts/ ./scripts/
+COPY --chown=ghostwriter:ghostwriter entrypoint.sh ./entrypoint.sh
 
 # Create data directories and pre-compile Python bytecode for faster startup
 RUN mkdir -p /app/data /app/output /app/logs && \
@@ -63,5 +64,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-# Run the application with optimized Python (-OO strips docstrings and asserts)
-CMD ["python", "-OO", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run migrations then start the application
+ENTRYPOINT ["./entrypoint.sh"]
