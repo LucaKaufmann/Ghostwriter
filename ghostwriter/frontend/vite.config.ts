@@ -9,16 +9,10 @@ export default defineConfig({
 			// Proxy API requests to FastAPI backend during development
 			'/api': {
 				target: 'http://localhost:8080',
-				changeOrigin: true,
-				rewrite: (path) => path.replace(/^\/api/, '')
-			},
-			// Also proxy health endpoint
-			'/health': {
-				target: 'http://localhost:8080',
 				changeOrigin: true
 			},
-			// Proxy config endpoint
-			'/config': {
+			// Root health endpoint for Docker healthcheck
+			'/health': {
 				target: 'http://localhost:8080',
 				changeOrigin: true
 			}

@@ -118,8 +118,7 @@ app.include_router(api_router, prefix="/api")
 @app.get("/health")
 async def root_health():
     """Root health check for Docker healthcheck and backwards compatibility."""
-    from app.api.health import health_check
-    return await health_check()
+    return {"status": "healthy"}
 
 
 # Serve frontend static files if the build directory exists

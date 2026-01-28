@@ -170,14 +170,14 @@ class ApiClient {
 
 	async getHealth(): Promise<HealthResponse> {
 		// Health endpoint doesn't need auth
-		const response = await fetch('/health');
+		const response = await fetch(`${BASE_URL}/health`);
 		if (!response.ok) throw new ApiError(response.status, { detail: 'Health check failed' });
 		return response.json();
 	}
 
 	async getPublicConfig(): Promise<ConfigResponse> {
 		// Config endpoint doesn't need auth
-		const response = await fetch('/config');
+		const response = await fetch(`${BASE_URL}/config`);
 		if (!response.ok) throw new ApiError(response.status, { detail: 'Config fetch failed' });
 		return response.json();
 	}
