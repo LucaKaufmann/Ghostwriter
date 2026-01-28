@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     wallabag_max_articles: int = Field(default=20, description="Max Wallabag articles per digest")
     wallabag_tag_on_process: str = Field(default="ghostwriter", description="Tag added after processing")
 
+    # Gmail Newsletters
+    gmail_client_id: str = Field(default="", description="Google OAuth client ID")
+    gmail_client_secret: str = Field(default="", description="Google OAuth client secret")
+    gmail_label: str = Field(default="Ghostwriter", description="Gmail label to fetch newsletters from")
+    gmail_max_articles: int = Field(default=20, description="Max newsletter emails per digest")
+
     # Paths
     data_dir: str = Field(default="/app/data", description="Database directory")
     output_dir: str = Field(default="/app/output", description="EPUB output directory")

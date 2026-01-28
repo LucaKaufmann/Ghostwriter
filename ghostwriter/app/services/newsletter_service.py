@@ -30,6 +30,7 @@ class NewsletterService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._token_path = os.path.join(self.settings.data_dir, "gmail_token.json")
+        self._pending_oauth_path = os.path.join(self.settings.data_dir, "gmail_oauth_pending.json")
 
     @property
     def is_configured(self) -> bool:
@@ -50,7 +51,7 @@ class NewsletterService:
         )
 
     def get_auth_url(self, redirect_uri: str) -> str:
-        """Build Google OAuth consent URL."""
+        """Build Google OAuth consent URL and store redirect_uri for callback."""
         params = {
             "client_id": self.settings.gmail_client_id,
             "redirect_uri": redirect_uri,
@@ -59,9 +60,32 @@ class NewsletterService:
             "access_type": "offline",
             "prompt": "consent",
         }
-        qs = "&".join(f"{k}={httpx.QueryParams({k: v})}" for k, v in params.items())
-        # Use httpx to properly encode
+        # Store redirect_uri for use in callback
+        os.makedirs(os.path.dirname(self._pending_oauth_path), exist_ok=True)
+        with open(self._pending_oauth_path, "w") as f:
+            json.dump({"redirect_uri": redirect_uri}, f)
+
         return str(httpx.URL(GOOGLE_AUTH_URL, params=params))
+
+    async def exchange_code_with_callback(self, code: str) -> None:
+        """Exchange authorization code using the stored redirect_uri from get_auth_url."""
+        if not os.path.exists(self._pending_oauth_path):
+            raise ValueError("No pending OAuth flow found. Start with get_auth_url first.")
+
+        with open(self._pending_oauth_path) as f:
+            pending = json.load(f)
+
+        redirect_uri = pending.get("redirect_uri")
+        if not redirect_uri:
+            raise ValueError("No redirect_uri in pending OAuth state")
+
+        await self.exchange_code(code, redirect_uri)
+
+        # Clean up pending state
+        try:
+            os.remove(self._pending_oauth_path)
+        except OSError:
+            pass
 
     async def exchange_code(self, code: str, redirect_uri: str) -> None:
         """Exchange authorization code for tokens and save to disk."""
