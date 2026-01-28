@@ -19,6 +19,7 @@ from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
 from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
+from app.services.wallabag_service import WallabagService
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,52 @@ class BinderyPipeline:
                 # Delay between feeds
                 await asyncio.sleep(self.settings.fetch_delay_ms / 1000)
 
-            if not all_articles:
+            # Fetch Wallabag articles (separate from RSS pipeline)
+            wallabag_articles: list[ExtractedArticle] = []
+            wallabag_entry_ids: list[int] = []
+            wallabag_service = WallabagService(self.settings)
+
+            if wallabag_service.is_configured:
+                try:
+                    wb_raw = await wallabag_service.fetch_unread_articles()
+                    digest_logger.info(
+                        f"Wallabag: fetched {len(wb_raw)} unread articles",
+                        component="feeds",
+                        event="wallabag_fetched",
+                        context={"count": len(wb_raw)},
+                    )
+                    for wb in wb_raw:
+                        guid = f"wallabag-{wb['id']}"
+                        if not await self._is_seen_wallabag(guid):
+                            content = wb["content"] or ""
+                            # Strip HTML for plain text
+                            import re
+                            plain = re.sub(r"<[^>]+>", "", content)
+                            word_count = ContentProcessor.count_words(plain)
+
+                            wallabag_articles.append(ExtractedArticle(
+                                guid=guid,
+                                url=wb["url"],
+                                title=wb["title"],
+                                content=plain,
+                                author=wb.get("domain_name"),
+                                word_count=word_count,
+                                is_summary=False,
+                                ai_failed=False,
+                                processing_ms=0,
+                            ))
+                            wallabag_entry_ids.append(wb["id"])
+                            await self._mark_seen_wallabag(guid, wb["url"], wb["title"])
+                except Exception as e:
+                    logger.warning(f"Wallabag fetch failed, continuing with RSS only: {e}")
+                    digest_logger.error(
+                        f"Wallabag fetch failed: {e}",
+                        component="feeds",
+                        event="wallabag_failed",
+                        context={"error": str(e)},
+                    )
+
+            if not all_articles and not wallabag_articles:
                 logger.warning("No new articles found")
                 digest_logger.pipeline_no_articles(str(self.digest_id), "No new articles found across all feeds")
                 await self._complete(0)
@@ -190,7 +236,29 @@ class BinderyPipeline:
                     articles_enriched=self._get_articles_enriched() + 1
                 )
 
-            if not extracted_articles:
+            # Enrich Wallabag articles with AI if configured
+            if wallabag_articles and self.settings.wallabag_mode == "summarize":
+                await self._update_stage("enriching")
+                enriched_wallabag = []
+                for article in wallabag_articles:
+                    summary_content, ai_failed = await self.llm_service.summarize(article.content)
+                    if not ai_failed:
+                        enriched_wallabag.append(ExtractedArticle(
+                            guid=article.guid,
+                            url=article.url,
+                            title=article.title,
+                            content=summary_content,
+                            author=article.author,
+                            word_count=ContentProcessor.count_words(summary_content),
+                            is_summary=True,
+                            ai_failed=False,
+                            processing_ms=article.processing_ms,
+                        ))
+                    else:
+                        enriched_wallabag.append(article)
+                wallabag_articles = enriched_wallabag
+
+            if not extracted_articles and not wallabag_articles:
                 logger.warning("No articles extracted successfully")
                 digest_logger.pipeline_no_articles(str(self.digest_id), "All article extractions failed")
                 await self._complete(0)
@@ -198,13 +266,16 @@ class BinderyPipeline:
 
             # Stage 4: Compile EPUB
             await self._update_stage("compiling")
-            digest_logger.epub_generation_started(str(self.digest_id), len(extracted_articles))
+            total_count = len(extracted_articles) + len(wallabag_articles)
+            digest_logger.epub_generation_started(str(self.digest_id), total_count)
 
             # Get just the articles for EPUB generation
             articles_for_epub = [a for _, a in extracted_articles]
 
             epub_path = self.epub_generator.generate(
-                articles_for_epub, period=period
+                articles_for_epub,
+                period=period,
+                saved_articles=wallabag_articles if wallabag_articles else None,
             )
 
             # Log EPUB file size
@@ -217,7 +288,19 @@ class BinderyPipeline:
             # Save DigestArticle records
             await self._save_article_records(extracted_articles)
 
-            await self._complete(len(extracted_articles), epub_path)
+            # Save Wallabag article records
+            if wallabag_articles:
+                await self._save_wallabag_article_records(wallabag_articles, len(extracted_articles))
+
+            # Mark Wallabag entries as processed
+            if wallabag_service.is_configured and wallabag_entry_ids:
+                for entry_id in wallabag_entry_ids:
+                    try:
+                        await wallabag_service.mark_processed(entry_id)
+                    except Exception:
+                        logger.warning(f"Failed to mark wallabag entry {entry_id} as processed")
+
+            await self._complete(len(extracted_articles) + len(wallabag_articles), epub_path)
 
         except Exception as e:
             logger.exception(f"Pipeline failed: {e}")
@@ -286,6 +369,55 @@ class BinderyPipeline:
                 title=article.title,
             )
             session.add(seen)
+            session.commit()
+
+    async def _is_seen_wallabag(self, guid: str) -> bool:
+        """Check if a Wallabag article has been seen recently."""
+        cutoff = datetime.utcnow() - timedelta(
+            days=self.settings.seen_article_retention_days
+        )
+        with Session(engine) as session:
+            statement = (
+                select(SeenArticle)
+                .where(SeenArticle.feed_id == None)  # noqa: E711
+                .where(SeenArticle.guid == guid)
+                .where(SeenArticle.seen_at > cutoff)
+            )
+            return session.exec(statement).first() is not None
+
+    async def _mark_seen_wallabag(self, guid: str, url: str, title: str) -> None:
+        """Mark a Wallabag article as seen."""
+        with Session(engine) as session:
+            seen = SeenArticle(
+                feed_id=None,
+                guid=guid,
+                url=url,
+                title=title,
+            )
+            session.add(seen)
+            session.commit()
+
+    async def _save_wallabag_article_records(
+        self, articles: list[ExtractedArticle], offset: int
+    ) -> None:
+        """Save DigestArticle records for Wallabag articles."""
+        with Session(engine) as session:
+            for sort_order, article in enumerate(articles, offset):
+                record = DigestArticle(
+                    digest_id=self.digest_id,
+                    feed_id=None,
+                    title=article.title,
+                    url=article.url,
+                    mode="summarized" if article.is_summary else "raw",
+                    word_count=article.word_count,
+                    ai_failed=article.ai_failed,
+                    processing_ms=article.processing_ms,
+                    content=article.content,
+                    author=article.author,
+                    feed_title="Wallabag",
+                    sort_order=sort_order,
+                )
+                session.add(record)
             session.commit()
 
     async def _save_article_records(

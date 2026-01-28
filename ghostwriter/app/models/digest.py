@@ -125,4 +125,4 @@ class DigestArticle(DigestArticleBase, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     digest_id: UUID = Field(foreign_key="digests.id", index=True)
-    feed_id: UUID = Field(foreign_key="feeds.id", index=True)
+    feed_id: UUID | None = Field(default=None, foreign_key="feeds.id", index=True)
