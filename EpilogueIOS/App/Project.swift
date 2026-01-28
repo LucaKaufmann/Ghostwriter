@@ -37,6 +37,9 @@ let project = Project(
             dependencies: [
                 .project(target: "Domain", path: "../Modules/Domain"),
                 .project(target: "Data", path: "../Modules/Data"),
+                .project(target: "ContentProcessing", path: "../Modules/ContentProcessing"),
+                .project(target: "EPUBGeneration", path: "../Modules/EPUBGeneration"),
+                .project(target: "AIServices", path: "../Modules/AIServices"),
                 .project(target: "GhostwriterClient", path: "../Modules/GhostwriterClient")
             ]
         ),

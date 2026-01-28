@@ -7,6 +7,6 @@
 //
 
 import Foundation
+import Domain
 
-// FeedParser conforms to FeedParserProtocol through its implementation
-// No extension needed - methods already match protocol requirements
+extension EpilogueFeedParser: FeedParserProtocol {}
