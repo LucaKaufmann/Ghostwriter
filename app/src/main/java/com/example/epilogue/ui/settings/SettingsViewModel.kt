@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.GhostwriterRepository
@@ -503,11 +504,39 @@ class SettingsViewModel @Inject constructor(
                 )
             }
 
-            // If connection successful and Ghostwriter is enabled, perform initial sync
-            if (connectionSuccessful && _uiState.value.ghostwriterEnabled) {
-                digestScheduler.scheduleDigestSync()
-                digestScheduler.syncDigestsNow()
-                performInitialGhostwriterSync()
+            // If connection successful, fetch integration status
+            if (connectionSuccessful) {
+                fetchIntegrationStatus()
+
+                // If Ghostwriter is enabled, perform initial sync
+                if (_uiState.value.ghostwriterEnabled) {
+                    digestScheduler.scheduleDigestSync()
+                    digestScheduler.syncDigestsNow()
+                    performInitialGhostwriterSync()
+                }
+            }
+        }
+    }
+
+    /**
+     * Fetch integration status (Wallabag, Newsletters) from Ghostwriter config.
+     */
+    private fun fetchIntegrationStatus() {
+        viewModelScope.launch {
+            val result = ghostwriterRepository.getConfig()
+            when (result) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            wallabagIntegration = result.data.wallabag,
+                            newslettersIntegration = result.data.newsletters
+                        )
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    Log.w(TAG, "Failed to fetch integration status: ${result.message}")
+                }
+                is GhostwriterResult.NotConfigured -> { }
             }
         }
     }
@@ -638,5 +667,8 @@ data class SettingsUiState(
     val ghostwriterProgress: DigestStatusResponse? = null,
     val ghostwriterError: String? = null,
     val ghostwriterSyncing: Boolean = false,
-    val ghostwriterSyncResult: String? = null
+    val ghostwriterSyncResult: String? = null,
+    // Integration status
+    val wallabagIntegration: IntegrationStatus? = null,
+    val newslettersIntegration: IntegrationStatus? = null
 )
