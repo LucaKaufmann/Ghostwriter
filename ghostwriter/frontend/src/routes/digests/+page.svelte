@@ -277,19 +277,23 @@
 									</Table.Cell>
 									<Table.Cell>
 										<DropdownMenu.Root>
-											<DropdownMenu.Trigger asChild let:builder>
-												<Button builders={[builder]} variant="ghost" size="icon">
-													<MoreHorizontal class="h-4 w-4" />
-												</Button>
+											<DropdownMenu.Trigger>
+												{#snippet child({ props })}
+													<Button {...props} variant="ghost" size="icon">
+														<MoreHorizontal class="h-4 w-4" />
+													</Button>
+												{/snippet}
 											</DropdownMenu.Trigger>
 											<DropdownMenu.Content align="end">
 												{#if digest.status === 'completed'}
 													{#if digest.filename}
-														<DropdownMenu.Item asChild>
-															<a href={api.getDigestDownloadUrl(digest.filename)} download>
-																<Download class="mr-2 h-4 w-4" />
-																Download EPUB
-															</a>
+														<DropdownMenu.Item>
+															{#snippet child({ props })}
+																<a {...props} href={api.getDigestDownloadUrl(digest.filename)} download>
+																	<Download class="mr-2 h-4 w-4" />
+																	Download EPUB
+																</a>
+															{/snippet}
 														</DropdownMenu.Item>
 													{/if}
 													<DropdownMenu.Item onclick={() => viewArticles(digest)}>
@@ -344,10 +348,12 @@
 								</span>
 								<div class="flex items-center gap-1">
 									{#if digest.status === 'completed' && digest.filename}
-										<Button variant="ghost" size="icon" asChild>
-											<a href={api.getDigestDownloadUrl(digest.filename)} download>
-												<Download class="h-4 w-4" />
-											</a>
+										<Button variant="ghost" size="icon">
+											{#snippet child({ props })}
+												<a {...props} href={api.getDigestDownloadUrl(digest.filename)} download>
+													<Download class="h-4 w-4" />
+												</a>
+											{/snippet}
 										</Button>
 										<Button variant="ghost" size="icon" onclick={() => viewArticles(digest)}>
 											<Eye class="h-4 w-4" />
@@ -436,11 +442,13 @@
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (viewingDigest = null)}>Close</Button>
 			{#if viewingDigest?.filename}
-				<Button asChild>
-					<a href={api.getDigestDownloadUrl(viewingDigest.filename)} download>
-						<Download class="mr-2 h-4 w-4" />
-						Download EPUB
-					</a>
+				<Button>
+					{#snippet child({ props })}
+						<a {...props} href={api.getDigestDownloadUrl(viewingDigest.filename)} download>
+							<Download class="mr-2 h-4 w-4" />
+							Download EPUB
+						</a>
+					{/snippet}
 				</Button>
 			{/if}
 		</Dialog.Footer>

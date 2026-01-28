@@ -272,10 +272,12 @@
 									</Table.Cell>
 									<Table.Cell>
 										<DropdownMenu.Root>
-											<DropdownMenu.Trigger asChild let:builder>
-												<Button builders={[builder]} variant="ghost" size="icon">
-													<MoreHorizontal class="h-4 w-4" />
-												</Button>
+											<DropdownMenu.Trigger>
+												{#snippet child({ props })}
+													<Button {...props} variant="ghost" size="icon">
+														<MoreHorizontal class="h-4 w-4" />
+													</Button>
+												{/snippet}
 											</DropdownMenu.Trigger>
 											<DropdownMenu.Content align="end">
 												<DropdownMenu.Item onclick={() => handleEditFeed(feed)}>
@@ -317,10 +319,12 @@
 									</a>
 								</div>
 								<DropdownMenu.Root>
-									<DropdownMenu.Trigger asChild let:builder>
-										<Button builders={[builder]} variant="ghost" size="icon" class="flex-shrink-0">
-											<MoreHorizontal class="h-4 w-4" />
-										</Button>
+									<DropdownMenu.Trigger>
+										{#snippet child({ props })}
+											<Button {...props} variant="ghost" size="icon" class="flex-shrink-0">
+												<MoreHorizontal class="h-4 w-4" />
+											</Button>
+										{/snippet}
 									</DropdownMenu.Trigger>
 									<DropdownMenu.Content align="end">
 										<DropdownMenu.Item onclick={() => handleEditFeed(feed)}>
