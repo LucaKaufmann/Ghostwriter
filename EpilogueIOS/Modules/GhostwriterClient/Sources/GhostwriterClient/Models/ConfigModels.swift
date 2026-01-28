@@ -10,6 +10,17 @@ import Foundation
 
 // MARK: - Response Models
 
+/// Status of an external integration (Wallabag, Newsletters, etc.)
+public struct IntegrationStatus: Codable, Sendable {
+    public let enabled: Bool
+    public let label: String?
+
+    public init(enabled: Bool, label: String? = nil) {
+        self.enabled = enabled
+        self.label = label
+    }
+}
+
 /// Response model for client configuration (shared settings)
 public struct ClientConfigResponse: Codable, Sendable {
     public let minWordCount: Int
@@ -21,7 +32,10 @@ public struct ClientConfigResponse: Codable, Sendable {
     public let eveningMinute: Int
     public let timezone: String
     public let updatedAt: String
-    
+    // Integration status
+    public let wallabag: IntegrationStatus?
+    public let newsletters: IntegrationStatus?
+
     enum CodingKeys: String, CodingKey {
         case minWordCount = "min_word_count"
         case morningHour = "morning_hour"
@@ -32,8 +46,10 @@ public struct ClientConfigResponse: Codable, Sendable {
         case eveningMinute = "evening_minute"
         case timezone
         case updatedAt = "updated_at"
+        case wallabag
+        case newsletters
     }
-    
+
     /// Parse the updatedAt timestamp to a Date
     public func parsedUpdatedAt() -> Date? {
         ISO8601DateFormatter.flexibleFormatter.date(from: updatedAt)

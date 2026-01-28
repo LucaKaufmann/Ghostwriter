@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -227,6 +228,8 @@ fun SettingsScreen(
                     url = uiState.ghostwriterUrl,
                     apiKey = uiState.ghostwriterApiKey,
                     isTesting = uiState.ghostwriterTesting,
+                    wallabagIntegration = uiState.wallabagIntegration,
+                    newslettersIntegration = uiState.newslettersIntegration,
                     onEnabledChange = viewModel::updateGhostwriterEnabled,
                     onUrlChange = viewModel::updateGhostwriterUrl,
                     onSaveUrl = viewModel::saveGhostwriterUrl,
@@ -592,6 +595,8 @@ fun GhostwriterInput(
     url: String,
     apiKey: String,
     isTesting: Boolean,
+    wallabagIntegration: IntegrationStatus?,
+    newslettersIntegration: IntegrationStatus?,
     onEnabledChange: (Boolean) -> Unit,
     onUrlChange: (String) -> Unit,
     onSaveUrl: () -> Unit,
@@ -714,8 +719,74 @@ fun GhostwriterInput(
                     text = "Run Ghostwriter on your home server or NAS. Supports local AI (Ollama) or cloud providers.",
                     style = MaterialTheme.typography.bodySmall
                 )
+
+                // Integration status (shown when connected)
+                if (wallabagIntegration != null || newslettersIntegration != null) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Divider()
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Integrations",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    if (wallabagIntegration != null) {
+                        IntegrationStatusRow(
+                            name = "Wallabag",
+                            enabled = wallabagIntegration.enabled
+                        )
+                    }
+
+                    if (newslettersIntegration != null) {
+                        IntegrationStatusRow(
+                            name = "Newsletters",
+                            enabled = newslettersIntegration.enabled,
+                            label = newslettersIntegration.label
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+fun IntegrationStatusRow(
+    name: String,
+    enabled: Boolean,
+    label: String? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            if (label != null && enabled) {
+                Text(
+                    text = "Label: $label",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Text(
+            text = if (enabled) "Enabled" else "Not configured",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
     }
 }
 

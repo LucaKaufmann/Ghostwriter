@@ -10,10 +10,20 @@ from sqlmodel import Session, select
 from app.core.database import get_session
 from app.core.security import verify_api_key
 from app.models.client_config import ClientConfig, ClientConfigRead, ClientConfigUpdate
+from app.services.newsletter_service import NewsletterService
+from app.services.wallabag_service import WallabagService
 from app.worker import scheduler as scheduler_module
+from app.core.config import get_settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class IntegrationStatus(BaseModel):
+    """Status of an external integration."""
+
+    enabled: bool
+    label: str | None = None  # For newsletters, the Gmail label
 
 
 class ConfigResponse(BaseModel):
@@ -28,6 +38,9 @@ class ConfigResponse(BaseModel):
     evening_minute: int
     timezone: str
     updated_at: datetime
+    # Integration status
+    wallabag: IntegrationStatus | None = None
+    newsletters: IntegrationStatus | None = None
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -59,6 +72,10 @@ def get_or_create_config(session: Session) -> ClientConfig:
 
 def _config_to_response(config: ClientConfig) -> ConfigResponse:
     """Convert a ClientConfig to a response model."""
+    settings = get_settings()
+    wallabag_service = WallabagService(settings)
+    newsletter_service = NewsletterService(settings)
+
     return ConfigResponse(
         min_word_count=config.min_word_count,
         morning_hour=config.morning_hour,
@@ -69,6 +86,11 @@ def _config_to_response(config: ClientConfig) -> ConfigResponse:
         evening_minute=config.evening_minute,
         timezone=config.timezone,
         updated_at=config.updated_at,
+        wallabag=IntegrationStatus(enabled=wallabag_service.is_configured),
+        newsletters=IntegrationStatus(
+            enabled=newsletter_service.is_configured,
+            label=settings.gmail_label if newsletter_service.is_configured else None,
+        ),
     )
 
 

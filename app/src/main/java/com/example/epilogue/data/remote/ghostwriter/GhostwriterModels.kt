@@ -195,6 +195,14 @@ data class FeedChangesResponse(
 // ===== Client Config Models =====
 
 /**
+ * Status of an external integration (Wallabag, Newsletters, etc.)
+ */
+data class IntegrationStatus(
+    @SerializedName("enabled") val enabled: Boolean,
+    @SerializedName("label") val label: String? = null
+)
+
+/**
  * Response model for client configuration (shared settings).
  */
 data class ClientConfigResponse(
@@ -206,7 +214,10 @@ data class ClientConfigResponse(
     @SerializedName("evening_hour") val eveningHour: Int,
     @SerializedName("evening_minute") val eveningMinute: Int,
     @SerializedName("timezone") val timezone: String,
-    @SerializedName("updated_at") val updatedAt: String
+    @SerializedName("updated_at") val updatedAt: String,
+    // Integration status
+    @SerializedName("wallabag") val wallabag: IntegrationStatus? = null,
+    @SerializedName("newsletters") val newsletters: IntegrationStatus? = null
 )
 
 /**
