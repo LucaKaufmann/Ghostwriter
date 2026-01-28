@@ -143,8 +143,12 @@ class WallabagService:
             page += 1
         return articles[:max_articles]
 
-    async def archive_article(self, entry_id: int):
+    async def mark_processed(self, entry_id: int):
+        """Archive the article and tag it."""
         await self._patch(f"/api/entries/{entry_id}", json={"archive": 1})
+        tag = self.settings.wallabag_tag_on_process
+        if tag:
+            await self._post(f"/api/entries/{entry_id}/tags", json={"tags": tag})
 ```
 
 ### Changes to Bindery (`app/worker/bindery.py`)
@@ -183,12 +187,11 @@ else:
     content = await trafilatura_extract(article.url)
 ```
 
-After successful digest compilation, archive the Wallabag articles:
+After successful digest compilation, mark Wallabag articles as read and tag them:
 
 ```python
-if settings.wallabag_archive_after:
-    for article in wallabag_articles:
-        await wallabag.archive_article(article.wallabag_id)
+for article in wallabag_articles:
+    await wallabag.mark_processed(article.wallabag_id)
 ```
 
 ### Deduplication
@@ -197,15 +200,13 @@ Use the `seen_articles` table with `guid = "wallabag-{entry_id}"` and a syntheti
 
 ### EPUB Placement
 
-Wallabag articles would appear as a separate section in the EPUB, similar to how RSS articles are grouped. The section could be titled "Saved Articles" or "From Wallabag". Alternatively, they can be interleaved with RSS articles — this is a UX choice.
+Wallabag articles will appear in a dedicated "Saved Articles" section in the EPUB, separate from RSS feed articles. The EPUB structure becomes: Cover → TOC → Section 1 (Briefings) → Section 2 (Full Articles) → Section 3 (Saved Articles).
 
 ---
 
 ## Considerations
 
 **Content quality:** Wallabag's built-in extraction is generally good but sometimes captures navigation/junk. We could optionally re-extract with Trafilatura if quality is poor, but starting with Wallabag's content is simpler and avoids extra HTTP requests.
-
-**Tag-based workflows:** A useful pattern is to configure `wallabag_tag_filter = "digest"` so users explicitly tag articles they want in the digest, rather than including all unread articles.
 
 **Token storage:** OAuth tokens are ephemeral (1h). The service should handle refresh transparently. Credentials (username/password/client secret) are stored as environment variables, consistent with how `GEMINI_API_KEY` etc. are already handled.
 
