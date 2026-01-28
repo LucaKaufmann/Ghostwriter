@@ -4,6 +4,7 @@ RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts artic
 
 ## Features
 
+- **Wallabag Integration** - Include saved articles from a Wallabag instance
 - **RSS/Atom Feed Aggregation** - Parse and deduplicate articles from multiple feeds
 - **Content Extraction** - Clean article extraction via Trafilatura
 - **AI Summarization** - Provider-agnostic AI via LiteLLM (OpenAI, Gemini, Ollama)
@@ -100,6 +101,39 @@ SCHEDULE_EVENING=18:00
 # API Authentication
 API_KEY=your-secret-key
 ```
+
+## Wallabag Integration
+
+Ghostwriter can pull unread articles from a [Wallabag](https://wallabag.org) instance and include them in a dedicated "Saved Articles" section of the EPUB digest. After processing, articles are archived in Wallabag and tagged so they aren't fetched again.
+
+### Setup
+
+1. Log into your Wallabag instance and go to **API clients management** (`https://your-instance/developer`).
+2. Create a new API client (any name, e.g. "Ghostwriter"). Copy the Client ID and Client Secret.
+3. Set the following environment variables:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `WALLABAG_URL` | Yes | — | Your Wallabag instance URL (e.g. `https://wallabag.example.com`) |
+| `WALLABAG_CLIENT_ID` | Yes | — | OAuth client ID from step 2 |
+| `WALLABAG_CLIENT_SECRET` | Yes | — | OAuth client secret from step 2 |
+| `WALLABAG_USERNAME` | Yes | — | Your Wallabag login username |
+| `WALLABAG_PASSWORD` | Yes | — | Your Wallabag login password |
+| `WALLABAG_MODE` | No | `raw` | `raw` keeps full article text, `summarize` runs AI summary |
+| `WALLABAG_MAX_ARTICLES` | No | `20` | Maximum articles to include per digest |
+| `WALLABAG_TAG_ON_PROCESS` | No | `ghostwriter` | Tag added to articles after processing |
+
+If `WALLABAG_URL` or any of the credentials are empty, the integration is silently skipped.
+
+### How it works
+
+During each digest run, the pipeline:
+
+1. Fetches unread (unarchived) articles from the Wallabag API
+2. Deduplicates against previously seen articles
+3. Optionally summarizes via AI (if `WALLABAG_MODE=summarize`)
+4. Adds them as a "Saved Articles" section at the end of the EPUB
+5. Archives each article in Wallabag and applies the configured tag
 
 ## Architecture
 
