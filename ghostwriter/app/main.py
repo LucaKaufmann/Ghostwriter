@@ -112,7 +112,14 @@ app.add_middleware(
 )
 
 # Include API routes
-app.include_router(api_router)
+app.include_router(api_router, prefix="/api")
+
+# Root health endpoint for Docker healthcheck (also available at /api/health)
+@app.get("/health")
+async def root_health():
+    """Root health check for Docker healthcheck and backwards compatibility."""
+    from app.api.health import health_check
+    return await health_check()
 
 
 # Serve frontend static files if the build directory exists
