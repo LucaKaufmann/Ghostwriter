@@ -182,7 +182,7 @@ newsletter_articles = await self.newsletter_service.get_unprocessed()
 all_articles = feed_articles + newsletter_articles
 ```
 
-Newsletters would be treated as `mode="raw"` by default (full content preserved), since they're already curated content. Optionally allow `mode="summarize"` via a setting.
+Newsletters are always treated as `mode="raw"` (full content preserved), since they're already curated content.
 
 ### Configuration (Environment Variables)
 
@@ -190,7 +190,6 @@ Newsletters would be treated as `mode="raw"` by default (full content preserved)
 # Newsletter integration
 NEWSLETTER_ENABLED=false
 NEWSLETTER_GMAIL_LABEL=Ghostwriter    # Gmail label to watch
-NEWSLETTER_MODE=raw                    # raw or summarize
 NEWSLETTER_MAX_PER_DIGEST=20          # Cap per digest
 ```
 
@@ -223,12 +222,10 @@ GET  /newsletters/status       # Auth status, last fetch, counts
 
 ### EPUB Integration
 
-Newsletters would appear as a third section in the EPUB:
+Newsletters appear as a dedicated third section in the EPUB:
 - Section 1: Briefings (AI summaries)
 - Section 2: Full Articles (RSS fidelity mode)
 - **Section 3: Newsletters**
-
-Or interleaved with full articles, grouped by source.
 
 ---
 
@@ -261,13 +258,16 @@ Newsletter emails are HTML. The extraction approach:
 
 ---
 
-## Open Questions
+## Decisions Made
 
-1. **Newsletter dedup across digests:** Should a newsletter only appear in one digest, or should it appear until explicitly dismissed? (Recommendation: once, mark as processed)
-2. **HTML fidelity vs plain text:** Should we preserve newsletter HTML styling in the EPUB or strip to plain text? (Recommendation: strip to clean HTML, similar to RSS fidelity mode)
-3. **Newsletter-specific summarization prompt:** If using briefing mode, should newsletters get a different AI prompt than RSS articles? (Recommendation: yes, newsletters tend to be longer and more curated)
-4. **Multiple Gmail accounts:** Support one account initially, could expand later
-5. **Auth on headless NAS:** The OAuth flow requires a browser. The init/callback API endpoints allow doing this from any device that can reach the NAS API
+| Decision | Choice |
+|----------|--------|
+| EPUB placement | Separate third section (after Briefings and Full Articles) |
+| HTML handling | Preserve cleaned HTML structure (headings, links, lists) |
+| Processing mode | Always raw — no AI summarization |
+| Gmail labels | Single label (`Ghostwriter`) for all newsletters |
+| OAuth setup UX | API init/callback endpoints only (no CLI script) — Docker-friendly |
+| Dedup | Once per digest — mark as processed after inclusion |
 
 ---
 
