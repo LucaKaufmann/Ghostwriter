@@ -104,7 +104,8 @@ class BinderyPipeline:
             # Fetch Wallabag articles (separate from RSS pipeline)
             wallabag_articles: list[ExtractedArticle] = []
             wallabag_entry_ids: list[int] = []
-            wallabag_service = WallabagService(self.settings)
+            with Session(engine) as wb_session:
+                wallabag_service = WallabagService.from_db_or_settings(wb_session, self.settings)
 
             if wallabag_service.is_configured:
                 try:

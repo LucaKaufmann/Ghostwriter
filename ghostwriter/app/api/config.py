@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 from app.core.database import get_session
 from app.core.security import verify_api_key
 from app.models.client_config import ClientConfig, ClientConfigRead, ClientConfigUpdate
+from app.models.wallabag_config import WallabagConfig, WallabagConfigRead, WallabagConfigUpdate
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
 from app.worker import scheduler as scheduler_module
@@ -70,10 +71,13 @@ def get_or_create_config(session: Session) -> ClientConfig:
     return config
 
 
-def _config_to_response(config: ClientConfig) -> ConfigResponse:
+def _config_to_response(config: ClientConfig, session: Session | None = None) -> ConfigResponse:
     """Convert a ClientConfig to a response model."""
     settings = get_settings()
-    wallabag_service = WallabagService(settings)
+    if session:
+        wallabag_service = WallabagService.from_db_or_settings(session, settings)
+    else:
+        wallabag_service = WallabagService(settings)
     newsletter_service = NewsletterService(settings)
 
     return ConfigResponse(
@@ -103,7 +107,7 @@ async def get_config(session: Session = Depends(get_session)) -> ConfigResponse:
     conflict detection during sync.
     """
     config = get_or_create_config(session)
-    return _config_to_response(config)
+    return _config_to_response(config, session)
 
 
 @router.put("", response_model=ConfigResponse, dependencies=[Depends(verify_api_key)])
@@ -190,4 +194,98 @@ async def update_config(
         logger.info(f"Updated schedule {period} from config sync: {updates}")
 
     logger.info(f"Updated client configuration: {request.model_dump(exclude_none=True)}")
-    return _config_to_response(config)
+    return _config_to_response(config, session)
+
+
+# ============ Wallabag Configuration ============
+
+PASSWORD_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022"
+
+
+def _get_or_create_wallabag_config(session: Session) -> WallabagConfig:
+    """Get the singleton Wallabag config or create it with defaults."""
+    config = session.exec(select(WallabagConfig)).first()
+    if config is None:
+        config = WallabagConfig()
+        session.add(config)
+        session.commit()
+        session.refresh(config)
+    return config
+
+
+def _wallabag_config_to_read(config: WallabagConfig) -> WallabagConfigRead:
+    """Convert DB model to response with masked password."""
+    return WallabagConfigRead(
+        url=config.url,
+        client_id=config.client_id,
+        client_secret=config.client_secret,
+        username=config.username,
+        password=PASSWORD_MASK if config.password else "",
+        mode=config.mode,
+        max_articles=config.max_articles,
+        tag_on_process=config.tag_on_process,
+    )
+
+
+@router.get("/wallabag", response_model=WallabagConfigRead, dependencies=[Depends(verify_api_key)])
+async def get_wallabag_config(session: Session = Depends(get_session)) -> WallabagConfigRead:
+    """Get the Wallabag integration configuration (password masked)."""
+    config = _get_or_create_wallabag_config(session)
+    return _wallabag_config_to_read(config)
+
+
+@router.put("/wallabag", response_model=WallabagConfigRead, dependencies=[Depends(verify_api_key)])
+async def update_wallabag_config(
+    request: WallabagConfigUpdate,
+    session: Session = Depends(get_session),
+) -> WallabagConfigRead:
+    """Update Wallabag configuration. Empty string clears a field. Password sentinel skips update."""
+    config = _get_or_create_wallabag_config(session)
+
+    for field_name in ["url", "client_id", "client_secret", "username", "mode", "tag_on_process"]:
+        value = getattr(request, field_name, None)
+        if value is not None:
+            setattr(config, field_name, value)
+
+    # Password: skip if sentinel, otherwise update
+    if request.password is not None and request.password != PASSWORD_MASK:
+        config.password = request.password
+
+    if request.max_articles is not None:
+        config.max_articles = request.max_articles
+
+    # Validate URL format if provided
+    if config.url and not config.url.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Wallabag URL must start with http:// or https://",
+        )
+
+    config.updated_at = datetime.now(timezone.utc)
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+
+    logger.info("Updated Wallabag configuration")
+    return _wallabag_config_to_read(config)
+
+
+class WallabagTestResult(BaseModel):
+    status: str
+    detail: str | None = None
+
+
+@router.post("/wallabag/test", response_model=WallabagTestResult, dependencies=[Depends(verify_api_key)])
+async def test_wallabag_connection(
+    session: Session = Depends(get_session),
+) -> WallabagTestResult:
+    """Test Wallabag connection by attempting OAuth token fetch."""
+    service = WallabagService.from_db_or_settings(session)
+    if not service.is_configured:
+        return WallabagTestResult(status="error", detail="Wallabag is not fully configured")
+
+    try:
+        await service._ensure_token()
+        return WallabagTestResult(status="ok")
+    except Exception as e:
+        return WallabagTestResult(status="error", detail=str(e))
