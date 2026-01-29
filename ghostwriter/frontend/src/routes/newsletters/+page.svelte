@@ -15,10 +15,10 @@
 	} from 'lucide-svelte';
 
 	// Queries
-	const statusQuery = createQuery({
+	const statusQuery = createQuery(() => ({
 		queryKey: ['newsletters', 'status'],
 		queryFn: () => api.getNewsletterStatus()
-	});
+	}));
 
 	function handleConnect() {
 		// Open OAuth flow in new window
@@ -48,17 +48,17 @@
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			{#if $statusQuery.isPending}
+			{#if statusQuery.isPending}
 				<div class="space-y-4">
 					<Skeleton class="h-12 w-full" />
 					<Skeleton class="h-4 w-48" />
 				</div>
-			{:else if $statusQuery.error}
+			{:else if statusQuery.error}
 				<div class="flex items-center gap-2 text-destructive">
 					<AlertCircle class="h-5 w-5" />
 					<span>Failed to load status</span>
 				</div>
-			{:else if $statusQuery.data?.configured}
+			{:else if statusQuery.data?.configured}
 				<div class="space-y-4">
 					<div class="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950">
 						<CheckCircle2 class="h-6 w-6 text-green-600" />
@@ -74,7 +74,7 @@
 						<div class="flex items-center gap-2 text-sm">
 							<Inbox class="h-4 w-4 text-muted-foreground" />
 							<span class="text-muted-foreground">Gmail Label:</span>
-							<Badge variant="secondary">{$statusQuery.data.label}</Badge>
+							<Badge variant="secondary">{statusQuery.data.label}</Badge>
 						</div>
 						<p class="text-sm text-muted-foreground">
 							Emails with this label will be processed as newsletters
@@ -86,7 +86,7 @@
 						Re-authorize Gmail
 					</Button>
 				</div>
-			{:else if $statusQuery.data?.oauth_ready}
+			{:else if statusQuery.data?.oauth_ready}
 				<div class="space-y-4">
 					<div class="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
 						<AlertCircle class="h-6 w-6 text-amber-600" />
@@ -142,7 +142,7 @@
 					<div>
 						<p class="font-medium">Label Newsletters</p>
 						<p class="text-sm text-muted-foreground">
-							Apply the "{$statusQuery.data?.label || 'Ghostwriter'}" label to newsletter emails
+							Apply the "{statusQuery.data?.label || 'Ghostwriter'}" label to newsletter emails
 						</p>
 					</div>
 				</div>

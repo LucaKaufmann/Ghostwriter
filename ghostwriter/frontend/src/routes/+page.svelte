@@ -21,43 +21,43 @@
 	} from 'lucide-svelte';
 
 	// Queries
-	const healthQuery = createQuery({
+	const healthQuery = createQuery(() => ({
 		queryKey: ['health'],
 		queryFn: () => api.getHealth(),
 		refetchInterval: 30000 // Refresh every 30s
-	});
+	}));
 
-	const configQuery = createQuery({
+	const configQuery = createQuery(() => ({
 		queryKey: ['config'],
 		queryFn: () => api.getPublicConfig()
-	});
+	}));
 
-	const feedsQuery = createQuery({
+	const feedsQuery = createQuery(() => ({
 		queryKey: ['feeds'],
 		queryFn: () => api.getFeeds()
-	});
+	}));
 
-	const digestsQuery = createQuery({
+	const digestsQuery = createQuery(() => ({
 		queryKey: ['digests', { limit: 5 }],
 		queryFn: () => api.getDigests({ limit: 5 })
-	});
+	}));
 
-	const schedulesQuery = createQuery({
+	const schedulesQuery = createQuery(() => ({
 		queryKey: ['schedules'],
 		queryFn: () => api.getSchedules()
-	});
+	}));
 
 	// State
 	let triggering = $state(false);
 
 	// Computed
-	const activeFeedsCount = $derived($feedsQuery.data?.filter((f) => f.is_active).length ?? 0);
-	const latestDigest = $derived($digestsQuery.data?.[0]);
-	const processingDigest = $derived($digestsQuery.data?.find((d) => d.status === 'processing'));
+	const activeFeedsCount = $derived(feedsQuery.data?.filter((f) => f.is_active).length ?? 0);
+	const latestDigest = $derived(digestsQuery.data?.[0]);
+	const processingDigest = $derived(digestsQuery.data?.find((d) => d.status === 'processing'));
 
 	// Get next scheduled run
 	const nextScheduledRun = $derived.by(() => {
-		const schedules = $schedulesQuery.data;
+		const schedules = schedulesQuery.data;
 		if (!schedules) return null;
 
 		const enabledSchedules = schedules.filter((s) => s.enabled && s.next_run_at);
@@ -77,7 +77,7 @@
 				description: result.message
 			});
 			// Refetch digests to show the new processing one
-			$digestsQuery.refetch();
+			digestsQuery.refetch();
 		} catch (err) {
 			toast.error('Failed to trigger digest', {
 				description: err instanceof Error ? err.message : 'Unknown error'
@@ -145,9 +145,9 @@
 				<Activity class="h-4 w-4 text-muted-foreground" />
 			</Card.Header>
 			<Card.Content>
-				{#if $healthQuery.isPending}
+				{#if healthQuery.isPending}
 					<Skeleton class="h-7 w-20" />
-				{:else if $healthQuery.error}
+				{:else if healthQuery.error}
 					<div class="flex items-center gap-2 text-destructive">
 						<AlertCircle class="h-4 w-4" />
 						<span class="text-lg font-bold">Offline</span>
@@ -158,7 +158,7 @@
 						<span class="text-lg font-bold">Online</span>
 					</div>
 					<p class="text-xs text-muted-foreground">
-						v{$healthQuery.data?.version}
+						v{healthQuery.data?.version}
 					</p>
 				{/if}
 			</Card.Content>
@@ -171,12 +171,12 @@
 				<Rss class="h-4 w-4 text-muted-foreground" />
 			</Card.Header>
 			<Card.Content>
-				{#if $feedsQuery.isPending}
+				{#if feedsQuery.isPending}
 					<Skeleton class="h-7 w-12" />
 				{:else}
 					<div class="text-2xl font-bold">{activeFeedsCount}</div>
 					<p class="text-xs text-muted-foreground">
-						{$feedsQuery.data?.length ?? 0} total feeds
+						{feedsQuery.data?.length ?? 0} total feeds
 					</p>
 				{/if}
 			</Card.Content>
@@ -189,11 +189,11 @@
 				<BookCopy class="h-4 w-4 text-muted-foreground" />
 			</Card.Header>
 			<Card.Content>
-				{#if $digestsQuery.isPending}
+				{#if digestsQuery.isPending}
 					<Skeleton class="h-7 w-12" />
 				{:else}
 					<div class="text-2xl font-bold">
-						{$digestsQuery.data?.filter((d) => d.status === 'completed').length ?? 0}
+						{digestsQuery.data?.filter((d) => d.status === 'completed').length ?? 0}
 					</div>
 					<p class="text-xs text-muted-foreground">completed this week</p>
 				{/if}
@@ -207,7 +207,7 @@
 				<Clock class="h-4 w-4 text-muted-foreground" />
 			</Card.Header>
 			<Card.Content>
-				{#if $schedulesQuery.isPending}
+				{#if schedulesQuery.isPending}
 					<Skeleton class="h-7 w-24" />
 				{:else if nextScheduledRun}
 					<div class="text-lg font-bold">
@@ -246,13 +246,9 @@
 					{/if}
 				</Button>
 				{#if latestDigest?.filename}
-					<Button variant="outline">
-						{#snippet child({ props })}
-							<a {...props} href={api.getDigestDownloadUrl(latestDigest.filename)} download>
-								<Download class="mr-2 h-4 w-4" />
-								Download Latest
-							</a>
-						{/snippet}
+					<Button variant="outline" href={api.getDigestDownloadUrl(latestDigest.filename)}>
+						<Download class="mr-2 h-4 w-4" />
+						Download Latest
 					</Button>
 				{/if}
 			</Card.Content>
@@ -303,20 +299,20 @@
 					<Card.Description>Current AI provider settings</Card.Description>
 				</Card.Header>
 				<Card.Content>
-					{#if $configQuery.isPending}
+					{#if configQuery.isPending}
 						<div class="space-y-2">
 							<Skeleton class="h-4 w-32" />
 							<Skeleton class="h-4 w-48" />
 						</div>
-					{:else if $configQuery.data}
+					{:else if configQuery.data}
 						<div class="space-y-1">
 							<div class="flex items-center gap-2">
 								<span class="text-sm text-muted-foreground">Provider:</span>
-								<span class="font-medium">{$configQuery.data.ai_provider}</span>
+								<span class="font-medium">{configQuery.data.ai_provider}</span>
 							</div>
 							<div class="flex items-center gap-2">
 								<span class="text-sm text-muted-foreground">Model:</span>
-								<span class="font-medium">{$configQuery.data.ai_model}</span>
+								<span class="font-medium">{configQuery.data.ai_model}</span>
 							</div>
 						</div>
 					{/if}
@@ -332,7 +328,7 @@
 			<Card.Description>Your latest generated digests</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			{#if $digestsQuery.isPending}
+			{#if digestsQuery.isPending}
 				<div class="space-y-3">
 					{#each [1, 2, 3] as _}
 						<div class="flex items-center gap-4">
@@ -345,7 +341,7 @@
 						</div>
 					{/each}
 				</div>
-			{:else if !$digestsQuery.data?.length}
+			{:else if !digestsQuery.data?.length}
 				<div class="flex flex-col items-center justify-center py-8 text-center">
 					<BookCopy class="h-10 w-10 text-muted-foreground/50" />
 					<p class="mt-2 text-sm text-muted-foreground">No digests yet</p>
@@ -353,7 +349,7 @@
 				</div>
 			{:else}
 				<div class="space-y-3">
-					{#each $digestsQuery.data as digest}
+					{#each digestsQuery.data as digest}
 						<div
 							class="flex items-center gap-4 rounded-lg border p-3 transition-colors hover:bg-muted/50"
 						>
@@ -378,13 +374,9 @@
 									{digest.status}
 								</Badge>
 								{#if digest.filename && digest.status === 'completed'}
-									<Button variant="ghost" size="icon">
-										{#snippet child({ props })}
-											<a {...props} href={api.getDigestDownloadUrl(digest.filename)} download>
-												<Download class="h-4 w-4" />
-											</a>
-										{/snippet}
-									</Button>
+									<Button variant="ghost" size="icon" href={api.getDigestDownloadUrl(digest.filename)}>
+									<Download class="h-4 w-4" />
+								</Button>
 								{/if}
 							</div>
 						</div>
@@ -393,10 +385,8 @@
 			{/if}
 		</Card.Content>
 		<Card.Footer>
-			<Button variant="outline" class="w-full">
-				{#snippet child({ props })}
-					<a {...props} href="/digests">View All Digests</a>
-				{/snippet}
+			<Button variant="outline" class="w-full" href="/digests">
+				View All Digests
 			</Button>
 		</Card.Footer>
 	</Card.Root>

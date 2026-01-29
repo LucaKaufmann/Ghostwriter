@@ -166,7 +166,15 @@ if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
             return FileResponse(file_path)
 
         # Otherwise, serve index.html for SPA routing
-        return FileResponse(FRONTEND_DIR / "index.html")
+        # Set no-cache headers so browsers always fetch the latest version
+        return FileResponse(
+            FRONTEND_DIR / "index.html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
 else:
     # No frontend build - serve a simple JSON response at root

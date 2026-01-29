@@ -30,6 +30,7 @@
 		}
 
 		isSubmitting = true;
+		console.log('[login] submitting, isRegistration:', isRegistration);
 
 		let success: boolean;
 		if (isRegistration) {
@@ -38,6 +39,7 @@
 			success = await auth.loginWithCredentials(username.trim(), password);
 		}
 
+		console.log('[login] result:', success);
 		isSubmitting = false;
 
 		if (success) {

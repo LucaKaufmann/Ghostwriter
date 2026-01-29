@@ -36,13 +36,9 @@
 			<RefreshCw class="mr-2 h-4 w-4" />
 			Refresh
 		</Button>
-		<Button>
-			{#snippet child({ props })}
-				<a {...props} href="/">
-					<Home class="mr-2 h-4 w-4" />
-					Go Home
-				</a>
-			{/snippet}
+		<Button href="/">
+			<Home class="mr-2 h-4 w-4" />
+			Go Home
 		</Button>
 	</div>
 </div>
