@@ -59,7 +59,14 @@ class ConfigSyncManager @Inject constructor(
                 }
 
                 // Compare timestamps
-                val serverTime = parseTimestamp(serverConfig.updatedAt)
+                val serverUpdatedAt = serverConfig.updatedAt
+                if (serverUpdatedAt == null) {
+                    // Server doesn't provide updated_at, just apply
+                    Log.i(TAG, "Server has no updated_at, applying server config")
+                    applyServerConfig(serverConfig)
+                    return@withContext true
+                }
+                val serverTime = parseTimestamp(serverUpdatedAt)
                 val localTime = parseTimestamp(localUpdatedAt)
 
                 when {
@@ -94,25 +101,50 @@ class ConfigSyncManager @Inject constructor(
      * Apply server configuration to local settings.
      */
     private suspend fun applyServerConfig(config: ClientConfigResponse) {
-        // Apply min word count
-        settingsRepository.setMinWordCount(config.minWordCount)
+        // Parse schedule times from "HH:mm" strings
+        val morning = parseTime(config.scheduleMorning)
+        val noon = parseTime(config.scheduleNoon)
+        val evening = parseTime(config.scheduleEvening)
 
-        // Note: Schedule times are managed by the server's scheduler.
-        // We don't need to store them locally since the server handles scheduling.
-        // If you want to display them in the UI, you can store them in SettingsRepository.
+        // Store schedule times locally for display in the UI
+        settingsRepository.setGhostwriterSchedule(
+            morningHour = morning?.first ?: 7,
+            morningMinute = morning?.second ?: 0,
+            noonHour = noon?.first ?: 12,
+            noonMinute = noon?.second ?: 0,
+            eveningHour = evening?.first ?: 18,
+            eveningMinute = evening?.second ?: 0,
+            timezone = config.timezone
+        )
 
         // Save the server's updated_at timestamp
-        settingsRepository.setConfigUpdatedAt(config.updatedAt)
+        config.updatedAt?.let { settingsRepository.setConfigUpdatedAt(it) }
 
-        Log.i(TAG, "Applied server config: minWordCount=${config.minWordCount}")
+        Log.i(TAG, "Applied server config: schedule times synced, timezone=${config.timezone}")
+    }
+
+    /**
+     * Parse "HH:mm" time string into hour and minute.
+     */
+    private fun parseTime(timeString: String?): Pair<Int, Int>? {
+        if (timeString == null) return null
+        val parts = timeString.split(":")
+        if (parts.size != 2) return null
+        val hour = parts[0].toIntOrNull() ?: return null
+        val minute = parts[1].toIntOrNull() ?: return null
+        return Pair(hour, minute)
     }
 
     /**
      * Push local configuration to the server.
      */
     private suspend fun pushLocalConfig(localUpdatedAt: String) {
+        val schedule = settingsRepository.getGhostwriterSchedule()
         val result = ghostwriterRepository.updateConfig(
-            minWordCount = settingsRepository.getMinWordCount(),
+            timezone = schedule?.timezone,
+            scheduleMorning = schedule?.let { String.format("%02d:%02d", it.morningHour, it.morningMinute) },
+            scheduleNoon = schedule?.let { String.format("%02d:%02d", it.noonHour, it.noonMinute) },
+            scheduleEvening = schedule?.let { String.format("%02d:%02d", it.eveningHour, it.eveningMinute) },
             clientUpdatedAt = localUpdatedAt
         )
 
@@ -146,25 +178,9 @@ class ConfigSyncManager @Inject constructor(
      * Called when user changes a synced setting.
      */
     suspend fun pushMinWordCount(count: Int) {
-        if (!settingsRepository.isGhostwriterConfigured()) {
-            return
-        }
-
-        val result = ghostwriterRepository.updateConfig(
-            minWordCount = count,
-            clientUpdatedAt = settingsRepository.getConfigUpdatedAt()
-        )
-
-        when (result) {
-            is GhostwriterResult.Success -> {
-                settingsRepository.setConfigUpdatedAt(result.data.updatedAt)
-                Log.i(TAG, "Pushed min word count to server: $count")
-            }
-            is GhostwriterResult.Error -> {
-                Log.e(TAG, "Failed to push min word count: ${result.message}")
-            }
-            is GhostwriterResult.NotConfigured -> { }
-        }
+        // min_word_count is no longer part of the server config schema;
+        // it's only stored locally now.
+        Log.d(TAG, "Min word count set locally: $count")
     }
 
     /**
