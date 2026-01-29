@@ -73,6 +73,10 @@ class DigestRead(SQLModel):
     created_at: datetime
     completed_at: datetime | None
     downloaded_at: datetime | None = None
+    total_feeds: int = 0
+    feeds_fetched: int = 0
+    total_articles: int = 0
+    articles_enriched: int = 0
 
 
 class DigestStatus(SQLModel):

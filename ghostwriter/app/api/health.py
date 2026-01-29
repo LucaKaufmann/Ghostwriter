@@ -13,6 +13,7 @@ from app.models.digest import Digest
 from app.services.llm_service import LLMService
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
+from app.worker import scheduler as scheduler_module
 
 router = APIRouter()
 
@@ -121,14 +122,21 @@ async def get_config(
         label=settings.gmail_label if newsletter_service.is_configured else None,
     )
 
+    # Read schedule times from database (Schedule table) so they reflect
+    # changes made via the web UI, falling back to env var defaults
+    schedules = {s.period: s for s in scheduler_module.get_all_schedules()}
+    morning = schedules.get("morning")
+    noon = schedules.get("noon")
+    evening = schedules.get("evening")
+
     return ConfigResponse(
-        timezone=settings.timezone,
+        timezone=morning.timezone if morning else settings.timezone,
         ai_provider=settings.ai_provider,
         ai_model=settings.get_llm_model_string(),
         schedule_enabled=settings.schedule_enabled,
-        schedule_morning=settings.schedule_morning,
-        schedule_noon=settings.schedule_noon,
-        schedule_evening=settings.schedule_evening,
+        schedule_morning=f"{morning.hour:02d}:{morning.minute:02d}" if morning else settings.schedule_morning,
+        schedule_noon=f"{noon.hour:02d}:{noon.minute:02d}" if noon else settings.schedule_noon,
+        schedule_evening=f"{evening.hour:02d}:{evening.minute:02d}" if evening else settings.schedule_evening,
         digest_retention_days=settings.digest_retention_days,
         max_articles_per_digest=settings.max_articles_per_digest,
         wallabag=wallabag_status,

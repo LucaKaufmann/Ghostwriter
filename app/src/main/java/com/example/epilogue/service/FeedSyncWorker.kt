@@ -70,7 +70,11 @@ class FeedSyncWorker @AssistedInject constructor(
             return Result.success()
         }
 
-        setForeground(createForegroundInfo())
+        try {
+            setForeground(createForegroundInfo())
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Could not start foreground service (app in background), continuing anyway")
+        }
 
         return try {
             // Step 1: PUSH - Sync local feeds to server

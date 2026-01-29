@@ -76,7 +76,7 @@ public final class ConfigSyncManager {
     }
 
     /// Push a specific setting change to server immediately
-    public func pushMinWordCount(_ count: Int) async throws {
+    public func pushSchedule(morning: String, noon: String, evening: String, timezone: String) async throws {
         guard try await settingsRepository.isGhostwriterConfigured() else {
             return
         }
@@ -85,14 +85,17 @@ public final class ConfigSyncManager {
         let localTimestamp = try await settingsRepository.getGhostwriterConfigUpdatedAt()
 
         let request = ClientConfigUpdateRequest(
-            minWordCount: count,
+            timezone: timezone,
+            scheduleMorning: morning,
+            scheduleNoon: noon,
+            scheduleEvening: evening,
             clientUpdatedAt: localTimestamp
         )
 
         do {
             let response = try await client.updateConfig(request)
             try await settingsRepository.setGhostwriterConfigUpdatedAt(response.updatedAt)
-            logger.info("Pushed min word count to server: \(count)")
+            logger.info("Pushed schedule to server")
         } catch GhostwriterError.conflict {
             // Server was modified, re-sync
             logger.warning("Conflict pushing config, re-syncing")
@@ -112,32 +115,47 @@ public final class ConfigSyncManager {
     }
 
     private func applyServerConfig(_ config: ClientConfigResponse) async throws {
-        // Apply min word count
-        try await settingsRepository.setMinWordCount(config.minWordCount)
+        // Parse schedule times from "HH:mm" strings into hour/minute
+        let morning = Self.parseTime(config.scheduleMorning)
+        let noon = Self.parseTime(config.scheduleNoon)
+        let evening = Self.parseTime(config.scheduleEvening)
 
         // Apply schedule times (for display - server handles actual scheduling)
         try await settingsRepository.setGhostwriterSchedule(
-            morningHour: config.morningHour,
-            morningMinute: config.morningMinute,
-            noonHour: config.noonHour,
-            noonMinute: config.noonMinute,
-            eveningHour: config.eveningHour,
-            eveningMinute: config.eveningMinute,
+            morningHour: morning?.hour ?? 7,
+            morningMinute: morning?.minute ?? 0,
+            noonHour: noon?.hour ?? 12,
+            noonMinute: noon?.minute ?? 0,
+            eveningHour: evening?.hour ?? 18,
+            eveningMinute: evening?.minute ?? 0,
             timezone: config.timezone
         )
 
         // Save server's updated_at timestamp for future comparisons
         try await settingsRepository.setGhostwriterConfigUpdatedAt(config.updatedAt)
 
-        logger.info("Applied server config: minWordCount=\(config.minWordCount), schedule times synced")
+        logger.info("Applied server config: schedule times synced, timezone=\(config.timezone)")
+    }
+
+    /// Parse "HH:mm" time string into hour and minute components
+    private static func parseTime(_ timeString: String?) -> (hour: Int, minute: Int)? {
+        guard let timeString else { return nil }
+        let parts = timeString.split(separator: ":")
+        guard parts.count == 2,
+              let hour = Int(parts[0]),
+              let minute = Int(parts[1]) else { return nil }
+        return (hour, minute)
     }
 
     private func pushLocalConfig(client: GhostwriterClient) async throws {
-        let minWordCount = try await settingsRepository.getMinWordCount()
         let localTimestamp = try await settingsRepository.getGhostwriterConfigUpdatedAt()
+        let schedule = try await settingsRepository.getGhostwriterSchedule()
 
         let request = ClientConfigUpdateRequest(
-            minWordCount: minWordCount,
+            timezone: schedule?.timezone,
+            scheduleMorning: schedule.map { String(format: "%02d:%02d", $0.morningHour, $0.morningMinute) },
+            scheduleNoon: schedule.map { String(format: "%02d:%02d", $0.noonHour, $0.noonMinute) },
+            scheduleEvening: schedule.map { String(format: "%02d:%02d", $0.eveningHour, $0.eveningMinute) },
             clientUpdatedAt: localTimestamp
         )
 

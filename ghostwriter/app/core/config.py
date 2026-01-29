@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     # General
     log_level: str = Field(default="INFO", description="Logging level")
     timezone: str = Field(default="UTC", description="IANA timezone identifier")
-    api_key: str = Field(default="", description="Bearer token for auth (empty = no auth)")
+    api_key: str = Field(default="", description="Legacy API key (deprecated, use user accounts)")
+
+    # Authentication
+    jwt_secret: str = Field(default="", description="Secret key for JWT tokens (auto-generated if empty)")
 
     # AI Provider Configuration
     ai_provider: Literal["openai", "gemini", "ollama"] = Field(

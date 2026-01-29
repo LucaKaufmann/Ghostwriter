@@ -524,39 +524,27 @@ class GhostwriterRepository @Inject constructor(
     /**
      * Update the shared client configuration on the server.
      *
-     * @param minWordCount Minimum word count filter (null to not update)
-     * @param morningHour Morning schedule hour (null to not update)
-     * @param morningMinute Morning schedule minute (null to not update)
-     * @param noonHour Noon schedule hour (null to not update)
-     * @param noonMinute Noon schedule minute (null to not update)
-     * @param eveningHour Evening schedule hour (null to not update)
-     * @param eveningMinute Evening schedule minute (null to not update)
      * @param timezone IANA timezone (null to not update)
+     * @param scheduleMorning Morning schedule time as "HH:mm" (null to not update)
+     * @param scheduleNoon Noon schedule time as "HH:mm" (null to not update)
+     * @param scheduleEvening Evening schedule time as "HH:mm" (null to not update)
      * @param clientUpdatedAt Client's last known server timestamp for conflict detection
      */
     suspend fun updateConfig(
-        minWordCount: Int? = null,
-        morningHour: Int? = null,
-        morningMinute: Int? = null,
-        noonHour: Int? = null,
-        noonMinute: Int? = null,
-        eveningHour: Int? = null,
-        eveningMinute: Int? = null,
         timezone: String? = null,
+        scheduleMorning: String? = null,
+        scheduleNoon: String? = null,
+        scheduleEvening: String? = null,
         clientUpdatedAt: String? = null
     ): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
             val request = ClientConfigUpdateRequest(
-                minWordCount = minWordCount,
-                morningHour = morningHour,
-                morningMinute = morningMinute,
-                noonHour = noonHour,
-                noonMinute = noonMinute,
-                eveningHour = eveningHour,
-                eveningMinute = eveningMinute,
                 timezone = timezone,
+                scheduleMorning = scheduleMorning,
+                scheduleNoon = scheduleNoon,
+                scheduleEvening = scheduleEvening,
                 clientUpdatedAt = clientUpdatedAt
             )
             val response = api.updateConfig(getAuthHeader(), request)

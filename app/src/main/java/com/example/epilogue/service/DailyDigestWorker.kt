@@ -68,7 +68,11 @@ class DailyDigestWorker @AssistedInject constructor(
         }
 
         // Set foreground for long-running work
-        setForeground(createForegroundInfo())
+        try {
+            setForeground(createForegroundInfo())
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Could not start foreground service (app in background), continuing anyway")
+        }
 
         return try {
             val fetchOnlyNew = !inputData.getBoolean(KEY_FETCH_ALL, false)

@@ -1,8 +1,22 @@
 # Ghostwriter Dockerfile
 # Multi-stage build for minimal final image
 
-# Stage 1: Builder
-FROM python:3.11-slim AS builder
+# Stage 1: Frontend Builder
+FROM node:22-alpine AS frontend-builder
+
+WORKDIR /frontend
+
+# Install dependencies
+COPY frontend/package*.json ./
+RUN npm ci --prefer-offline
+
+# Copy source and build
+COPY frontend/ ./
+RUN npm run build
+
+
+# Stage 2: Python Builder
+FROM python:3.11-slim AS python-builder
 
 WORKDIR /build
 
@@ -22,7 +36,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 
-# Stage 2: Runtime
+# Stage 3: Runtime
 FROM python:3.11-slim AS runtime
 
 WORKDIR /app
@@ -34,13 +48,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd -m -u 1000 ghostwriter
 
 # Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
+COPY --from=python-builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
 COPY --chown=ghostwriter:ghostwriter scripts/ ./scripts/
 COPY --chown=ghostwriter:ghostwriter entrypoint.sh ./entrypoint.sh
+
+# Copy frontend build output
+COPY --from=frontend-builder --chown=ghostwriter:ghostwriter /frontend/build ./frontend/
 
 # Create data directories and pre-compile Python bytecode for faster startup
 RUN mkdir -p /app/data /app/output /app/logs && \

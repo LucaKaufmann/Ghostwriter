@@ -4,6 +4,7 @@ RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts artic
 
 ## Features
 
+- **Web UI** - Modern, responsive dashboard for configuration and monitoring
 - **Wallabag Integration** - Include saved articles from a Wallabag instance
 - **RSS/Atom Feed Aggregation** - Parse and deduplicate articles from multiple feeds
 - **Content Extraction** - Clean article extraction via Trafilatura
@@ -98,9 +99,93 @@ AI_PROVIDER=ollama
 SCHEDULE_MORNING=07:00
 SCHEDULE_EVENING=18:00
 
-# API Authentication
-API_KEY=your-secret-key
+# Authentication (see below)
+JWT_SECRET=your-secret-key-for-jwt-tokens
 ```
+
+## Authentication
+
+Ghostwriter supports user accounts with secure authentication. On first run, you'll be prompted to create an admin account.
+
+### User Accounts
+
+- **Web UI**: Log in with username/password, receives a JWT token (valid 7 days)
+- **Mobile Apps**: Create API tokens in Settings, use with `Authorization: Bearer <token>` or `X-API-Key: <token>`
+
+### API Tokens
+
+API tokens are designed for mobile apps and scripts:
+
+1. Log into the web UI
+2. Go to **Settings** → **API Tokens**
+3. Click **Create Token** and give it a name (e.g., "My iPhone")
+4. Copy the token immediately — it's only shown once!
+
+Tokens start with `gw_` and are stored hashed in the database.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JWT_SECRET` | No | (auto-generated) | Secret key for JWT tokens. Set this for persistent sessions across restarts. |
+| `API_KEY` | No | — | **Deprecated.** Legacy API key for backward compatibility. |
+
+### Migration from Legacy API_KEY
+
+If you're upgrading from a version that used `API_KEY`:
+
+1. The legacy `API_KEY` continues to work for backward compatibility
+2. Create a user account in the web UI (first user becomes admin)
+3. Generate API tokens for your mobile apps
+4. Remove `API_KEY` from your environment once migrated
+
+A deprecation warning is logged when `API_KEY` is used.
+
+### Security Notes
+
+- Passwords are hashed with bcrypt
+- JWT tokens expire after 7 days
+- API tokens never expire but can be revoked
+- If `JWT_SECRET` is not set, a random one is generated (tokens won't survive restarts)
+
+## Web UI
+
+Ghostwriter includes a built-in web interface for managing feeds, viewing digests, and configuring the service. The UI is automatically served when running the Docker image.
+
+### Accessing the Web UI
+
+After starting Ghostwriter, open `http://localhost:8080` in your browser. You'll be prompted for your API token (the `API_KEY` environment variable).
+
+### Features
+
+- **Dashboard** - Server status, active jobs, quick actions, recent digests
+- **Feeds** - Add, search, and manage RSS/Atom feed subscriptions
+- **Digests** - View history, download EPUBs, see article contents
+- **Newsletters** - Connect Gmail to include newsletter emails
+- **Settings** - Configure digest schedules, view AI settings
+
+### Development
+
+To run the frontend in development mode:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The development server proxies API requests to `http://localhost:8080`. Make sure the FastAPI backend is running.
+
+### Building
+
+The frontend is built automatically as part of the Docker image. To build manually:
+
+```bash
+cd frontend
+npm run build
+```
+
+The built files are output to `frontend/build/` and served by FastAPI.
 
 ## Wallabag Integration
 
