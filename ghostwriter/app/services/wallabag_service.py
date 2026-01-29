@@ -42,10 +42,11 @@ class WallabagService:
     Uses OAuth2 password grant for authentication.
     """
 
+    _cached_token: str | None = None
+    _cached_token_expires_at: float = 0
+
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self._token: str | None = None
-        self._token_expires_at: float = 0
 
     @classmethod
     def from_db_or_settings(cls, session: Session, settings: Settings | None = None) -> "WallabagService":
@@ -68,8 +69,6 @@ class WallabagService:
             )
             svc = cls.__new__(cls)
             svc.settings = wrapper
-            svc._token = None
-            svc._token_expires_at = 0
             return svc
 
         return cls(settings)
@@ -88,8 +87,8 @@ class WallabagService:
 
     async def _ensure_token(self) -> str:
         """Obtain or refresh the OAuth2 access token."""
-        if self._token and time.time() < self._token_expires_at - 60:
-            return self._token
+        if WallabagService._cached_token and time.time() < WallabagService._cached_token_expires_at - 60:
+            return WallabagService._cached_token
 
         s = self.settings
         url = f"{s.wallabag_url.rstrip('/')}/oauth/v2/token"
@@ -126,10 +125,10 @@ class WallabagService:
             logger.error(f"Wallabag OAuth request timed out: {url} - {e!r}")
             raise
 
-        self._token = data["access_token"]
-        self._token_expires_at = time.time() + data.get("expires_in", 3600)
+        WallabagService._cached_token = data["access_token"]
+        WallabagService._cached_token_expires_at = time.time() + data.get("expires_in", 3600)
         logger.info("Wallabag OAuth token acquired successfully")
-        return self._token
+        return WallabagService._cached_token
 
     async def fetch_unread_articles(self, max_articles: int | None = None) -> list[dict]:
         """
