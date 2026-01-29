@@ -30,42 +30,42 @@
 	const queryClient = useQueryClient();
 
 	// Queries
-	const configQuery = createQuery({
+	const configQuery = createQuery(() => ({
 		queryKey: ['config'],
 		queryFn: () => api.getPublicConfig()
-	});
+	}));
 
-	const clientConfigQuery = createQuery({
+	const clientConfigQuery = createQuery(() => ({
 		queryKey: ['client-config'],
 		queryFn: () => api.getClientConfig()
-	});
+	}));
 
-	const schedulesQuery = createQuery({
+	const schedulesQuery = createQuery(() => ({
 		queryKey: ['schedules'],
 		queryFn: () => api.getSchedules()
-	});
+	}));
 
-	const tokensQuery = createQuery({
+	const tokensQuery = createQuery(() => ({
 		queryKey: ['api-tokens'],
 		queryFn: () => api.getAPITokens()
-	});
+	}));
 
 	// Mutations
-	const updateScheduleMutation = createMutation({
+	const updateScheduleMutation = createMutation(() => ({
 		mutationFn: ({ period, data }: { period: DigestPeriod; data: ScheduleUpdate }) =>
 			api.updateSchedule(period, data),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['schedules'] });
 			toast.success('Schedule updated');
 		},
-		onError: (err) => {
+		onError: (err: Error) => {
 			toast.error('Failed to update schedule', {
-				description: err instanceof Error ? err.message : 'Unknown error'
+				description: err.message ?? 'Unknown error'
 			});
 		}
-	});
+	}));
 
-	const createTokenMutation = createMutation({
+	const createTokenMutation = createMutation(() => ({
 		mutationFn: (name: string) => api.createAPIToken({ name }),
 		onSuccess: (data) => {
 			queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
@@ -74,26 +74,26 @@
 			newTokenName = '';
 			showCreateTokenDialog = false;
 		},
-		onError: (err) => {
+		onError: (err: Error) => {
 			toast.error('Failed to create token', {
-				description: err instanceof Error ? err.message : 'Unknown error'
+				description: err.message ?? 'Unknown error'
 			});
 		}
-	});
+	}));
 
-	const revokeTokenMutation = createMutation({
+	const revokeTokenMutation = createMutation(() => ({
 		mutationFn: (tokenId: string) => api.revokeAPIToken(tokenId),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
 			toast.success('Token revoked');
 			tokenToRevoke = null;
 		},
-		onError: (err) => {
+		onError: (err: Error) => {
 			toast.error('Failed to revoke token', {
-				description: err instanceof Error ? err.message : 'Unknown error'
+				description: err.message ?? 'Unknown error'
 			});
 		}
-	});
+	}));
 
 	// State
 	let showToken = $state(false);
@@ -115,7 +115,7 @@
 
 	// Initialize schedule edits when data loads
 	$effect(() => {
-		const schedules = $schedulesQuery.data;
+		const schedules = schedulesQuery.data;
 		if (schedules && Object.keys(scheduleEdits).length === 0) {
 			schedules.forEach((s) => {
 				scheduleEdits[s.period] = {
@@ -157,7 +157,7 @@
 	function saveSchedule(period: DigestPeriod) {
 		const edit = scheduleEdits[period];
 		if (!edit) return;
-		$updateScheduleMutation.mutate({
+		updateScheduleMutation.mutate({
 			period,
 			data: {
 				hour: edit.hour,
@@ -168,7 +168,7 @@
 	}
 
 	function hasScheduleChanged(period: string): boolean {
-		const original = $schedulesQuery.data?.find((s) => s.period === period);
+		const original = schedulesQuery.data?.find((s) => s.period === period);
 		const edit = scheduleEdits[period];
 		if (!original || !edit) return false;
 		return (
@@ -258,20 +258,20 @@
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			{#if $configQuery.isPending}
+			{#if configQuery.isPending}
 				<div class="space-y-3">
 					<Skeleton class="h-4 w-48" />
 					<Skeleton class="h-4 w-64" />
 				</div>
-			{:else if $configQuery.data}
+			{:else if configQuery.data}
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div class="space-y-1">
 						<Label class="text-muted-foreground">Provider</Label>
-						<p class="font-medium">{$configQuery.data.ai_provider}</p>
+						<p class="font-medium">{configQuery.data.ai_provider}</p>
 					</div>
 					<div class="space-y-1">
 						<Label class="text-muted-foreground">Model</Label>
-						<p class="font-medium">{$configQuery.data.ai_model}</p>
+						<p class="font-medium">{configQuery.data.ai_model}</p>
 					</div>
 				</div>
 			{/if}
@@ -287,13 +287,13 @@
 			</Card.Title>
 			<Card.Description>
 				Configure when automatic digests are generated
-				{#if $clientConfigQuery.data?.timezone}
-					• Timezone: {$clientConfigQuery.data.timezone}
+				{#if clientConfigQuery.data?.timezone}
+					• Timezone: {clientConfigQuery.data.timezone}
 				{/if}
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="space-y-4">
-			{#if $schedulesQuery.isPending}
+			{#if schedulesQuery.isPending}
 				<div class="space-y-4">
 					{#each [1, 2, 3] as _}
 						<div class="flex items-center gap-4">
@@ -303,8 +303,8 @@
 						</div>
 					{/each}
 				</div>
-			{:else if $schedulesQuery.data}
-				{#each $schedulesQuery.data as schedule}
+			{:else if schedulesQuery.data}
+				{#each schedulesQuery.data as schedule}
 					{@const edit = scheduleEdits[schedule.period]}
 					<div class="flex flex-col gap-4 sm:flex-row sm:items-center rounded-lg border p-4">
 						<div class="flex items-center gap-4 flex-1 min-w-0">
@@ -338,9 +338,9 @@
 							<Button
 								size="sm"
 								onclick={() => saveSchedule(schedule.period as DigestPeriod)}
-								disabled={!hasScheduleChanged(schedule.period) || $updateScheduleMutation.isPending}
+								disabled={!hasScheduleChanged(schedule.period) || updateScheduleMutation.isPending}
 							>
-								{#if $updateScheduleMutation.isPending}
+								{#if updateScheduleMutation.isPending}
 									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 								{:else}
 									<Save class="mr-2 h-4 w-4" />
@@ -366,20 +366,20 @@
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			{#if $configQuery.isPending}
+			{#if configQuery.isPending}
 				<div class="space-y-3">
 					<Skeleton class="h-4 w-48" />
 					<Skeleton class="h-4 w-48" />
 				</div>
-			{:else if $configQuery.data}
+			{:else if configQuery.data}
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div class="space-y-1">
 						<Label class="text-muted-foreground">Digest Retention</Label>
-						<p class="font-medium">{$configQuery.data.digest_retention_days} days</p>
+						<p class="font-medium">{configQuery.data.digest_retention_days} days</p>
 					</div>
 					<div class="space-y-1">
 						<Label class="text-muted-foreground">Max Articles per Digest</Label>
-						<p class="font-medium">{$configQuery.data.max_articles_per_digest}</p>
+						<p class="font-medium">{configQuery.data.max_articles_per_digest}</p>
 					</div>
 				</div>
 			{/if}
@@ -406,14 +406,14 @@
 			</div>
 		</Card.Header>
 		<Card.Content>
-			{#if $tokensQuery.isPending}
+			{#if tokensQuery.isPending}
 				<div class="space-y-3">
 					<Skeleton class="h-16 w-full" />
 					<Skeleton class="h-16 w-full" />
 				</div>
-			{:else if $tokensQuery.data && $tokensQuery.data.length > 0}
+			{:else if tokensQuery.data && tokensQuery.data.length > 0}
 				<div class="space-y-3">
-					{#each $tokensQuery.data as token}
+					{#each tokensQuery.data as token}
 						<div class="flex items-center justify-between rounded-lg border p-4">
 							<div class="space-y-1">
 								<p class="font-medium">{token.name}</p>
@@ -517,12 +517,12 @@
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			{#if $clientConfigQuery.isPending}
+			{#if clientConfigQuery.isPending}
 				<div class="space-y-3">
 					<Skeleton class="h-8 w-full" />
 					<Skeleton class="h-8 w-full" />
 				</div>
-			{:else if $clientConfigQuery.data}
+			{:else if clientConfigQuery.data}
 				<div class="space-y-3">
 					<div class="flex items-center justify-between rounded-lg border p-3">
 						<div>
@@ -530,7 +530,7 @@
 							<p class="text-sm text-muted-foreground">Read-it-later integration</p>
 						</div>
 						<div class="flex items-center gap-2">
-							{#if $clientConfigQuery.data.wallabag?.enabled}
+							{#if clientConfigQuery.data.wallabag?.enabled}
 								<CheckCircle2 class="h-5 w-5 text-green-500" />
 								<span class="text-sm text-green-600">Connected</span>
 							{:else}
@@ -543,13 +543,13 @@
 						<div>
 							<p class="font-medium">Gmail Newsletters</p>
 							<p class="text-sm text-muted-foreground">
-								{$clientConfigQuery.data.newsletters?.label
-									? `Label: ${$clientConfigQuery.data.newsletters.label}`
+								{clientConfigQuery.data.newsletters?.label
+									? `Label: ${clientConfigQuery.data.newsletters.label}`
 									: 'Newsletter email integration'}
 							</p>
 						</div>
 						<div class="flex items-center gap-2">
-							{#if $clientConfigQuery.data.newsletters?.enabled}
+							{#if clientConfigQuery.data.newsletters?.enabled}
 								<CheckCircle2 class="h-5 w-5 text-green-500" />
 								<span class="text-sm text-green-600">Connected</span>
 							{:else}
@@ -578,7 +578,7 @@
 			onsubmit={(e) => {
 				e.preventDefault();
 				if (newTokenName.trim()) {
-					$createTokenMutation.mutate(newTokenName.trim());
+					createTokenMutation.mutate(newTokenName.trim());
 				}
 			}}
 			class="space-y-4"
@@ -589,15 +589,15 @@
 					id="token-name"
 					placeholder="My iPhone"
 					bind:value={newTokenName}
-					disabled={$createTokenMutation.isPending}
+					disabled={createTokenMutation.isPending}
 				/>
 			</div>
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (showCreateTokenDialog = false)}>
 					Cancel
 				</Button>
-				<Button type="submit" disabled={!newTokenName.trim() || $createTokenMutation.isPending}>
-					{#if $createTokenMutation.isPending}
+				<Button type="submit" disabled={!newTokenName.trim() || createTokenMutation.isPending}>
+					{#if createTokenMutation.isPending}
 						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 					{/if}
 					Create Token
@@ -670,9 +670,9 @@
 			<AlertDialog.Cancel onclick={() => (tokenToRevoke = null)}>Cancel</AlertDialog.Cancel>
 			<AlertDialog.Action
 				class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-				onclick={() => tokenToRevoke && $revokeTokenMutation.mutate(tokenToRevoke.id)}
+				onclick={() => tokenToRevoke && revokeTokenMutation.mutate(tokenToRevoke.id)}
 			>
-				{#if $revokeTokenMutation.isPending}
+				{#if revokeTokenMutation.isPending}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 				{/if}
 				Revoke Token

@@ -28,13 +28,13 @@
 	const queryClient = useQueryClient();
 
 	// Queries
-	const feedsQuery = createQuery({
+	const feedsQuery = createQuery(() => ({
 		queryKey: ['feeds'],
 		queryFn: () => api.getFeeds()
-	});
+	}));
 
 	// Mutations
-	const createFeedMutation = createMutation({
+	const createFeedMutation = createMutation(() => ({
 		mutationFn: (data: FeedCreate) => api.createFeed(data),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
@@ -42,28 +42,28 @@
 			addDialogOpen = false;
 			resetForm();
 		},
-		onError: (err) => {
+		onError: (err: Error) => {
 			toast.error('Failed to create feed', {
-				description: err instanceof Error ? err.message : 'Unknown error'
+				description: err.message ?? 'Unknown error'
 			});
 		}
-	});
+	}));
 
-	const deleteFeedMutation = createMutation({
+	const deleteFeedMutation = createMutation(() => ({
 		mutationFn: (id: string) => api.deleteFeed(id),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success('Feed deleted');
 			feedToDelete = null;
 		},
-		onError: (err) => {
+		onError: (err: Error) => {
 			toast.error('Failed to delete feed', {
-				description: err instanceof Error ? err.message : 'Unknown error'
+				description: err.message ?? 'Unknown error'
 			});
 		}
-	});
+	}));
 
-	const updateFeedMutation = createMutation({
+	const updateFeedMutation = createMutation(() => ({
 		mutationFn: ({ id, data }: { id: string; data: FeedUpdate }) => api.updateFeed(id, data),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
@@ -71,12 +71,12 @@
 			editDialogOpen = false;
 			feedToEdit = null;
 		},
-		onError: (err) => {
+		onError: (err: Error) => {
 			toast.error('Failed to update feed', {
-				description: err instanceof Error ? err.message : 'Unknown error'
+				description: err.message ?? 'Unknown error'
 			});
 		}
-	});
+	}));
 
 	// State
 	let searchQuery = $state('');
@@ -99,7 +99,7 @@
 
 	// Filtered feeds
 	const filteredFeeds = $derived.by(() => {
-		const feeds = $feedsQuery.data ?? [];
+		const feeds = feedsQuery.data ?? [];
 		if (!searchQuery.trim()) return feeds;
 		const q = searchQuery.toLowerCase();
 		return feeds.filter(
@@ -116,7 +116,7 @@
 
 	function handleAddFeed(e: Event) {
 		e.preventDefault();
-		$createFeedMutation.mutate({
+		createFeedMutation.mutate({
 			url: formUrl,
 			title: formTitle || formUrl,
 			mode: formMode,
@@ -131,7 +131,7 @@
 
 	function confirmDelete() {
 		if (feedToDelete) {
-			$deleteFeedMutation.mutate(feedToDelete.id);
+			deleteFeedMutation.mutate(feedToDelete.id);
 		}
 	}
 
@@ -147,7 +147,7 @@
 	function handleUpdateFeed(e: Event) {
 		e.preventDefault();
 		if (!feedToEdit) return;
-		$updateFeedMutation.mutate({
+		updateFeedMutation.mutate({
 			id: feedToEdit.id,
 			data: {
 				title: editTitle,
@@ -200,7 +200,7 @@
 	<!-- Feed List -->
 	<Card.Root>
 		<Card.Content class="p-0">
-			{#if $feedsQuery.isPending}
+			{#if feedsQuery.isPending}
 				<div class="p-4 space-y-3">
 					{#each [1, 2, 3, 4, 5] as _}
 						<div class="flex items-center gap-4">
@@ -409,8 +409,8 @@
 				<Button type="button" variant="outline" onclick={() => (addDialogOpen = false)}>
 					Cancel
 				</Button>
-				<Button type="submit" disabled={$createFeedMutation.isPending}>
-					{#if $createFeedMutation.isPending}
+				<Button type="submit" disabled={createFeedMutation.isPending}>
+					{#if createFeedMutation.isPending}
 						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 						Adding...
 					{:else}
@@ -434,7 +434,7 @@
 		<AlertDialog.Footer>
 			<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
 			<AlertDialog.Action onclick={confirmDelete} class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-				{#if $deleteFeedMutation.isPending}
+				{#if deleteFeedMutation.isPending}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 				{/if}
 				Delete
@@ -501,8 +501,8 @@
 				<Button type="button" variant="outline" onclick={() => (editDialogOpen = false)}>
 					Cancel
 				</Button>
-				<Button type="submit" disabled={$updateFeedMutation.isPending}>
-					{#if $updateFeedMutation.isPending}
+				<Button type="submit" disabled={updateFeedMutation.isPending}>
+					{#if updateFeedMutation.isPending}
 						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 						Saving...
 					{:else}

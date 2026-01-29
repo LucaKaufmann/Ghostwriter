@@ -29,7 +29,7 @@
 	const queryClient = useQueryClient();
 
 	// Queries
-	const digestsQuery = createQuery({
+	const digestsQuery = createQuery(() => ({
 		queryKey: ['digests', { limit: 20 }],
 		queryFn: () => api.getDigests({ limit: 20 }),
 		refetchInterval: (query) => {
@@ -37,35 +37,35 @@
 			const hasProcessing = query.state.data?.some((d) => d.status === 'processing');
 			return hasProcessing ? 5000 : 30000;
 		}
-	});
+	}));
 
 	// Mutations
-	const triggerMutation = createMutation({
+	const triggerMutation = createMutation(() => ({
 		mutationFn: () => api.triggerDigest(),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['digests'] });
 			toast.success('Digest generation started');
 		},
-		onError: (err) => {
+		onError: (err: Error) => {
 			toast.error('Failed to trigger digest', {
-				description: err instanceof Error ? err.message : 'Unknown error'
+				description: err.message ?? 'Unknown error'
 			});
 		}
-	});
+	}));
 
-	const deleteMutation = createMutation({
+	const deleteMutation = createMutation(() => ({
 		mutationFn: (filename: string) => api.deleteDigest(filename),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['digests'] });
 			toast.success('Digest deleted');
 			digestToDelete = null;
 		},
-		onError: (err) => {
+		onError: (err: Error) => {
 			toast.error('Failed to delete digest', {
-				description: err instanceof Error ? err.message : 'Unknown error'
+				description: err.message ?? 'Unknown error'
 			});
 		}
-	});
+	}));
 
 	// State
 	let digestToDelete = $state<Digest | null>(null);
@@ -74,7 +74,7 @@
 	let loadingArticles = $state(false);
 
 	// Computed
-	const processingDigest = $derived($digestsQuery.data?.find((d) => d.status === 'processing'));
+	const processingDigest = $derived(digestsQuery.data?.find((d) => d.status === 'processing'));
 
 	async function viewArticles(digest: Digest) {
 		viewingDigest = digest;
@@ -148,13 +148,13 @@
 			<Button
 				variant="outline"
 				size="icon"
-				onclick={() => $digestsQuery.refetch()}
-				disabled={$digestsQuery.isFetching}
+				onclick={() => digestsQuery.refetch()}
+				disabled={digestsQuery.isFetching}
 			>
-				<RefreshCw class="h-4 w-4 {$digestsQuery.isFetching ? 'animate-spin' : ''}" />
+				<RefreshCw class="h-4 w-4 {digestsQuery.isFetching ? 'animate-spin' : ''}" />
 			</Button>
-			<Button onclick={() => $triggerMutation.mutate()} disabled={$triggerMutation.isPending || !!processingDigest}>
-				{#if $triggerMutation.isPending || processingDigest}
+			<Button onclick={() => triggerMutation.mutate()} disabled={triggerMutation.isPending || !!processingDigest}>
+				{#if triggerMutation.isPending || processingDigest}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 					{processingDigest ? 'Processing...' : 'Starting...'}
 				{:else}
@@ -207,7 +207,7 @@
 	<!-- Digests List -->
 	<Card.Root>
 		<Card.Content class="p-0">
-			{#if $digestsQuery.isPending}
+			{#if digestsQuery.isPending}
 				<div class="p-4 space-y-3">
 					{#each [1, 2, 3, 4, 5] as _}
 						<div class="flex items-center gap-4">
@@ -220,14 +220,14 @@
 						</div>
 					{/each}
 				</div>
-			{:else if !$digestsQuery.data?.length}
+			{:else if !digestsQuery.data?.length}
 				<div class="flex flex-col items-center justify-center py-12 text-center">
 					<BookCopy class="h-12 w-12 text-muted-foreground/50" />
 					<p class="mt-4 text-lg font-medium">No digests yet</p>
 					<p class="text-sm text-muted-foreground">
 						Generate your first digest to see it here
 					</p>
-					<Button onclick={() => $triggerMutation.mutate()} class="mt-4" disabled={$triggerMutation.isPending}>
+					<Button onclick={() => triggerMutation.mutate()} class="mt-4" disabled={triggerMutation.isPending}>
 						<Play class="mr-2 h-4 w-4" />
 						Generate Digest
 					</Button>
@@ -247,7 +247,7 @@
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
-							{#each $digestsQuery.data as digest}
+							{#each digestsQuery.data as digest}
 								<Table.Row>
 									<Table.Cell>
 										<div class="flex items-center gap-2">
@@ -322,7 +322,7 @@
 
 				<!-- Mobile List -->
 				<div class="md:hidden divide-y">
-					{#each $digestsQuery.data as digest}
+					{#each digestsQuery.data as digest}
 						<div class="p-4 space-y-2">
 							<div class="flex items-start justify-between gap-2">
 								<div class="min-w-0 flex-1">
@@ -348,13 +348,9 @@
 								</span>
 								<div class="flex items-center gap-1">
 									{#if digest.status === 'completed' && digest.filename}
-										<Button variant="ghost" size="icon">
-											{#snippet child({ props })}
-												<a {...props} href={api.getDigestDownloadUrl(digest.filename)} download>
-													<Download class="h-4 w-4" />
-												</a>
-											{/snippet}
-										</Button>
+										<Button variant="ghost" size="icon" href={api.getDigestDownloadUrl(digest.filename)}>
+										<Download class="h-4 w-4" />
+									</Button>
 										<Button variant="ghost" size="icon" onclick={() => viewArticles(digest)}>
 											<Eye class="h-4 w-4" />
 										</Button>
@@ -442,13 +438,9 @@
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (viewingDigest = null)}>Close</Button>
 			{#if viewingDigest?.filename}
-				<Button>
-					{#snippet child({ props })}
-						<a {...props} href={api.getDigestDownloadUrl(viewingDigest.filename)} download>
-							<Download class="mr-2 h-4 w-4" />
-							Download EPUB
-						</a>
-					{/snippet}
+				<Button href={api.getDigestDownloadUrl(viewingDigest.filename)}>
+					<Download class="mr-2 h-4 w-4" />
+					Download EPUB
 				</Button>
 			{/if}
 		</Dialog.Footer>
@@ -469,10 +461,10 @@
 		<AlertDialog.Footer>
 			<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
 			<AlertDialog.Action
-				onclick={() => digestToDelete?.filename && $deleteMutation.mutate(digestToDelete.filename)}
+				onclick={() => digestToDelete?.filename && deleteMutation.mutate(digestToDelete.filename)}
 				class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 			>
-				{#if $deleteMutation.isPending}
+				{#if deleteMutation.isPending}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 				{/if}
 				Delete

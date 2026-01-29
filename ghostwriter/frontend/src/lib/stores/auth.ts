@@ -26,13 +26,16 @@ function createAuthStore() {
 
 		// Initialize auth state from localStorage
 		async init() {
+			console.log('[auth] init called');
 			update((state) => ({ ...state, isLoading: true, error: null }));
 
 			// Check server health first
 			try {
 				const health = await api.getHealth();
+				console.log('[auth] health check passed');
 				update((state) => ({ ...state, serverStatus: health }));
 			} catch {
+				console.log('[auth] health check failed, bailing');
 				update((state) => ({
 					...state,
 					serverStatus: null,
@@ -45,18 +48,22 @@ function createAuthStore() {
 			// Check auth status (setup complete?)
 			try {
 				const authStatus = await api.getAuthStatus();
+				console.log('[auth] auth status:', authStatus);
 				update((state) => ({ ...state, authStatus }));
 			} catch {
+				console.log('[auth] auth status check failed');
 				update((state) => ({ ...state, authStatus: null }));
 			}
 
 			// Check if we have a stored token
 			const token = api.getToken();
+			console.log('[auth] stored token exists:', !!token);
 
 			if (token) {
 				// Verify token by making an authenticated request
 				try {
 					const user = await api.getCurrentUser();
+					console.log('[auth] token verified, user:', user?.username);
 					update((state) => ({
 						...state,
 						isAuthenticated: true,
@@ -66,6 +73,7 @@ function createAuthStore() {
 				} catch (err) {
 					if (err instanceof ApiError && err.isUnauthorized) {
 						// Token is invalid
+						console.log('[auth] token invalid (401/403), clearing');
 						api.setToken(null);
 						update((state) => ({
 							...state,
@@ -76,6 +84,7 @@ function createAuthStore() {
 						}));
 					} else {
 						// Network error or server issue - keep token, try again later
+						console.log('[auth] token verify failed (network?), keeping token');
 						update((state) => ({
 							...state,
 							isAuthenticated: true,
@@ -85,6 +94,7 @@ function createAuthStore() {
 					}
 				}
 			} else {
+				console.log('[auth] no token, showing login');
 				update((state) => ({
 					...state,
 					isAuthenticated: false,
@@ -96,19 +106,25 @@ function createAuthStore() {
 
 		// Login with username and password
 		async loginWithCredentials(username: string, password: string) {
+			console.log('[auth] loginWithCredentials called');
 			update((state) => ({ ...state, error: null }));
 
 			try {
+				console.log('[auth] calling api.login...');
 				const response = await api.login({ username, password });
+				console.log('[auth] api.login returned:', { hasToken: !!response?.access_token, hasUser: !!response?.user });
 				api.setToken(response.access_token);
+				console.log('[auth] token stored, updating state to authenticated');
 				update((state) => ({
 					...state,
 					isAuthenticated: true,
 					error: null,
 					user: response.user
 				}));
+				console.log('[auth] state updated, returning true');
 				return true;
 			} catch (err) {
+				console.error('[auth] loginWithCredentials error:', err);
 				const message =
 					err instanceof ApiError
 						? err.message
