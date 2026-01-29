@@ -384,7 +384,7 @@ def get_next_run_time(schedule: Schedule) -> datetime | None:
     job = scheduler.get_job(job_id)
 
     if job and job.next_run_time:
-        return job.next_run_time.astimezone(pytz.UTC).replace(tzinfo=None)
+        return job.next_run_time.astimezone(pytz.UTC)
 
     return None
 

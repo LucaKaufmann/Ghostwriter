@@ -87,8 +87,16 @@
 		}
 	}
 
+	function parseUTC(dateStr: string): Date {
+		// API returns naive UTC datetimes (no Z suffix) — ensure they're parsed as UTC
+		if (!dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
+			return new Date(dateStr + 'Z');
+		}
+		return new Date(dateStr);
+	}
+
 	function formatDate(dateStr: string): string {
-		return new Date(dateStr).toLocaleDateString('en-US', {
+		return parseUTC(dateStr).toLocaleDateString('en-US', {
 			month: 'short',
 			day: 'numeric',
 			hour: 'numeric',
@@ -97,11 +105,13 @@
 	}
 
 	function formatRelativeTime(dateStr: string): string {
-		const date = new Date(dateStr);
+		const date = parseUTC(dateStr);
 		const now = new Date();
 		const diff = date.getTime() - now.getTime();
 
-		if (diff < 0) return 'now';
+		if (diff < 0) {
+			return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+		}
 
 		const hours = Math.floor(diff / (1000 * 60 * 60));
 		const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));

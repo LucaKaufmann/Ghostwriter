@@ -200,9 +200,16 @@
 		}
 	}
 
+	function parseUTC(dateStr: string): Date {
+		if (!dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
+			return new Date(dateStr + 'Z');
+		}
+		return new Date(dateStr);
+	}
+
 	function formatNextRun(schedule: Schedule): string {
 		if (!schedule.next_run_at) return 'Not scheduled';
-		return new Date(schedule.next_run_at).toLocaleString('en-US', {
+		return parseUTC(schedule.next_run_at).toLocaleString('en-US', {
 			weekday: 'short',
 			month: 'short',
 			day: 'numeric',
@@ -212,7 +219,7 @@
 	}
 
 	function formatDate(dateStr: string): string {
-		return new Date(dateStr).toLocaleDateString('en-US', {
+		return parseUTC(dateStr).toLocaleDateString('en-US', {
 			month: 'short',
 			day: 'numeric',
 			year: 'numeric'
@@ -221,7 +228,7 @@
 
 	function formatLastUsed(dateStr: string | null): string {
 		if (!dateStr) return 'Never used';
-		const date = new Date(dateStr);
+		const date = parseUTC(dateStr);
 		const now = new Date();
 		const diffMs = now.getTime() - date.getTime();
 		const diffMins = Math.floor(diffMs / 60000);

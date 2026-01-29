@@ -90,8 +90,15 @@
 		}
 	}
 
+	function parseUTC(dateStr: string): Date {
+		if (!dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
+			return new Date(dateStr + 'Z');
+		}
+		return new Date(dateStr);
+	}
+
 	function formatDate(dateStr: string): string {
-		return new Date(dateStr).toLocaleDateString('en-US', {
+		return parseUTC(dateStr).toLocaleDateString('en-US', {
 			weekday: 'short',
 			month: 'short',
 			day: 'numeric',
@@ -101,7 +108,7 @@
 	}
 
 	function formatShortDate(dateStr: string): string {
-		return new Date(dateStr).toLocaleDateString('en-US', {
+		return parseUTC(dateStr).toLocaleDateString('en-US', {
 			month: 'short',
 			day: 'numeric'
 		});
@@ -124,8 +131,8 @@
 
 	function getDuration(digest: Digest): string | null {
 		if (!digest.completed_at) return null;
-		const start = new Date(digest.created_at).getTime();
-		const end = new Date(digest.completed_at).getTime();
+		const start = parseUTC(digest.created_at).getTime();
+		const end = parseUTC(digest.completed_at).getTime();
 		const seconds = Math.round((end - start) / 1000);
 		if (seconds < 60) return `${seconds}s`;
 		const minutes = Math.floor(seconds / 60);
