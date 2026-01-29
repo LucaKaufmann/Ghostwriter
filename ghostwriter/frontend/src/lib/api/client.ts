@@ -25,7 +25,8 @@ import type {
 	UserUpdate,
 	APITokenResponse,
 	APITokenCreateRequest,
-	APITokenCreateResponse
+	APITokenCreateResponse,
+	LogFileInfo
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -324,6 +325,17 @@ class ApiClient {
 
 	getOAuthStartUrl(): string {
 		return `${BASE_URL}/newsletters/oauth/start`;
+	}
+
+	// ============ Logs ============
+
+	async getLogFiles(): Promise<LogFileInfo[]> {
+		return this.request<LogFileInfo[]>('/logs');
+	}
+
+	getLogDownloadUrl(filename: string): string {
+		const token = this.getToken();
+		return `${BASE_URL}/logs/${filename}${token ? `?api_key=${token}` : ''}`;
 	}
 }
 
