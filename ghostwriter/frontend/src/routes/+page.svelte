@@ -42,6 +42,22 @@
 		queryFn: () => api.getDigests({ limit: 5 })
 	}));
 
+	function getStartOfWeek(): string {
+		const now = new Date();
+		const day = now.getDay();
+		const diff = day === 0 ? 6 : day - 1; // Monday as start of week
+		const monday = new Date(now);
+		monday.setDate(now.getDate() - diff);
+		monday.setHours(0, 0, 0, 0);
+		return monday.toISOString();
+	}
+
+	const weeklyDigestsQuery = createQuery(() => ({
+		queryKey: ['digests', { since: getStartOfWeek(), status: 'completed', limit: 100 }],
+		queryFn: () =>
+			api.getDigests({ since: getStartOfWeek(), status: 'completed', limit: 100 })
+	}));
+
 	const schedulesQuery = createQuery(() => ({
 		queryKey: ['schedules'],
 		queryFn: () => api.getSchedules()
@@ -199,11 +215,11 @@
 				<BookCopy class="h-4 w-4 text-muted-foreground" />
 			</Card.Header>
 			<Card.Content>
-				{#if digestsQuery.isPending}
+				{#if weeklyDigestsQuery.isPending}
 					<Skeleton class="h-7 w-12" />
 				{:else}
 					<div class="text-2xl font-bold">
-						{digestsQuery.data?.filter((d) => d.status === 'completed').length ?? 0}
+						{weeklyDigestsQuery.data?.length ?? 0}
 					</div>
 					<p class="text-xs text-muted-foreground">completed this week</p>
 				{/if}
