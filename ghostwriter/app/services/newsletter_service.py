@@ -165,7 +165,6 @@ class NewsletterService:
                 headers=headers,
                 params={
                     "labelIds": label_id,
-                    "q": "is:unread",
                     "maxResults": max_results,
                 },
             )
@@ -173,7 +172,7 @@ class NewsletterService:
             messages = resp.json().get("messages", [])
 
             if not messages:
-                logger.info("No unread newsletter emails found")
+                logger.info("No newsletter emails found")
                 return []
 
             # Fetch each message
