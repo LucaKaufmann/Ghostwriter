@@ -1,5 +1,7 @@
 """Newsletter (Gmail) integration endpoints."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
@@ -7,8 +9,10 @@ from pydantic import BaseModel
 from app.core.config import Settings, get_settings
 from app.core.security import verify_api_key
 from app.services.newsletter_service import NewsletterService
+from app.api.config import PreviewArticle, PreviewResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class NewsletterStatusResponse(BaseModel):
@@ -85,6 +89,7 @@ async def newsletter_status(
 ) -> NewsletterStatusResponse:
     """Get newsletter integration status."""
     service = NewsletterService(settings)
+    logger.info(f"Newsletter status check: configured={service.is_configured}, oauth_ready={service.is_oauth_ready}")
     return NewsletterStatusResponse(
         configured=service.is_configured,
         oauth_ready=service.is_oauth_ready,
@@ -105,6 +110,7 @@ async def oauth_start(
     """
     service = NewsletterService(settings)
     if not settings.gmail_client_id or not settings.gmail_client_secret:
+        logger.warning("OAuth start failed: Gmail client ID and secret not configured")
         return HTMLResponse(
             content=ERROR_HTML.format(error="Gmail client ID and secret not configured"),
             status_code=400,
@@ -113,6 +119,7 @@ async def oauth_start(
     # Build callback URL from current request
     callback_url = str(request.url_for("oauth_web_callback"))
     auth_url = service.get_auth_url(callback_url)
+    logger.info(f"OAuth flow started, callback URL: {callback_url}")
     return RedirectResponse(url=auth_url)
 
 
@@ -128,12 +135,14 @@ async def oauth_web_callback(
     This endpoint is called by Google, not by the user directly.
     """
     if error:
+        logger.error(f"OAuth callback received error from Google: {error}")
         return HTMLResponse(
             content=ERROR_HTML.format(error=f"Google returned error: {error}"),
             status_code=400,
         )
 
     if not code:
+        logger.error("OAuth callback received no authorization code")
         return HTMLResponse(
             content=ERROR_HTML.format(error="No authorization code received"),
             status_code=400,
@@ -144,11 +153,13 @@ async def oauth_web_callback(
     try:
         await service.exchange_code_with_callback(code)
     except Exception as e:
+        logger.error(f"OAuth token exchange failed: {e}")
         return HTMLResponse(
             content=ERROR_HTML.format(error=str(e)),
             status_code=400,
         )
 
+    logger.info(f"OAuth flow completed successfully, label: {settings.gmail_label}")
     return HTMLResponse(
         content=SUCCESS_HTML.format(label=settings.gmail_label),
         status_code=200,
@@ -164,11 +175,13 @@ async def oauth_init(
     """Get Google OAuth consent URL (for manual flow)."""
     service = NewsletterService(settings)
     if not settings.gmail_client_id or not settings.gmail_client_secret:
+        logger.warning("OAuth init failed: Gmail client ID and secret not configured")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Gmail client ID and secret must be configured",
         )
     auth_url = service.get_auth_url(redirect_uri)
+    logger.info(f"OAuth init: generated auth URL for redirect_uri={redirect_uri}")
     return OAuthInitResponse(auth_url=auth_url)
 
 
@@ -183,8 +196,40 @@ async def oauth_callback_post(
     try:
         await service.exchange_code(body.code, body.redirect_uri)
     except Exception as e:
+        logger.error(f"OAuth token exchange (POST) failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"OAuth token exchange failed: {e}",
         )
+    logger.info("OAuth token exchange (POST) completed successfully")
     return {"status": "ok", "message": "Gmail token saved successfully"}
+
+
+@router.post("/preview", response_model=PreviewResponse)
+async def preview_newsletters(
+    settings: Settings = Depends(get_settings),
+    _: None = Depends(verify_api_key),
+) -> PreviewResponse:
+    """Preview newsletter articles without marking them as read."""
+    service = NewsletterService(settings)
+    if not service.is_configured:
+        logger.warning("Newsletter preview requested but integration is not configured")
+        return PreviewResponse(status="error", detail="Newsletter integration is not configured")
+
+    try:
+        logger.info("Fetching newsletter preview")
+        articles = await service.fetch_newsletters()
+        preview_articles = [
+            PreviewArticle(
+                title=a.title,
+                url=a.url,
+                author=a.author,
+                word_count=a.word_count if a.word_count else None,
+            )
+            for a in articles
+        ]
+        logger.info(f"Newsletter preview: found {len(preview_articles)} articles")
+        return PreviewResponse(status="ok", count=len(preview_articles), articles=preview_articles)
+    except Exception as e:
+        logger.error(f"Newsletter preview failed: {e}")
+        return PreviewResponse(status="error", detail=str(e))

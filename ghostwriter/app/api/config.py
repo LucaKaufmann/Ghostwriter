@@ -275,6 +275,20 @@ class WallabagTestResult(BaseModel):
     detail: str | None = None
 
 
+class PreviewArticle(BaseModel):
+    title: str
+    url: str
+    author: str | None = None
+    word_count: int | None = None
+
+
+class PreviewResponse(BaseModel):
+    status: str  # "ok" | "error"
+    detail: str | None = None
+    count: int = 0
+    articles: list[PreviewArticle] = []
+
+
 @router.post("/wallabag/test", response_model=WallabagTestResult, dependencies=[Depends(verify_api_key)])
 async def test_wallabag_connection(
     session: Session = Depends(get_session),
@@ -289,3 +303,29 @@ async def test_wallabag_connection(
         return WallabagTestResult(status="ok")
     except Exception as e:
         return WallabagTestResult(status="error", detail=str(e))
+
+
+@router.post("/wallabag/preview", response_model=PreviewResponse, dependencies=[Depends(verify_api_key)])
+async def preview_wallabag(
+    session: Session = Depends(get_session),
+) -> PreviewResponse:
+    """Preview unread Wallabag articles without archiving or tagging."""
+    service = WallabagService.from_db_or_settings(session)
+    if not service.is_configured:
+        return PreviewResponse(status="error", detail="Wallabag is not configured")
+
+    try:
+        articles = await service.fetch_unread_articles()
+        preview_articles = [
+            PreviewArticle(
+                title=a.get("title", "Untitled"),
+                url=a.get("url", ""),
+                author=a.get("domain_name"),
+                word_count=len(a.get("content", "").split()) if a.get("content") else None,
+            )
+            for a in articles
+        ]
+        return PreviewResponse(status="ok", count=len(preview_articles), articles=preview_articles)
+    except Exception as e:
+        logger.error(f"Wallabag preview failed: {e}")
+        return PreviewResponse(status="error", detail=str(e))

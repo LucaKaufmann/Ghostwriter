@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -31,7 +31,8 @@
 		ChevronDown,
 		ChevronUp,
 		Plug,
-		TestTube2
+		TestTube2,
+		Search
 	} from 'lucide-svelte';
 
 	const queryClient = useQueryClient();
@@ -145,6 +146,36 @@
 		},
 		onError: (err: Error) => {
 			toast.error('Wallabag test failed', { description: err.message });
+		}
+	}));
+
+	// Preview state
+	let wallabagPreview = $state<PreviewResponse | null>(null);
+	let newsletterPreview = $state<PreviewResponse | null>(null);
+
+	const previewWallabagMutation = createMutation(() => ({
+		mutationFn: () => api.previewWallabag(),
+		onSuccess: (data) => {
+			wallabagPreview = data;
+			if (data.status === 'error') {
+				toast.error('Wallabag preview failed', { description: data.detail });
+			}
+		},
+		onError: (err: Error) => {
+			toast.error('Wallabag preview failed', { description: err.message });
+		}
+	}));
+
+	const previewNewsletterMutation = createMutation(() => ({
+		mutationFn: () => api.previewNewsletters(),
+		onSuccess: (data) => {
+			newsletterPreview = data;
+			if (data.status === 'error') {
+				toast.error('Newsletter preview failed', { description: data.detail });
+			}
+		},
+		onError: (err: Error) => {
+			toast.error('Newsletter preview failed', { description: err.message });
 		}
 	}));
 
@@ -767,32 +798,98 @@
 									{/if}
 									Save
 								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => previewWallabagMutation.mutate()}
+									disabled={previewWallabagMutation.isPending}
+								>
+									{#if previewWallabagMutation.isPending}
+										<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+									{:else}
+										<Search class="mr-2 h-4 w-4" />
+									{/if}
+									Preview
+								</Button>
 							</div>
+
+							{#if wallabagPreview?.status === 'ok' && wallabagPreview.articles.length > 0}
+								<div class="mt-3 rounded-md border p-3">
+									<p class="mb-2 text-sm font-medium">{wallabagPreview.count} unread article{wallabagPreview.count === 1 ? '' : 's'}</p>
+									<ul class="space-y-1">
+										{#each wallabagPreview.articles as article}
+											<li class="text-sm">
+												<a href={article.url} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">{article.title}</a>
+												<span class="text-muted-foreground">
+													{#if article.author} — {article.author}{/if}
+													{#if article.word_count} ({article.word_count.toLocaleString()} words){/if}
+												</span>
+											</li>
+										{/each}
+									</ul>
+								</div>
+							{:else if wallabagPreview?.status === 'ok' && wallabagPreview.articles.length === 0}
+								<p class="mt-3 text-sm text-muted-foreground">No unread articles found.</p>
+							{/if}
 						{/if}
 					</div>
 				{/if}
 			</div>
 
 			<!-- Gmail Newsletters -->
-			<div class="flex items-center justify-between rounded-lg border p-3">
-				<div>
-					<p class="font-medium">Gmail Newsletters</p>
-					<p class="text-sm text-muted-foreground">
-						{clientConfigQuery.data?.newsletters?.label
-							? `Label: ${clientConfigQuery.data.newsletters.label}`
-							: 'Newsletter email integration'}
-					</p>
+			<div class="rounded-lg border p-3">
+				<div class="flex items-center justify-between">
+					<div>
+						<p class="font-medium">Gmail Newsletters</p>
+						<p class="text-sm text-muted-foreground">
+							{clientConfigQuery.data?.newsletters?.label
+								? `Label: ${clientConfigQuery.data.newsletters.label}`
+								: 'Newsletter email integration'}
+						</p>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if clientConfigQuery.data?.newsletters?.enabled}
+							<CheckCircle2 class="h-5 w-5 text-green-500" />
+							<span class="text-sm text-green-600">Connected</span>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => previewNewsletterMutation.mutate()}
+								disabled={previewNewsletterMutation.isPending}
+							>
+								{#if previewNewsletterMutation.isPending}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								{:else}
+									<Search class="mr-2 h-4 w-4" />
+								{/if}
+								Preview
+							</Button>
+						{:else}
+							<a href="/newsletters" class="text-sm text-primary hover:underline">
+								Configure
+							</a>
+						{/if}
+					</div>
 				</div>
-				<div class="flex items-center gap-2">
-					{#if clientConfigQuery.data?.newsletters?.enabled}
-						<CheckCircle2 class="h-5 w-5 text-green-500" />
-						<span class="text-sm text-green-600">Connected</span>
-					{:else}
-						<a href="/newsletters" class="text-sm text-primary hover:underline">
-							Configure
-						</a>
-					{/if}
-				</div>
+
+				{#if newsletterPreview?.status === 'ok' && newsletterPreview.articles.length > 0}
+					<div class="mt-3 rounded-md border p-3">
+						<p class="mb-2 text-sm font-medium">{newsletterPreview.count} newsletter{newsletterPreview.count === 1 ? '' : 's'}</p>
+						<ul class="space-y-1">
+							{#each newsletterPreview.articles as article}
+								<li class="text-sm">
+									<a href={article.url} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">{article.title}</a>
+									<span class="text-muted-foreground">
+										{#if article.author} — {article.author}{/if}
+										{#if article.word_count} ({article.word_count.toLocaleString()} words){/if}
+									</span>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{:else if newsletterPreview?.status === 'ok' && newsletterPreview.articles.length === 0}
+					<p class="mt-3 text-sm text-muted-foreground">No newsletters found.</p>
+				{/if}
 			</div>
 		</Card.Content>
 	</Card.Root>

@@ -290,6 +290,22 @@ export interface WallabagTestResult {
 	detail?: string;
 }
 
+// ============ Integration Previews ============
+
+export interface PreviewArticle {
+	title: string;
+	url: string;
+	author?: string | null;
+	word_count?: number | null;
+}
+
+export interface PreviewResponse {
+	status: 'ok' | 'error';
+	detail?: string;
+	count: number;
+	articles: PreviewArticle[];
+}
+
 // ============ API Error ============
 
 export interface APIError {
