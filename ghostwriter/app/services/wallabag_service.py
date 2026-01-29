@@ -96,7 +96,10 @@ class WallabagService:
         logger.info(f"Requesting Wallabag OAuth token from {url}")
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(
+                timeout=30,
+                follow_redirects=True,
+            ) as client:
                 resp = await client.post(
                     url,
                     data={
@@ -106,6 +109,7 @@ class WallabagService:
                         "username": s.wallabag_username,
                         "password": s.wallabag_password,
                     },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
                 if resp.status_code != 200:
                     body = resp.text[:500]
