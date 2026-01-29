@@ -15,6 +15,9 @@ import type {
 	Schedule,
 	ScheduleUpdate,
 	NewsletterStatus,
+	WallabagConfigResponse,
+	WallabagConfigUpdate,
+	WallabagTestResult,
 	APIError,
 	DigestPeriod,
 	AuthStatus,
@@ -313,6 +316,25 @@ class ApiClient {
 
 	async triggerSchedule(period: DigestPeriod): Promise<TriggerResponse> {
 		return this.request<TriggerResponse>(`/schedules/${period}/trigger`, {
+			method: 'POST'
+		});
+	}
+
+	// ============ Wallabag ============
+
+	async getWallabagConfig(): Promise<WallabagConfigResponse> {
+		return this.request<WallabagConfigResponse>('/config/wallabag');
+	}
+
+	async updateWallabagConfig(data: WallabagConfigUpdate): Promise<WallabagConfigResponse> {
+		return this.request<WallabagConfigResponse>('/config/wallabag', {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async testWallabagConnection(): Promise<WallabagTestResult> {
+		return this.request<WallabagTestResult>('/config/wallabag/test', {
 			method: 'POST'
 		});
 	}

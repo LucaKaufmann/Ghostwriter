@@ -261,6 +261,35 @@ export interface LogFileInfo {
 	modified_at: string;
 }
 
+// ============ Wallabag ============
+
+export interface WallabagConfigResponse {
+	url: string;
+	client_id: string;
+	client_secret: string;
+	username: string;
+	password: string;
+	mode: 'raw' | 'summarize';
+	max_articles: number;
+	tag_on_process: string;
+}
+
+export interface WallabagConfigUpdate {
+	url?: string;
+	client_id?: string;
+	client_secret?: string;
+	username?: string;
+	password?: string;
+	mode?: string;
+	max_articles?: number;
+	tag_on_process?: string;
+}
+
+export interface WallabagTestResult {
+	status: 'ok' | 'error';
+	detail?: string;
+}
+
 // ============ API Error ============
 
 export interface APIError {

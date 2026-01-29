@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -26,7 +27,11 @@
 		Trash2,
 		AlertTriangle,
 		FileText,
-		Download
+		Download,
+		ChevronDown,
+		ChevronUp,
+		Plug,
+		TestTube2
 	} from 'lucide-svelte';
 
 	const queryClient = useQueryClient();
@@ -101,6 +106,79 @@
 			});
 		}
 	}));
+
+	const wallabagConfigQuery = createQuery(() => ({
+		queryKey: ['wallabag-config'],
+		queryFn: () => api.getWallabagConfig()
+	}));
+
+	const updateWallabagMutation = createMutation(() => ({
+		mutationFn: (data: WallabagConfigUpdate) => api.updateWallabagConfig(data),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['wallabag-config'] });
+			queryClient.invalidateQueries({ queryKey: ['client-config'] });
+			toast.success('Wallabag configuration saved');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to save Wallabag config', { description: err.message });
+		}
+	}));
+
+	const testWallabagMutation = createMutation(() => ({
+		mutationFn: () => api.testWallabagConnection(),
+		onSuccess: (data) => {
+			if (data.status === 'ok') {
+				toast.success('Wallabag connection successful');
+			} else {
+				toast.error('Wallabag connection failed', { description: data.detail });
+			}
+		},
+		onError: (err: Error) => {
+			toast.error('Wallabag test failed', { description: err.message });
+		}
+	}));
+
+	// Wallabag form state
+	let wallabagExpanded = $state(false);
+	let wbForm = $state<WallabagConfigUpdate>({});
+	let wbFormInitialized = $state(false);
+
+	$effect(() => {
+		const data = wallabagConfigQuery.data;
+		if (data && !wbFormInitialized) {
+			wbForm = {
+				url: data.url,
+				client_id: data.client_id,
+				client_secret: data.client_secret,
+				username: data.username,
+				password: data.password,
+				mode: data.mode,
+				max_articles: data.max_articles,
+				tag_on_process: data.tag_on_process
+			};
+			wbFormInitialized = true;
+		}
+	});
+
+	function saveWallabag() {
+		updateWallabagMutation.mutate(wbForm);
+		wbFormInitialized = false; // re-init from server response
+	}
+
+	function hasWallabagChanged(): boolean {
+		const data = wallabagConfigQuery.data;
+		if (!data) return false;
+		return (
+			wbForm.url !== data.url ||
+			wbForm.client_id !== data.client_id ||
+			wbForm.client_secret !== data.client_secret ||
+			wbForm.username !== data.username ||
+			wbForm.password !== data.password ||
+			wbForm.mode !== data.mode ||
+			wbForm.max_articles !== data.max_articles ||
+			wbForm.tag_on_process !== data.tag_on_process
+		);
+	}
 
 	// State
 	let showToken = $state(false);
@@ -554,59 +632,159 @@
 		</Card.Content>
 	</Card.Root>
 
-	<!-- Integrations Status -->
+	<!-- Integrations -->
 	<Card.Root>
 		<Card.Header>
-			<Card.Title>Integrations</Card.Title>
+			<Card.Title class="flex items-center gap-2">
+				<Plug class="h-5 w-5" />
+				Integrations
+			</Card.Title>
 			<Card.Description>
-				Status of external service integrations
+				Configure external service integrations
 			</Card.Description>
 		</Card.Header>
-		<Card.Content>
-			{#if clientConfigQuery.isPending}
-				<div class="space-y-3">
-					<Skeleton class="h-8 w-full" />
-					<Skeleton class="h-8 w-full" />
-				</div>
-			{:else if clientConfigQuery.data}
-				<div class="space-y-3">
-					<div class="flex items-center justify-between rounded-lg border p-3">
-						<div>
-							<p class="font-medium">Wallabag</p>
-							<p class="text-sm text-muted-foreground">Read-it-later integration</p>
-						</div>
-						<div class="flex items-center gap-2">
-							{#if clientConfigQuery.data.wallabag?.enabled}
-								<CheckCircle2 class="h-5 w-5 text-green-500" />
-								<span class="text-sm text-green-600">Connected</span>
-							{:else}
-								<span class="text-sm text-muted-foreground">Not configured</span>
-							{/if}
-						</div>
+		<Card.Content class="space-y-3">
+			<!-- Wallabag -->
+			<div class="rounded-lg border">
+				<button
+					class="flex w-full items-center justify-between p-3 text-left"
+					onclick={() => (wallabagExpanded = !wallabagExpanded)}
+				>
+					<div>
+						<p class="font-medium">Wallabag</p>
+						<p class="text-sm text-muted-foreground">Read-it-later integration</p>
 					</div>
+					<div class="flex items-center gap-2">
+						{#if clientConfigQuery.data?.wallabag?.enabled}
+							<CheckCircle2 class="h-5 w-5 text-green-500" />
+							<span class="text-sm text-green-600">Connected</span>
+						{:else}
+							<span class="text-sm text-muted-foreground">Not configured</span>
+						{/if}
+						{#if wallabagExpanded}
+							<ChevronUp class="h-4 w-4 text-muted-foreground" />
+						{:else}
+							<ChevronDown class="h-4 w-4 text-muted-foreground" />
+						{/if}
+					</div>
+				</button>
 
-					<div class="flex items-center justify-between rounded-lg border p-3">
-						<div>
-							<p class="font-medium">Gmail Newsletters</p>
-							<p class="text-sm text-muted-foreground">
-								{clientConfigQuery.data.newsletters?.label
-									? `Label: ${clientConfigQuery.data.newsletters.label}`
-									: 'Newsletter email integration'}
-							</p>
-						</div>
-						<div class="flex items-center gap-2">
-							{#if clientConfigQuery.data.newsletters?.enabled}
-								<CheckCircle2 class="h-5 w-5 text-green-500" />
-								<span class="text-sm text-green-600">Connected</span>
-							{:else}
-								<a href="/newsletters" class="text-sm text-primary hover:underline">
-									Configure
-								</a>
-							{/if}
-						</div>
+				{#if wallabagExpanded}
+					<div class="border-t p-4 space-y-4">
+						{#if wallabagConfigQuery.isPending}
+							<div class="space-y-3">
+								<Skeleton class="h-10 w-full" />
+								<Skeleton class="h-10 w-full" />
+							</div>
+						{:else}
+							<div class="grid gap-4 sm:grid-cols-2">
+								<div class="space-y-2 sm:col-span-2">
+									<Label for="wb-url">URL</Label>
+									<Input
+										id="wb-url"
+										placeholder="https://wallabag.example.com"
+										bind:value={wbForm.url}
+									/>
+								</div>
+								<div class="space-y-2">
+									<Label for="wb-client-id">Client ID</Label>
+									<Input id="wb-client-id" bind:value={wbForm.client_id} />
+								</div>
+								<div class="space-y-2">
+									<Label for="wb-client-secret">Client Secret</Label>
+									<Input id="wb-client-secret" type="password" bind:value={wbForm.client_secret} />
+								</div>
+								<div class="space-y-2">
+									<Label for="wb-username">Username</Label>
+									<Input id="wb-username" bind:value={wbForm.username} />
+								</div>
+								<div class="space-y-2">
+									<Label for="wb-password">Password</Label>
+									<Input id="wb-password" type="password" bind:value={wbForm.password} />
+								</div>
+								<div class="space-y-2">
+									<Label for="wb-mode">Processing Mode</Label>
+									<select
+										id="wb-mode"
+										class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+										bind:value={wbForm.mode}
+									>
+										<option value="raw">Raw (full text)</option>
+										<option value="summarize">Summarize (AI)</option>
+									</select>
+								</div>
+								<div class="space-y-2">
+									<Label for="wb-max">Max Articles</Label>
+									<Input
+										id="wb-max"
+										type="number"
+										min="1"
+										bind:value={wbForm.max_articles}
+									/>
+								</div>
+								<div class="space-y-2 sm:col-span-2">
+									<Label for="wb-tag">Tag on Process</Label>
+									<Input
+										id="wb-tag"
+										placeholder="ghostwriter"
+										bind:value={wbForm.tag_on_process}
+									/>
+								</div>
+							</div>
+
+							<div class="flex items-center gap-2 pt-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => testWallabagMutation.mutate()}
+									disabled={testWallabagMutation.isPending}
+								>
+									{#if testWallabagMutation.isPending}
+										<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+									{:else}
+										<TestTube2 class="mr-2 h-4 w-4" />
+									{/if}
+									Test Connection
+								</Button>
+								<Button
+									size="sm"
+									onclick={saveWallabag}
+									disabled={!hasWallabagChanged() || updateWallabagMutation.isPending}
+								>
+									{#if updateWallabagMutation.isPending}
+										<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+									{:else}
+										<Save class="mr-2 h-4 w-4" />
+									{/if}
+									Save
+								</Button>
+							</div>
+						{/if}
 					</div>
+				{/if}
+			</div>
+
+			<!-- Gmail Newsletters -->
+			<div class="flex items-center justify-between rounded-lg border p-3">
+				<div>
+					<p class="font-medium">Gmail Newsletters</p>
+					<p class="text-sm text-muted-foreground">
+						{clientConfigQuery.data?.newsletters?.label
+							? `Label: ${clientConfigQuery.data.newsletters.label}`
+							: 'Newsletter email integration'}
+					</p>
 				</div>
-			{/if}
+				<div class="flex items-center gap-2">
+					{#if clientConfigQuery.data?.newsletters?.enabled}
+						<CheckCircle2 class="h-5 w-5 text-green-500" />
+						<span class="text-sm text-green-600">Connected</span>
+					{:else}
+						<a href="/newsletters" class="text-sm text-primary hover:underline">
+							Configure
+						</a>
+					{/if}
+				</div>
+			</div>
 		</Card.Content>
 	</Card.Root>
 </div>
