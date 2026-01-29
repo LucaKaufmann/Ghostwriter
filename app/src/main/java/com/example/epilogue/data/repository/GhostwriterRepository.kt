@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.SyncResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestArticlesResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestResponse
@@ -471,6 +472,43 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Heartbeat failed", e)
             GhostwriterResult.Error("Heartbeat failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Perform a combined sync that returns config, feeds, digests, and schedules
+     * in a single API call.
+     *
+     * @param feedSince Timestamp in milliseconds for incremental feed sync. Null for initial sync.
+     * @param knownDigestIds List of digest IDs the client already has, to exclude from response.
+     */
+    suspend fun performSync(feedSince: Long?, knownDigestIds: List<String>): GhostwriterResult<SyncResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val sinceStr = feedSince?.let {
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+                sdf.timeZone = TimeZone.getTimeZone("UTC")
+                sdf.format(java.util.Date(it))
+            }
+
+            val digestIdsStr = if (knownDigestIds.isNotEmpty()) {
+                knownDigestIds.joinToString(",")
+            } else null
+
+            val response = api.performSync(getAuthHeader(), sinceStr, digestIdsStr)
+            if (response.isSuccessful && response.body() != null) {
+                Log.i(TAG, "Combined sync successful")
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Combined sync failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Combined sync failed", e)
+            GhostwriterResult.Error("Combined sync failed: ${e.message}")
         }
     }
 

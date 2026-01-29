@@ -2,12 +2,13 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, client, config, digests, feeds, health, logs, newsletters, schedules
+from app.api import auth, client, config, digests, feeds, health, logs, newsletters, schedules, sync
 
 api_router = APIRouter()
 
 # Include all route modules
 api_router.include_router(health.router, tags=["System"])
+api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
 api_router.include_router(auth.router, tags=["Authentication"])
 api_router.include_router(feeds.router, prefix="/feeds", tags=["Feeds"])
 api_router.include_router(digests.router, prefix="/digests", tags=["Digests"])

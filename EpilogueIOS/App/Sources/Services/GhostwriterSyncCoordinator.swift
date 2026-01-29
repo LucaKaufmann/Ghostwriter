@@ -70,8 +70,7 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     private static let digestSyncInterval: TimeInterval = 3600
 
     /// Perform a full sync with Ghostwriter
-    /// Config, schedule, and feeds sync every time.
-    /// Digest sync only runs if enough time has passed since the last one.
+    /// Tries the combined /sync endpoint first, falls back to individual calls.
     public func performFullSync() async {
         guard await isConfigured() else {
             logger.debug("Ghostwriter not configured, skipping sync")
@@ -96,23 +95,32 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                 logger.warning("Heartbeat failed: \(error.localizedDescription)")
             }
 
-            // 2. Sync config (always)
+            // 2. Push local feeds first (needs to happen before pull)
             do {
-                _ = try await configSyncManager.sync()
+                try await feedSyncService.pushLocalFeeds()
             } catch {
-                logger.warning("Config sync failed: \(error.localizedDescription)")
+                logger.warning("Feed push failed: \(error.localizedDescription)")
             }
 
-            // 3. Sync feeds (always)
-            try await feedSyncService.sync()
+            // 3. Try combined sync
+            let combinedSyncSucceeded = await tryCombinedSync()
 
-            // 4. Sync digests (only if stale)
-            let shouldSyncDigests = await shouldRunDigestSync()
-            if shouldSyncDigests {
-                logger.info("Digest sync is due, running...")
-                try await digestSyncService.sync()
-            } else {
-                logger.info("Digest sync skipped — last sync was recent")
+            if !combinedSyncSucceeded {
+                // Fall back to individual calls
+                logger.warning("Combined sync failed, falling back to individual calls")
+
+                do {
+                    _ = try await configSyncManager.sync()
+                } catch {
+                    logger.warning("Config sync failed: \(error.localizedDescription)")
+                }
+
+                try await feedSyncService.sync()
+
+                let shouldSyncDigests = await shouldRunDigestSync()
+                if shouldSyncDigests {
+                    try await digestSyncService.sync()
+                }
             }
 
             lastSyncTime = Date()
@@ -123,6 +131,48 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         }
 
         isSyncing = false
+    }
+
+    /// Try combined sync endpoint. Returns true if successful.
+    private func tryCombinedSync() async -> Bool {
+        do {
+            guard let url = try await settingsRepository.getGhostwriterURL() else { return false }
+            let apiKey = try await settingsRepository.getGhostwriterAPIKey()
+            let client = try GhostwriterClient(baseURLString: url, apiKey: apiKey)
+
+            let feedSince = try await settingsRepository.getLastFeedSyncTime()
+            let knownDigestIds = try await digestSyncService.getKnownRemoteIds()
+
+            let syncResponse = try await client.performSync(
+                feedSince: feedSince,
+                knownDigestIds: knownDigestIds
+            )
+
+            // Dispatch response to individual handlers
+            do {
+                try await configSyncManager.applyPreFetchedConfig(syncResponse.config)
+            } catch {
+                logger.warning("Failed to apply synced config: \(error.localizedDescription)")
+            }
+
+            do {
+                try await feedSyncService.applyFeedChanges(syncResponse.feeds)
+            } catch {
+                logger.warning("Failed to apply synced feeds: \(error.localizedDescription)")
+            }
+
+            do {
+                try await digestSyncService.processDigestsFromSync(syncResponse.digests.newDigests)
+            } catch {
+                logger.warning("Failed to process synced digests: \(error.localizedDescription)")
+            }
+
+            logger.info("Combined sync completed: \(syncResponse.digests.newDigests.count) new digests")
+            return true
+        } catch {
+            logger.warning("Combined sync endpoint failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// Force a full sync including digests regardless of timing
@@ -137,9 +187,18 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
             logger.info("Starting forced full Ghostwriter sync (including digests)")
 
             do { _ = try await heartbeatService.sendHeartbeat() } catch {}
-            do { _ = try await configSyncManager.sync() } catch {}
-            try await feedSyncService.sync()
-            try await digestSyncService.sync()
+
+            // Push feeds first
+            do { try await feedSyncService.pushLocalFeeds() } catch {}
+
+            // Try combined sync
+            let combinedSyncSucceeded = await tryCombinedSync()
+
+            if !combinedSyncSucceeded {
+                do { _ = try await configSyncManager.sync() } catch {}
+                try await feedSyncService.sync()
+                try await digestSyncService.sync()
+            }
 
             lastSyncTime = Date()
             logger.info("Forced full sync completed")

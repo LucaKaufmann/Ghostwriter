@@ -110,6 +110,35 @@ public final class FeedSyncService {
         logger.info("Pushed \(result.synced) feeds to server (created: \(result.created), updated: \(result.updated))")
     }
 
+    /// Apply feed changes from a pre-fetched sync response (combined sync endpoint).
+    /// Skips the push phase (assumed already done) and the fetch.
+    public func applyFeedChanges(_ changes: FeedChangesResponse) async throws {
+        // Apply server feeds locally
+        if !changes.feeds.isEmpty {
+            let serverFeeds = changes.feeds.map { convertResponseToFeed($0) }
+            logger.info("Applying \(serverFeeds.count) feeds from combined sync")
+            try await feedRepository.upsertAll(serverFeeds)
+        }
+
+        // Apply tombstones
+        if !changes.tombstones.isEmpty {
+            let tombstoneURLs = changes.tombstones.map { $0.url }
+            logger.info("Applying \(tombstoneURLs.count) tombstones from combined sync")
+            try await feedRepository.deleteByURLs(tombstoneURLs)
+        }
+
+        // Clear modified flags and update timestamp
+        try await feedRepository.clearAllLocallyModified()
+
+        if let serverTime = changes.serverTimestamp.toISO8601Date() {
+            try await settingsRepository.setLastFeedSyncTime(serverTime)
+        } else {
+            try await settingsRepository.setLastFeedSyncTime(Date())
+        }
+
+        logger.info("Applied feed changes from combined sync")
+    }
+
     /// Notify server when a feed is deleted locally
     public func notifyFeedDeleted(url: String) async throws {
         guard try await settingsRepository.isGhostwriterConfigured() else {
