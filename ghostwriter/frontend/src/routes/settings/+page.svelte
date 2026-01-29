@@ -114,7 +114,17 @@
 
 	const updateWallabagMutation = createMutation(() => ({
 		mutationFn: (data: WallabagConfigUpdate) => api.updateWallabagConfig(data),
-		onSuccess: () => {
+		onSuccess: (data) => {
+			wbForm = {
+				url: data.url,
+				client_id: data.client_id,
+				client_secret: data.client_secret,
+				username: data.username,
+				password: data.password,
+				mode: data.mode,
+				max_articles: data.max_articles,
+				tag_on_process: data.tag_on_process
+			};
 			queryClient.invalidateQueries({ queryKey: ['wallabag-config'] });
 			queryClient.invalidateQueries({ queryKey: ['client-config'] });
 			toast.success('Wallabag configuration saved');
@@ -162,7 +172,6 @@
 
 	function saveWallabag() {
 		updateWallabagMutation.mutate(wbForm);
-		wbFormInitialized = false; // re-init from server response
 	}
 
 	function hasWallabagChanged(): boolean {
