@@ -24,6 +24,32 @@ from app.services.wallabag_service import WallabagService
 
 logger = logging.getLogger(__name__)
 
+# Well-known synthetic feed URLs for non-RSS sources
+_SYNTHETIC_FEED_URLS = {
+    "wallabag": "synthetic://wallabag",
+    "newsletter": "synthetic://newsletter",
+}
+
+
+def get_or_create_synthetic_feed(session: Session, source: str) -> Feed:
+    """Get or create a synthetic Feed row for non-RSS sources (Wallabag, Newsletter)."""
+    url = _SYNTHETIC_FEED_URLS[source]
+    statement = select(Feed).where(Feed.url == url)
+    feed = session.exec(statement).first()
+    if feed is None:
+        feed = Feed(
+            url=url,
+            title=source.capitalize(),
+            is_active=False,  # Not a real RSS feed; never fetched
+            mode="raw",
+            max_articles=0,
+        )
+        session.add(feed)
+        session.commit()
+        session.refresh(feed)
+        logger.info(f"Created synthetic feed for {source}: {feed.id}")
+    return feed
+
 
 class BinderyPipeline:
     """
@@ -54,6 +80,21 @@ class BinderyPipeline:
         self._feeds_fetched: int = 0
         self._articles_enriched: int = 0
         self._progress_dirty: bool = False
+
+        # Synthetic feed IDs for non-RSS sources (resolved lazily)
+        self._wallabag_feed_id: UUID | None = None
+        self._newsletter_feed_id: UUID | None = None
+
+    def _get_synthetic_feed_id(self, source: str) -> UUID:
+        """Get the synthetic feed ID, creating the feed row if needed."""
+        attr = f"_{source}_feed_id"
+        fid = getattr(self, attr)
+        if fid is None:
+            with Session(engine) as session:
+                feed = get_or_create_synthetic_feed(session, source)
+                fid = feed.id
+                setattr(self, attr, fid)
+        return fid
 
     async def run(self) -> None:
         """Execute the full pipeline."""
@@ -132,9 +173,10 @@ class BinderyPipeline:
                         event="wallabag_fetched",
                         context={"count": len(wb_raw)},
                     )
+                    wb_feed_id = self._get_synthetic_feed_id("wallabag")
                     for wb in wb_raw:
                         guid = f"wallabag-{wb['id']}"
-                        if not await self._is_seen_wallabag(guid):
+                        if not await self._is_seen(wb_feed_id, guid):
                             content = wb["content"] or ""
                             # Strip HTML for plain text
                             import re
@@ -153,7 +195,7 @@ class BinderyPipeline:
                                 processing_ms=0,
                             ))
                             wallabag_entry_ids.append(wb["id"])
-                            await self._mark_seen_wallabag(guid, wb["url"], wb["title"])
+                            await self._mark_seen_raw(wb_feed_id, guid, wb["url"], wb["title"])
                 except Exception as e:
                     logger.warning(f"Wallabag fetch failed, continuing with RSS only: {e!r}", exc_info=True)
                     digest_logger.error(
@@ -179,10 +221,11 @@ class BinderyPipeline:
                         event="newsletters_fetched",
                         context={"count": len(nl_raw)},
                     )
+                    nl_feed_id = self._get_synthetic_feed_id("newsletter")
                     for nl in nl_raw:
-                        if not await self._is_seen_wallabag(nl.guid):
+                        if not await self._is_seen(nl_feed_id, nl.guid):
                             newsletter_articles.append(nl)
-                            await self._mark_seen_wallabag(nl.guid, nl.url, nl.title)
+                            await self._mark_seen_raw(nl_feed_id, nl.guid, nl.url, nl.title)
                 except Exception as e:
                     logger.warning(f"Newsletter fetch failed, continuing without: {e}")
                     digest_logger.error(
@@ -449,25 +492,11 @@ class BinderyPipeline:
             session.add(seen)
             session.commit()
 
-    async def _is_seen_wallabag(self, guid: str) -> bool:
-        """Check if a Wallabag article has been seen recently."""
-        cutoff = datetime.utcnow() - timedelta(
-            days=self.settings.seen_article_retention_days
-        )
-        with Session(engine) as session:
-            statement = (
-                select(SeenArticle)
-                .where(SeenArticle.feed_id == None)  # noqa: E711
-                .where(SeenArticle.guid == guid)
-                .where(SeenArticle.seen_at > cutoff)
-            )
-            return session.exec(statement).first() is not None
-
-    async def _mark_seen_wallabag(self, guid: str, url: str, title: str) -> None:
-        """Mark a Wallabag article as seen."""
+    async def _mark_seen_raw(self, feed_id: UUID, guid: str, url: str, title: str) -> None:
+        """Mark an article as seen using raw fields (for non-RSS sources)."""
         with Session(engine) as session:
             seen = SeenArticle(
-                feed_id=None,
+                feed_id=feed_id,
                 guid=guid,
                 url=url,
                 title=title,
