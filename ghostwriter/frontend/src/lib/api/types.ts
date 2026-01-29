@@ -253,6 +253,14 @@ export interface NewsletterStatus {
 	label: string;
 }
 
+// ============ Logs ============
+
+export interface LogFileInfo {
+	filename: string;
+	size_bytes: number;
+	modified_at: string;
+}
+
 // ============ API Error ============
 
 export interface APIError {

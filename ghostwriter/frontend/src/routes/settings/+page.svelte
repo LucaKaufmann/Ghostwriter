@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -24,7 +24,9 @@
 		Key,
 		Plus,
 		Trash2,
-		AlertTriangle
+		AlertTriangle,
+		FileText,
+		Download
 	} from 'lucide-svelte';
 
 	const queryClient = useQueryClient();
@@ -48,6 +50,11 @@
 	const tokensQuery = createQuery(() => ({
 		queryKey: ['api-tokens'],
 		queryFn: () => api.getAPITokens()
+	}));
+
+	const logFilesQuery = createQuery(() => ({
+		queryKey: ['log-files'],
+		queryFn: () => api.getLogFiles()
 	}));
 
 	// Mutations
@@ -242,6 +249,12 @@
 			hour: 'numeric',
 			minute: '2-digit'
 		});
+	}
+
+	function formatFileSize(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
 	function formatDate(dateStr: string): string {
@@ -689,6 +702,49 @@
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
+
+<!-- Activity Logs -->
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="flex items-center gap-2">
+				<FileText class="h-5 w-5" />
+				Activity Logs
+			</Card.Title>
+			<Card.Description>Download server log files for debugging</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			{#if logFilesQuery.isPending}
+				<div class="space-y-2">
+					<Skeleton class="h-10 w-full" />
+					<Skeleton class="h-10 w-full" />
+				</div>
+			{:else if logFilesQuery.data && logFilesQuery.data.length > 0}
+				<div class="space-y-2">
+					{#each logFilesQuery.data as logFile}
+						<div class="flex items-center justify-between rounded-lg border p-3">
+							<div>
+								<p class="text-sm font-medium">{logFile.filename}</p>
+								<p class="text-xs text-muted-foreground">{formatFileSize(logFile.size_bytes)}</p>
+							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => window.open(api.getLogDownloadUrl(logFile.filename), '_blank')}
+							>
+								<Download class="mr-2 h-4 w-4" />
+								Download
+							</Button>
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<div class="text-center py-8 text-muted-foreground">
+					<FileText class="h-8 w-8 mx-auto mb-2 opacity-50" />
+					<p>No log files available</p>
+				</div>
+			{/if}
+		</Card.Content>
+	</Card.Root>
 
 <!-- Revoke Token Confirmation -->
 <AlertDialog.Root open={tokenToRevoke !== null}>
