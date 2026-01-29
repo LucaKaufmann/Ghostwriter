@@ -178,9 +178,31 @@
 		);
 	}
 
+	function copyToClipboard(text: string): boolean {
+		// Fallback for non-secure contexts (HTTP)
+		const textarea = document.createElement('textarea');
+		textarea.value = text;
+		textarea.style.position = 'fixed';
+		textarea.style.opacity = '0';
+		document.body.appendChild(textarea);
+		textarea.select();
+		try {
+			document.execCommand('copy');
+			return true;
+		} catch {
+			return false;
+		} finally {
+			document.body.removeChild(textarea);
+		}
+	}
+
 	async function copyToken() {
 		try {
-			await navigator.clipboard.writeText(storedToken);
+			if (navigator.clipboard && window.isSecureContext) {
+				await navigator.clipboard.writeText(storedToken);
+			} else if (!copyToClipboard(storedToken)) {
+				throw new Error('Copy failed');
+			}
 			copiedToken = true;
 			toast.success('Token copied to clipboard');
 			setTimeout(() => (copiedToken = false), 2000);
@@ -191,7 +213,11 @@
 
 	async function copyNewToken() {
 		try {
-			await navigator.clipboard.writeText(newlyCreatedToken);
+			if (navigator.clipboard && window.isSecureContext) {
+				await navigator.clipboard.writeText(newlyCreatedToken);
+			} else if (!copyToClipboard(newlyCreatedToken)) {
+				throw new Error('Copy failed');
+			}
 			copiedNewToken = true;
 			toast.success('Token copied to clipboard');
 			setTimeout(() => (copiedNewToken = false), 2000);
