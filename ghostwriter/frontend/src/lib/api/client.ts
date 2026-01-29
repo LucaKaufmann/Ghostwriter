@@ -18,6 +18,7 @@ import type {
 	WallabagConfigResponse,
 	WallabagConfigUpdate,
 	WallabagTestResult,
+	PreviewResponse,
 	APIError,
 	DigestPeriod,
 	AuthStatus,
@@ -339,6 +340,12 @@ class ApiClient {
 		});
 	}
 
+	async previewWallabag(): Promise<PreviewResponse> {
+		return this.request<PreviewResponse>('/config/wallabag/preview', {
+			method: 'POST'
+		});
+	}
+
 	// ============ Newsletters ============
 
 	async getNewsletterStatus(): Promise<NewsletterStatus> {
@@ -347,6 +354,12 @@ class ApiClient {
 
 	getOAuthStartUrl(): string {
 		return `${BASE_URL}/newsletters/oauth/start`;
+	}
+
+	async previewNewsletters(): Promise<PreviewResponse> {
+		return this.request<PreviewResponse>('/newsletters/preview', {
+			method: 'POST'
+		});
 	}
 
 	// ============ Logs ============
