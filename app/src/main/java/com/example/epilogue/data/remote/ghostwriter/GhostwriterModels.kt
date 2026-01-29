@@ -206,15 +206,16 @@ data class IntegrationStatus(
  * Response model for client configuration (shared settings).
  */
 data class ClientConfigResponse(
-    @SerializedName("min_word_count") val minWordCount: Int,
-    @SerializedName("morning_hour") val morningHour: Int,
-    @SerializedName("morning_minute") val morningMinute: Int,
-    @SerializedName("noon_hour") val noonHour: Int,
-    @SerializedName("noon_minute") val noonMinute: Int,
-    @SerializedName("evening_hour") val eveningHour: Int,
-    @SerializedName("evening_minute") val eveningMinute: Int,
     @SerializedName("timezone") val timezone: String,
-    @SerializedName("updated_at") val updatedAt: String,
+    @SerializedName("ai_provider") val aiProvider: String? = null,
+    @SerializedName("ai_model") val aiModel: String? = null,
+    @SerializedName("schedule_enabled") val scheduleEnabled: Boolean? = null,
+    @SerializedName("schedule_morning") val scheduleMorning: String? = null,
+    @SerializedName("schedule_noon") val scheduleNoon: String? = null,
+    @SerializedName("schedule_evening") val scheduleEvening: String? = null,
+    @SerializedName("digest_retention_days") val digestRetentionDays: Int? = null,
+    @SerializedName("max_articles_per_digest") val maxArticlesPerDigest: Int? = null,
+    @SerializedName("updated_at") val updatedAt: String? = null,
     // Integration status
     @SerializedName("wallabag") val wallabag: IntegrationStatus? = null,
     @SerializedName("newsletters") val newsletters: IntegrationStatus? = null
@@ -224,13 +225,10 @@ data class ClientConfigResponse(
  * Request model for updating client configuration.
  */
 data class ClientConfigUpdateRequest(
-    @SerializedName("min_word_count") val minWordCount: Int? = null,
-    @SerializedName("morning_hour") val morningHour: Int? = null,
-    @SerializedName("morning_minute") val morningMinute: Int? = null,
-    @SerializedName("noon_hour") val noonHour: Int? = null,
-    @SerializedName("noon_minute") val noonMinute: Int? = null,
-    @SerializedName("evening_hour") val eveningHour: Int? = null,
-    @SerializedName("evening_minute") val eveningMinute: Int? = null,
     @SerializedName("timezone") val timezone: String? = null,
+    @SerializedName("schedule_enabled") val scheduleEnabled: Boolean? = null,
+    @SerializedName("schedule_morning") val scheduleMorning: String? = null,
+    @SerializedName("schedule_noon") val scheduleNoon: String? = null,
+    @SerializedName("schedule_evening") val scheduleEvening: String? = null,
     @SerializedName("client_updated_at") val clientUpdatedAt: String? = null
 )

@@ -50,6 +50,15 @@ class SettingsRepository @Inject constructor(
         private const val KEY_LAST_FEED_SYNC = "last_feed_sync"
         private const val KEY_CONFIG_UPDATED_AT = "config_updated_at"  // Server's updated_at timestamp
 
+        // Ghostwriter schedule display keys
+        private const val KEY_GW_MORNING_HOUR = "gw_morning_hour"
+        private const val KEY_GW_MORNING_MINUTE = "gw_morning_minute"
+        private const val KEY_GW_NOON_HOUR = "gw_noon_hour"
+        private const val KEY_GW_NOON_MINUTE = "gw_noon_minute"
+        private const val KEY_GW_EVENING_HOUR = "gw_evening_hour"
+        private const val KEY_GW_EVENING_MINUTE = "gw_evening_minute"
+        private const val KEY_GW_TIMEZONE = "gw_timezone"
+
         // Defaults
         private const val DEFAULT_MIN_WORD_COUNT = 0
         private const val DEFAULT_EINK_MODE = false
@@ -413,5 +422,50 @@ class SettingsRepository @Inject constructor(
      */
     fun getConfigUpdatedAt(): String? {
         return prefs.getString(KEY_CONFIG_UPDATED_AT, null)
+    }
+
+    // ===== Ghostwriter Schedule (for display) =====
+
+    data class GhostwriterSchedule(
+        val morningHour: Int,
+        val morningMinute: Int,
+        val noonHour: Int,
+        val noonMinute: Int,
+        val eveningHour: Int,
+        val eveningMinute: Int,
+        val timezone: String
+    )
+
+    fun setGhostwriterSchedule(
+        morningHour: Int,
+        morningMinute: Int,
+        noonHour: Int,
+        noonMinute: Int,
+        eveningHour: Int,
+        eveningMinute: Int,
+        timezone: String
+    ) {
+        prefs.edit()
+            .putInt(KEY_GW_MORNING_HOUR, morningHour)
+            .putInt(KEY_GW_MORNING_MINUTE, morningMinute)
+            .putInt(KEY_GW_NOON_HOUR, noonHour)
+            .putInt(KEY_GW_NOON_MINUTE, noonMinute)
+            .putInt(KEY_GW_EVENING_HOUR, eveningHour)
+            .putInt(KEY_GW_EVENING_MINUTE, eveningMinute)
+            .putString(KEY_GW_TIMEZONE, timezone)
+            .apply()
+    }
+
+    fun getGhostwriterSchedule(): GhostwriterSchedule? {
+        val timezone = prefs.getString(KEY_GW_TIMEZONE, null) ?: return null
+        return GhostwriterSchedule(
+            morningHour = prefs.getInt(KEY_GW_MORNING_HOUR, 7),
+            morningMinute = prefs.getInt(KEY_GW_MORNING_MINUTE, 0),
+            noonHour = prefs.getInt(KEY_GW_NOON_HOUR, 12),
+            noonMinute = prefs.getInt(KEY_GW_NOON_MINUTE, 0),
+            eveningHour = prefs.getInt(KEY_GW_EVENING_HOUR, 18),
+            eveningMinute = prefs.getInt(KEY_GW_EVENING_MINUTE, 0),
+            timezone = timezone
+        )
     }
 }
