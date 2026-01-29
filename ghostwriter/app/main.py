@@ -4,9 +4,12 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app import __version__
@@ -21,6 +24,9 @@ from app.worker.scheduler import setup_scheduler, shutdown_scheduler
 settings = get_settings()
 configure_logging()
 logger = logging.getLogger(__name__)
+
+# Frontend directory (built SvelteKit app)
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
 
 class ProxyHeadersMiddleware(BaseHTTPMiddleware):
@@ -106,14 +112,78 @@ app.add_middleware(
 )
 
 # Include API routes
-app.include_router(api_router)
+app.include_router(api_router, prefix="/api")
+
+# Root health endpoint for Docker healthcheck (also available at /api/health)
+@app.get("/health")
+async def root_health():
+    """Root health check for Docker healthcheck and backwards compatibility."""
+    return {"status": "healthy"}
 
 
-@app.get("/")
-async def root():
-    """Root endpoint with basic service info."""
-    return {
-        "service": "Ghostwriter",
-        "version": __version__,
-        "docs": "/docs",
-    }
+# Serve frontend static files if the build directory exists
+if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
+    logger.info(f"Serving frontend from {FRONTEND_DIR}")
+
+    # Mount static assets (JS, CSS, images, etc.)
+    # These are typically in _app/ for SvelteKit builds
+    if (FRONTEND_DIR / "_app").exists():
+        app.mount("/_app", StaticFiles(directory=FRONTEND_DIR / "_app"), name="app-assets")
+
+    # Mount any other static files (favicon, robots.txt, etc.)
+    # We'll handle index.html separately for SPA routing
+
+    @app.get("/favicon.svg")
+    async def favicon():
+        """Serve favicon."""
+        favicon_path = FRONTEND_DIR / "favicon.svg"
+        if favicon_path.exists():
+            return FileResponse(favicon_path)
+        return FileResponse(FRONTEND_DIR / "favicon.ico")
+
+    @app.get("/robots.txt")
+    async def robots():
+        """Serve robots.txt."""
+        return FileResponse(FRONTEND_DIR / "robots.txt")
+
+    # SPA fallback - catch all frontend routes and serve index.html
+    # This must be registered last, after all API routes
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        """
+        Serve the SPA for any unmatched routes.
+
+        This enables client-side routing - all frontend routes
+        return index.html and let SvelteKit handle routing.
+        """
+        # Don't serve index.html for API paths or known backend paths
+        if full_path.startswith(("api/", "docs", "redoc", "openapi.json")):
+            return {"detail": "Not found"}
+
+        # Check if it's a direct file request (has extension)
+        file_path = FRONTEND_DIR / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+
+        # Otherwise, serve index.html for SPA routing
+        # Set no-cache headers so browsers always fetch the latest version
+        return FileResponse(
+            FRONTEND_DIR / "index.html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+
+else:
+    # No frontend build - serve a simple JSON response at root
+    @app.get("/")
+    async def root():
+        """Root endpoint with basic service info."""
+        return {
+            "service": "Ghostwriter",
+            "version": __version__,
+            "docs": "/docs",
+            "note": "Web UI not built. Run 'npm run build' in frontend/ to enable.",
+        }

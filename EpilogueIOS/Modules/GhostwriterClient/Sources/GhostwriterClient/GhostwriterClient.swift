@@ -27,7 +27,12 @@ public actor GhostwriterClient {
     ///   - apiKey: Optional API key for authentication
     ///   - session: URLSession to use for requests (defaults to shared)
     public init(baseURL: URL, apiKey: String? = nil, session: URLSession = .shared) {
-        self.baseURL = baseURL
+        // Ensure base URL includes /api/ path
+        if baseURL.pathComponents.contains("api") {
+            self.baseURL = baseURL
+        } else {
+            self.baseURL = baseURL.appendingPathComponent("api")
+        }
         self.apiKey = apiKey
         self.session = session
         

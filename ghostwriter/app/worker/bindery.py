@@ -104,7 +104,8 @@ class BinderyPipeline:
             # Fetch Wallabag articles (separate from RSS pipeline)
             wallabag_articles: list[ExtractedArticle] = []
             wallabag_entry_ids: list[int] = []
-            wallabag_service = WallabagService(self.settings)
+            with Session(engine) as wb_session:
+                wallabag_service = WallabagService.from_db_or_settings(wb_session, self.settings)
 
             if wallabag_service.is_configured:
                 try:
@@ -138,12 +139,12 @@ class BinderyPipeline:
                             wallabag_entry_ids.append(wb["id"])
                             await self._mark_seen_wallabag(guid, wb["url"], wb["title"])
                 except Exception as e:
-                    logger.warning(f"Wallabag fetch failed, continuing with RSS only: {e}")
+                    logger.warning(f"Wallabag fetch failed, continuing with RSS only: {e!r}", exc_info=True)
                     digest_logger.error(
-                        f"Wallabag fetch failed: {e}",
+                        f"Wallabag fetch failed: {e!r}",
                         component="feeds",
                         event="wallabag_failed",
-                        context={"error": str(e)},
+                        context={"error": repr(e)},
                     )
 
             # Fetch newsletter emails from Gmail

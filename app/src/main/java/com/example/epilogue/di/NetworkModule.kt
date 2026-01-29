@@ -59,8 +59,9 @@ class GhostwriterApiFactory(
      * Creates or returns a cached GhostwriterApi for the given base URL.
      */
     fun create(baseUrl: String): GhostwriterApi {
-        // Normalize URL
-        val normalizedUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+        // Normalize URL and ensure /api/ path
+        val trimmedUrl = baseUrl.trimEnd('/')
+        val normalizedUrl = if (trimmedUrl.endsWith("/api")) "$trimmedUrl/" else "$trimmedUrl/api/"
 
         // Return cached instance if URL hasn't changed
         if (cachedApi != null && cachedBaseUrl == normalizedUrl) {
