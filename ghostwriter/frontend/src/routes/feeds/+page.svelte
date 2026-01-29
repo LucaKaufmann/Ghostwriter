@@ -158,8 +158,15 @@
 		});
 	}
 
+	function parseUTC(dateStr: string): Date {
+		if (!dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
+			return new Date(dateStr + 'Z');
+		}
+		return new Date(dateStr);
+	}
+
 	function formatDate(dateStr: string): string {
-		return new Date(dateStr).toLocaleDateString('en-US', {
+		return parseUTC(dateStr).toLocaleDateString('en-US', {
 			month: 'short',
 			day: 'numeric',
 			year: 'numeric'

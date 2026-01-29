@@ -124,12 +124,12 @@ def generate_api_token() -> str:
 
 def hash_api_token(token: str) -> str:
     """Hash an API token using bcrypt."""
-    return pwd_context.hash(token)
+    return bcrypt.hashpw(token.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_api_token(plain_token: str, hashed_token: str) -> bool:
     """Verify an API token against its hash."""
-    return pwd_context.verify(plain_token, hashed_token)
+    return bcrypt.checkpw(plain_token.encode("utf-8"), hashed_token.encode("utf-8"))
 
 
 def get_token_prefix(token: str) -> str:
