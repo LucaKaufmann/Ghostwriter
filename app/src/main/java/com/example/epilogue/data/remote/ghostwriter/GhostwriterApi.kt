@@ -20,6 +20,19 @@ import retrofit2.http.Streaming
  */
 interface GhostwriterApi {
 
+    // ===== Combined Sync =====
+
+    /**
+     * Combined sync endpoint that returns config, feeds, digests, and schedules
+     * in a single response for efficient synchronization.
+     */
+    @GET("sync")
+    suspend fun performSync(
+        @Header("Authorization") authorization: String?,
+        @Query("feed_since") feedSince: String? = null,
+        @Query("digest_ids") digestIds: String? = null
+    ): Response<SyncResponse>
+
     // ===== Health =====
 
     /**
