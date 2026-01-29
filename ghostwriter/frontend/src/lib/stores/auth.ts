@@ -96,7 +96,7 @@ function createAuthStore() {
 
 		// Login with username and password
 		async loginWithCredentials(username: string, password: string) {
-			update((state) => ({ ...state, isLoading: true, error: null }));
+			update((state) => ({ ...state, error: null }));
 
 			try {
 				const response = await api.login({ username, password });
@@ -104,7 +104,6 @@ function createAuthStore() {
 				update((state) => ({
 					...state,
 					isAuthenticated: true,
-					isLoading: false,
 					error: null,
 					user: response.user
 				}));
@@ -117,7 +116,6 @@ function createAuthStore() {
 				update((state) => ({
 					...state,
 					isAuthenticated: false,
-					isLoading: false,
 					error: message,
 					user: null
 				}));
@@ -127,7 +125,7 @@ function createAuthStore() {
 
 		// Register first admin user
 		async register(username: string, password: string, email?: string) {
-			update((state) => ({ ...state, isLoading: true, error: null }));
+			update((state) => ({ ...state, error: null }));
 
 			try {
 				const response = await api.register({ username, password, email });
@@ -135,7 +133,6 @@ function createAuthStore() {
 				update((state) => ({
 					...state,
 					isAuthenticated: true,
-					isLoading: false,
 					error: null,
 					user: response.user,
 					authStatus: { setup_complete: true, registration_open: false }
@@ -149,7 +146,6 @@ function createAuthStore() {
 				update((state) => ({
 					...state,
 					isAuthenticated: false,
-					isLoading: false,
 					error: message,
 					user: null
 				}));
@@ -159,7 +155,7 @@ function createAuthStore() {
 
 		// Legacy: Set auth token directly (for backward compatibility with old API_KEY flow)
 		async loginWithToken(token: string) {
-			update((state) => ({ ...state, isLoading: true, error: null }));
+			update((state) => ({ ...state, error: null }));
 
 			api.setToken(token);
 
@@ -170,7 +166,6 @@ function createAuthStore() {
 					update((state) => ({
 						...state,
 						isAuthenticated: true,
-						isLoading: false,
 						error: null,
 						user
 					}));
@@ -180,7 +175,6 @@ function createAuthStore() {
 					update((state) => ({
 						...state,
 						isAuthenticated: true,
-						isLoading: false,
 						error: null,
 						user: null
 					}));
@@ -195,7 +189,6 @@ function createAuthStore() {
 				update((state) => ({
 					...state,
 					isAuthenticated: false,
-					isLoading: false,
 					error: message,
 					user: null
 				}));
