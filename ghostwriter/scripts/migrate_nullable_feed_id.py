@@ -53,6 +53,9 @@ def migrate():
     for table in tables_to_migrate:
         print(f"Migrating {table}...")
 
+        # Drop leftover temp table from any previous failed attempt
+        cursor.execute(f"DROP TABLE IF EXISTS {table}_new")
+
         # Get current CREATE TABLE statement
         cursor.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
