@@ -41,24 +41,38 @@ class WallabagService:
 
         s = self.settings
         url = f"{s.wallabag_url.rstrip('/')}/oauth/v2/token"
+        logger.info(f"Requesting Wallabag OAuth token from {url}")
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                url,
-                data={
-                    "grant_type": "password",
-                    "client_id": s.wallabag_client_id,
-                    "client_secret": s.wallabag_client_secret,
-                    "username": s.wallabag_username,
-                    "password": s.wallabag_password,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    url,
+                    data={
+                        "grant_type": "password",
+                        "client_id": s.wallabag_client_id,
+                        "client_secret": s.wallabag_client_secret,
+                        "username": s.wallabag_username,
+                        "password": s.wallabag_password,
+                    },
+                )
+                if resp.status_code != 200:
+                    body = resp.text[:500]
+                    logger.error(
+                        f"Wallabag OAuth token request failed: "
+                        f"HTTP {resp.status_code} - {body}"
+                    )
+                    resp.raise_for_status()
+                data = resp.json()
+        except httpx.ConnectError as e:
+            logger.error(f"Wallabag connection failed (is the URL correct?): {url} - {e!r}")
+            raise
+        except httpx.TimeoutException as e:
+            logger.error(f"Wallabag OAuth request timed out: {url} - {e!r}")
+            raise
 
         self._token = data["access_token"]
         self._token_expires_at = time.time() + data.get("expires_in", 3600)
-        logger.info("Wallabag OAuth token acquired")
+        logger.info("Wallabag OAuth token acquired successfully")
         return self._token
 
     async def fetch_unread_articles(self, max_articles: int | None = None) -> list[dict]:
@@ -78,6 +92,8 @@ class WallabagService:
         page = 1
         per_page = min(max_articles, 30)
 
+        logger.info(f"Fetching up to {max_articles} unread Wallabag articles from {base}")
+
         async with httpx.AsyncClient(timeout=30) as client:
             while len(articles) < max_articles:
                 resp = await client.get(
@@ -91,7 +107,13 @@ class WallabagService:
                         "perPage": per_page,
                     },
                 )
-                resp.raise_for_status()
+                if resp.status_code != 200:
+                    body = resp.text[:500]
+                    logger.error(
+                        f"Wallabag entries fetch failed: "
+                        f"HTTP {resp.status_code} - {body}"
+                    )
+                    resp.raise_for_status()
                 data = resp.json()
 
                 items = data.get("_embedded", {}).get("items", [])
@@ -125,19 +147,30 @@ class WallabagService:
 
         async with httpx.AsyncClient(timeout=30) as client:
             # Archive the entry
-            await client.patch(
+            resp = await client.patch(
                 f"{base}/api/entries/{entry_id}.json",
                 headers=headers,
                 json={"archive": 1},
             )
+            if resp.status_code != 200:
+                logger.warning(
+                    f"Wallabag archive entry {entry_id} failed: "
+                    f"HTTP {resp.status_code} - {resp.text[:200]}"
+                )
+                resp.raise_for_status()
 
             # Add tag
             tag = self.settings.wallabag_tag_on_process
             if tag:
-                await client.post(
+                resp = await client.post(
                     f"{base}/api/entries/{entry_id}/tags.json",
                     headers=headers,
                     json={"tags": tag},
                 )
+                if resp.status_code != 200:
+                    logger.warning(
+                        f"Wallabag tag entry {entry_id} failed: "
+                        f"HTTP {resp.status_code} - {resp.text[:200]}"
+                    )
 
         logger.debug(f"Marked Wallabag entry {entry_id} as processed")
