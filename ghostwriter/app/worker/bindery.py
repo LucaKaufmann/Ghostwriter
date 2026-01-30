@@ -421,13 +421,18 @@ class BinderyPipeline:
                 except Exception:
                     logger.warning("Failed to mark newsletter emails as read")
 
-            # Mark Wallabag entries as processed
+            # Mark Wallabag entries as processed (parallel)
             if wallabag_service.is_configured and wallabag_entry_ids:
-                for entry_id in wallabag_entry_ids:
-                    try:
-                        await wallabag_service.mark_processed(entry_id)
-                    except Exception:
-                        logger.warning(f"Failed to mark wallabag entry {entry_id} as processed")
+                wb_sem = asyncio.Semaphore(5)
+
+                async def _mark_wb(eid: int) -> None:
+                    async with wb_sem:
+                        try:
+                            await wallabag_service.mark_processed(eid)
+                        except Exception:
+                            logger.warning(f"Failed to mark wallabag entry {eid} as processed")
+
+                await asyncio.gather(*[_mark_wb(eid) for eid in wallabag_entry_ids])
 
             await self._complete(
                 len(extracted_articles) + len(wallabag_articles) + len(newsletter_articles),
