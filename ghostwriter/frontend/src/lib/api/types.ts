@@ -113,6 +113,7 @@ export interface ClientConfigUpdate {
 	evening_hour?: number;
 	evening_minute?: number;
 	timezone?: string;
+	newsletters_enabled?: boolean;
 	client_updated_at?: string;
 }
 
@@ -272,6 +273,7 @@ export interface WallabagConfigResponse {
 	mode: 'raw' | 'summarize';
 	max_articles: number;
 	tag_on_process: string;
+	enabled: boolean;
 }
 
 export interface WallabagConfigUpdate {
@@ -283,6 +285,7 @@ export interface WallabagConfigUpdate {
 	mode?: string;
 	max_articles?: number;
 	tag_on_process?: string;
+	enabled?: boolean;
 }
 
 export interface WallabagTestResult {
