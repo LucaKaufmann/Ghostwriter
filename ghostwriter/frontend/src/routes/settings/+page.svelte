@@ -189,6 +189,26 @@
 		}
 	}));
 
+	const clearWallabagSeenMutation = createMutation(() => ({
+		mutationFn: () => api.clearWallabagSeen(),
+		onSuccess: (data) => {
+			toast.success(`Cleared ${data.cleared} Wallabag seen article${data.cleared === 1 ? '' : 's'}`);
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to clear Wallabag history', { description: err.message });
+		}
+	}));
+
+	const clearNewsletterSeenMutation = createMutation(() => ({
+		mutationFn: () => api.clearNewsletterSeen(),
+		onSuccess: (data) => {
+			toast.success(`Cleared ${data.cleared} newsletter seen article${data.cleared === 1 ? '' : 's'}`);
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to clear newsletter history', { description: err.message });
+		}
+	}));
+
 	// Wallabag form state
 	let wallabagExpanded = $state(false);
 	let wbForm = $state<WallabagConfigUpdate>({});
@@ -834,6 +854,19 @@
 									{/if}
 									Preview
 								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => clearWallabagSeenMutation.mutate()}
+									disabled={clearWallabagSeenMutation.isPending}
+								>
+									{#if clearWallabagSeenMutation.isPending}
+										<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+									{:else}
+										<Trash2 class="mr-2 h-4 w-4" />
+									{/if}
+									Clear History
+								</Button>
 							</div>
 
 							{#if wallabagPreview?.status === 'ok' && wallabagPreview.articles.length > 0}
@@ -891,6 +924,19 @@
 									<Search class="mr-2 h-4 w-4" />
 								{/if}
 								Preview
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => clearNewsletterSeenMutation.mutate()}
+								disabled={clearNewsletterSeenMutation.isPending}
+							>
+								{#if clearNewsletterSeenMutation.isPending}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								{:else}
+									<Trash2 class="mr-2 h-4 w-4" />
+								{/if}
+								Clear History
 							</Button>
 						{:else}
 							<a href="/newsletters" class="text-sm text-primary hover:underline">
