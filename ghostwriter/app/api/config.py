@@ -7,9 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from sqlmodel import delete as sql_delete
+
 from app.core.database import get_session
 from app.core.security import verify_api_key
 from app.models.client_config import ClientConfig, ClientConfigRead, ClientConfigUpdate
+from app.models.feed import Feed
+from app.models.seen_article import SeenArticle
 from app.models.wallabag_config import WallabagConfig, WallabagConfigRead, WallabagConfigUpdate
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
@@ -347,3 +351,31 @@ async def preview_wallabag(
     except Exception as e:
         logger.error(f"Wallabag preview failed: {e}")
         return PreviewResponse(status="error", detail=str(e))
+
+
+def _clear_seen_for_synthetic_feed(session: Session, synthetic_url: str) -> int:
+    """Delete seen_articles rows for a synthetic feed, returning count deleted."""
+    feed = session.exec(select(Feed).where(Feed.url == synthetic_url)).first()
+    if not feed:
+        return 0
+    result = session.exec(
+        sql_delete(SeenArticle).where(SeenArticle.feed_id == feed.id)
+    )
+    session.commit()
+    return result.rowcount  # type: ignore[union-attr]
+
+
+@router.post("/wallabag/clear-seen", dependencies=[Depends(verify_api_key)])
+async def clear_wallabag_seen(session: Session = Depends(get_session)) -> dict:
+    """Clear seen-article history for Wallabag integration."""
+    cleared = _clear_seen_for_synthetic_feed(session, "synthetic://wallabag")
+    logger.info(f"Cleared {cleared} Wallabag seen articles")
+    return {"cleared": cleared}
+
+
+@router.post("/newsletters/clear-seen", dependencies=[Depends(verify_api_key)])
+async def clear_newsletter_seen(session: Session = Depends(get_session)) -> dict:
+    """Clear seen-article history for Newsletter integration."""
+    cleared = _clear_seen_for_synthetic_feed(session, "synthetic://newsletter")
+    logger.info(f"Cleared {cleared} Newsletter seen articles")
+    return {"cleared": cleared}
