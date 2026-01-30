@@ -75,6 +75,28 @@ public final class ConfigSyncManager {
         return true
     }
 
+    /// Apply a pre-fetched config from the combined sync endpoint.
+    /// Uses the same last-write-wins logic as regular sync.
+    public func applyPreFetchedConfig(_ config: ClientConfigResponse) async throws {
+        let localUpdatedAt = try await settingsRepository.getGhostwriterConfigUpdatedAt()
+
+        if localUpdatedAt == nil {
+            try await applyServerConfig(config)
+            return
+        }
+
+        guard let serverTime = config.parsedUpdatedAt(),
+              let localTime = localUpdatedAt?.toISO8601Date() else {
+            try await applyServerConfig(config)
+            return
+        }
+
+        if serverTime >= localTime {
+            try await applyServerConfig(config)
+        }
+        // If local is newer, don't overwrite — regular sync will push later
+    }
+
     /// Push a specific setting change to server immediately
     public func pushSchedule(morning: String, noon: String, evening: String, timezone: String) async throws {
         guard try await settingsRepository.isGhostwriterConfigured() else {

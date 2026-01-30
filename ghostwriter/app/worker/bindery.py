@@ -24,6 +24,32 @@ from app.services.wallabag_service import WallabagService
 
 logger = logging.getLogger(__name__)
 
+# Well-known synthetic feed URLs for non-RSS sources
+_SYNTHETIC_FEED_URLS = {
+    "wallabag": "synthetic://wallabag",
+    "newsletter": "synthetic://newsletter",
+}
+
+
+def get_or_create_synthetic_feed(session: Session, source: str) -> Feed:
+    """Get or create a synthetic Feed row for non-RSS sources (Wallabag, Newsletter)."""
+    url = _SYNTHETIC_FEED_URLS[source]
+    statement = select(Feed).where(Feed.url == url)
+    feed = session.exec(statement).first()
+    if feed is None:
+        feed = Feed(
+            url=url,
+            title=source.capitalize(),
+            is_active=False,  # Not a real RSS feed; never fetched
+            mode="raw",
+            max_articles=0,
+        )
+        session.add(feed)
+        session.commit()
+        session.refresh(feed)
+        logger.info(f"Created synthetic feed for {source}: {feed.id}")
+    return feed
+
 
 class BinderyPipeline:
     """
@@ -49,6 +75,26 @@ class BinderyPipeline:
         self.llm_service = LLMService(self.settings)
         self.epub_generator = EpubGenerator(self.settings)
         self.start_time: float | None = None
+
+        # In-memory progress counters (avoid per-article DB reads)
+        self._feeds_fetched: int = 0
+        self._articles_enriched: int = 0
+        self._progress_dirty: bool = False
+
+        # Synthetic feed IDs for non-RSS sources (resolved lazily)
+        self._wallabag_feed_id: UUID | None = None
+        self._newsletter_feed_id: UUID | None = None
+
+    def _get_synthetic_feed_id(self, source: str) -> UUID:
+        """Get the synthetic feed ID, creating the feed row if needed."""
+        attr = f"_{source}_feed_id"
+        fid = getattr(self, attr)
+        if fid is None:
+            with Session(engine) as session:
+                feed = get_or_create_synthetic_feed(session, source)
+                fid = feed.id
+                setattr(self, attr, fid)
+        return fid
 
     async def run(self) -> None:
         """Execute the full pipeline."""
@@ -76,38 +122,53 @@ class BinderyPipeline:
                 feeds_count=len(feeds),
             )
 
-            # Stage 1: Fetch all feeds
-            all_articles = []
-            for feed in feeds:
-                feed_start = time.time()
-                digest_logger.feed_fetch_started(feed.title, feed.url)
+            # Stage 1: Fetch all feeds (parallel with semaphore)
+            fetch_sem = asyncio.Semaphore(self.settings.max_concurrent_fetches)
+            all_articles: list[tuple[Feed, any]] = []
+            articles_lock = asyncio.Lock()
 
-                try:
-                    articles, total_in_feed = await self._fetch_feed(feed)
-                    all_articles.extend(articles)
-                    fetch_time_ms = int((time.time() - feed_start) * 1000)
+            async def _fetch_one(feed: Feed) -> None:
+                async with fetch_sem:
+                    feed_start = time.time()
+                    digest_logger.feed_fetch_started(feed.title, feed.url)
 
-                    digest_logger.feed_fetch_completed(
-                        feed.title,
-                        total_articles=total_in_feed,
-                        new_articles=len(articles),
-                        fetch_time_ms=fetch_time_ms,
-                    )
-                except Exception as e:
-                    digest_logger.feed_fetch_failed(feed.title, feed.url, str(e))
+                    try:
+                        articles, total_in_feed = await self._fetch_feed(feed)
+                        async with articles_lock:
+                            all_articles.extend(articles)
+                        fetch_time_ms = int((time.time() - feed_start) * 1000)
 
-                await self._update_progress(feeds_fetched=self._get_feeds_fetched() + 1)
+                        digest_logger.feed_fetch_completed(
+                            feed.title,
+                            total_articles=total_in_feed,
+                            new_articles=len(articles),
+                            fetch_time_ms=fetch_time_ms,
+                        )
+                    except Exception as e:
+                        digest_logger.feed_fetch_failed(feed.title, feed.url, str(e))
 
-                # Delay between feeds
-                await asyncio.sleep(self.settings.fetch_delay_ms / 1000)
+                    self._feeds_fetched += 1
+                    self._progress_dirty = True
+                    await self._flush_progress_if_needed()
+
+                    # Per-fetch delay (inside semaphore to rate-limit)
+                    await asyncio.sleep(self.settings.fetch_delay_ms / 1000)
+
+            logger.info(f"Fetching {len(feeds)} feeds with concurrency={self.settings.max_concurrent_fetches}")
+            await asyncio.gather(*[_fetch_one(f) for f in feeds])
+            await self._flush_progress_if_needed(force=True)
 
             # Fetch Wallabag articles (separate from RSS pipeline)
             wallabag_articles: list[ExtractedArticle] = []
             wallabag_entry_ids: list[int] = []
+            wallabag_enabled = False
             with Session(engine) as wb_session:
                 wallabag_service = WallabagService.from_db_or_settings(wb_session, self.settings)
+                from app.models.wallabag_config import WallabagConfig
+                wb_cfg = wb_session.exec(select(WallabagConfig)).first()
+                wallabag_enabled = wb_cfg.enabled if wb_cfg else True
 
-            if wallabag_service.is_configured:
+            if wallabag_service.is_configured and wallabag_enabled:
                 try:
                     wb_raw = await wallabag_service.fetch_unread_articles()
                     digest_logger.info(
@@ -116,9 +177,10 @@ class BinderyPipeline:
                         event="wallabag_fetched",
                         context={"count": len(wb_raw)},
                     )
+                    wb_feed_id = self._get_synthetic_feed_id("wallabag")
                     for wb in wb_raw:
                         guid = f"wallabag-{wb['id']}"
-                        if not await self._is_seen_wallabag(guid):
+                        if not await self._is_seen(wb_feed_id, guid):
                             content = wb["content"] or ""
                             # Strip HTML for plain text
                             import re
@@ -137,7 +199,7 @@ class BinderyPipeline:
                                 processing_ms=0,
                             ))
                             wallabag_entry_ids.append(wb["id"])
-                            await self._mark_seen_wallabag(guid, wb["url"], wb["title"])
+                            await self._mark_seen_raw(wb_feed_id, guid, wb["url"], wb["title"])
                 except Exception as e:
                     logger.warning(f"Wallabag fetch failed, continuing with RSS only: {e!r}", exc_info=True)
                     digest_logger.error(
@@ -152,7 +214,14 @@ class BinderyPipeline:
             newsletter_message_ids: list[str] = []
             newsletter_service = NewsletterService(self.settings)
 
-            if newsletter_service.is_configured:
+            newsletters_enabled = True
+            with Session(engine) as nl_session:
+                from app.models.client_config import ClientConfig
+                nl_config = nl_session.exec(select(ClientConfig)).first()
+                if nl_config:
+                    newsletters_enabled = nl_config.newsletters_enabled
+
+            if newsletter_service.is_configured and newsletters_enabled:
                 try:
                     # Get message IDs before fetching (for mark_processed later)
                     newsletter_message_ids = await newsletter_service.get_fetched_message_ids()
@@ -163,10 +232,11 @@ class BinderyPipeline:
                         event="newsletters_fetched",
                         context={"count": len(nl_raw)},
                     )
+                    nl_feed_id = self._get_synthetic_feed_id("newsletter")
                     for nl in nl_raw:
-                        if not await self._is_seen_wallabag(nl.guid):
+                        if not await self._is_seen(nl_feed_id, nl.guid):
                             newsletter_articles.append(nl)
-                            await self._mark_seen_wallabag(nl.guid, nl.url, nl.title)
+                            await self._mark_seen_raw(nl_feed_id, nl.guid, nl.url, nl.title)
                 except Exception as e:
                     logger.warning(f"Newsletter fetch failed, continuing without: {e}")
                     digest_logger.error(
@@ -194,99 +264,113 @@ class BinderyPipeline:
                 )
             await self._update_progress(total_articles=len(all_articles))
 
-            # Stage 2 & 3: Extract and enrich
+            # Stage 2 & 3: Extract and enrich (parallel with semaphore)
             await self._update_stage("extracting")
             digest_logger.pipeline_stage(
                 "extracting",
                 str(self.digest_id),
                 articles_to_process=len(all_articles),
             )
-            extracted_articles = []
+            extracted_articles: list[tuple[Feed, ExtractedArticle]] = []
+            extracted_lock = asyncio.Lock()
+            extract_sem = asyncio.Semaphore(5)
 
-            for article_data in all_articles:
-                feed, parsed_article = article_data
-                article_start = time.time()
+            async def _extract_one(feed: Feed, parsed_article) -> None:
+                async with extract_sem:
+                    article_start = time.time()
 
-                content = await self.content_processor.extract_content(parsed_article.url)
-                if not content:
-                    logger.warning(f"Could not extract: {parsed_article.url}")
-                    digest_logger.article_extraction_failed(parsed_article.url, "Content extraction returned empty")
-                    continue
+                    content = await self.content_processor.extract_content(parsed_article.url)
+                    if not content:
+                        logger.warning(f"Could not extract: {parsed_article.url}")
+                        digest_logger.article_extraction_failed(parsed_article.url, "Content extraction returned empty")
+                        return
 
-                original_word_count = ContentProcessor.count_words(content)
-                word_count = original_word_count
+                    original_word_count = ContentProcessor.count_words(content)
+                    word_count = original_word_count
 
-                # Enrich with AI if enabled
-                is_summary = False
-                ai_failed = False
+                    # Enrich with AI if enabled
+                    is_summary = False
+                    ai_failed = False
 
-                if feed.mode == "summarize":
-                    await self._update_stage("enriching")
-                    summary_content, ai_failed = await self.llm_service.summarize(content)
-                    if not ai_failed:
-                        content = summary_content
-                        is_summary = True
-                        word_count = ContentProcessor.count_words(content)
-                        digest_logger.article_summarized(
-                            parsed_article.title,
-                            original_words=original_word_count,
-                            summary_words=word_count,
-                        )
-                    else:
-                        digest_logger.article_summarization_failed(
-                            parsed_article.title,
-                            "AI service returned error",
-                            fallback=True,
-                        )
+                    if feed.mode == "summarize":
+                        summary_content, ai_failed = await self.llm_service.summarize(content)
+                        if not ai_failed:
+                            content = summary_content
+                            is_summary = True
+                            word_count = ContentProcessor.count_words(content)
+                            digest_logger.article_summarized(
+                                parsed_article.title,
+                                original_words=original_word_count,
+                                summary_words=word_count,
+                            )
+                        else:
+                            digest_logger.article_summarization_failed(
+                                parsed_article.title,
+                                "AI service returned error",
+                                fallback=True,
+                            )
 
-                processing_ms = int((time.time() - article_start) * 1000)
+                    processing_ms = int((time.time() - article_start) * 1000)
 
-                extracted = ExtractedArticle(
-                    guid=parsed_article.guid,
-                    url=parsed_article.url,
-                    title=parsed_article.title,
-                    content=content,
-                    author=parsed_article.author,
-                    word_count=word_count,
-                    is_summary=is_summary,
-                    ai_failed=ai_failed,
-                    processing_ms=processing_ms,
-                )
-                extracted_articles.append((feed, extracted))
+                    extracted = ExtractedArticle(
+                        guid=parsed_article.guid,
+                        url=parsed_article.url,
+                        title=parsed_article.title,
+                        content=content,
+                        author=parsed_article.author,
+                        word_count=word_count,
+                        is_summary=is_summary,
+                        ai_failed=ai_failed,
+                        processing_ms=processing_ms,
+                    )
+                    async with extracted_lock:
+                        extracted_articles.append((feed, extracted))
 
-                digest_logger.article_extracted(
-                    parsed_article.title,
-                    word_count=word_count,
-                    url=parsed_article.url,
-                )
+                    digest_logger.article_extracted(
+                        parsed_article.title,
+                        word_count=word_count,
+                        url=parsed_article.url,
+                    )
 
-                # Mark article as seen
-                await self._mark_seen(feed.id, parsed_article)
+                    await self._mark_seen(feed.id, parsed_article)
 
-                await self._update_progress(
-                    articles_enriched=self._get_articles_enriched() + 1
-                )
+                    self._articles_enriched += 1
+                    self._progress_dirty = True
+                    await self._flush_progress_if_needed()
 
-            # Enrich Wallabag articles with AI if configured
+            logger.info(f"Extracting {len(all_articles)} articles with concurrency=5")
+            await asyncio.gather(*[_extract_one(feed, art) for feed, art in all_articles])
+            await self._flush_progress_if_needed(force=True)
+
+            # Enrich Wallabag articles with AI if configured (parallel)
             if wallabag_articles and self.settings.wallabag_mode == "summarize":
                 await self._update_stage("enriching")
-                enriched_wallabag = []
-                for article in wallabag_articles:
-                    summary_content, ai_failed = await self.llm_service.summarize(article.content)
-                    if not ai_failed:
-                        enriched_wallabag.append(ExtractedArticle(
-                            guid=article.guid,
-                            url=article.url,
-                            title=article.title,
-                            content=summary_content,
-                            author=article.author,
-                            word_count=ContentProcessor.count_words(summary_content),
-                            is_summary=True,
-                            ai_failed=False,
-                            processing_ms=article.processing_ms,
-                        ))
-                    else:
-                        enriched_wallabag.append(article)
+                llm_sem = asyncio.Semaphore(3)
+                enriched_wallabag: list[ExtractedArticle] = []
+                wb_lock = asyncio.Lock()
+
+                async def _summarize_wb(article: ExtractedArticle) -> None:
+                    async with llm_sem:
+                        summary_content, ai_failed = await self.llm_service.summarize(article.content)
+                        if not ai_failed:
+                            result = ExtractedArticle(
+                                guid=article.guid,
+                                url=article.url,
+                                title=article.title,
+                                content=summary_content,
+                                author=article.author,
+                                word_count=ContentProcessor.count_words(summary_content),
+                                is_summary=True,
+                                ai_failed=False,
+                                processing_ms=article.processing_ms,
+                            )
+                        else:
+                            result = article
+                    async with wb_lock:
+                        enriched_wallabag.append(result)
+
+                logger.info(f"Summarizing {len(wallabag_articles)} Wallabag articles with concurrency=3")
+                await asyncio.gather(*[_summarize_wb(a) for a in wallabag_articles])
                 wallabag_articles = enriched_wallabag
 
             if not extracted_articles and not wallabag_articles and not newsletter_articles:
@@ -337,13 +421,18 @@ class BinderyPipeline:
                 except Exception:
                     logger.warning("Failed to mark newsletter emails as read")
 
-            # Mark Wallabag entries as processed
+            # Mark Wallabag entries as processed (parallel)
             if wallabag_service.is_configured and wallabag_entry_ids:
-                for entry_id in wallabag_entry_ids:
-                    try:
-                        await wallabag_service.mark_processed(entry_id)
-                    except Exception:
-                        logger.warning(f"Failed to mark wallabag entry {entry_id} as processed")
+                wb_sem = asyncio.Semaphore(5)
+
+                async def _mark_wb(eid: int) -> None:
+                    async with wb_sem:
+                        try:
+                            await wallabag_service.mark_processed(eid)
+                        except Exception:
+                            logger.warning(f"Failed to mark wallabag entry {eid} as processed")
+
+                await asyncio.gather(*[_mark_wb(eid) for eid in wallabag_entry_ids])
 
             await self._complete(
                 len(extracted_articles) + len(wallabag_articles) + len(newsletter_articles),
@@ -419,25 +508,11 @@ class BinderyPipeline:
             session.add(seen)
             session.commit()
 
-    async def _is_seen_wallabag(self, guid: str) -> bool:
-        """Check if a Wallabag article has been seen recently."""
-        cutoff = datetime.utcnow() - timedelta(
-            days=self.settings.seen_article_retention_days
-        )
-        with Session(engine) as session:
-            statement = (
-                select(SeenArticle)
-                .where(SeenArticle.feed_id == None)  # noqa: E711
-                .where(SeenArticle.guid == guid)
-                .where(SeenArticle.seen_at > cutoff)
-            )
-            return session.exec(statement).first() is not None
-
-    async def _mark_seen_wallabag(self, guid: str, url: str, title: str) -> None:
-        """Mark a Wallabag article as seen."""
+    async def _mark_seen_raw(self, feed_id: UUID, guid: str, url: str, title: str) -> None:
+        """Mark an article as seen using raw fields (for non-RSS sources)."""
         with Session(engine) as session:
             seen = SeenArticle(
-                feed_id=None,
+                feed_id=feed_id,
                 guid=guid,
                 url=url,
                 title=title,
@@ -453,7 +528,7 @@ class BinderyPipeline:
             for sort_order, article in enumerate(articles, offset):
                 record = DigestArticle(
                     digest_id=self.digest_id,
-                    feed_id=None,
+                    feed_id=self._get_synthetic_feed_id("wallabag"),
                     title=article.title,
                     url=article.url,
                     mode="summarized" if article.is_summary else "raw",
@@ -476,7 +551,7 @@ class BinderyPipeline:
             for sort_order, article in enumerate(articles, offset):
                 record = DigestArticle(
                     digest_id=self.digest_id,
-                    feed_id=None,
+                    feed_id=self._get_synthetic_feed_id("newsletter"),
                     title=article.title,
                     url=article.url,
                     mode="raw",
@@ -536,17 +611,17 @@ class BinderyPipeline:
                 session.add(digest)
                 session.commit()
 
-    def _get_feeds_fetched(self) -> int:
-        """Get current feeds_fetched count."""
-        with Session(engine) as session:
-            digest = session.get(Digest, self.digest_id)
-            return digest.feeds_fetched if digest else 0
-
-    def _get_articles_enriched(self) -> int:
-        """Get current articles_enriched count."""
-        with Session(engine) as session:
-            digest = session.get(Digest, self.digest_id)
-            return digest.articles_enriched if digest else 0
+    async def _flush_progress_if_needed(self, force: bool = False) -> None:
+        """Flush in-memory progress counters to DB periodically (every 5 updates) or when forced."""
+        if not self._progress_dirty and not force:
+            return
+        total = self._feeds_fetched + self._articles_enriched
+        if force or total % 5 == 0:
+            await self._update_progress(
+                feeds_fetched=self._feeds_fetched,
+                articles_enriched=self._articles_enriched,
+            )
+            self._progress_dirty = False
 
     async def _complete(self, article_count: int, epub_path: str | None = None) -> None:
         """Mark digest as completed."""

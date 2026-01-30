@@ -7,9 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from sqlmodel import delete as sql_delete
+
 from app.core.database import get_session
 from app.core.security import verify_api_key
 from app.models.client_config import ClientConfig, ClientConfigRead, ClientConfigUpdate
+from app.models.feed import Feed
+from app.models.seen_article import SeenArticle
 from app.models.wallabag_config import WallabagConfig, WallabagConfigRead, WallabagConfigUpdate
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
@@ -55,6 +59,7 @@ class ConfigUpdateRequest(BaseModel):
     evening_hour: int | None = Field(default=None, ge=0, le=23, description="Evening hour (24h)")
     evening_minute: int | None = Field(default=None, ge=0, le=59, description="Evening minute")
     timezone: str | None = Field(default=None, description="IANA timezone")
+    newsletters_enabled: bool | None = Field(default=None, description="Enable newsletter integration")
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
 
@@ -69,6 +74,14 @@ def get_or_create_config(session: Session) -> ClientConfig:
         session.refresh(config)
         logger.info("Created default client configuration")
     return config
+
+
+def _get_wallabag_enabled(session: Session | None) -> bool:
+    """Check if Wallabag integration is enabled in its config."""
+    if not session:
+        return True
+    wb_config = session.exec(select(WallabagConfig)).first()
+    return wb_config.enabled if wb_config else True
 
 
 def _config_to_response(config: ClientConfig, session: Session | None = None) -> ConfigResponse:
@@ -90,9 +103,11 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         evening_minute=config.evening_minute,
         timezone=config.timezone,
         updated_at=config.updated_at,
-        wallabag=IntegrationStatus(enabled=wallabag_service.is_configured),
+        wallabag=IntegrationStatus(
+            enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
+        ),
         newsletters=IntegrationStatus(
-            enabled=newsletter_service.is_configured,
+            enabled=newsletter_service.is_configured and config.newsletters_enabled,
             label=settings.gmail_label if newsletter_service.is_configured else None,
         ),
     )
@@ -148,6 +163,9 @@ async def update_config(
     # Update config fields
     if request.min_word_count is not None:
         config.min_word_count = request.min_word_count
+
+    if request.newsletters_enabled is not None:
+        config.newsletters_enabled = request.newsletters_enabled
 
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour
@@ -224,6 +242,7 @@ def _wallabag_config_to_read(config: WallabagConfig) -> WallabagConfigRead:
         mode=config.mode,
         max_articles=config.max_articles,
         tag_on_process=config.tag_on_process,
+        enabled=config.enabled,
     )
 
 
@@ -241,6 +260,9 @@ async def update_wallabag_config(
 ) -> WallabagConfigRead:
     """Update Wallabag configuration. Empty string clears a field. Password sentinel skips update."""
     config = _get_or_create_wallabag_config(session)
+
+    if request.enabled is not None:
+        config.enabled = request.enabled
 
     for field_name in ["url", "client_id", "client_secret", "username", "mode", "tag_on_process"]:
         value = getattr(request, field_name, None)
@@ -329,3 +351,31 @@ async def preview_wallabag(
     except Exception as e:
         logger.error(f"Wallabag preview failed: {e}")
         return PreviewResponse(status="error", detail=str(e))
+
+
+def _clear_seen_for_synthetic_feed(session: Session, synthetic_url: str) -> int:
+    """Delete seen_articles rows for a synthetic feed, returning count deleted."""
+    feed = session.exec(select(Feed).where(Feed.url == synthetic_url)).first()
+    if not feed:
+        return 0
+    result = session.exec(
+        sql_delete(SeenArticle).where(SeenArticle.feed_id == feed.id)
+    )
+    session.commit()
+    return result.rowcount  # type: ignore[union-attr]
+
+
+@router.post("/wallabag/clear-seen", dependencies=[Depends(verify_api_key)])
+async def clear_wallabag_seen(session: Session = Depends(get_session)) -> dict:
+    """Clear seen-article history for Wallabag integration."""
+    cleared = _clear_seen_for_synthetic_feed(session, "synthetic://wallabag")
+    logger.info(f"Cleared {cleared} Wallabag seen articles")
+    return {"cleared": cleared}
+
+
+@router.post("/newsletters/clear-seen", dependencies=[Depends(verify_api_key)])
+async def clear_newsletter_seen(session: Session = Depends(get_session)) -> dict:
+    """Clear seen-article history for Newsletter integration."""
+    cleared = _clear_seen_for_synthetic_feed(session, "synthetic://newsletter")
+    logger.info(f"Cleared {cleared} Newsletter seen articles")
+    return {"cleared": cleared}

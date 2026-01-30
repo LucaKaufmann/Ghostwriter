@@ -174,6 +174,41 @@ class ConfigSyncManager @Inject constructor(
     }
 
     /**
+     * Apply a pre-fetched config response (e.g., from the combined sync endpoint).
+     * Skips the server fetch and applies directly.
+     *
+     * @return true if applied successfully
+     */
+    suspend fun applyPreFetchedConfig(config: ClientConfigResponse): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val localUpdatedAt = settingsRepository.getConfigUpdatedAt()
+
+            if (localUpdatedAt == null) {
+                applyServerConfig(config)
+                return@withContext true
+            }
+
+            val serverUpdatedAt = config.updatedAt ?: run {
+                applyServerConfig(config)
+                return@withContext true
+            }
+
+            val serverTime = parseTimestamp(serverUpdatedAt)
+            val localTime = parseTimestamp(localUpdatedAt)
+
+            if (serverTime >= localTime) {
+                applyServerConfig(config)
+            }
+            // If local is newer, don't overwrite - the normal syncConfig() will push later
+
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to apply pre-fetched config", e)
+            false
+        }
+    }
+
+    /**
      * Push a specific setting change to the server immediately.
      * Called when user changes a synced setting.
      */
