@@ -512,7 +512,7 @@ class BinderyPipeline:
             for sort_order, article in enumerate(articles, offset):
                 record = DigestArticle(
                     digest_id=self.digest_id,
-                    feed_id=None,
+                    feed_id=self._get_synthetic_feed_id("wallabag"),
                     title=article.title,
                     url=article.url,
                     mode="summarized" if article.is_summary else "raw",
@@ -535,7 +535,7 @@ class BinderyPipeline:
             for sort_order, article in enumerate(articles, offset):
                 record = DigestArticle(
                     digest_id=self.digest_id,
-                    feed_id=None,
+                    feed_id=self._get_synthetic_feed_id("newsletter"),
                     title=article.title,
                     url=article.url,
                     mode="raw",
