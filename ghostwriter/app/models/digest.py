@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, String, Text
+from sqlalchemy import Column, Index, String, Text
 from sqlmodel import Field, SQLModel
 
 
@@ -37,6 +37,9 @@ class Digest(DigestBase, table=True):
     """
 
     __tablename__ = "digests"
+    __table_args__ = (
+        Index("ix_digests_status", "status"),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)

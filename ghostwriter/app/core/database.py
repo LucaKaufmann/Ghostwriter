@@ -29,8 +29,17 @@ engine = create_engine(
 
 
 def init_db() -> None:
-    """Initialize database tables."""
+    """Initialize database tables and ensure indexes exist."""
     SQLModel.metadata.create_all(engine)
+
+    # Add indexes that create_all won't apply to existing tables
+    with engine.connect() as conn:
+        conn.execute(
+            __import__("sqlalchemy").text(
+                "CREATE INDEX IF NOT EXISTS ix_digests_status ON digests (status)"
+            )
+        )
+        conn.commit()
 
 
 def get_session() -> Generator[Session, None, None]:
