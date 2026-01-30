@@ -107,6 +107,94 @@ public final class DigestSyncService {
         logger.info("Digest sync completed: downloaded \(downloadedCount) new digests")
     }
 
+    /// Get all known remote digest IDs from local database
+    public func getKnownRemoteIds() async throws -> [String] {
+        return try await digestRepository.getAllRemoteIds()
+    }
+
+    /// Process digests from combined sync response.
+    /// Articles are already embedded, so no separate fetch needed.
+    /// Downloads EPUBs concurrently (max 3).
+    public func processDigestsFromSync(_ digests: [SyncDigest]) async throws {
+        guard !digests.isEmpty else {
+            logger.info("No new digests from combined sync")
+            return
+        }
+
+        logger.info("Processing \(digests.count) new digests from combined sync")
+
+        var downloadedCount = 0
+
+        // Download EPUBs concurrently with max 3 concurrent
+        await withTaskGroup(of: Bool.self) { group in
+            var inFlight = 0
+
+            for digest in digests {
+                // Wait if we have 3 in flight
+                if inFlight >= 3 {
+                    if let success = await group.next() {
+                        if success { downloadedCount += 1 }
+                        inFlight -= 1
+                    }
+                }
+
+                inFlight += 1
+                group.addTask { [self] in
+                    await self.downloadAndSaveFromSync(digest)
+                }
+            }
+
+            // Collect remaining
+            for await success in group {
+                if success { downloadedCount += 1 }
+            }
+        }
+
+        try await settingsRepository.setLastDigestSyncTime(Date())
+        logger.info("Combined sync digest processing completed: downloaded \(downloadedCount) digests")
+    }
+
+    /// Download a single digest from sync data and save it.
+    private func downloadAndSaveFromSync(_ digest: SyncDigest) async -> Bool {
+        do {
+            let client = try await createClient()
+            let epubData = try await client.downloadDigest(filename: digest.filename)
+            let localURL = try saveEPUB(data: epubData, filename: digest.filename)
+
+            let generatedAt = digest.createdAt.toISO8601Date() ?? digest.completedAt?.toISO8601Date() ?? Date()
+
+            // Articles are already embedded in the sync response
+            let articlesData: [DigestArticleData]? = digest.articles.isEmpty ? nil : digest.articles.map { article in
+                DigestArticleData(
+                    id: article.id,
+                    title: article.title,
+                    url: article.url,
+                    mode: article.mode,
+                    wordCount: article.wordCount,
+                    content: article.content,
+                    author: article.author,
+                    feedTitle: article.feedTitle,
+                    sortOrder: article.sortOrder
+                )
+            }
+
+            _ = try await digestRepository.saveRemoteDigest(
+                remoteId: digest.id,
+                epubFilePath: localURL.path,
+                articleCount: digest.articleCount,
+                generatedAt: generatedAt,
+                period: digest.period,
+                articles: articlesData
+            )
+
+            logger.info("Downloaded and saved digest \(digest.id) from combined sync")
+            return true
+        } catch {
+            logger.error("Failed to download digest \(digest.filename) from sync: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     /// Trigger a digest generation on the server
     /// - Parameter period: The period (morning, noon, evening, manual)
     /// - Returns: The digest ID and status

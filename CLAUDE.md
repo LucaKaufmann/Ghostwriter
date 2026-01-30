@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Epilogue is an Android application that aggregates RSS/Atom feeds, processes content through either full extraction or AI summarization, and compiles results into daily EPUB files for offline reading on e-ink devices (optimized for Onyx Boox Palma 2).
+Epilogue is an Android application that aggregates RSS/Atom feeds, Wallabag bookmarks, and Gmail newsletters, processes content through either full extraction or AI summarization, and compiles results into daily EPUB files for offline reading on e-ink devices (optimized for Onyx Boox Palma 2).
 
 ## Build Commands
 
@@ -238,11 +238,17 @@ After updating the codebase, run migrations before deploying:
 ```bash
 cd ghostwriter
 python scripts/migrate_add_article_content.py
+python scripts/migrate_nullable_feed_id.py
+python scripts/migrate_add_digest_indexes.py
+python scripts/migrate_add_integration_enabled.py
 ```
 
 On Docker, exec into the container:
 ```bash
 docker exec -it ghostwriter python scripts/migrate_add_article_content.py
+docker exec -it ghostwriter python scripts/migrate_nullable_feed_id.py
+docker exec -it ghostwriter python scripts/migrate_add_digest_indexes.py
+docker exec -it ghostwriter python scripts/migrate_add_integration_enabled.py
 ```
 
 ### API Endpoints
@@ -254,6 +260,39 @@ docker exec -it ghostwriter python scripts/migrate_add_article_content.py
 - `GET /digests` - List digests
 - `GET /digests/{id}/articles` - Get articles with content
 - `GET /digests/{filename}` - Download EPUB
+- `GET /sync` - Combined sync endpoint (config, feeds, digests, schedules in one request)
+- `GET /config` - Get client config (includes integration status)
+- `PUT /config` - Update client config
+- `GET /config/wallabag` - Get Wallabag configuration
+- `PUT /config/wallabag` - Update Wallabag configuration
+- `POST /config/wallabag/test` - Test Wallabag connection
+- `POST /config/wallabag/preview` - Preview Wallabag articles
+- `POST /config/wallabag/clear-seen` - Clear Wallabag seen article history
+- `GET /newsletters/status` - Newsletter integration status
+- `POST /newsletters/oauth/init` - Start Gmail OAuth flow
+- `POST /newsletters/oauth/callback` - Exchange OAuth code for token
+- `POST /newsletters/preview` - Preview newsletter articles
+- `POST /config/newsletters/clear-seen` - Clear newsletter seen article history
+
+### Integrations
+
+Beyond RSS/Atom feeds, Ghostwriter supports two additional content sources. Both use **synthetic feed IDs** (`synthetic://wallabag`, `synthetic://newsletter`) for deduplication via the `seen_articles` table, and both can be toggled enabled/disabled independently.
+
+#### Wallabag
+
+Fetches unread articles from a self-hosted or SaaS Wallabag instance via OAuth2 password grant. Articles arrive with pre-extracted HTML content (no Readability extraction needed). After digest generation, articles are archived and tagged in Wallabag.
+
+**Environment variables:** `WALLABAG_URL`, `WALLABAG_CLIENT_ID`, `WALLABAG_CLIENT_SECRET`, `WALLABAG_USERNAME`, `WALLABAG_PASSWORD`, `WALLABAG_MODE` (raw/summarize), `WALLABAG_MAX_ARTICLES`, `WALLABAG_TAG_ON_PROCESS`.
+
+#### Gmail Newsletters
+
+Fetches unread emails from a specified Gmail label via OAuth2 authorization code flow. HTML is cleaned for e-ink (tracking pixels, scripts, styles, unsubscribe footers removed). Emails are marked as read after processing. OAuth token stored at `data/gmail_token.json`.
+
+**Environment variables:** `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_LABEL` (default: "Ghostwriter"), `GMAIL_MAX_ARTICLES`.
+
+#### Sync Endpoint
+
+`GET /sync` combines config, feeds, digests (with embedded articles), and schedules into a single response. Supports incremental sync via `feed_since` and `digest_ids` parameters. Uses direct JSON serialization (bypassing Pydantic) for performance.
 
 ### Digest Activity Logs
 
@@ -295,3 +334,83 @@ When investigating issues, the logs show:
 3. Which articles failed extraction or summarization
 4. EPUB generation success and file size
 5. Pipeline duration and any errors with stack traces
+
+### Ghostwriter Frontend (Web UI)
+
+The `ghostwriter/frontend/` directory contains a SvelteKit web dashboard for managing the Ghostwriter backend.
+
+**Tech Stack:**
+- **Framework:** SvelteKit 2.x (Svelte 5) with TypeScript
+- **Build:** Vite, static adapter (SPA mode)
+- **Styling:** Tailwind CSS + Bits UI (headless components) + Lucide icons
+- **State:** TanStack SvelteQuery
+- **Notifications:** Svelte Sonner
+
+**Development:**
+```bash
+cd ghostwriter/frontend
+npm install
+npm run dev              # Dev server with HMR
+npm run build            # Production build to ./build/
+npm run check            # TypeScript & Svelte type checking
+```
+
+**Pages:**
+- `/` - Dashboard (health, feed count, recent digests, quick actions, processing progress)
+- `/feeds` - Feed CRUD (search, mode selection, active/paused toggle)
+- `/digests` - Digest history (filter by status/period, download EPUB, view articles)
+- `/settings` - Schedules, API tokens, Wallabag config, newsletter OAuth, activity logs
+- `/newsletters` - Newsletter integration setup
+
+**Key Files:**
+- API client: `src/lib/api/client.ts`
+- Type definitions: `src/lib/api/types.ts`
+- UI components: `src/lib/components/ui/`
+
+## Epilogue iOS App
+
+The `EpilogueIOS/` directory contains an iOS client built with SwiftUI.
+
+**Tech Stack:**
+- **Language:** Swift / SwiftUI
+- **Min iOS:** 18.0
+- **Build System:** Tuist 4.x (modular project generation)
+- **Persistence:** SwiftData
+- **Architecture:** MVVM + Clean Architecture (6 modules)
+
+**Key Libraries:**
+- `FeedKit` - RSS/Atom parsing
+- `SwiftSoup` - HTML parsing and extraction
+- `ZIPFoundation` - EPUB generation
+
+**Module Structure:**
+```
+EpilogueIOS/
+├── App/                          # Main app target
+│   ├── Sources/
+│   │   ├── EpilogueApp.swift     # Entry point, DI setup
+│   │   ├── Services/             # Ghostwriter sync, background tasks, heartbeat
+│   │   └── Views/                # SwiftUI views (FeedList, Settings, History, Reader)
+├── Modules/
+│   ├── Domain/                   # Models (Feed, Digest, DigestArticle), protocols
+│   ├── Data/                     # Repositories, persistence (SwiftData), services
+│   ├── ContentProcessing/        # FeedKit + SwiftSoup pipeline
+│   ├── AIServices/               # OpenAI (GPT-4o-mini) summarization
+│   ├── EPUBGeneration/           # EPUB 3.0 builder with e-ink CSS
+│   └── GhostwriterClient/       # Server sync client
+└── Tuist/
+    └── Package.swift             # SPM dependencies
+```
+
+**Build (requires Tuist):**
+```bash
+cd EpilogueIOS
+tuist generate                    # Generate Xcode project
+tuist build                       # Build via CLI
+```
+
+**Key Patterns:**
+- SwiftData `@Model` classes for Feed, Digest, DigestArticle
+- Background tasks via `BGTaskScheduler` for digest generation and Ghostwriter sync
+- `GhostwriterSyncCoordinator` orchestrates feed/digest/config sync with server
+- Keychain storage for API keys

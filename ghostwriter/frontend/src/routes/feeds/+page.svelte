@@ -99,7 +99,7 @@
 
 	// Filtered feeds
 	const filteredFeeds = $derived.by(() => {
-		const feeds = feedsQuery.data ?? [];
+		const feeds = (feedsQuery.data ?? []).filter((f) => !f.url.startsWith('synthetic://'));
 		if (!searchQuery.trim()) return feeds;
 		const q = searchQuery.toLowerCase();
 		return feeds.filter(

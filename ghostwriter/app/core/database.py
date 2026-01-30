@@ -29,8 +29,28 @@ engine = create_engine(
 
 
 def init_db() -> None:
-    """Initialize database tables."""
+    """Initialize database tables and ensure indexes exist."""
     SQLModel.metadata.create_all(engine)
+
+    # Add indexes that create_all won't apply to existing tables
+    with engine.connect() as conn:
+        conn.execute(
+            __import__("sqlalchemy").text(
+                "CREATE INDEX IF NOT EXISTS ix_digests_status ON digests (status)"
+            )
+        )
+
+        # Add integration enabled columns (safe for existing DBs)
+        for stmt in [
+            "ALTER TABLE wallabag_config ADD COLUMN enabled BOOLEAN DEFAULT 1",
+            "ALTER TABLE client_config ADD COLUMN newsletters_enabled BOOLEAN DEFAULT 1",
+        ]:
+            try:
+                conn.execute(__import__("sqlalchemy").text(stmt))
+            except Exception:
+                pass  # Column already exists
+
+        conn.commit()
 
 
 def get_session() -> Generator[Session, None, None]:

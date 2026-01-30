@@ -48,6 +48,29 @@ public actor GhostwriterClient {
         self.init(baseURL: url, apiKey: apiKey)
     }
     
+    // MARK: - Combined Sync
+    
+    /// Perform a combined sync that returns config, feeds, digests, and schedules in one call.
+    /// - Parameters:
+    ///   - feedSince: Optional date for incremental feed sync
+    ///   - knownDigestIds: List of digest IDs the client already has (excluded from response)
+    /// - Returns: Combined sync response
+    public func performSync(feedSince: Date? = nil, knownDigestIds: [String] = []) async throws -> SyncResponse {
+        var queryItems: [URLQueryItem] = []
+        
+        if let feedSince = feedSince {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            queryItems.append(URLQueryItem(name: "feed_since", value: formatter.string(from: feedSince)))
+        }
+        
+        if !knownDigestIds.isEmpty {
+            queryItems.append(URLQueryItem(name: "digest_ids", value: knownDigestIds.joined(separator: ",")))
+        }
+        
+        return try await get(path: "/sync", queryItems: queryItems)
+    }
+    
     // MARK: - Health
     
     /// Check the health of the Ghostwriter server
