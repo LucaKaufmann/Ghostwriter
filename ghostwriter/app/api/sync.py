@@ -1,13 +1,17 @@
 """Combined sync endpoint for efficient client synchronization."""
 
+import json
 import logging
+import time
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlalchemy import text
+from sqlmodel import Session, col, select
 
 from app.core.database import get_session
 from app.core.security import verify_api_key
@@ -67,12 +71,12 @@ class SyncResponse(BaseModel):
     schedules: list[ScheduleResponse]
 
 
-@router.get("", response_model=SyncResponse, dependencies=[Depends(verify_api_key)])
+@router.get("", dependencies=[Depends(verify_api_key)])
 async def combined_sync(
     feed_since: Optional[datetime] = Query(None, description="Get feed changes since this timestamp"),
     digest_ids: Optional[str] = Query(None, description="Comma-separated list of known digest IDs to exclude"),
     session: Session = Depends(get_session),
-) -> SyncResponse:
+) -> Response:
     """
     Combined sync endpoint that returns everything the client needs in one response.
 
@@ -86,9 +90,12 @@ async def combined_sync(
     - feed_since: Timestamp for incremental feed sync (omit for initial sync)
     - digest_ids: Comma-separated list of digest IDs the client already has
     """
+    t0 = time.perf_counter()
+
     # 1. Config
     config = get_or_create_config(session)
     config_response = _config_to_response(config, session)
+    t_config = time.perf_counter()
 
     # 2. Feeds (same logic as GET /feeds/changes)
     server_timestamp = datetime.utcnow()
@@ -126,64 +133,96 @@ async def combined_sync(
             tombstones=tombstones,
             server_timestamp=server_timestamp,
         )
+    t_feeds = time.perf_counter()
 
-    # 3. Digests - only completed, excluding known IDs
+    # 3. Digests - only completed, excluding known IDs in SQL
     known_ids: set[str] = set()
     if digest_ids:
         known_ids = {id_str.strip() for id_str in digest_ids.split(",") if id_str.strip()}
 
     digests_statement = select(Digest).where(Digest.status == "completed")
-    all_completed = list(session.exec(digests_statement).all())
+    if known_ids:
+        digests_statement = digests_statement.where(
+            col(Digest.id).notin_([UUID(id_str) for id_str in known_ids])
+        )
+    new_completed = list(session.exec(digests_statement).all())
+    t_digests_query = time.perf_counter()
 
-    new_digests: list[SyncDigest] = []
-    for digest in all_completed:
-        if str(digest.id) in known_ids:
-            continue
-
-        # Fetch articles for this digest
+    # Batch-fetch all articles for new digests in a single query
+    new_digests: list[dict] = []
+    if new_completed:
+        digest_id_list = [d.id for d in new_completed]
         articles_statement = (
             select(DigestArticle)
-            .where(DigestArticle.digest_id == digest.id)
+            .where(col(DigestArticle.digest_id).in_(digest_id_list))
             .order_by(DigestArticle.sort_order)
         )
-        articles = list(session.exec(articles_statement).all())
+        all_articles = list(session.exec(articles_statement).all())
 
-        new_digests.append(SyncDigest(
-            id=digest.id,
-            filename=digest.filename,
-            period=digest.period,
-            status=digest.status,
-            stage=digest.stage,
-            article_count=digest.article_count,
-            error_message=digest.error_message,
-            created_at=digest.created_at,
-            completed_at=digest.completed_at,
-            articles=[
-                SyncDigestArticle(
-                    id=a.id,
-                    title=a.title,
-                    url=a.url,
-                    mode=a.mode,
-                    word_count=a.word_count,
-                    content=a.content,
-                    author=a.author,
-                    feed_title=a.feed_title,
-                    sort_order=a.sort_order,
-                    ai_failed=a.ai_failed,
-                )
-                for a in articles
-            ],
-        ))
+        # Group articles by digest_id
+        articles_by_digest: dict[UUID, list] = defaultdict(list)
+        for a in all_articles:
+            articles_by_digest[a.digest_id].append({
+                "id": str(a.id),
+                "title": a.title,
+                "url": a.url,
+                "mode": a.mode,
+                "word_count": a.word_count,
+                "content": a.content,
+                "author": a.author,
+                "feed_title": a.feed_title,
+                "sort_order": a.sort_order,
+                "ai_failed": a.ai_failed,
+            })
 
-    digests_response = SyncDigestsSection(new_digests=new_digests)
+        for digest in new_completed:
+            new_digests.append({
+                "id": str(digest.id),
+                "filename": digest.filename,
+                "period": digest.period,
+                "status": digest.status,
+                "stage": digest.stage,
+                "article_count": digest.article_count,
+                "error_message": digest.error_message,
+                "created_at": digest.created_at.isoformat(),
+                "completed_at": digest.completed_at.isoformat() if digest.completed_at else None,
+                "articles": articles_by_digest.get(digest.id, []),
+            })
+    t_articles = time.perf_counter()
 
     # 4. Schedules
     schedules = scheduler_module.get_all_schedules()
     schedules_response = [_schedule_to_response(s) for s in schedules]
+    t_schedules = time.perf_counter()
 
-    return SyncResponse(
-        config=config_response,
-        feeds=feeds_response,
-        digests=digests_response,
-        schedules=schedules_response,
+    # Build response as dict and serialize directly, skipping Pydantic validation
+    response_data = {
+        "config": config_response.model_dump(mode="json"),
+        "feeds": feeds_response.model_dump(mode="json"),
+        "digests": {"new_digests": new_digests},
+        "schedules": [s.model_dump(mode="json") for s in schedules_response],
+    }
+    t_serialize = time.perf_counter()
+
+    body = json.dumps(response_data, default=str)
+    t_json = time.perf_counter()
+
+    total_ms = (t_json - t0) * 1000
+    logger.info(
+        "Sync completed in %.0fms (config=%.0f feeds=%.0f digests_q=%.0f "
+        "articles_q=%.0f schedules=%.0f serialize=%.0f json=%.0f) "
+        "digests=%d articles=%d bytes=%d",
+        total_ms,
+        (t_config - t0) * 1000,
+        (t_feeds - t_config) * 1000,
+        (t_digests_query - t_feeds) * 1000,
+        (t_articles - t_digests_query) * 1000,
+        (t_schedules - t_articles) * 1000,
+        (t_serialize - t_schedules) * 1000,
+        (t_json - t_serialize) * 1000,
+        len(new_digests),
+        sum(len(d["articles"]) for d in new_digests),
+        len(body),
     )
+
+    return Response(content=body, media_type="application/json")
