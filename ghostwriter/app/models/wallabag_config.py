@@ -21,6 +21,7 @@ class WallabagConfig(SQLModel, table=True):
     mode: str = Field(default="raw")
     max_articles: int = Field(default=20, ge=1)
     tag_on_process: str = Field(default="ghostwriter")
+    enabled: bool = Field(default=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -36,6 +37,7 @@ class WallabagConfigUpdate(SQLModel):
     mode: str | None = None
     max_articles: int | None = Field(default=None, ge=1)
     tag_on_process: str | None = None
+    enabled: bool | None = None
 
 
 class WallabagConfigRead(BaseModel):
@@ -49,3 +51,4 @@ class WallabagConfigRead(BaseModel):
     mode: str
     max_articles: int
     tag_on_process: str
+    enabled: bool

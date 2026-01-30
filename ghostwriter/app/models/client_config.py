@@ -21,6 +21,9 @@ class ClientConfigBase(SQLModel):
     evening_minute: int = Field(default=0, ge=0, le=59, description="Evening digest minute")
     timezone: str = Field(default="UTC", description="IANA timezone identifier")
 
+    # Integration toggles
+    newsletters_enabled: bool = Field(default=True, description="Enable newsletter integration")
+
 
 class ClientConfig(ClientConfigBase, table=True):
     """
@@ -48,6 +51,7 @@ class ClientConfigUpdate(SQLModel):
     evening_hour: int | None = Field(default=None, ge=0, le=23, description="Evening hour (24h)")
     evening_minute: int | None = Field(default=None, ge=0, le=59, description="Evening minute")
     timezone: str | None = Field(default=None, description="IANA timezone")
+    newsletters_enabled: bool | None = Field(default=None, description="Enable newsletter integration")
 
 
 class ClientConfigRead(SQLModel):
@@ -61,4 +65,5 @@ class ClientConfigRead(SQLModel):
     evening_hour: int
     evening_minute: int
     timezone: str
+    newsletters_enabled: bool
     updated_at: datetime

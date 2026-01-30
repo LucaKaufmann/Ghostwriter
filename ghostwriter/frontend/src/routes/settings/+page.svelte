@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -149,6 +149,16 @@
 		}
 	}));
 
+	const updateClientConfigMutation = createMutation(() => ({
+		mutationFn: (data: ClientConfigUpdate) => api.updateClientConfig(data),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['client-config'] });
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to update config', { description: err.message });
+		}
+	}));
+
 	// Preview state
 	let wallabagPreview = $state<PreviewResponse | null>(null);
 	let newsletterPreview = $state<PreviewResponse | null>(null);
@@ -184,6 +194,8 @@
 	let wbForm = $state<WallabagConfigUpdate>({});
 	let wbFormInitialized = $state(false);
 
+	let wbEnabled = $state(true);
+
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
 		if (data && !wbFormInitialized) {
@@ -197,6 +209,7 @@
 				max_articles: data.max_articles,
 				tag_on_process: data.tag_on_process
 			};
+			wbEnabled = data.enabled;
 			wbFormInitialized = true;
 		}
 	});
@@ -695,11 +708,21 @@
 						<p class="text-sm text-muted-foreground">Read-it-later integration</p>
 					</div>
 					<div class="flex items-center gap-2">
+						{#if wallabagConfigQuery.data}
+							<!-- svelte-ignore a11y_click_events_have_key_events -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div onclick={(e) => e.stopPropagation()}>
+								<Switch
+									checked={wbEnabled}
+									onCheckedChange={(checked) => {
+										wbEnabled = checked;
+										updateWallabagMutation.mutate({ enabled: checked });
+									}}
+								/>
+							</div>
+						{/if}
 						{#if clientConfigQuery.data?.wallabag?.enabled}
 							<CheckCircle2 class="h-5 w-5 text-green-500" />
-							<span class="text-sm text-green-600">Connected</span>
-						{:else}
-							<span class="text-sm text-muted-foreground">Not configured</span>
 						{/if}
 						{#if wallabagExpanded}
 							<ChevronUp class="h-4 w-4 text-muted-foreground" />
@@ -848,9 +871,14 @@
 						</p>
 					</div>
 					<div class="flex items-center gap-2">
+						<Switch
+							checked={clientConfigQuery.data?.newsletters?.enabled ?? false}
+							onCheckedChange={(checked) => {
+								updateClientConfigMutation.mutate({ newsletters_enabled: checked });
+							}}
+						/>
 						{#if clientConfigQuery.data?.newsletters?.enabled}
 							<CheckCircle2 class="h-5 w-5 text-green-500" />
-							<span class="text-sm text-green-600">Connected</span>
 							<Button
 								variant="outline"
 								size="sm"

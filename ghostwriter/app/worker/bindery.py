@@ -161,10 +161,14 @@ class BinderyPipeline:
             # Fetch Wallabag articles (separate from RSS pipeline)
             wallabag_articles: list[ExtractedArticle] = []
             wallabag_entry_ids: list[int] = []
+            wallabag_enabled = False
             with Session(engine) as wb_session:
                 wallabag_service = WallabagService.from_db_or_settings(wb_session, self.settings)
+                from app.models.wallabag_config import WallabagConfig
+                wb_cfg = wb_session.exec(select(WallabagConfig)).first()
+                wallabag_enabled = wb_cfg.enabled if wb_cfg else True
 
-            if wallabag_service.is_configured:
+            if wallabag_service.is_configured and wallabag_enabled:
                 try:
                     wb_raw = await wallabag_service.fetch_unread_articles()
                     digest_logger.info(
@@ -210,7 +214,14 @@ class BinderyPipeline:
             newsletter_message_ids: list[str] = []
             newsletter_service = NewsletterService(self.settings)
 
-            if newsletter_service.is_configured:
+            newsletters_enabled = True
+            with Session(engine) as nl_session:
+                from app.models.client_config import ClientConfig
+                nl_config = nl_session.exec(select(ClientConfig)).first()
+                if nl_config:
+                    newsletters_enabled = nl_config.newsletters_enabled
+
+            if newsletter_service.is_configured and newsletters_enabled:
                 try:
                     # Get message IDs before fetching (for mark_processed later)
                     newsletter_message_ids = await newsletter_service.get_fetched_message_ids()
