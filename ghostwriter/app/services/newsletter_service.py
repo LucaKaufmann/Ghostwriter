@@ -7,6 +7,8 @@ import os
 import re
 
 import httpx
+from lxml import html as lxml_html
+from lxml.html import tostring as html_tostring
 
 from app.core.config import Settings, get_settings
 from app.services.content_processor import ContentProcessor, ExtractedArticle
@@ -297,41 +299,173 @@ class NewsletterService:
 
         return None
 
-    def _clean_newsletter_html(self, html: str) -> str:
-        """Strip tracking pixels, scripts, styles, and other noise from newsletter HTML."""
-        # Remove <script> and <style> tags with content
-        html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
-        html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    # Tags whose content we want to keep (semantic / readable)
+    _KEEP_TAGS = frozenset({
+        "p", "h1", "h2", "h3", "h4", "h5", "h6",
+        "a", "strong", "b", "em", "i", "u",
+        "ul", "ol", "li",
+        "blockquote", "pre", "code",
+        "br", "hr",
+        "figure", "figcaption",
+        "sup", "sub", "span",
+    })
 
-        # Remove tracking pixels (1x1 images)
-        html = re.sub(
-            r'<img[^>]*(?:width\s*=\s*["\']?1["\']?[^>]*height\s*=\s*["\']?1["\']?|'
-            r'height\s*=\s*["\']?1["\']?[^>]*width\s*=\s*["\']?1["\']?)[^>]*/?>',
-            "", html, flags=re.IGNORECASE,
-        )
+    # Tags to remove entirely, including their content
+    _STRIP_WITH_CONTENT = frozenset({
+        "script", "style", "noscript", "iframe", "object", "embed",
+        "form", "input", "button", "select", "textarea",
+        "nav", "footer", "header",
+    })
 
-        # Remove common tracking image patterns
-        tracking_domains = [
-            "open.substack.com", "tracking.", "pixel.", "beacon.",
-            "clicks.", "email.mg.", "list-manage.com/track",
-        ]
-        for domain in tracking_domains:
-            html = re.sub(
-                rf'<img[^>]*src\s*=\s*["\'][^"\']*{re.escape(domain)}[^"\']*["\'][^>]*/?>',
-                "", html, flags=re.IGNORECASE,
+    # Attributes to keep on allowed tags
+    _KEEP_ATTRS = frozenset({"href"})
+
+    # Tracking image domains
+    _TRACKING_DOMAINS = [
+        "open.substack.com", "tracking.", "pixel.", "beacon.",
+        "clicks.", "email.mg.", "list-manage.com/track",
+    ]
+
+    # Footer / unsubscribe text patterns
+    _FOOTER_RE = re.compile(
+        r"unsubscribe|manage\s+preferences|email\s+preferences|opt[\s-]?out|"
+        r"view\s+in\s+browser|view\s+online|update\s+your\s+preferences",
+        re.IGNORECASE,
+    )
+
+    def _clean_newsletter_html(self, raw_html: str) -> str:
+        """Clean newsletter HTML for e-ink EPUB reading.
+
+        Uses lxml for proper DOM-based cleaning:
+        - Removes all images (newsletters are heavy with decorative/tracking images)
+        - Flattens table-based layouts to plain content
+        - Strips non-semantic tags while keeping their text
+        - Removes empty elements and spacer elements
+        - Removes footer/unsubscribe sections
+        - Strips all attributes except href on links
+        """
+        try:
+            doc = lxml_html.fromstring(raw_html)
+        except Exception:
+            # Fallback: return plain text if HTML parsing fails
+            return re.sub(r"<[^>]+>", "", raw_html)
+
+        # 1. Remove tags that should be deleted with all their content
+        for tag in self._STRIP_WITH_CONTENT:
+            for el in doc.xpath(f".//{tag}"):
+                el.getparent().remove(el)
+
+        # 2. Remove all images (decorative, tracking, etc.)
+        for img in doc.xpath(".//img"):
+            img.getparent().remove(img)
+
+        # 3. Remove SVGs
+        for svg in doc.xpath(".//*[local-name()='svg']"):
+            svg.getparent().remove(svg)
+
+        # 4. Remove footer/unsubscribe sections
+        for el in doc.iter():
+            text_content = el.text_content().strip()
+            # Remove small blocks that look like footers
+            if text_content and len(text_content) < 500 and self._FOOTER_RE.search(text_content):
+                # Only remove if it's a block-level container
+                if el.tag in ("div", "p", "td", "tr", "table", "section", "footer"):
+                    parent = el.getparent()
+                    if parent is not None:
+                        parent.remove(el)
+
+        # 5. Flatten tables to divs (tables in newsletters are almost always layout)
+        for table in doc.xpath(".//table"):
+            self._flatten_table(table)
+
+        # 6. Unwrap non-semantic tags (keep text, drop the tag)
+        # Process bottom-up to handle nesting
+        for el in reversed(list(doc.iter())):
+            if el.tag not in self._KEEP_TAGS and el.tag not in ("html", "body", "div"):
+                el.drop_tag()
+
+        # 7. Collapse nested divs into paragraphs where sensible
+        self._collapse_divs(doc)
+
+        # 8. Strip all attributes except href
+        for el in doc.iter():
+            attrs_to_remove = [a for a in el.attrib if a not in self._KEEP_ATTRS]
+            for attr in attrs_to_remove:
+                del el.attrib[attr]
+
+        # 9. Remove empty elements
+        self._remove_empty(doc)
+
+        # 10. Serialize the body content
+        body = doc.xpath(".//body")
+        if body:
+            content_el = body[0]
+        else:
+            content_el = doc
+
+        parts = []
+        if content_el.text and content_el.text.strip():
+            parts.append(content_el.text.strip())
+        for child in content_el:
+            serialized = html_tostring(child, encoding="unicode", method="html")
+            if serialized.strip():
+                parts.append(serialized.strip())
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _flatten_table(table):
+        """Replace a table with its cell contents as divs."""
+        parent = table.getparent()
+        if parent is None:
+            return
+
+        idx = list(parent).index(table)
+        # Collect text content from cells
+        cells = table.xpath(".//td|.//th")
+        new_elements = []
+        for cell in cells:
+            text = cell.text_content().strip()
+            if text:
+                div = lxml_html.Element("div")
+                # Preserve child elements (links, etc.) not just text
+                if len(cell) > 0:
+                    div.text = cell.text
+                    for child in cell:
+                        div.append(child)
+                else:
+                    div.text = text
+                new_elements.append(div)
+
+        # Replace table with extracted content
+        for i, el in enumerate(new_elements):
+            parent.insert(idx + i, el)
+        parent.remove(table)
+
+    @staticmethod
+    def _collapse_divs(doc):
+        """Turn leaf-level divs (containing only text/inline) into paragraphs."""
+        for div in doc.xpath(".//div"):
+            # If div has no block-level children, convert to <p>
+            has_block = any(
+                child.tag in ("div", "p", "ul", "ol", "blockquote", "h1", "h2",
+                              "h3", "h4", "h5", "h6", "pre", "hr", "table")
+                for child in div
             )
+            if not has_block and div.text_content().strip():
+                div.tag = "p"
 
-        # Remove inline style attributes
-        html = re.sub(r'\s+style\s*=\s*"[^"]*"', "", html, flags=re.IGNORECASE)
-        html = re.sub(r"\s+style\s*=\s*'[^']*'", "", html, flags=re.IGNORECASE)
-
-        # Remove bgcolor attributes
-        html = re.sub(r'\s+bgcolor\s*=\s*"[^"]*"', "", html, flags=re.IGNORECASE)
-
-        # Remove unsubscribe footers (common patterns)
-        html = re.sub(
-            r'<[^>]*class\s*=\s*["\'][^"\']*unsubscribe[^"\']*["\'][^>]*>.*?</[^>]+>',
-            "", html, flags=re.DOTALL | re.IGNORECASE,
-        )
-
-        return html
+    @staticmethod
+    def _remove_empty(doc):
+        """Remove elements that have no text content and no meaningful children."""
+        changed = True
+        while changed:
+            changed = False
+            for el in doc.iter():
+                if el.tag in ("br", "hr", "html", "body"):
+                    continue
+                if not el.text_content().strip() and len(el) == 0:
+                    parent = el.getparent()
+                    if parent is not None:
+                        parent.remove(el)
+                        changed = True

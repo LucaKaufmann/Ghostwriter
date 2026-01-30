@@ -362,6 +362,14 @@ class ApiClient {
 		});
 	}
 
+	async clearWallabagSeen(): Promise<{ cleared: number }> {
+		return this.request('/config/wallabag/clear-seen', { method: 'POST' });
+	}
+
+	async clearNewsletterSeen(): Promise<{ cleared: number }> {
+		return this.request('/config/newsletters/clear-seen', { method: 'POST' });
+	}
+
 	// ============ Logs ============
 
 	async getLogFiles(): Promise<LogFileInfo[]> {

@@ -39,6 +39,17 @@ def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_digests_status ON digests (status)"
             )
         )
+
+        # Add integration enabled columns (safe for existing DBs)
+        for stmt in [
+            "ALTER TABLE wallabag_config ADD COLUMN enabled BOOLEAN DEFAULT 1",
+            "ALTER TABLE client_config ADD COLUMN newsletters_enabled BOOLEAN DEFAULT 1",
+        ]:
+            try:
+                conn.execute(__import__("sqlalchemy").text(stmt))
+            except Exception:
+                pass  # Column already exists
+
         conn.commit()
 
 
