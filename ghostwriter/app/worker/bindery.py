@@ -231,9 +231,8 @@ class BinderyPipeline:
 
             if newsletter_service.is_configured and newsletters_enabled:
                 try:
-                    # Get message IDs before fetching (for mark_processed later)
-                    newsletter_message_ids = await newsletter_service.get_fetched_message_ids()
-                    nl_raw = await newsletter_service.fetch_newsletters()
+                    # Single fetch returns both articles and their message IDs in sync
+                    nl_raw, newsletter_message_ids = await newsletter_service.fetch_newsletters()
                     digest_logger.info(
                         f"Newsletters: fetched {len(nl_raw)} emails",
                         component="feeds",
