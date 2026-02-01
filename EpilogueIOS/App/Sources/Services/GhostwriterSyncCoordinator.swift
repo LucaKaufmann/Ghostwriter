@@ -84,42 +84,55 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
 
         isSyncing = true
         lastSyncError = nil
+        let tracker = SyncPerformanceTracker()
 
         do {
             logger.info("Starting Ghostwriter sync")
 
             // 1. Send heartbeat
             do {
+                let s = tracker.beginInterval("Heartbeat")
                 _ = try await heartbeatService.sendHeartbeat()
+                tracker.endInterval("Heartbeat", state: s)
             } catch {
                 logger.warning("Heartbeat failed: \(error.localizedDescription)")
             }
 
             // 2. Push local feeds first (needs to happen before pull)
             do {
-                try await feedSyncService.pushLocalFeeds()
+                let s = tracker.beginInterval("Feed Push")
+                try await feedSyncService.pushLocalFeeds(tracker: tracker)
+                tracker.endInterval("Feed Push", state: s)
             } catch {
                 logger.warning("Feed push failed: \(error.localizedDescription)")
             }
 
             // 3. Try combined sync
-            let combinedSyncSucceeded = await tryCombinedSync()
+            let s = tracker.beginInterval("Combined Sync")
+            let combinedSyncSucceeded = await tryCombinedSync(tracker: tracker)
+            tracker.endInterval("Combined Sync", state: s)
 
             if !combinedSyncSucceeded {
                 // Fall back to individual calls
                 logger.warning("Combined sync failed, falling back to individual calls")
 
                 do {
+                    let cs = tracker.beginInterval("Config Sync")
                     _ = try await configSyncManager.sync()
+                    tracker.endInterval("Config Sync", state: cs)
                 } catch {
                     logger.warning("Config sync failed: \(error.localizedDescription)")
                 }
 
-                try await feedSyncService.sync()
+                let fs = tracker.beginInterval("Feed Sync (fallback)")
+                try await feedSyncService.sync(tracker: tracker)
+                tracker.endInterval("Feed Sync (fallback)", state: fs)
 
                 let shouldSyncDigests = await shouldRunDigestSync()
                 if shouldSyncDigests {
-                    try await digestSyncService.sync()
+                    let ds = tracker.beginInterval("Digest Sync (fallback)")
+                    try await digestSyncService.sync(tracker: tracker)
+                    tracker.endInterval("Digest Sync (fallback)", state: ds)
                 }
             }
 
@@ -130,11 +143,12 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
             lastSyncError = error
         }
 
+        tracker.logSummary()
         isSyncing = false
     }
 
     /// Try combined sync endpoint. Returns true if successful.
-    private func tryCombinedSync() async -> Bool {
+    private func tryCombinedSync(tracker: SyncPerformanceTracker? = nil) async -> Bool {
         do {
             guard let url = try await settingsRepository.getGhostwriterURL() else { return false }
             let apiKey = try await settingsRepository.getGhostwriterAPIKey()
@@ -143,10 +157,12 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
             let feedSince = try await settingsRepository.getLastFeedSyncTime()
             let knownDigestIds = try await digestSyncService.getKnownRemoteIds()
 
+            let s = tracker?.beginInterval("Sync Endpoint Request")
             let syncResponse = try await client.performSync(
                 feedSince: feedSince,
                 knownDigestIds: knownDigestIds
             )
+            if let s { tracker?.endInterval("Sync Endpoint Request", state: s) }
 
             // Dispatch response to individual handlers
             do {
@@ -162,7 +178,9 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
             }
 
             do {
-                try await digestSyncService.processDigestsFromSync(syncResponse.digests.newDigests)
+                let ds = tracker?.beginInterval("Process Synced Digests")
+                try await digestSyncService.processDigestsFromSync(syncResponse.digests.newDigests, tracker: tracker)
+                if let ds { tracker?.endInterval("Process Synced Digests", state: ds) }
             } catch {
                 logger.warning("Failed to process synced digests: \(error.localizedDescription)")
             }
@@ -182,22 +200,41 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
 
         isSyncing = true
         lastSyncError = nil
+        let tracker = SyncPerformanceTracker()
 
         do {
             logger.info("Starting forced full Ghostwriter sync (including digests)")
 
-            do { _ = try await heartbeatService.sendHeartbeat() } catch {}
+            do {
+                let s = tracker.beginInterval("Heartbeat")
+                _ = try await heartbeatService.sendHeartbeat()
+                tracker.endInterval("Heartbeat", state: s)
+            } catch {}
 
             // Push feeds first
-            do { try await feedSyncService.pushLocalFeeds() } catch {}
+            do {
+                let s = tracker.beginInterval("Feed Push")
+                try await feedSyncService.pushLocalFeeds(tracker: tracker)
+                tracker.endInterval("Feed Push", state: s)
+            } catch {}
 
             // Try combined sync
-            let combinedSyncSucceeded = await tryCombinedSync()
+            let s = tracker.beginInterval("Combined Sync")
+            let combinedSyncSucceeded = await tryCombinedSync(tracker: tracker)
+            tracker.endInterval("Combined Sync", state: s)
 
             if !combinedSyncSucceeded {
-                do { _ = try await configSyncManager.sync() } catch {}
-                try await feedSyncService.sync()
-                try await digestSyncService.sync()
+                do {
+                    let cs = tracker.beginInterval("Config Sync")
+                    _ = try await configSyncManager.sync()
+                    tracker.endInterval("Config Sync", state: cs)
+                } catch {}
+                let fs = tracker.beginInterval("Feed Sync (fallback)")
+                try await feedSyncService.sync(tracker: tracker)
+                tracker.endInterval("Feed Sync (fallback)", state: fs)
+                let ds = tracker.beginInterval("Digest Sync (fallback)")
+                try await digestSyncService.sync(tracker: tracker)
+                tracker.endInterval("Digest Sync (fallback)", state: ds)
             }
 
             lastSyncTime = Date()
@@ -207,6 +244,7 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
             lastSyncError = error
         }
 
+        tracker.logSummary()
         isSyncing = false
     }
 

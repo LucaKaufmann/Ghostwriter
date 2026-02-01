@@ -7,6 +7,68 @@
 //
 
 import Foundation
+import OSLog
+
+// MARK: - URLSession Metrics Delegate
+
+/// Helper class to capture URLSession task metrics (used opt-in).
+/// Not an actor so it can serve as a delegate.
+public final class GhostwriterMetricsDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let logger = Logger(subsystem: "com.epilogue", category: "NetworkMetrics")
+    private let lock = NSLock()
+    private var _lastMetricsSummary: RequestMetricsSummary?
+
+    /// Summary of the last completed request's network metrics
+    public struct RequestMetricsSummary: Sendable {
+        public let dnsLookupMs: Double?
+        public let tlsHandshakeMs: Double?
+        public let ttfbMs: Double?
+        public let totalTransferMs: Double?
+        public let responseBytes: Int64?
+    }
+
+    public var lastMetricsSummary: RequestMetricsSummary? {
+        lock.withLock { _lastMetricsSummary }
+    }
+
+    public func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        guard let tx = metrics.transactionMetrics.last else { return }
+
+        let dns: Double? = {
+            guard let start = tx.domainLookupStartDate, let end = tx.domainLookupEndDate else { return nil }
+            return end.timeIntervalSince(start) * 1000
+        }()
+
+        let tls: Double? = {
+            guard let start = tx.secureConnectionStartDate, let end = tx.secureConnectionEndDate else { return nil }
+            return end.timeIntervalSince(start) * 1000
+        }()
+
+        let ttfb: Double? = {
+            guard let reqEnd = tx.requestEndDate, let respStart = tx.responseStartDate else { return nil }
+            return respStart.timeIntervalSince(reqEnd) * 1000
+        }()
+
+        let total: Double? = {
+            guard let start = tx.fetchStartDate, let end = tx.responseEndDate else { return nil }
+            return end.timeIntervalSince(start) * 1000
+        }()
+
+        let bytes = tx.countOfResponseBodyBytesReceived
+
+        let summary = RequestMetricsSummary(
+            dnsLookupMs: dns,
+            tlsHandshakeMs: tls,
+            ttfbMs: ttfb,
+            totalTransferMs: total,
+            responseBytes: bytes
+        )
+
+        lock.withLock { _lastMetricsSummary = summary }
+
+        logger.debug("Network metrics — DNS: \(dns.map { String(format: "%.1f", $0) } ?? "-")ms, TLS: \(tls.map { String(format: "%.1f", $0) } ?? "-")ms, TTFB: \(ttfb.map { String(format: "%.1f", $0) } ?? "-")ms, transfer: \(total.map { String(format: "%.1f", $0) } ?? "-")ms, bytes: \(bytes)")
+    }
+}
 
 /// Client for interacting with the Ghostwriter backend API
 public actor GhostwriterClient {
@@ -18,6 +80,8 @@ public actor GhostwriterClient {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let perfLogger = Logger(subsystem: "com.epilogue", category: "GhostwriterRequests")
+    private let metricsDelegate: GhostwriterMetricsDelegate?
     
     // MARK: - Initialization
     
@@ -26,7 +90,14 @@ public actor GhostwriterClient {
     ///   - baseURL: The base URL of the Ghostwriter server
     ///   - apiKey: Optional API key for authentication
     ///   - session: URLSession to use for requests (defaults to shared)
-    public init(baseURL: URL, apiKey: String? = nil, session: URLSession = .shared) {
+    ///   - enableMetrics: Whether to capture URLSession task metrics (creates a custom session)
+    public init(baseURL: URL, apiKey: String? = nil, session: URLSession = .shared, enableMetrics: Bool = {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }()) {
         // Ensure base URL includes /api/ path
         if baseURL.pathComponents.contains("api") {
             self.baseURL = baseURL
@@ -34,18 +105,37 @@ public actor GhostwriterClient {
             self.baseURL = baseURL.appendingPathComponent("api")
         }
         self.apiKey = apiKey
-        self.session = session
+        
+        if enableMetrics {
+            let delegate = GhostwriterMetricsDelegate()
+            self.metricsDelegate = delegate
+            self.session = URLSession(configuration: session.configuration, delegate: delegate, delegateQueue: nil)
+        } else {
+            self.metricsDelegate = nil
+            self.session = session
+        }
         
         self.decoder = JSONDecoder()
         self.encoder = JSONEncoder()
     }
     
     /// Convenience initializer from URL string
-    public init(baseURLString: String, apiKey: String? = nil) throws {
+    public init(baseURLString: String, apiKey: String? = nil, enableMetrics: Bool = {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }()) throws {
         guard let url = URL(string: baseURLString) else {
             throw GhostwriterError.invalidURL(baseURLString)
         }
-        self.init(baseURL: url, apiKey: apiKey)
+        self.init(baseURL: url, apiKey: apiKey, enableMetrics: enableMetrics)
+    }
+    
+    /// Get the last request's network metrics summary (only available when enableMetrics is true)
+    public func getLastMetricsSummary() -> GhostwriterMetricsDelegate.RequestMetricsSummary? {
+        metricsDelegate?.lastMetricsSummary
     }
     
     // MARK: - Combined Sync
@@ -253,11 +343,17 @@ public actor GhostwriterClient {
     }
     
     private func performRequest<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let start = ContinuousClock.now
         let (data, response) = try await session.data(for: request)
+        let elapsed = ContinuousClock.now - start
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw GhostwriterError.networkError(URLError(.badServerResponse))
         }
+        
+        let ms = Double(elapsed.components.seconds) * 1000.0 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000.0
+        let path = request.url?.path ?? "?"
+        perfLogger.debug("\(request.httpMethod ?? "GET") \(path) → \(httpResponse.statusCode) | \(data.count) bytes | \(String(format: "%.1f", ms))ms")
         
         try handleHTTPStatus(httpResponse, data: data)
         
@@ -305,11 +401,16 @@ public actor GhostwriterClient {
         let url = try buildURL(path: path)
         let request = buildRequest(url: url, method: "GET", authenticated: authenticated)
         
+        let start = ContinuousClock.now
         let (data, response) = try await session.data(for: request)
+        let elapsed = ContinuousClock.now - start
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw GhostwriterError.networkError(URLError(.badServerResponse))
         }
+        
+        let ms = Double(elapsed.components.seconds) * 1000.0 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000.0
+        perfLogger.debug("GET \(path) → \(httpResponse.statusCode) | \(data.count) bytes | \(String(format: "%.1f", ms))ms")
         
         try handleHTTPStatus(httpResponse, data: data)
         

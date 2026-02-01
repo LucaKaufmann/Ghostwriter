@@ -34,7 +34,7 @@ public final class FeedSyncService {
     }
 
     /// Perform bi-directional feed sync with Ghostwriter
-    public func sync() async throws {
+    public func sync(tracker: SyncPerformanceTracker? = nil) async throws {
         guard try await settingsRepository.isGhostwriterConfigured() else {
             logger.debug("Ghostwriter not configured, skipping feed sync")
             return
@@ -45,13 +45,17 @@ public final class FeedSyncService {
         logger.info("Starting feed sync with Ghostwriter")
 
         // Step 1: PUSH - Sync local feeds to server
-        try await pushLocalFeeds(client: client)
+        let pushState = tracker?.beginInterval("Feed Push (in sync)")
+        try await pushLocalFeeds(client: client, tracker: tracker)
+        if let pushState { tracker?.endInterval("Feed Push (in sync)", state: pushState) }
 
         // Step 2: PULL - Get changes from server
         let lastSyncTime = try await settingsRepository.getLastFeedSyncTime()
         logger.info("Pulling feed changes since: \(lastSyncTime?.description ?? "initial sync")")
 
+        let pullState = tracker?.beginInterval("Feed Pull")
         let changes = try await client.getFeedChanges(since: lastSyncTime)
+        if let pullState { tracker?.endInterval("Feed Pull", state: pullState) }
 
         // Step 3: Apply server feeds locally
         if !changes.feeds.isEmpty {
@@ -81,7 +85,7 @@ public final class FeedSyncService {
     }
 
     /// Push local feeds to the server
-    public func pushLocalFeeds(client: GhostwriterClient? = nil) async throws {
+    public func pushLocalFeeds(client: GhostwriterClient? = nil, tracker: SyncPerformanceTracker? = nil) async throws {
         let ghostwriterClient: GhostwriterClient
         if let client {
             ghostwriterClient = client
@@ -106,8 +110,10 @@ public final class FeedSyncService {
             )
         }
 
+        let pushState = tracker?.beginInterval("Feed Push Request")
         let result = try await ghostwriterClient.syncFeeds(syncRequests)
-        logger.info("Pushed \(result.synced) feeds to server (created: \(result.created), updated: \(result.updated))")
+        if let pushState { tracker?.endInterval("Feed Push Request", state: pushState) }
+        logger.info("Pushed \(result.synced) feeds to server (created: \(result.created), updated: \(result.updated), count: \(syncRequests.count))")
     }
 
     /// Apply feed changes from a pre-fetched sync response (combined sync endpoint).

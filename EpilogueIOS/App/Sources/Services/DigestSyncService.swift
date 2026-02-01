@@ -39,7 +39,7 @@ public final class DigestSyncService {
 
     /// Sync digests from Ghostwriter server
     /// Downloads new completed digests that we don't have locally
-    public func sync() async throws {
+    public func sync(tracker: SyncPerformanceTracker? = nil) async throws {
         guard try await settingsRepository.isGhostwriterConfigured() else {
             logger.debug("Ghostwriter not configured, skipping digest sync")
             return
@@ -67,15 +67,25 @@ public final class DigestSyncService {
         for digest in newDigests {
             do {
                 // Download EPUB
+                let epubState = tracker?.beginInterval("EPUB Download [\(digest.id.prefix(8))]")
                 let epubData = try await client.downloadDigest(filename: digest.filename)
-                let localURL = try saveEPUB(data: epubData, filename: digest.filename)
+                if let epubState { tracker?.endInterval("EPUB Download [\(digest.id.prefix(8))]", state: epubState, bytes: epubData.count) }
 
-                logger.info("Downloaded: \(localURL.lastPathComponent)")
+                let ioState = tracker?.beginInterval("EPUB Write [\(digest.id.prefix(8))]")
+                let localURL = try saveEPUB(data: epubData, filename: digest.filename)
+                if let ioState { tracker?.endInterval("EPUB Write [\(digest.id.prefix(8))]", state: ioState) }
+
+                logger.info("Downloaded: \(localURL.lastPathComponent) (\(SyncPerformanceTracker.formatBytes(epubData.count)))")
 
                 // Fetch articles for in-app display
                 var articlesData: [DigestArticleData]?
                 do {
+                    let artState = tracker?.beginInterval("Articles Fetch [\(digest.id.prefix(8))]")
                     articlesData = try await fetchArticles(client: client, digestId: digest.id)
+                    if let artState {
+                        tracker?.endInterval("Articles Fetch [\(digest.id.prefix(8))]", state: artState)
+                        tracker?.addArticlesSynced(articlesData?.count ?? 0)
+                    }
                 } catch {
                     logger.error("Failed to fetch articles for digest \(digest.id): \(error.localizedDescription)")
                 }
@@ -85,6 +95,7 @@ public final class DigestSyncService {
                 logger.debug("Digest \(digest.id) createdAt='\(digest.createdAt)' completedAt='\(digest.completedAt ?? "nil")' parsed=\(generatedAt)")
 
                 // Save to local database
+                let saveState = tracker?.beginInterval("DB Save [\(digest.id.prefix(8))]")
                 _ = try await digestRepository.saveRemoteDigest(
                     remoteId: digest.id,
                     epubFilePath: localURL.path,
@@ -93,6 +104,7 @@ public final class DigestSyncService {
                     period: digest.period,
                     articles: articlesData
                 )
+                if let saveState { tracker?.endInterval("DB Save [\(digest.id.prefix(8))]", state: saveState) }
 
                 downloadedCount += 1
             } catch {
@@ -115,7 +127,7 @@ public final class DigestSyncService {
     /// Process digests from combined sync response.
     /// Articles are already embedded, so no separate fetch needed.
     /// Downloads EPUBs concurrently (max 3).
-    public func processDigestsFromSync(_ digests: [SyncDigest]) async throws {
+    public func processDigestsFromSync(_ digests: [SyncDigest], tracker: SyncPerformanceTracker? = nil) async throws {
         guard !digests.isEmpty else {
             logger.info("No new digests from combined sync")
             return
@@ -140,7 +152,7 @@ public final class DigestSyncService {
 
                 inFlight += 1
                 group.addTask { [self] in
-                    await self.downloadAndSaveFromSync(digest)
+                    await self.downloadAndSaveFromSync(digest, tracker: tracker)
                 }
             }
 
@@ -155,11 +167,17 @@ public final class DigestSyncService {
     }
 
     /// Download a single digest from sync data and save it.
-    private func downloadAndSaveFromSync(_ digest: SyncDigest) async -> Bool {
+    private func downloadAndSaveFromSync(_ digest: SyncDigest, tracker: SyncPerformanceTracker? = nil) async -> Bool {
         do {
             let client = try await createClient()
+
+            let epubState = tracker?.beginInterval("EPUB Download [\(digest.id.prefix(8))]")
             let epubData = try await client.downloadDigest(filename: digest.filename)
+            if let epubState { tracker?.endInterval("EPUB Download [\(digest.id.prefix(8))]", state: epubState, bytes: epubData.count) }
+
+            let ioState = tracker?.beginInterval("EPUB Write [\(digest.id.prefix(8))]")
             let localURL = try saveEPUB(data: epubData, filename: digest.filename)
+            if let ioState { tracker?.endInterval("EPUB Write [\(digest.id.prefix(8))]", state: ioState) }
 
             let generatedAt = digest.createdAt.toISO8601Date() ?? digest.completedAt?.toISO8601Date() ?? Date()
 
@@ -178,6 +196,9 @@ public final class DigestSyncService {
                 )
             }
 
+            if let articlesData { tracker?.addArticlesSynced(articlesData.count) }
+
+            let saveState = tracker?.beginInterval("DB Save [\(digest.id.prefix(8))]")
             _ = try await digestRepository.saveRemoteDigest(
                 remoteId: digest.id,
                 epubFilePath: localURL.path,
@@ -186,8 +207,9 @@ public final class DigestSyncService {
                 period: digest.period,
                 articles: articlesData
             )
+            if let saveState { tracker?.endInterval("DB Save [\(digest.id.prefix(8))]", state: saveState) }
 
-            logger.info("Downloaded and saved digest \(digest.id) from combined sync")
+            logger.info("Downloaded and saved digest \(digest.id) from combined sync (\(SyncPerformanceTracker.formatBytes(epubData.count)))")
             return true
         } catch {
             logger.error("Failed to download digest \(digest.filename) from sync: \(error.localizedDescription)")
