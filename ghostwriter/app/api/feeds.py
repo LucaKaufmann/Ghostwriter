@@ -1,5 +1,6 @@
 """Feed management endpoints."""
 
+import time
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.core.database import get_session
+from app.core.logging import digest_logger
 from app.core.security import verify_api_key
 from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync, FeedUpdate
 
@@ -121,6 +123,8 @@ async def sync_feeds(
 
     This also records feed sync activity for inactivity tracking.
     """
+    t0 = time.perf_counter()
+
     # Record feed sync activity
     from app.services import activity_tracker
     activity_tracker.record_feed_sync()
@@ -168,6 +172,15 @@ async def sync_feeds(
     # This allows feeds added via web UI to coexist with app-synced feeds.
 
     session.commit()
+
+    duration_ms = (time.perf_counter() - t0) * 1000
+    digest_logger.sync_feed_push(
+        feed_count=len(feeds),
+        created=created,
+        updated=updated,
+        unchanged=unchanged,
+        duration_ms=duration_ms,
+    )
 
     return SyncResponse(
         synced=len(feeds),

@@ -372,6 +372,65 @@ class DigestActivityLogger:
             context={"digest_id": digest_id, "file_path": file_path, "file_size_kb": file_size_kb},
         )
 
+    # ===== Client Sync Events =====
+
+    def sync_heartbeat(self, schedules_active: bool, reactivated: bool = False) -> None:
+        """Log client heartbeat received."""
+        msg = "Client heartbeat received"
+        if reactivated:
+            msg += " (schedules reactivated)"
+        self.info(
+            msg,
+            component="sync",
+            event="heartbeat",
+            context={"schedules_active": schedules_active, "reactivated": reactivated},
+        )
+
+    def sync_feed_push(
+        self,
+        feed_count: int,
+        created: int,
+        updated: int,
+        unchanged: int,
+        duration_ms: float,
+    ) -> None:
+        """Log feed push sync from client."""
+        self.info(
+            f"Feed push: {feed_count} feeds (created={created} updated={updated} unchanged={unchanged}) in {duration_ms:.0f}ms",
+            component="sync",
+            event="feed_push",
+            context={
+                "feed_count": feed_count,
+                "created": created,
+                "updated": updated,
+                "unchanged": unchanged,
+                "duration_ms": round(duration_ms),
+            },
+        )
+
+    def sync_combined(
+        self,
+        duration_ms: float,
+        new_digests: int,
+        article_count: int,
+        response_bytes: int,
+        breakdown: dict,
+    ) -> None:
+        """Log combined sync endpoint completion."""
+        self.info(
+            f"Combined sync: {new_digests} digests, {article_count} articles, "
+            f"{response_bytes} bytes in {duration_ms:.0f}ms",
+            component="sync",
+            event="combined_sync",
+            context={
+                "duration_ms": round(duration_ms),
+                "new_digests": new_digests,
+                "article_count": article_count,
+                "response_bytes": response_bytes,
+                **breakdown,
+            },
+        )
+
     # ===== Maintenance Events =====
 
     def maintenance_started(self) -> None:
