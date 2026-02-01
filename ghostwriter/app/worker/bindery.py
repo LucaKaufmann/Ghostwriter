@@ -96,9 +96,17 @@ class BinderyPipeline:
                 setattr(self, attr, fid)
         return fid
 
+    def _ensure_synthetic_feeds(self) -> None:
+        """Pre-create synthetic feeds at pipeline start so they're always available."""
+        for source in _SYNTHETIC_FEED_URLS:
+            self._get_synthetic_feed_id(source)
+
     async def run(self) -> None:
         """Execute the full pipeline."""
         self.start_time = time.time()
+
+        # Pre-create synthetic feeds so feed_id is always available
+        self._ensure_synthetic_feeds()
 
         # Get digest info for logging
         with Session(engine) as session:
