@@ -60,12 +60,20 @@ def migrate():
         cursor.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
         )
-        create_sql = cursor.fetchone()[0]
+        row = cursor.fetchone()
+        if row is None:
+            print(f"  {table}: table not found, skipping")
+            continue
+        create_sql = row[0]
 
         # Replace NOT NULL constraint on feed_id
         # The column is defined as: feed_id CHAR(32) NOT NULL
         new_create_sql = create_sql.replace(
             f"CREATE TABLE {table}", f"CREATE TABLE {table}_new"
+        )
+        # Also handle quoted table names
+        new_create_sql = new_create_sql.replace(
+            f'CREATE TABLE "{table}"', f'CREATE TABLE "{table}_new"'
         )
         # Remove NOT NULL from feed_id column definition
         # SQLModel generates: "feed_id" CHAR(32) NOT NULL,
