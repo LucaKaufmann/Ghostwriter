@@ -89,23 +89,8 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         do {
             logger.info("Starting Ghostwriter sync")
 
-            // 1. Send heartbeat
-            do {
-                let s = tracker.beginInterval("Heartbeat")
-                _ = try await heartbeatService.sendHeartbeat()
-                tracker.endInterval("Heartbeat", state: s)
-            } catch {
-                logger.warning("Heartbeat failed: \(error.localizedDescription)")
-            }
-
-            // 2. Push local feeds first (needs to happen before pull)
-            do {
-                let s = tracker.beginInterval("Feed Push")
-                try await feedSyncService.pushLocalFeeds(tracker: tracker)
-                tracker.endInterval("Feed Push", state: s)
-            } catch {
-                logger.warning("Feed push failed: \(error.localizedDescription)")
-            }
+            // 1. Send heartbeat + push feeds concurrently (independent operations)
+            await sendHeartbeatAndPushFeeds(tracker: tracker)
 
             // 3. Try combined sync
             let s = tracker.beginInterval("Combined Sync")
@@ -145,6 +130,31 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
 
         tracker.logSummary()
         isSyncing = false
+    }
+
+    /// Send heartbeat and push feeds concurrently since they're independent operations.
+    private func sendHeartbeatAndPushFeeds(tracker: SyncPerformanceTracker) async {
+        async let heartbeatResult: Void = {
+            do {
+                let s = tracker.beginInterval("Heartbeat")
+                _ = try await self.heartbeatService.sendHeartbeat()
+                tracker.endInterval("Heartbeat", state: s)
+            } catch {
+                self.logger.warning("Heartbeat failed: \(error.localizedDescription)")
+            }
+        }()
+
+        async let feedPushResult: Void = {
+            do {
+                let s = tracker.beginInterval("Feed Push")
+                try await self.feedSyncService.pushLocalFeeds(tracker: tracker)
+                tracker.endInterval("Feed Push", state: s)
+            } catch {
+                self.logger.warning("Feed push failed: \(error.localizedDescription)")
+            }
+        }()
+
+        _ = await (heartbeatResult, feedPushResult)
     }
 
     /// Try combined sync endpoint. Returns true if successful.
@@ -205,18 +215,8 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         do {
             logger.info("Starting forced full Ghostwriter sync (including digests)")
 
-            do {
-                let s = tracker.beginInterval("Heartbeat")
-                _ = try await heartbeatService.sendHeartbeat()
-                tracker.endInterval("Heartbeat", state: s)
-            } catch {}
-
-            // Push feeds first
-            do {
-                let s = tracker.beginInterval("Feed Push")
-                try await feedSyncService.pushLocalFeeds(tracker: tracker)
-                tracker.endInterval("Feed Push", state: s)
-            } catch {}
+            // Send heartbeat + push feeds concurrently (independent operations)
+            await sendHeartbeatAndPushFeeds(tracker: tracker)
 
             // Try combined sync
             let s = tracker.beginInterval("Combined Sync")

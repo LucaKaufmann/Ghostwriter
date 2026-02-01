@@ -20,6 +20,7 @@ from app.models.feed import Feed
 from app.api.config import ConfigResponse, get_or_create_config, _config_to_response
 from app.api.feeds import FeedChangesResponse, FeedTombstone
 from app.api.schedules import ScheduleResponse, _schedule_to_response
+from app.core.logging import digest_logger
 from app.worker import scheduler as scheduler_module
 
 router = APIRouter()
@@ -208,21 +209,40 @@ async def combined_sync(
     t_json = time.perf_counter()
 
     total_ms = (t_json - t0) * 1000
+    article_count = sum(len(d["articles"]) for d in new_digests)
+    breakdown = {
+        "config_ms": round((t_config - t0) * 1000),
+        "feeds_ms": round((t_feeds - t_config) * 1000),
+        "digests_query_ms": round((t_digests_query - t_feeds) * 1000),
+        "articles_query_ms": round((t_articles - t_digests_query) * 1000),
+        "schedules_ms": round((t_schedules - t_articles) * 1000),
+        "serialize_ms": round((t_serialize - t_schedules) * 1000),
+        "json_ms": round((t_json - t_serialize) * 1000),
+    }
+
     logger.info(
         "Sync completed in %.0fms (config=%.0f feeds=%.0f digests_q=%.0f "
         "articles_q=%.0f schedules=%.0f serialize=%.0f json=%.0f) "
         "digests=%d articles=%d bytes=%d",
         total_ms,
-        (t_config - t0) * 1000,
-        (t_feeds - t_config) * 1000,
-        (t_digests_query - t_feeds) * 1000,
-        (t_articles - t_digests_query) * 1000,
-        (t_schedules - t_articles) * 1000,
-        (t_serialize - t_schedules) * 1000,
-        (t_json - t_serialize) * 1000,
+        breakdown["config_ms"],
+        breakdown["feeds_ms"],
+        breakdown["digests_query_ms"],
+        breakdown["articles_query_ms"],
+        breakdown["schedules_ms"],
+        breakdown["serialize_ms"],
+        breakdown["json_ms"],
         len(new_digests),
-        sum(len(d["articles"]) for d in new_digests),
+        article_count,
         len(body),
+    )
+
+    digest_logger.sync_combined(
+        duration_ms=total_ms,
+        new_digests=len(new_digests),
+        article_count=article_count,
+        response_bytes=len(body),
+        breakdown=breakdown,
     )
 
     return Response(content=body, media_type="application/json")

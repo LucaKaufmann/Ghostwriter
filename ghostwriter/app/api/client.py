@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.core.logging import digest_logger
 from app.core.security import verify_api_key
 from app.models.client_settings import ClientSettingsRead, ClientSettingsUpdate
 from app.services import activity_tracker
@@ -58,6 +59,11 @@ async def send_heartbeat() -> HeartbeatResponse:
     If schedules were auto-disabled due to inactivity, this will re-enable them.
     """
     settings = activity_tracker.record_heartbeat()
+    reactivated = not settings.schedules_auto_disabled  # True if schedules are active (may have been reactivated)
+    digest_logger.sync_heartbeat(
+        schedules_active=not settings.schedules_auto_disabled,
+        reactivated=reactivated and settings.auto_disable_enabled,
+    )
 
     message = None
     if not settings.schedules_auto_disabled and settings.auto_disable_enabled:
