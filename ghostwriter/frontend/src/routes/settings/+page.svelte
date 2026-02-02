@@ -874,7 +874,7 @@
 									<p class="mb-2 text-sm font-medium">{wallabagPreview.count} unread article{wallabagPreview.count === 1 ? '' : 's'}</p>
 									<ul class="space-y-1">
 										{#each wallabagPreview.articles as article}
-											<li class="text-sm">
+											<li class="text-sm break-words">
 												<a href={article.url} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">{article.title}</a>
 												<span class="text-muted-foreground">
 													{#if article.author} — {article.author}{/if}
