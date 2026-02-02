@@ -102,14 +102,16 @@ app = FastAPI(
 # Proxy headers middleware (for correct URL generation behind reverse proxy)
 app.add_middleware(ProxyHeadersMiddleware)
 
-# CORS middleware (for development/debugging)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS middleware (optional; configure allowed origins via settings)
+cors_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=settings.cors_allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Include API routes
 app.include_router(api_router, prefix="/api")
