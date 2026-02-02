@@ -5,6 +5,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { onMount, onDestroy } from 'svelte';
+	import { useQueryClient } from '@tanstack/svelte-query';
 	import {
 		Mail,
 		CheckCircle2,
@@ -14,11 +16,26 @@
 		Inbox
 	} from 'lucide-svelte';
 
+	const queryClient = useQueryClient();
+
 	// Queries
 	const statusQuery = createQuery(() => ({
 		queryKey: ['newsletters', 'status'],
 		queryFn: () => api.getNewsletterStatus()
 	}));
+
+	// Refetch status when window regains focus (after OAuth popup completes)
+	function handleFocus() {
+		queryClient.invalidateQueries({ queryKey: ['newsletters', 'status'] });
+	}
+
+	onMount(() => {
+		window.addEventListener('focus', handleFocus);
+	});
+
+	onDestroy(() => {
+		window.removeEventListener('focus', handleFocus);
+	});
 
 	function handleConnect() {
 		// Open OAuth flow in new window
