@@ -45,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.TriggerType
+import com.example.epilogue.service.DigestSyncWorker
+import com.example.epilogue.ui.components.SyncStatusIndicator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -102,6 +104,10 @@ fun HistoryScreen(
                     }
                 },
                 actions = {
+                    SyncStatusIndicator(
+                        tags = listOf(DigestSyncWorker.TAG),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                     IconButton(
                         onClick = { viewModel.refresh() },
                         enabled = !uiState.isRefreshing
