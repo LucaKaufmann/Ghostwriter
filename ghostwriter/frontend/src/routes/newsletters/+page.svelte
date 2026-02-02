@@ -125,7 +125,7 @@
 		<Card.Content class="space-y-4">
 			<div class="grid gap-4 md:grid-cols-3">
 				<div class="flex gap-3">
-					<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
+					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
 						1
 					</div>
 					<div>
@@ -136,7 +136,7 @@
 					</div>
 				</div>
 				<div class="flex gap-3">
-					<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
+					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
 						2
 					</div>
 					<div>
@@ -147,7 +147,7 @@
 					</div>
 				</div>
 				<div class="flex gap-3">
-					<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
+					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
 						3
 					</div>
 					<div>
