@@ -102,6 +102,11 @@ class Settings(BaseSettings):
         description="Comma-separated list of trusted proxy IPs/CIDRs for forwarded headers",
     )
 
+    # Rate limiting
+    auth_rate_limit_enabled: bool = Field(default=True, description="Enable auth rate limiting")
+    auth_rate_limit_max: int = Field(default=10, description="Max auth requests per window")
+    auth_rate_limit_window_seconds: int = Field(default=60, description="Auth rate limit window (seconds)")
+
     # Paths
     data_dir: str = Field(default="/app/data", description="Database directory")
     output_dir: str = Field(default="/app/output", description="EPUB output directory")
