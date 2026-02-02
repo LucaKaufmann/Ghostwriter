@@ -3,4 +3,7 @@
     <external-path
         name="documents"
         path="Documents/Epilogue/" />
+    <external-files-path
+        name="external_files"
+        path="Epilogue/" />
 </paths>
