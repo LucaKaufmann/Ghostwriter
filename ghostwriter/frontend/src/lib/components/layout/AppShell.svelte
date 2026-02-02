@@ -84,7 +84,7 @@
 	</aside>
 
 	<!-- Mobile Header + Content -->
-	<div class="flex flex-1 flex-col">
+	<div class="flex flex-1 flex-col min-w-0">
 		<!-- Mobile Header -->
 		<header class="flex h-16 items-center justify-between border-b px-4 lg:hidden">
 			<div class="flex items-center gap-2">
@@ -145,8 +145,8 @@
 		</header>
 
 		<!-- Main Content -->
-		<main class="flex-1 overflow-x-hidden overflow-y-auto">
-			<div class="w-full max-w-7xl mx-auto p-4 md:p-6 lg:p-8">
+		<main class="flex-1 min-w-0 overflow-y-auto">
+			<div class="max-w-7xl mx-auto p-4 md:p-6 lg:p-8">
 				{@render children()}
 			</div>
 		</main>
