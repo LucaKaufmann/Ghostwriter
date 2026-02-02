@@ -5,6 +5,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { onMount, onDestroy } from 'svelte';
+	import { useQueryClient } from '@tanstack/svelte-query';
 	import {
 		Mail,
 		CheckCircle2,
@@ -14,11 +16,26 @@
 		Inbox
 	} from 'lucide-svelte';
 
+	const queryClient = useQueryClient();
+
 	// Queries
 	const statusQuery = createQuery(() => ({
 		queryKey: ['newsletters', 'status'],
 		queryFn: () => api.getNewsletterStatus()
 	}));
+
+	// Refetch status when window regains focus (after OAuth popup completes)
+	function handleFocus() {
+		queryClient.invalidateQueries({ queryKey: ['newsletters', 'status'] });
+	}
+
+	onMount(() => {
+		window.addEventListener('focus', handleFocus);
+	});
+
+	onDestroy(() => {
+		window.removeEventListener('focus', handleFocus);
+	});
 
 	function handleConnect() {
 		// Open OAuth flow in new window
@@ -125,7 +142,7 @@
 		<Card.Content class="space-y-4">
 			<div class="grid gap-4 md:grid-cols-3">
 				<div class="flex gap-3">
-					<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
+					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
 						1
 					</div>
 					<div>
@@ -136,7 +153,7 @@
 					</div>
 				</div>
 				<div class="flex gap-3">
-					<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
+					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
 						2
 					</div>
 					<div>
@@ -147,7 +164,7 @@
 					</div>
 				</div>
 				<div class="flex gap-3">
-					<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
+					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
 						3
 					</div>
 					<div>

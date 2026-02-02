@@ -137,8 +137,12 @@ class NewsletterService:
 
         return token_data["access_token"]
 
-    async def fetch_newsletters(self) -> list[ExtractedArticle]:
-        """Fetch unread emails with the configured Gmail label."""
+    async def fetch_newsletters(self) -> tuple[list[ExtractedArticle], list[str]]:
+        """Fetch unread emails with the configured Gmail label.
+
+        Returns a tuple of (articles, message_ids) from a single query,
+        ensuring both lists are always in sync.
+        """
         token = await self._get_access_token()
         headers = {"Authorization": f"Bearer {token}"}
         label = self.settings.gmail_label
@@ -159,14 +163,15 @@ class NewsletterService:
 
             if not label_id:
                 logger.warning(f"Gmail label '{label}' not found")
-                return []
+                return [], []
 
-            # List unread messages with this label
+            # List unread messages with this label (single query)
             resp = await client.get(
                 f"{GMAIL_API_BASE}/messages",
                 headers=headers,
                 params={
                     "labelIds": label_id,
+                    "q": "is:unread",
                     "maxResults": max_results,
                 },
             )
@@ -175,7 +180,7 @@ class NewsletterService:
 
             if not messages:
                 logger.info("No newsletter emails found")
-                return []
+                return [], []
 
             # Fetch each message
             for msg_ref in messages:
@@ -194,37 +199,7 @@ class NewsletterService:
                     message_ids.append(msg_id)
 
         logger.info(f"Fetched {len(articles)} newsletter emails")
-        return articles
-
-    async def get_fetched_message_ids(self) -> list[str]:
-        """Get message IDs from the most recent fetch (for mark_processed)."""
-        # Re-fetch to get IDs - this is called after fetch_newsletters
-        token = await self._get_access_token()
-        headers = {"Authorization": f"Bearer {token}"}
-        label = self.settings.gmail_label
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{GMAIL_API_BASE}/labels", headers=headers)
-            resp.raise_for_status()
-            label_id = None
-            for lbl in resp.json().get("labels", []):
-                if lbl["name"].lower() == label.lower():
-                    label_id = lbl["id"]
-                    break
-            if not label_id:
-                return []
-
-            resp = await client.get(
-                f"{GMAIL_API_BASE}/messages",
-                headers=headers,
-                params={
-                    "labelIds": label_id,
-                    "q": "is:unread",
-                    "maxResults": self.settings.gmail_max_articles,
-                },
-            )
-            resp.raise_for_status()
-            return [m["id"] for m in resp.json().get("messages", [])]
+        return articles, message_ids
 
     async def mark_processed(self, message_ids: list[str]) -> None:
         """Mark emails as read by removing UNREAD label."""
