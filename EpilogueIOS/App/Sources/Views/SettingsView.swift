@@ -9,6 +9,7 @@
 import SwiftUI
 import Domain
 import GhostwriterClient
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.settingsRepository) private var settingsRepository
@@ -26,6 +27,10 @@ struct SettingsView: View {
     @State private var ghostwriterStatus: DigestStatusResponse?
     @State private var ghostwriterStatusError: String?
     @State private var ghostwriterStatusTask: Task<Void, Never>?
+    @State private var exportEnabled = false
+    @State private var exportFolderURL: URL?
+    @State private var showExportPicker = false
+    @State private var exportError: String?
 
     var body: some View {
         NavigationStack {
@@ -155,6 +160,48 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                // MARK: - Export Directory
+                Section("Export Directory") {
+                    Toggle(isOn: Binding(
+                        get: { exportEnabled },
+                        set: { enabled in
+                            Task { await setExportEnabled(enabled) }
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Export to custom folder")
+                            if let url = exportFolderURL {
+                                Text(url.lastPathComponent)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(exportFolderURL == nil)
+
+                    HStack {
+                        Button(exportFolderURL == nil ? "Select Folder" : "Change") {
+                            showExportPicker = true
+                        }
+                        if exportFolderURL != nil {
+                            Button("Clear") {
+                                Task { await clearExportFolder() }
+                            }
+                            .foregroundColor(.red)
+                        }
+                    }
+
+                    Text("EPUBs will be copied to this folder (e.g., KOReader)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let error = exportError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
                 // MARK: - Notifications
                 Section("Notifications") {
                     Toggle("Show Digest Completion", isOn: $showNotifications)
@@ -244,6 +291,20 @@ struct SettingsView: View {
             .task {
                 await loadSettings()
             }
+            .fileImporter(
+                isPresented: $showExportPicker,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        Task { await setExportFolder(url) }
+                    }
+                case .failure(let error):
+                    exportError = error.localizedDescription
+                }
+            }
         }
     }
 
@@ -264,6 +325,10 @@ struct SettingsView: View {
             minWordCount = try await settingsRepository.getMinWordCount()
             showNotifications = try await settingsRepository.shouldShowNotifications()
             ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
+            exportEnabled = try await settingsRepository.getCustomExportEnabled()
+            if let bookmark = try await settingsRepository.getCustomExportBookmark() {
+                exportFolderURL = try resolveExportBookmark(bookmark)
+            }
         } catch {
             // Use defaults on error
         }
@@ -317,6 +382,55 @@ struct SettingsView: View {
             // Local generation
             await localDigestService.generateDigest()
         }
+    }
+
+    private func setExportFolder(_ url: URL) async {
+        do {
+            let bookmark = try url.bookmarkData(options: [.withSecurityScope])
+            try await settingsRepository.setCustomExportBookmark(bookmark)
+            try await settingsRepository.setCustomExportEnabled(true)
+            exportFolderURL = url
+            exportEnabled = true
+            exportError = nil
+        } catch {
+            exportError = error.localizedDescription
+        }
+    }
+
+    private func clearExportFolder() async {
+        do {
+            try await settingsRepository.setCustomExportBookmark(nil)
+            try await settingsRepository.setCustomExportEnabled(false)
+            exportFolderURL = nil
+            exportEnabled = false
+            exportError = nil
+        } catch {
+            exportError = error.localizedDescription
+        }
+    }
+
+    private func setExportEnabled(_ enabled: Bool) async {
+        do {
+            try await settingsRepository.setCustomExportEnabled(enabled)
+            exportEnabled = enabled
+        } catch {
+            exportError = error.localizedDescription
+        }
+    }
+
+    private func resolveExportBookmark(_ bookmark: Data) throws -> URL {
+        var isStale = false
+        let url = try URL(
+            resolvingBookmarkData: bookmark,
+            options: [.withSecurityScope],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+        if isStale {
+            let refreshed = try url.bookmarkData(options: [.withSecurityScope])
+            Task { try? await settingsRepository.setCustomExportBookmark(refreshed) }
+        }
+        return url
     }
 
     private func pollGhostwriterStatus(digestId: String) async {

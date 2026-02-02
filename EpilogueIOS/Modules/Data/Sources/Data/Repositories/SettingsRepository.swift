@@ -30,6 +30,8 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         static let aiModel = "ai_model"
         static let showNotifications = "show_notifications"
         static let einkMode = "eink_mode"
+        static let customExportEnabled = "custom_export_enabled"
+        static let customExportBookmark = "custom_export_bookmark"
         // Ghostwriter settings
         static let ghostwriterEnabled = "ghostwriter_enabled"
         static let ghostwriterURL = "ghostwriter_url"
@@ -196,6 +198,28 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     public func setEinkModeEnabled(_ enabled: Bool) async throws {
         userDefaults.set(enabled, forKey: DefaultsKeys.einkMode)
+    }
+
+    // MARK: - Export Settings
+
+    public func getCustomExportEnabled() async throws -> Bool {
+        return userDefaults.bool(forKey: DefaultsKeys.customExportEnabled)
+    }
+
+    public func setCustomExportEnabled(_ enabled: Bool) async throws {
+        userDefaults.set(enabled, forKey: DefaultsKeys.customExportEnabled)
+    }
+
+    public func getCustomExportBookmark() async throws -> Data? {
+        return userDefaults.data(forKey: DefaultsKeys.customExportBookmark)
+    }
+
+    public func setCustomExportBookmark(_ bookmark: Data?) async throws {
+        if let bookmark {
+            userDefaults.set(bookmark, forKey: DefaultsKeys.customExportBookmark)
+        } else {
+            userDefaults.removeObject(forKey: DefaultsKeys.customExportBookmark)
+        }
     }
 
     // MARK: - Ghostwriter Settings
