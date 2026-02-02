@@ -90,6 +90,10 @@ class NewsletterService:
                 },
                 f,
             )
+        try:
+            os.chmod(self._pending_oauth_path, 0o600)
+        except OSError:
+            pass
 
         return str(httpx.URL(GOOGLE_AUTH_URL, params=params))
 
@@ -143,6 +147,10 @@ class NewsletterService:
         os.makedirs(os.path.dirname(self._token_path), exist_ok=True)
         with open(self._token_path, "w") as f:
             json.dump(token_data, f)
+        try:
+            os.chmod(self._token_path, 0o600)
+        except OSError:
+            pass
         logger.info("Gmail OAuth token saved")
 
     async def _get_access_token(self) -> str:
@@ -168,6 +176,10 @@ class NewsletterService:
                     new_data.setdefault("refresh_token", token_data["refresh_token"])
                     with open(self._token_path, "w") as f:
                         json.dump(new_data, f)
+                    try:
+                        os.chmod(self._token_path, 0o600)
+                    except OSError:
+                        pass
                     return new_data["access_token"]
 
         return token_data["access_token"]
