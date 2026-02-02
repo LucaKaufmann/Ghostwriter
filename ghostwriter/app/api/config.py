@@ -236,7 +236,7 @@ def _wallabag_config_to_read(config: WallabagConfig) -> WallabagConfigRead:
     return WallabagConfigRead(
         url=config.url,
         client_id=config.client_id,
-        client_secret=config.client_secret,
+        client_secret=PASSWORD_MASK if config.client_secret else "",
         username=config.username,
         password=PASSWORD_MASK if config.password else "",
         mode=config.mode,
