@@ -894,7 +894,7 @@
 
 			<!-- Gmail Newsletters -->
 			<div class="rounded-lg border p-3">
-				<div class="flex items-center justify-between">
+				<div class="flex flex-wrap items-center justify-between gap-2">
 					<div>
 						<p class="font-medium">Gmail Newsletters</p>
 						<p class="text-sm text-muted-foreground">
@@ -903,7 +903,7 @@
 								: 'Newsletter email integration'}
 						</p>
 					</div>
-					<div class="flex items-center gap-2">
+					<div class="flex flex-wrap items-center gap-2">
 						<Switch
 							checked={clientConfigQuery.data?.newsletters?.enabled ?? false}
 							onCheckedChange={(checked) => {
