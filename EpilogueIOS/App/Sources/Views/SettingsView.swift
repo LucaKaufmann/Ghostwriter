@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Domain
+import GhostwriterClient
 
 struct SettingsView: View {
     @Environment(\.settingsRepository) private var settingsRepository
@@ -22,6 +23,9 @@ struct SettingsView: View {
     @State private var ghostwriterEnabled = false
     @State private var isGenerating = false
     @State private var apiKeySaved = false
+    @State private var ghostwriterStatus: DigestStatusResponse?
+    @State private var ghostwriterStatusError: String?
+    @State private var ghostwriterStatusTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -199,6 +203,30 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(isGenerating || localDigestService.isGenerating || ghostwriterCoordinator.isSyncing)
+
+                    if ghostwriterEnabled {
+                        if let status = ghostwriterStatus {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Stage: \(status.stage ?? "starting")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                ProgressView(value: status.progress.progressPercentage)
+
+                                Text("Feeds: \(status.progress.feedsFetched)/\(status.progress.totalFeeds) | " +
+                                     "Articles: \(status.progress.articlesEnriched)/\(status.progress.totalArticles)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 6)
+                        }
+
+                        if let error = ghostwriterStatusError {
+                            Text("Error: \(error)")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
                 } footer: {
                     if ghostwriterEnabled {
                         Text("Will trigger digest generation on the Ghostwriter server")
@@ -269,13 +297,43 @@ struct SettingsView: View {
             isGenerating = true
             defer { isGenerating = false }
             do {
-                _ = try await ghostwriterCoordinator.triggerDigest(period: "manual")
+                ghostwriterStatusTask?.cancel()
+                ghostwriterStatus = nil
+                ghostwriterStatusError = nil
+
+                let response = try await ghostwriterCoordinator.triggerDigest(period: "manual")
+                guard let digestId = response.id else {
+                    ghostwriterStatusError = "No digest ID returned"
+                    return
+                }
+
+                ghostwriterStatusTask = Task {
+                    await pollGhostwriterStatus(digestId: digestId)
+                }
             } catch {
-                // Handle error
+                ghostwriterStatusError = error.localizedDescription
             }
         } else {
             // Local generation
             await localDigestService.generateDigest()
+        }
+    }
+
+    private func pollGhostwriterStatus(digestId: String) async {
+        while !Task.isCancelled {
+            do {
+                let status = try await ghostwriterCoordinator.getDigestStatus(digestId: digestId)
+                ghostwriterStatus = status
+
+                if status.isComplete {
+                    break
+                }
+            } catch {
+                ghostwriterStatusError = error.localizedDescription
+                break
+            }
+
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
         }
     }
 }
