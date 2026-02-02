@@ -41,7 +41,7 @@
 	}
 </script>
 
-<div class="flex min-h-screen">
+<div class="flex min-h-screen overflow-x-hidden">
 	<!-- Desktop Sidebar -->
 	<aside class="hidden w-64 flex-shrink-0 border-r bg-card lg:block">
 		<div class="flex h-full flex-col">
