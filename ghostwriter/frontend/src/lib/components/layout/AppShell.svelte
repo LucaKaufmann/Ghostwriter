@@ -41,7 +41,7 @@
 	}
 </script>
 
-<div class="flex min-h-screen overflow-x-hidden">
+<div class="flex min-h-screen w-full max-w-full overflow-x-hidden">
 	<!-- Desktop Sidebar -->
 	<aside class="hidden w-64 flex-shrink-0 border-r bg-card lg:block">
 		<div class="flex h-full flex-col">
@@ -145,8 +145,8 @@
 		</header>
 
 		<!-- Main Content -->
-		<main class="flex-1 overflow-auto">
-			<div class="container mx-auto p-4 md:p-6 lg:p-8">
+		<main class="flex-1 overflow-x-hidden overflow-y-auto">
+			<div class="w-full max-w-7xl mx-auto p-4 md:p-6 lg:p-8">
 				{@render children()}
 			</div>
 		</main>
