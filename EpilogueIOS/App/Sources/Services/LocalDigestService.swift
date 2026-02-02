@@ -92,6 +92,10 @@ public final class LocalDigestService: ObservableObject {
             lastGeneratedDigest = digest
             generationStatus = "Complete! \(digest.articleCount) articles"
             logger.info("Local digest generation complete: \(digest.articleCount) articles, path: \(digest.epubFilePath)")
+            await CustomExportHelper.exportIfConfigured(
+                fileURL: URL(fileURLWithPath: digest.epubFilePath),
+                settingsRepository: settingsRepository
+            )
 
         } catch {
             generationError = error

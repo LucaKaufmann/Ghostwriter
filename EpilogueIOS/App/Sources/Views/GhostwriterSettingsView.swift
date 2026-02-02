@@ -466,6 +466,10 @@ private class MockSettingsRepository: SettingsRepositoryProtocol {
     // Display
     func isEinkModeEnabled() async throws -> Bool { false }
     func setEinkModeEnabled(_ enabled: Bool) async throws {}
+    func getCustomExportEnabled() async throws -> Bool { false }
+    func setCustomExportEnabled(_ enabled: Bool) async throws {}
+    func getCustomExportBookmark() async throws -> Data? { nil }
+    func setCustomExportBookmark(_ bookmark: Data?) async throws {}
 
     // Ghostwriter
     func isGhostwriterEnabled() async throws -> Bool { true }
