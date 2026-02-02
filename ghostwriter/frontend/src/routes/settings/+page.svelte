@@ -504,7 +504,7 @@
 				{#each schedulesQuery.data as schedule}
 					{@const edit = scheduleEdits[schedule.period]}
 					<div class="flex flex-col gap-4 sm:flex-row sm:items-center rounded-lg border p-4">
-						<div class="flex items-center gap-4 flex-1 min-w-0">
+						<div class="flex flex-wrap items-center gap-3 flex-1 min-w-0">
 							<div class="w-20">
 								<Label class="text-base font-medium capitalize">{schedule.period}</Label>
 							</div>
