@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     # Network safety
     allow_private_hosts: bool = Field(default=False, description="Allow private/localhost outbound URLs")
 
+    # CORS
+    cors_allow_origins: str = Field(
+        default="",
+        description="Comma-separated list of allowed CORS origins (empty disables CORS)",
+    )
+    cors_allow_credentials: bool = Field(default=False, description="Allow credentials for CORS requests")
+
     # Paths
     data_dir: str = Field(default="/app/data", description="Database directory")
     output_dir: str = Field(default="/app/output", description="EPUB output directory")
