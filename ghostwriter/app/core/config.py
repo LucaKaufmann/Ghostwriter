@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     )
     cors_allow_credentials: bool = Field(default=False, description="Allow credentials for CORS requests")
 
+    # Docs and proxy trust
+    enable_api_docs: bool = Field(default=False, description="Enable OpenAPI docs endpoints")
+    trusted_proxy_hosts: str = Field(
+        default="",
+        description="Comma-separated list of trusted proxy IPs/CIDRs for forwarded headers",
+    )
+
     # Paths
     data_dir: str = Field(default="/app/data", description="Database directory")
     output_dir: str = Field(default="/app/output", description="EPUB output directory")
