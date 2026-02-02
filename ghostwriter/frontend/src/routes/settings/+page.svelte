@@ -431,6 +431,21 @@
 		if (diffDays < 7) return `${diffDays}d ago`;
 		return formatDate(dateStr);
 	}
+
+	async function downloadLog(filename: string) {
+		try {
+			const { blob, filename: resolved } = await api.downloadLog(filename);
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = resolved;
+			anchor.click();
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Unknown error';
+			toast.error('Failed to download log', { description: message });
+		}
+	}
 </script>
 
 <svelte:head>
@@ -1087,7 +1102,7 @@
 							<Button
 								variant="outline"
 								size="sm"
-								onclick={() => window.open(api.getLogDownloadUrl(logFile.filename), '_blank')}
+								onclick={() => downloadLog(logFile.filename)}
 							>
 								<Download class="mr-2 h-4 w-4" />
 								Download
