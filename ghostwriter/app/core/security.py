@@ -27,7 +27,6 @@ def _get_token_from_request(
     Checks in order:
     1. Authorization: Bearer <token>
     2. X-API-Key header
-    3. api_key query parameter (for downloads)
     """
     # Bearer token from Authorization header
     if credentials and credentials.credentials:
@@ -37,11 +36,6 @@ def _get_token_from_request(
     api_key_header = request.headers.get("x-api-key")
     if api_key_header:
         return api_key_header
-
-    # Query parameter (for file downloads)
-    api_key_param = request.query_params.get("api_key")
-    if api_key_param:
-        return api_key_param
 
     return None
 
