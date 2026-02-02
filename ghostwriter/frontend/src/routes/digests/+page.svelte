@@ -384,7 +384,7 @@
 
 <!-- View Articles Dialog -->
 <Dialog.Root open={!!viewingDigest} onOpenChange={(open) => !open && (viewingDigest = null)}>
-	<Dialog.Content class="max-w-2xl max-h-[80vh] flex flex-col">
+	<Dialog.Content class="max-w-2xl max-h-[80vh] w-[calc(100vw-2rem)] sm:w-auto flex flex-col">
 		<Dialog.Header>
 			<Dialog.Title class="capitalize">
 				{viewingDigest?.period} Digest Articles
