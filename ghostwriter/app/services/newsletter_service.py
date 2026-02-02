@@ -1,10 +1,13 @@
 """Gmail newsletter integration service."""
 
 import base64
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
+import time
 
 import httpx
 from lxml import html as lxml_html
@@ -52,8 +55,18 @@ class NewsletterService:
             and not os.path.exists(self._token_path)
         )
 
+    def _generate_pkce_pair(self) -> tuple[str, str]:
+        """Generate (code_verifier, code_challenge) for PKCE."""
+        # RFC 7636: code_verifier length 43-128 characters
+        verifier = secrets.token_urlsafe(64)[:128]
+        challenge = hashlib.sha256(verifier.encode("utf-8")).digest()
+        challenge_b64 = base64.urlsafe_b64encode(challenge).rstrip(b"=").decode("utf-8")
+        return verifier, challenge_b64
+
     def get_auth_url(self, redirect_uri: str) -> str:
         """Build Google OAuth consent URL and store redirect_uri for callback."""
+        code_verifier, code_challenge = self._generate_pkce_pair()
+        state = secrets.token_urlsafe(32)
         params = {
             "client_id": self.settings.gmail_client_id,
             "redirect_uri": redirect_uri,
@@ -61,15 +74,26 @@ class NewsletterService:
             "scope": GMAIL_SCOPES,
             "access_type": "offline",
             "prompt": "consent",
+            "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
         }
         # Store redirect_uri for use in callback
         os.makedirs(os.path.dirname(self._pending_oauth_path), exist_ok=True)
         with open(self._pending_oauth_path, "w") as f:
-            json.dump({"redirect_uri": redirect_uri}, f)
+            json.dump(
+                {
+                    "redirect_uri": redirect_uri,
+                    "state": state,
+                    "code_verifier": code_verifier,
+                    "created_at": int(time.time()),
+                },
+                f,
+            )
 
         return str(httpx.URL(GOOGLE_AUTH_URL, params=params))
 
-    async def exchange_code_with_callback(self, code: str) -> None:
+    async def exchange_code_with_callback(self, code: str, state: str | None) -> None:
         """Exchange authorization code using the stored redirect_uri from get_auth_url."""
         if not os.path.exists(self._pending_oauth_path):
             raise ValueError("No pending OAuth flow found. Start with get_auth_url first.")
@@ -78,10 +102,20 @@ class NewsletterService:
             pending = json.load(f)
 
         redirect_uri = pending.get("redirect_uri")
+        pending_state = pending.get("state")
+        code_verifier = pending.get("code_verifier")
+        created_at = pending.get("created_at", 0)
+
+        if not pending_state or not code_verifier:
+            raise ValueError("OAuth state or PKCE verifier missing from pending state")
+        if not state or state != pending_state:
+            raise ValueError("OAuth state mismatch")
+        if int(time.time()) - int(created_at) > 600:
+            raise ValueError("OAuth state expired. Please retry.")
         if not redirect_uri:
             raise ValueError("No redirect_uri in pending OAuth state")
 
-        await self.exchange_code(code, redirect_uri)
+        await self.exchange_code(code, redirect_uri, code_verifier)
 
         # Clean up pending state
         try:
@@ -89,7 +123,7 @@ class NewsletterService:
         except OSError:
             pass
 
-    async def exchange_code(self, code: str, redirect_uri: str) -> None:
+    async def exchange_code(self, code: str, redirect_uri: str, code_verifier: str | None = None) -> None:
         """Exchange authorization code for tokens and save to disk."""
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
@@ -100,6 +134,7 @@ class NewsletterService:
                     "client_secret": self.settings.gmail_client_secret,
                     "redirect_uri": redirect_uri,
                     "grant_type": "authorization_code",
+                    **({"code_verifier": code_verifier} if code_verifier else {}),
                 },
             )
             resp.raise_for_status()
