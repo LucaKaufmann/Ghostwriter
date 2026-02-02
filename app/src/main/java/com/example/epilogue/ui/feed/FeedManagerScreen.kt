@@ -309,7 +309,7 @@ fun FeedItem(
     }
 }
 
-private val maxArticleOptions = listOf(5, 10, 15, 20, 25, 30, 50, 0) // 0 = Unlimited
+private val maxArticleOptions = listOf(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 0) // 0 = Unlimited
 
 @Composable
 fun AddFeedDialog(
