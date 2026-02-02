@@ -106,3 +106,6 @@ secrets.properties
 
 # Claude Code local settings
 .claude/
+
+# Codex local settings
+.codex/

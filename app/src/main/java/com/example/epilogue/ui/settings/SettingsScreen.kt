@@ -704,6 +704,14 @@ fun GhostwriterInput(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                Text(
+                    text = "Use a Ghostwriter API token (gw_...) or a JWT from the web UI.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End

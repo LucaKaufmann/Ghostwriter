@@ -64,6 +64,9 @@ struct GhostwriterSettingsView: View {
                     }
                 }
                 .disabled(!viewModel.isEnabled)
+                Text("Use a Ghostwriter API token (gw_...) or a JWT from the web UI.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             // MARK: - Connection Test
@@ -358,6 +361,15 @@ class GhostwriterSettingsViewModel: ObservableObject {
             let health = try await client.checkHealth()
             serverHealth = health
             connectionStatus = health.isHealthy ? .connected : .failed
+
+            if health.isHealthy, let token = apiKey, !token.isEmpty {
+                do {
+                    _ = try await client.getConfig()
+                } catch {
+                    connectionStatus = .failed
+                    connectionError = error.localizedDescription
+                }
+            }
 
             // Also get client status and integrations
             await refreshClientStatus()
