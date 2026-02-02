@@ -49,7 +49,7 @@ struct GhostwriterSettingsView: View {
 
                 HStack {
                     if viewModel.hasAPIKey {
-                        Text("API Key")
+                        Text("API Token")
                         Spacer()
                         Text("••••••••")
                             .foregroundColor(.secondary)
@@ -58,7 +58,7 @@ struct GhostwriterSettingsView: View {
                         }
                         .buttonStyle(.borderless)
                     } else {
-                        Button("Set API Key") {
+                        Button("Set API Token") {
                             showingAPIKeyAlert = true
                         }
                     }
@@ -216,8 +216,8 @@ struct GhostwriterSettingsView: View {
             }
         }
         .navigationTitle("Ghostwriter")
-        .alert("API Key", isPresented: $showingAPIKeyAlert) {
-            TextField("API Key", text: $viewModel.newAPIKey)
+        .alert("API Token", isPresented: $showingAPIKeyAlert) {
+            TextField("API Token (gw_... or JWT)", text: $viewModel.newAPIKey)
             Button("Cancel", role: .cancel) {
                 viewModel.newAPIKey = ""
             }
@@ -225,7 +225,7 @@ struct GhostwriterSettingsView: View {
                 Task { await viewModel.saveAPIKey() }
             }
         } message: {
-            Text("Enter your Ghostwriter API key")
+            Text("Enter your Ghostwriter API token")
         }
         .task {
             await viewModel.load()
