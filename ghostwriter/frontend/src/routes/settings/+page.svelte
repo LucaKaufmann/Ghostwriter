@@ -614,7 +614,7 @@
 						<div class="flex items-center justify-between rounded-lg border p-4">
 							<div class="space-y-1">
 								<p class="font-medium">{token.name}</p>
-								<div class="flex items-center gap-3 text-sm text-muted-foreground">
+								<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
 									<code class="bg-muted px-1.5 py-0.5 rounded text-xs">{token.token_prefix}</code>
 									<span>Created {formatDate(token.created_at)}</span>
 									<span>• {formatLastUsed(token.last_used_at)}</span>
