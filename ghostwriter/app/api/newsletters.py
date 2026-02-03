@@ -221,7 +221,7 @@ async def preview_newsletters(
 
     try:
         logger.info("Fetching newsletter preview")
-        articles = await service.fetch_newsletters()
+        articles, _message_ids = await service.fetch_newsletters()
         preview_articles = [
             PreviewArticle(
                 title=a.title,
