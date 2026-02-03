@@ -49,7 +49,7 @@ struct GhostwriterSettingsView: View {
 
                 HStack {
                     if viewModel.hasAPIKey {
-                        Text("API Key")
+                        Text("API Token")
                         Spacer()
                         Text("••••••••")
                             .foregroundColor(.secondary)
@@ -58,12 +58,15 @@ struct GhostwriterSettingsView: View {
                         }
                         .buttonStyle(.borderless)
                     } else {
-                        Button("Set API Key") {
+                        Button("Set API Token") {
                             showingAPIKeyAlert = true
                         }
                     }
                 }
                 .disabled(!viewModel.isEnabled)
+                Text("Use a Ghostwriter API token (gw_...) or a JWT from the web UI.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             // MARK: - Connection Test
@@ -216,8 +219,8 @@ struct GhostwriterSettingsView: View {
             }
         }
         .navigationTitle("Ghostwriter")
-        .alert("API Key", isPresented: $showingAPIKeyAlert) {
-            TextField("API Key", text: $viewModel.newAPIKey)
+        .alert("API Token", isPresented: $showingAPIKeyAlert) {
+            TextField("API Token (gw_... or JWT)", text: $viewModel.newAPIKey)
             Button("Cancel", role: .cancel) {
                 viewModel.newAPIKey = ""
             }
@@ -225,7 +228,7 @@ struct GhostwriterSettingsView: View {
                 Task { await viewModel.saveAPIKey() }
             }
         } message: {
-            Text("Enter your Ghostwriter API key")
+            Text("Enter your Ghostwriter API token")
         }
         .task {
             await viewModel.load()
@@ -358,6 +361,15 @@ class GhostwriterSettingsViewModel: ObservableObject {
             let health = try await client.checkHealth()
             serverHealth = health
             connectionStatus = health.isHealthy ? .connected : .failed
+
+            if health.isHealthy, let token = apiKey, !token.isEmpty {
+                do {
+                    _ = try await client.getConfig()
+                } catch {
+                    connectionStatus = .failed
+                    connectionError = error.localizedDescription
+                }
+            }
 
             // Also get client status and integrations
             await refreshClientStatus()

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.core.database import get_session
+from app.core.net import validate_public_url
 from app.core.logging import digest_logger
 from app.core.security import verify_api_key
 from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync, FeedUpdate
@@ -136,6 +137,16 @@ async def sync_feeds(
     # Get existing feeds by URL
     existing_statement = select(Feed)
     existing_feeds = {f.url: f for f in session.exec(existing_statement).all()}
+
+    # Validate URLs before applying changes
+    for feed_data in feeds:
+        try:
+            validate_public_url(feed_data.url)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid feed URL '{feed_data.url}': {e}",
+            )
 
     # Update or create feeds from the sync list
     for feed_data in feeds:
@@ -327,3 +338,17 @@ async def delete_feed_by_url(
     session.commit()
 
     return {"status": "deleted", "url": feed_url}
+    try:
+        validate_public_url(feed_data.url)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid feed URL '{feed_data.url}': {e}",
+        )
+    try:
+        validate_public_url(feed_data.url)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid feed URL '{feed_data.url}': {e}",
+        )

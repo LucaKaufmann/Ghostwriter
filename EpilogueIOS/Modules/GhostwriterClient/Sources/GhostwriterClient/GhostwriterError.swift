@@ -39,6 +39,9 @@ public enum GhostwriterError: LocalizedError {
     
     /// Authentication failed
     case unauthorized
+
+    /// Rate limited by server
+    case rateLimited
     
     public var errorDescription: String? {
         switch self {
@@ -65,6 +68,8 @@ public enum GhostwriterError: LocalizedError {
             return "Not found: \(resource)"
         case .unauthorized:
             return "Authentication failed"
+        case .rateLimited:
+            return "Too many attempts. Please try again in a minute."
         }
     }
 }
