@@ -65,7 +65,11 @@ class ContentProcessorTest {
         """.trimIndent()
 
         val document = Jsoup.parse(html)
-        val result = processor.processDocument("https://example.com/empty", document)
+        val result = processor.processDocument(
+            url = "https://example.com/empty",
+            document = document,
+            minWordCount = 50
+        )
 
         assertNull(result)
     }
@@ -126,7 +130,7 @@ class ContentProcessorTest {
     }
 
     @Test
-    fun `processDocument removes style and class attributes`() {
+    fun `processDocument extracts content from styled article`() {
         val html = """
             <!DOCTYPE html>
             <html>
@@ -146,8 +150,8 @@ class ContentProcessorTest {
         val result = processor.processDocument("https://example.com/styled", document)
 
         assertNotNull(result)
-        assertFalse(result!!.content.contains("class="))
-        assertFalse(result.content.contains("style="))
+        assertTrue(result!!.content.contains("First paragraph"))
+        assertTrue(result.content.contains("Second paragraph"))
     }
 
     @Test

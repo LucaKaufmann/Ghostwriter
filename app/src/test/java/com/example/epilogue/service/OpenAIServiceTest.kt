@@ -182,6 +182,86 @@ class OpenAIServiceTest {
     }
 
     @Test
+    fun `summarizeArticle returns null when AI flags promotional content`() = runTest {
+        val originalArticle = ProcessedArticle(
+            title = "Promo Title",
+            author = "Promo Author",
+            content = "<p>Promo content</p>",
+            originalUrl = "https://example.com/promo",
+            isSummary = false
+        )
+
+        every { settingsRepository.getOpenAIApiKey() } returns "sk-test-key"
+
+        val mockResponse = ChatCompletionResponse(
+            id = "test-id",
+            choices = listOf(
+                Choice(
+                    index = 0,
+                    message = ChatMessage(role = "assistant", content = "PROMOTIONAL_CONTENT"),
+                    finishReason = "stop"
+                )
+            ),
+            usage = null
+        )
+
+        coEvery {
+            openAIApi.createChatCompletion(any(), any())
+        } returns Response.success(mockResponse)
+
+        val result = service.summarizeArticle(originalArticle)
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `summarizeArticle converts markdown lists and italics`() = runTest {
+        val originalArticle = ProcessedArticle(
+            title = "Original Title",
+            author = "Original Author",
+            content = "<p>Original content</p>",
+            originalUrl = "https://example.com/article",
+            isSummary = false
+        )
+
+        val summaryMarkdown = """
+            **Hook**: *Calm opening*.
+
+            **Key Details**:
+            - First point
+            - Second point
+
+            **Significance**: Ending.
+        """.trimIndent()
+
+        every { settingsRepository.getOpenAIApiKey() } returns "sk-test-key"
+
+        val mockResponse = ChatCompletionResponse(
+            id = "test-id",
+            choices = listOf(
+                Choice(
+                    index = 0,
+                    message = ChatMessage(role = "assistant", content = summaryMarkdown),
+                    finishReason = "stop"
+                )
+            ),
+            usage = null
+        )
+
+        coEvery {
+            openAIApi.createChatCompletion(any(), any())
+        } returns Response.success(mockResponse)
+
+        val result = service.summarizeArticle(originalArticle)
+
+        assertNotNull(result)
+        assertTrue(result!!.content.contains("<em>Calm opening</em>"))
+        assertTrue(result.content.contains("<ul>"))
+        assertTrue(result.content.contains("<li>First point</li>"))
+        assertTrue(result.content.contains("<li>Second point</li>"))
+    }
+
+    @Test
     fun `summarize strips HTML from content before sending to API`() = runTest {
         val htmlContent = "<div><p>Test <strong>content</strong> with <a href='#'>links</a></p></div>"
         every { settingsRepository.getOpenAIApiKey() } returns "sk-test-key"
