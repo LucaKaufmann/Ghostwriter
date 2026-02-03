@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -228,6 +229,7 @@ fun SettingsScreen(
                     url = uiState.ghostwriterUrl,
                     apiKey = uiState.ghostwriterApiKey,
                     isTesting = uiState.ghostwriterTesting,
+                    health = uiState.ghostwriterHealth,
                     wallabagIntegration = uiState.wallabagIntegration,
                     newslettersIntegration = uiState.newslettersIntegration,
                     onEnabledChange = viewModel::updateGhostwriterEnabled,
@@ -595,6 +597,7 @@ fun GhostwriterInput(
     url: String,
     apiKey: String,
     isTesting: Boolean,
+    health: HealthResponse?,
     wallabagIntegration: IntegrationStatus?,
     newslettersIntegration: IntegrationStatus?,
     onEnabledChange: (Boolean) -> Unit,
@@ -728,6 +731,34 @@ fun GhostwriterInput(
                     style = MaterialTheme.typography.bodySmall
                 )
 
+                // Server health summary (shown after successful test)
+                if (health != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Divider()
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Server",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+
+                    Text(
+                        text = "Version: ${health.version}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = "AI: ${health.aiProvider} · ${health.aiModel}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    health.uptimeSeconds?.let { seconds ->
+                        Text(
+                            text = "Uptime: ${formatUptime(seconds)}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+
                 // Integration status (shown when connected)
                 if (wallabagIntegration != null || newslettersIntegration != null) {
                     Spacer(modifier = Modifier.height(16.dp))
@@ -795,6 +826,18 @@ fun IntegrationStatusRow(
                 MaterialTheme.colorScheme.onSurfaceVariant
             }
         )
+    }
+}
+
+private fun formatUptime(seconds: Int): String {
+    val days = seconds / 86400
+    val hours = (seconds % 86400) / 3600
+    val minutes = (seconds % 3600) / 60
+
+    return when {
+        days > 0 -> "${days}d ${hours}h"
+        hours > 0 -> "${hours}h ${minutes}m"
+        else -> "${minutes}m"
     }
 }
 
