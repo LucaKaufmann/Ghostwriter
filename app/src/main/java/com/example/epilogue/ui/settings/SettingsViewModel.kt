@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
@@ -473,7 +474,7 @@ class SettingsViewModel @Inject constructor(
 
     fun testGhostwriterConnection() {
         viewModelScope.launch {
-            _uiState.update { it.copy(ghostwriterTesting = true, ghostwriterTestResult = null) }
+            _uiState.update { it.copy(ghostwriterTesting = true, ghostwriterTestResult = null, ghostwriterHealth = null) }
 
             // Save URL and API key first if changed
             val url = _uiState.value.ghostwriterUrl.trim()
@@ -488,6 +489,7 @@ class SettingsViewModel @Inject constructor(
 
             val (testResult, connectionSuccessful) = when (healthResult) {
                 is GhostwriterResult.Success -> {
+                    _uiState.update { it.copy(ghostwriterHealth = healthResult.data) }
                     if (apiKeyPresent) {
                         when (val authResult = ghostwriterRepository.getConfig()) {
                             is GhostwriterResult.Success -> {
@@ -699,6 +701,7 @@ data class SettingsUiState(
     val ghostwriterError: String? = null,
     val ghostwriterSyncing: Boolean = false,
     val ghostwriterSyncResult: String? = null,
+    val ghostwriterHealth: HealthResponse? = null,
     // Integration status
     val wallabagIntegration: IntegrationStatus? = null,
     val newslettersIntegration: IntegrationStatus? = null
