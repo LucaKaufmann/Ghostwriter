@@ -439,7 +439,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
 }
 
 // Mock for previews
-private class MockSettingsRepository: SettingsRepositoryProtocol {
+private final class MockSettingsRepository: SettingsRepositoryProtocol, @unchecked Sendable {
     func getOpenAIKey() async throws -> String? { nil }
     func setOpenAIKey(_ key: String) async throws {}
     func deleteOpenAIKey() async throws {}
