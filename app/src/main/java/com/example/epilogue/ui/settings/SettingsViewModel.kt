@@ -483,14 +483,37 @@ class SettingsViewModel @Inject constructor(
             val apiKey = _uiState.value.ghostwriterApiKey.trim()
             settingsRepository.setGhostwriterApiKey(apiKey.ifBlank { null })
 
-            val result = ghostwriterRepository.checkHealth()
+            val healthResult = ghostwriterRepository.checkHealth()
+            val apiKeyPresent = apiKey.isNotBlank()
 
-            val (testResult, connectionSuccessful) = when (result) {
+            val (testResult, connectionSuccessful) = when (healthResult) {
                 is GhostwriterResult.Success -> {
-                    Pair("Connected! Server v${result.data.version}, AI: ${result.data.aiProvider}", true)
+                    if (apiKeyPresent) {
+                        when (val authResult = ghostwriterRepository.getConfig()) {
+                            is GhostwriterResult.Success -> {
+                                Pair(
+                                    "Connected! Server v${healthResult.data.version}, " +
+                                        "AI: ${healthResult.data.aiProvider} (authenticated)",
+                                    true
+                                )
+                            }
+                            is GhostwriterResult.Error -> {
+                                Pair(formatAuthError(authResult), false)
+                            }
+                            is GhostwriterResult.NotConfigured -> {
+                                Pair("Please enter a server URL", false)
+                            }
+                        }
+                    } else {
+                        Pair(
+                            "Connected! Server v${healthResult.data.version}, " +
+                                "AI: ${healthResult.data.aiProvider} (no token)",
+                            true
+                        )
+                    }
                 }
                 is GhostwriterResult.Error -> {
-                    Pair("Error: ${result.message}", false)
+                    Pair(formatAuthError(healthResult), false)
                 }
                 is GhostwriterResult.NotConfigured -> {
                     Pair("Please enter a server URL", false)
@@ -515,6 +538,14 @@ class SettingsViewModel @Inject constructor(
                     performInitialGhostwriterSync()
                 }
             }
+        }
+    }
+
+    private fun formatAuthError(result: GhostwriterResult.Error): String {
+        return when (result.code) {
+            401 -> "Authentication failed. Check your API token."
+            429 -> "Too many attempts. Please try again in a minute."
+            else -> "Error: ${result.message}"
         }
     }
 

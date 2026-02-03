@@ -678,12 +678,12 @@ fun GhostwriterInput(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // API Key (optional)
+                // API Token (optional)
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = onApiKeyChange,
-                    label = { Text("API Key (optional)") },
-                    placeholder = { Text("Leave blank if not required") },
+                    label = { Text("API Token (optional)") },
+                    placeholder = { Text("gw_... or JWT (leave blank if not required)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     visualTransformation = if (showApiKey) {
@@ -700,6 +700,14 @@ fun GhostwriterInput(
                             )
                         }
                     }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Use a Ghostwriter API token (gw_...) or a JWT from the web UI.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

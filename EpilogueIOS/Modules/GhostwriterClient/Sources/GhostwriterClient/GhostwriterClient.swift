@@ -370,6 +370,8 @@ public actor GhostwriterClient {
             return // Success
         case 401:
             throw GhostwriterError.unauthorized
+        case 429:
+            throw GhostwriterError.rateLimited
         case 404:
             let message = String(data: data, encoding: .utf8)
             throw GhostwriterError.notFound(message ?? "Resource not found")
