@@ -303,21 +303,45 @@ def _get_last_activity_time(settings: ClientSettings) -> datetime | None:
 
 def _disable_all_schedules(session: Session) -> None:
     """Disable all schedules."""
-    from app.worker.scheduler import update_schedule
+    from app.core.logging import digest_logger
+    from app.worker import scheduler as scheduler_module
 
     schedules = session.exec(select(Schedule)).all()
+    now = datetime.utcnow()
     for schedule in schedules:
         if schedule.enabled:
-            update_schedule(period=schedule.period, enabled=False)
+            schedule.enabled = False
+            schedule.updated_at = now
+            session.add(schedule)
+            scheduler_module._remove_schedule_job(schedule.period)
+            digest_logger.schedule_updated(
+                period=schedule.period,
+                hour=schedule.hour,
+                minute=schedule.minute,
+                enabled=False,
+                timezone=schedule.timezone,
+            )
             logger.info(f"Auto-disabled {schedule.period} schedule")
 
 
 def _reenable_schedules(session: Session) -> None:
     """Re-enable all schedules that were auto-disabled."""
-    from app.worker.scheduler import update_schedule
+    from app.core.logging import digest_logger
+    from app.worker import scheduler as scheduler_module
 
     schedules = session.exec(select(Schedule)).all()
+    now = datetime.utcnow()
     for schedule in schedules:
         if not schedule.enabled:
-            update_schedule(period=schedule.period, enabled=True)
+            schedule.enabled = True
+            schedule.updated_at = now
+            session.add(schedule)
+            scheduler_module._add_schedule_job(schedule)
+            digest_logger.schedule_updated(
+                period=schedule.period,
+                hour=schedule.hour,
+                minute=schedule.minute,
+                enabled=True,
+                timezone=schedule.timezone,
+            )
             logger.info(f"Re-enabled {schedule.period} schedule")

@@ -382,9 +382,10 @@ def get_next_run_time(schedule: Schedule) -> datetime | None:
 
     job_id = f"digest_{schedule.period}"
     job = scheduler.get_job(job_id)
+    next_run = getattr(job, "next_run_time", None) if job else None
 
-    if job and job.next_run_time:
-        return job.next_run_time.astimezone(pytz.UTC)
+    if next_run:
+        return next_run.astimezone(pytz.UTC)
 
     return None
 

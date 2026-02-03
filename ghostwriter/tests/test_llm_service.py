@@ -68,3 +68,29 @@ async def test_summarize_fallback(llm_service):
     # Should return original content on failure
     assert ai_failed is True
     assert result == content
+
+
+@pytest.mark.asyncio
+async def test_summarize_success(monkeypatch, llm_service):
+    """Test summarize returns summary content on success."""
+    class _Message:
+        def __init__(self, content: str) -> None:
+            self.content = content
+
+    class _Choice:
+        def __init__(self, content: str) -> None:
+            self.message = _Message(content)
+
+    class _Response:
+        def __init__(self, content: str) -> None:
+            self.choices = [_Choice(content)]
+
+    async def _fake_acompletion(**_kwargs):
+        return _Response("Short summary")
+
+    monkeypatch.setattr("app.services.llm_service.acompletion", _fake_acompletion)
+
+    result, ai_failed = await llm_service.summarize("Some content", retries=0)
+
+    assert ai_failed is False
+    assert result == "Short summary"
