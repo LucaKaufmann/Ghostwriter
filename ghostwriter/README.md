@@ -96,7 +96,6 @@ All configuration via environment variables. See `.env.example` for full list.
 AI_PROVIDER=ollama
 
 # Summarize.sh (optional, for summarize-mode feeds)
-SUMMARIZE_SH_ENABLED=false
 SUMMARIZE_SH_CONFIG_PATH=~/.summarize/config.json
 SUMMARIZE_SH_TIMEOUT_SECONDS=90
 

@@ -23,6 +23,9 @@ class ClientConfigBase(SQLModel):
 
     # Integration toggles
     newsletters_enabled: bool = Field(default=True, description="Enable newsletter integration")
+    summarize_sh_enabled: bool = Field(
+        default=False, description="Enable Summarize.sh for summarize-mode feeds"
+    )
 
 
 class ClientConfig(ClientConfigBase, table=True):
@@ -52,6 +55,9 @@ class ClientConfigUpdate(SQLModel):
     evening_minute: int | None = Field(default=None, ge=0, le=59, description="Evening minute")
     timezone: str | None = Field(default=None, description="IANA timezone")
     newsletters_enabled: bool | None = Field(default=None, description="Enable newsletter integration")
+    summarize_sh_enabled: bool | None = Field(
+        default=None, description="Enable Summarize.sh for summarize-mode feeds"
+    )
 
 
 class ClientConfigRead(SQLModel):
@@ -66,4 +72,5 @@ class ClientConfigRead(SQLModel):
     evening_minute: int
     timezone: str
     newsletters_enabled: bool
+    summarize_sh_enabled: bool
     updated_at: datetime
