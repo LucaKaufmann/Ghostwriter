@@ -76,6 +76,10 @@ public final class DigestSyncService {
                 if let ioState { tracker?.endInterval("EPUB Write [\(digest.id.prefix(8))]", state: ioState) }
 
                 logger.info("Downloaded: \(localURL.lastPathComponent) (\(SyncPerformanceTracker.formatBytes(epubData.count)))")
+                await CustomExportHelper.exportIfConfigured(
+                    fileURL: localURL,
+                    settingsRepository: settingsRepository
+                )
 
                 // Fetch articles for in-app display
                 var articlesData: [DigestArticleData]?
@@ -178,6 +182,10 @@ public final class DigestSyncService {
             let ioState = tracker?.beginInterval("EPUB Write [\(digest.id.prefix(8))]")
             let localURL = try saveEPUB(data: epubData, filename: digest.filename)
             if let ioState { tracker?.endInterval("EPUB Write [\(digest.id.prefix(8))]", state: ioState) }
+            await CustomExportHelper.exportIfConfigured(
+                fileURL: localURL,
+                settingsRepository: settingsRepository
+            )
 
             let generatedAt = digest.createdAt.toISO8601Date() ?? digest.completedAt?.toISO8601Date() ?? Date()
 

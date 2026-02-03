@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UIKit
 import SwiftData
 import Domain
 
@@ -53,6 +54,13 @@ struct HistoryView: View {
                                     Label("Share", systemImage: "square.and.arrow.up")
                                 }
                                 .tint(.gray)
+
+                                Button {
+                                    openInReader(digest)
+                                } label: {
+                                    Label("Open", systemImage: "book")
+                                }
+                                .tint(.blue)
                             }
                         }
                     }
@@ -103,6 +111,14 @@ struct HistoryView: View {
         // Delete from database
         modelContext.delete(digest)
         try? modelContext.save()
+    }
+
+    private func openInReader(_ digest: Digest) {
+        let fileURL = URL(fileURLWithPath: digest.epubFilePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return
+        }
+        UIApplication.shared.open(fileURL)
     }
 
 }
