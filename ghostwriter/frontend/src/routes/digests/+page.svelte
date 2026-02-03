@@ -139,6 +139,21 @@
 		const remainingSeconds = seconds % 60;
 		return `${minutes}m ${remainingSeconds}s`;
 	}
+
+	async function downloadDigest(filename: string) {
+		try {
+			const { blob, filename: resolved } = await api.downloadDigest(filename);
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = resolved;
+			anchor.click();
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Unknown error';
+			toast.error('Failed to download digest', { description: message });
+		}
+	}
 </script>
 
 <svelte:head>
@@ -296,7 +311,14 @@
 													{#if digest.filename}
 														<DropdownMenu.Item>
 															{#snippet child({ props })}
-																<a {...props} href={api.getDigestDownloadUrl(digest.filename)} download>
+																<a
+																	{...props}
+																	href="#"
+																	onclick={(event) => {
+																		event.preventDefault();
+																		downloadDigest(digest.filename);
+																	}}
+																>
 																	<Download class="mr-2 h-4 w-4" />
 																	Download EPUB
 																</a>
@@ -355,9 +377,13 @@
 								</span>
 								<div class="flex items-center gap-1">
 									{#if digest.status === 'completed' && digest.filename}
-										<Button variant="ghost" size="icon" href={api.getDigestDownloadUrl(digest.filename)}>
-										<Download class="h-4 w-4" />
-									</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											onclick={() => downloadDigest(digest.filename)}
+										>
+											<Download class="h-4 w-4" />
+										</Button>
 										<Button variant="ghost" size="icon" onclick={() => viewArticles(digest)}>
 											<Eye class="h-4 w-4" />
 										</Button>
@@ -384,7 +410,7 @@
 
 <!-- View Articles Dialog -->
 <Dialog.Root open={!!viewingDigest} onOpenChange={(open) => !open && (viewingDigest = null)}>
-	<Dialog.Content class="max-w-2xl max-h-[80vh] flex flex-col">
+	<Dialog.Content class="max-w-2xl max-h-[80vh] w-[calc(100vw-2rem)] sm:w-auto flex flex-col">
 		<Dialog.Header>
 			<Dialog.Title class="capitalize">
 				{viewingDigest?.period} Digest Articles
@@ -445,7 +471,7 @@
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (viewingDigest = null)}>Close</Button>
 			{#if viewingDigest?.filename}
-				<Button href={api.getDigestDownloadUrl(viewingDigest.filename)}>
+				<Button onclick={() => downloadDigest(viewingDigest.filename)}>
 					<Download class="mr-2 h-4 w-4" />
 					Download EPUB
 				</Button>

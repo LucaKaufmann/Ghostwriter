@@ -11,6 +11,7 @@ import trafilatura
 from trafilatura.settings import use_config
 
 from app.core.config import Settings, get_settings
+from app.core.net import validate_public_url
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class ContentProcessor:
             List of ParsedArticle objects.
         """
         try:
+            validate_public_url(feed_url, self.settings)
             loop = asyncio.get_event_loop()
             feed = await loop.run_in_executor(
                 self._executor,
@@ -108,6 +110,9 @@ class ContentProcessor:
             logger.info(f"Parsed {len(articles)} articles from {feed_url}")
             return articles
 
+        except ValueError as e:
+            logger.warning(f"Blocked feed URL (unsafe): {feed_url} - {e}")
+            return []
         except Exception as e:
             logger.error(f"Error parsing feed {feed_url}: {e}")
             return []
@@ -123,6 +128,7 @@ class ContentProcessor:
             Extracted text content or None if extraction failed.
         """
         try:
+            validate_public_url(url, self.settings)
             loop = asyncio.get_event_loop()
 
             # Fetch and extract in executor to avoid blocking
@@ -152,6 +158,9 @@ class ContentProcessor:
 
             return content
 
+        except ValueError as e:
+            logger.warning(f"Blocked URL fetch (unsafe): {url} - {e}")
+            return None
         except asyncio.TimeoutError:
             logger.error(f"Timeout extracting content from {url}")
             return None

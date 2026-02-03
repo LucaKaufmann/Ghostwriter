@@ -178,7 +178,7 @@
 	<title>Feeds - Ghostwriter</title>
 </svelte:head>
 
-<div class="space-y-6">
+<div class="space-y-6 min-w-0">
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 		<div>
 			<h1 class="text-2xl font-bold tracking-tight">Feeds</h1>
@@ -311,24 +311,24 @@
 				<!-- Mobile List -->
 				<div class="md:hidden divide-y">
 					{#each filteredFeeds as feed}
-						<div class="p-4 space-y-2">
+						<div class="p-4 space-y-2 overflow-hidden">
 							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0 flex-1">
+								<div class="min-w-0 flex-1 overflow-hidden">
 									<p class="font-medium truncate">{feed.title}</p>
 									<a
 										href={feed.url}
 										target="_blank"
 										rel="noopener noreferrer"
-										class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground truncate"
+										class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
 									>
-										{feed.url}
+										<span class="truncate">{feed.url}</span>
 										<ExternalLink class="h-3 w-3 flex-shrink-0" />
 									</a>
 								</div>
 								<DropdownMenu.Root>
 									<DropdownMenu.Trigger>
 										{#snippet child({ props })}
-											<Button {...props} variant="ghost" size="icon" class="flex-shrink-0">
+											<Button {...props} variant="ghost" size="icon" class="flex-shrink-0 -mr-2">
 												<MoreHorizontal class="h-4 w-4" />
 											</Button>
 										{/snippet}
@@ -349,7 +349,7 @@
 									</DropdownMenu.Content>
 								</DropdownMenu.Root>
 							</div>
-							<div class="flex items-center gap-2">
+							<div class="flex flex-wrap items-center gap-2">
 								<Badge variant={feed.mode === 'summarize' ? 'default' : 'secondary'} class="text-xs">
 									{feed.mode}
 								</Badge>

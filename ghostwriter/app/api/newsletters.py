@@ -34,6 +34,7 @@ class OAuthCallbackRequest(BaseModel):
 
     code: str
     redirect_uri: str
+    state: str
 
 
 # Simple HTML templates for OAuth flow
@@ -101,6 +102,7 @@ async def newsletter_status(
 async def oauth_start(
     request: Request,
     settings: Settings = Depends(get_settings),
+    _: None = Depends(verify_api_key),
 ) -> RedirectResponse:
     """
     Start OAuth flow - redirects to Google consent screen.
@@ -127,6 +129,7 @@ async def oauth_start(
 async def oauth_web_callback(
     code: str = Query(None),
     error: str = Query(None),
+    state: str = Query(None),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
     """
@@ -151,7 +154,7 @@ async def oauth_web_callback(
     service = NewsletterService(settings)
 
     try:
-        await service.exchange_code_with_callback(code)
+        await service.exchange_code_with_callback(code, state)
     except Exception as e:
         logger.error(f"OAuth token exchange failed: {e}")
         return HTMLResponse(
@@ -194,7 +197,7 @@ async def oauth_callback_post(
     """Exchange OAuth authorization code for tokens (for manual flow)."""
     service = NewsletterService(settings)
     try:
-        await service.exchange_code(body.code, body.redirect_uri)
+        await service.exchange_code_with_callback(body.code, body.state)
     except Exception as e:
         logger.error(f"OAuth token exchange (POST) failed: {e}")
         raise HTTPException(

@@ -431,6 +431,21 @@
 		if (diffDays < 7) return `${diffDays}d ago`;
 		return formatDate(dateStr);
 	}
+
+	async function downloadLog(filename: string) {
+		try {
+			const { blob, filename: resolved } = await api.downloadLog(filename);
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = resolved;
+			anchor.click();
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Unknown error';
+			toast.error('Failed to download log', { description: message });
+		}
+	}
 </script>
 
 <svelte:head>
@@ -504,7 +519,7 @@
 				{#each schedulesQuery.data as schedule}
 					{@const edit = scheduleEdits[schedule.period]}
 					<div class="flex flex-col gap-4 sm:flex-row sm:items-center rounded-lg border p-4">
-						<div class="flex items-center gap-4 flex-1 min-w-0">
+						<div class="flex flex-wrap items-center gap-3 flex-1 min-w-0">
 							<div class="w-20">
 								<Label class="text-base font-medium capitalize">{schedule.period}</Label>
 							</div>
@@ -614,7 +629,7 @@
 						<div class="flex items-center justify-between rounded-lg border p-4">
 							<div class="space-y-1">
 								<p class="font-medium">{token.name}</p>
-								<div class="flex items-center gap-3 text-sm text-muted-foreground">
+								<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
 									<code class="bg-muted px-1.5 py-0.5 rounded text-xs">{token.token_prefix}</code>
 									<span>Created {formatDate(token.created_at)}</span>
 									<span>• {formatLastUsed(token.last_used_at)}</span>
@@ -815,7 +830,7 @@
 								</div>
 							</div>
 
-							<div class="flex items-center gap-2 pt-2">
+							<div class="flex flex-wrap items-center gap-2 pt-2">
 								<Button
 									variant="outline"
 									size="sm"
@@ -874,7 +889,7 @@
 									<p class="mb-2 text-sm font-medium">{wallabagPreview.count} unread article{wallabagPreview.count === 1 ? '' : 's'}</p>
 									<ul class="space-y-1">
 										{#each wallabagPreview.articles as article}
-											<li class="text-sm">
+											<li class="text-sm break-words">
 												<a href={article.url} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">{article.title}</a>
 												<span class="text-muted-foreground">
 													{#if article.author} — {article.author}{/if}
@@ -894,7 +909,7 @@
 
 			<!-- Gmail Newsletters -->
 			<div class="rounded-lg border p-3">
-				<div class="flex items-center justify-between">
+				<div class="flex flex-wrap items-center justify-between gap-2">
 					<div>
 						<p class="font-medium">Gmail Newsletters</p>
 						<p class="text-sm text-muted-foreground">
@@ -903,7 +918,7 @@
 								: 'Newsletter email integration'}
 						</p>
 					</div>
-					<div class="flex items-center gap-2">
+					<div class="flex flex-wrap items-center gap-2">
 						<Switch
 							checked={clientConfigQuery.data?.newsletters?.enabled ?? false}
 							onCheckedChange={(checked) => {
@@ -1087,7 +1102,7 @@
 							<Button
 								variant="outline"
 								size="sm"
-								onclick={() => window.open(api.getLogDownloadUrl(logFile.filename), '_blank')}
+								onclick={() => downloadLog(logFile.filename)}
 							>
 								<Download class="mr-2 h-4 w-4" />
 								Download

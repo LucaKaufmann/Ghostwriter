@@ -37,7 +37,32 @@ class ProxyHeadersMiddleware(BaseHTTPMiddleware):
     correct scheme (https) when behind a reverse proxy like Cloudflare or nginx.
     """
 
+    def __init__(self, app, trusted_hosts: list[str] | None = None):
+        super().__init__(app)
+        self._trusted_hosts = [h for h in (trusted_hosts or []) if h]
+
+    def _is_trusted_proxy(self, client_host: str | None) -> bool:
+        if not self._trusted_hosts or not client_host:
+            return False
+        try:
+            import ipaddress
+
+            client_ip = ipaddress.ip_address(client_host)
+            for entry in self._trusted_hosts:
+                if "/" in entry:
+                    if client_ip in ipaddress.ip_network(entry, strict=False):
+                        return True
+                else:
+                    if client_host == entry:
+                        return True
+        except ValueError:
+            # Non-IP client host; allow exact string match
+            return client_host in self._trusted_hosts
+        return False
+
     async def dispatch(self, request: Request, call_next):
+        if not self._is_trusted_proxy(getattr(request.client, "host", None)):
+            return await call_next(request)
         # Check for X-Forwarded-Proto header
         forwarded_proto = request.headers.get("x-forwarded-proto")
         if forwarded_proto:
@@ -95,21 +120,25 @@ app = FastAPI(
     description="RSS digest generation service for Epilogue",
     version=__version__,
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.enable_api_docs else None,
+    redoc_url="/redoc" if settings.enable_api_docs else None,
+    openapi_url="/openapi.json" if settings.enable_api_docs else None,
 )
 
 # Proxy headers middleware (for correct URL generation behind reverse proxy)
-app.add_middleware(ProxyHeadersMiddleware)
+trusted_proxies = [h.strip() for h in settings.trusted_proxy_hosts.split(",") if h.strip()]
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_proxies)
 
-# CORS middleware (for development/debugging)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS middleware (optional; configure allowed origins via settings)
+cors_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=settings.cors_allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Include API routes
 app.include_router(api_router, prefix="/api")

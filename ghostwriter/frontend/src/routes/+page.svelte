@@ -136,6 +136,21 @@
 		return `in ${minutes}m`;
 	}
 
+	async function downloadDigest(filename: string) {
+		try {
+			const { blob, filename: resolved } = await api.downloadDigest(filename);
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = resolved;
+			anchor.click();
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Unknown error';
+			toast.error('Failed to download digest', { description: message });
+		}
+	}
+
 	function getStatusBadgeVariant(
 		status: string
 	): 'default' | 'secondary' | 'destructive' | 'outline' {
@@ -163,7 +178,7 @@
 	</div>
 
 	<!-- Status Cards -->
-	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+	<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 		<!-- Server Status -->
 		<Card.Root>
 			<Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -272,7 +287,7 @@
 					{/if}
 				</Button>
 				{#if latestDigest?.filename}
-					<Button variant="outline" href={api.getDigestDownloadUrl(latestDigest.filename)}>
+					<Button variant="outline" onclick={() => downloadDigest(latestDigest.filename)}>
 						<Download class="mr-2 h-4 w-4" />
 						Download Latest
 					</Button>
@@ -400,9 +415,13 @@
 									{digest.status}
 								</Badge>
 								{#if digest.filename && digest.status === 'completed'}
-									<Button variant="ghost" size="icon" href={api.getDigestDownloadUrl(digest.filename)}>
-									<Download class="h-4 w-4" />
-								</Button>
+									<Button
+										variant="ghost"
+										size="icon"
+										onclick={() => downloadDigest(digest.filename)}
+									>
+										<Download class="h-4 w-4" />
+									</Button>
 								{/if}
 							</div>
 						</div>

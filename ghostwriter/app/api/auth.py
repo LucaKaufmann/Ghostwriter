@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlmodel import Session, select
 
 from app.core.auth import (
@@ -18,6 +18,7 @@ from app.core.auth import (
     verify_password,
 )
 from app.core.database import get_session
+from app.core.rate_limit import check_auth_rate_limit
 from app.core.security import get_current_user
 from app.models.api_token import (
     APIToken,
@@ -68,6 +69,7 @@ async def get_auth_status(session: Session = Depends(get_session)) -> dict:
 @router.post("/register", response_model=LoginResponse)
 async def register(
     data: UserCreate,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> LoginResponse:
     """
@@ -129,6 +131,7 @@ async def register(
 @router.post("/login", response_model=LoginResponse)
 async def login(
     data: LoginRequest,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> LoginResponse:
     """
@@ -332,3 +335,5 @@ async def revoke_api_token(
     logger.info(f"API token revoked for user {current_user.username}: {token.token_prefix}")
 
     return {"status": "ok", "message": "Token revoked successfully."}
+    check_auth_rate_limit(request)
+    check_auth_rate_limit(request)
