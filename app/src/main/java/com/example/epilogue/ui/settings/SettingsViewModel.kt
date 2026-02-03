@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
@@ -473,7 +474,7 @@ class SettingsViewModel @Inject constructor(
 
     fun testGhostwriterConnection() {
         viewModelScope.launch {
-            _uiState.update { it.copy(ghostwriterTesting = true, ghostwriterTestResult = null) }
+            _uiState.update { it.copy(ghostwriterTesting = true, ghostwriterTestResult = null, ghostwriterHealth = null) }
 
             // Save URL and API key first if changed
             val url = _uiState.value.ghostwriterUrl.trim()
@@ -483,14 +484,38 @@ class SettingsViewModel @Inject constructor(
             val apiKey = _uiState.value.ghostwriterApiKey.trim()
             settingsRepository.setGhostwriterApiKey(apiKey.ifBlank { null })
 
-            val result = ghostwriterRepository.checkHealth()
+            val healthResult = ghostwriterRepository.checkHealth()
+            val apiKeyPresent = apiKey.isNotBlank()
 
-            val (testResult, connectionSuccessful) = when (result) {
+            val (testResult, connectionSuccessful) = when (healthResult) {
                 is GhostwriterResult.Success -> {
-                    Pair("Connected! Server v${result.data.version}, AI: ${result.data.aiProvider}", true)
+                    _uiState.update { it.copy(ghostwriterHealth = healthResult.data) }
+                    if (apiKeyPresent) {
+                        when (val authResult = ghostwriterRepository.getConfig()) {
+                            is GhostwriterResult.Success -> {
+                                Pair(
+                                    "Connected! Server v${healthResult.data.version}, " +
+                                        "AI: ${healthResult.data.aiProvider} (authenticated)",
+                                    true
+                                )
+                            }
+                            is GhostwriterResult.Error -> {
+                                Pair(formatAuthError(authResult), false)
+                            }
+                            is GhostwriterResult.NotConfigured -> {
+                                Pair("Please enter a server URL", false)
+                            }
+                        }
+                    } else {
+                        Pair(
+                            "Connected! Server v${healthResult.data.version}, " +
+                                "AI: ${healthResult.data.aiProvider} (no token)",
+                            true
+                        )
+                    }
                 }
                 is GhostwriterResult.Error -> {
-                    Pair("Error: ${result.message}", false)
+                    Pair(formatAuthError(healthResult), false)
                 }
                 is GhostwriterResult.NotConfigured -> {
                     Pair("Please enter a server URL", false)
@@ -515,6 +540,14 @@ class SettingsViewModel @Inject constructor(
                     performInitialGhostwriterSync()
                 }
             }
+        }
+    }
+
+    private fun formatAuthError(result: GhostwriterResult.Error): String {
+        return when (result.code) {
+            401 -> "Authentication failed. Check your API token."
+            429 -> "Too many attempts. Please try again in a minute."
+            else -> "Error: ${result.message}"
         }
     }
 
@@ -668,6 +701,7 @@ data class SettingsUiState(
     val ghostwriterError: String? = null,
     val ghostwriterSyncing: Boolean = false,
     val ghostwriterSyncResult: String? = null,
+    val ghostwriterHealth: HealthResponse? = null,
     // Integration status
     val wallabagIntegration: IntegrationStatus? = null,
     val newslettersIntegration: IntegrationStatus? = null

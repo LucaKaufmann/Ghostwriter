@@ -85,6 +85,28 @@ class Settings(BaseSettings):
     gmail_label: str = Field(default="Ghostwriter", description="Gmail label to fetch newsletters from")
     gmail_max_articles: int = Field(default=20, description="Max newsletter emails per digest")
 
+    # Network safety
+    allow_private_hosts: bool = Field(default=False, description="Allow private/localhost outbound URLs")
+
+    # CORS
+    cors_allow_origins: str = Field(
+        default="",
+        description="Comma-separated list of allowed CORS origins (empty disables CORS)",
+    )
+    cors_allow_credentials: bool = Field(default=False, description="Allow credentials for CORS requests")
+
+    # Docs and proxy trust
+    enable_api_docs: bool = Field(default=False, description="Enable OpenAPI docs endpoints")
+    trusted_proxy_hosts: str = Field(
+        default="",
+        description="Comma-separated list of trusted proxy IPs/CIDRs for forwarded headers",
+    )
+
+    # Rate limiting
+    auth_rate_limit_enabled: bool = Field(default=True, description="Enable auth rate limiting")
+    auth_rate_limit_max: int = Field(default=10, description="Max auth requests per window")
+    auth_rate_limit_window_seconds: int = Field(default=60, description="Auth rate limit window (seconds)")
+
     # Paths
     data_dir: str = Field(default="/app/data", description="Database directory")
     output_dir: str = Field(default="/app/output", description="EPUB output directory")

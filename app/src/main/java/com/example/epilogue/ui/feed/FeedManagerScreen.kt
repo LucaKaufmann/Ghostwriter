@@ -54,6 +54,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.ui.LocalEinkMode
+import com.example.epilogue.ui.components.SyncStatusIndicator
+import com.example.epilogue.service.DigestSyncWorker
+import com.example.epilogue.service.FeedSyncWorker
 
 private const val FEEDS_PER_PAGE = 5
 
@@ -75,6 +78,10 @@ fun FeedManagerScreen(
             TopAppBar(
                 title = { Text("Feed Manager") },
                 actions = {
+                    SyncStatusIndicator(
+                        tags = listOf(FeedSyncWorker.TAG, DigestSyncWorker.TAG),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                     IconButton(onClick = onNavigateToHistory) {
                         Icon(Icons.Default.History, contentDescription = "History")
                     }
@@ -302,7 +309,7 @@ fun FeedItem(
     }
 }
 
-private val maxArticleOptions = listOf(5, 10, 15, 20, 25, 30, 50, 0) // 0 = Unlimited
+private val maxArticleOptions = listOf(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 0) // 0 = Unlimited
 
 @Composable
 fun AddFeedDialog(

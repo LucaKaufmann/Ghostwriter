@@ -101,6 +101,13 @@ SCHEDULE_EVENING=18:00
 
 # Authentication (see below)
 JWT_SECRET=your-secret-key-for-jwt-tokens
+
+# Security / networking
+ALLOW_PRIVATE_HOSTS=false
+CORS_ALLOW_ORIGINS=https://ghostwriter.example.com
+ENABLE_API_DOCS=false
+TRUSTED_PROXY_HOSTS=203.0.113.10/32
+AUTH_RATE_LIMIT_ENABLED=true
 ```
 
 ## Authentication
@@ -147,6 +154,8 @@ A deprecation warning is logged when `API_KEY` is used.
 - JWT tokens expire after 7 days
 - API tokens never expire but can be revoked
 - If `JWT_SECRET` is not set, a random one is generated (tokens won't survive restarts)
+- Download endpoints require `Authorization: Bearer <token>` (no query-string tokens)
+- For public deployments, keep `ALLOW_PRIVATE_HOSTS=false` to avoid SSRF risks
 
 ## Web UI
 

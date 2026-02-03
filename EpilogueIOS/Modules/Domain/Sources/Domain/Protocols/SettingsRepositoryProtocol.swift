@@ -88,6 +88,20 @@ public protocol SettingsRepositoryProtocol: Sendable {
     /// Sets whether e-ink reader mode is enabled
     func setEinkModeEnabled(_ enabled: Bool) async throws
 
+    // MARK: - Export Settings
+
+    /// Gets whether custom export is enabled
+    func getCustomExportEnabled() async throws -> Bool
+
+    /// Sets whether custom export is enabled
+    func setCustomExportEnabled(_ enabled: Bool) async throws
+
+    /// Gets the stored security-scoped bookmark for export directory
+    func getCustomExportBookmark() async throws -> Data?
+
+    /// Sets the security-scoped bookmark for export directory
+    func setCustomExportBookmark(_ bookmark: Data?) async throws
+
     // MARK: - Ghostwriter Settings
 
     /// Gets whether Ghostwriter sync is enabled

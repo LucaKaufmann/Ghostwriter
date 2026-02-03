@@ -41,7 +41,7 @@
 	}
 </script>
 
-<div class="flex min-h-screen">
+<div class="flex min-h-screen w-full max-w-full overflow-x-hidden">
 	<!-- Desktop Sidebar -->
 	<aside class="hidden w-64 flex-shrink-0 border-r bg-card lg:block">
 		<div class="flex h-full flex-col">
@@ -84,7 +84,7 @@
 	</aside>
 
 	<!-- Mobile Header + Content -->
-	<div class="flex flex-1 flex-col">
+	<div class="flex flex-1 flex-col min-w-0">
 		<!-- Mobile Header -->
 		<header class="flex h-16 items-center justify-between border-b px-4 lg:hidden">
 			<div class="flex items-center gap-2">
@@ -114,7 +114,7 @@
 							<a
 								href={item.href}
 								onclick={closeMobileMenu}
-								class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors {isActive(
+								class="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors {isActive(
 									item.href
 								)
 									? 'bg-primary text-primary-foreground'
@@ -145,8 +145,8 @@
 		</header>
 
 		<!-- Main Content -->
-		<main class="flex-1 overflow-auto">
-			<div class="container mx-auto p-4 md:p-6 lg:p-8">
+		<main class="flex-1 min-w-0 overflow-y-auto">
+			<div class="max-w-7xl mx-auto p-4 md:p-6 lg:p-8">
 				{@render children()}
 			</div>
 		</main>

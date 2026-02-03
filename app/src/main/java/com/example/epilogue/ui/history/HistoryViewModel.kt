@@ -102,6 +102,38 @@ class HistoryViewModel @Inject constructor(
     }
 
     /**
+     * Share the digest EPUB via system share sheet.
+     */
+    fun shareDigest(digest: Digest) {
+        val file = File(digest.epubFilePath)
+        if (!file.exists()) {
+            _uiState.update { it.copy(error = "EPUB file not found") }
+            return
+        }
+
+        try {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/epub+zip"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            context.startActivity(Intent.createChooser(intent, "Share EPUB"))
+        } catch (e: ActivityNotFoundException) {
+            _uiState.update { it.copy(error = "No app found to share EPUB files") }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Failed to share file: ${e.message}") }
+        }
+    }
+
+    /**
      * Clear any error message.
      */
     fun clearError() {

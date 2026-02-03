@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -45,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.TriggerType
+import com.example.epilogue.service.DigestSyncWorker
+import com.example.epilogue.ui.components.SyncStatusIndicator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -102,6 +105,10 @@ fun HistoryScreen(
                     }
                 },
                 actions = {
+                    SyncStatusIndicator(
+                        tags = listOf(DigestSyncWorker.TAG),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                     IconButton(
                         onClick = { viewModel.refresh() },
                         enabled = !uiState.isRefreshing
@@ -158,7 +165,8 @@ fun HistoryScreen(
                             digest = digest,
                             onClick = { onDigestClick(digest.id) },
                             onDelete = { viewModel.showDeleteConfirmation(digest) },
-                            onOpenExternal = { viewModel.openInExternalReader(digest) }
+                            onOpenExternal = { viewModel.openInExternalReader(digest) },
+                            onShare = { viewModel.shareDigest(digest) }
                         )
                     }
                 }
@@ -202,6 +210,7 @@ fun DigestHistoryItem(
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onOpenExternal: () -> Unit,
+    onShare: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
@@ -283,6 +292,12 @@ fun DigestHistoryItem(
                     Icon(
                         imageVector = Icons.Default.OpenInNew,
                         contentDescription = "Open in reader"
+                    )
+                }
+                IconButton(onClick = onShare) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share"
                     )
                 }
                 IconButton(onClick = onDelete) {

@@ -94,6 +94,31 @@ class ApiClient {
 		return JSON.parse(text);
 	}
 
+	private async download(
+		endpoint: string,
+		filename: string
+	): Promise<{ blob: Blob; filename: string }> {
+		const token = this.getToken();
+		const headers: Record<string, string> = {};
+		if (token) {
+			headers['Authorization'] = `Bearer ${token}`;
+		}
+
+		const response = await fetch(`${BASE_URL}${endpoint}`, { headers });
+		if (!response.ok) {
+			let error: APIError;
+			try {
+				error = await response.json();
+			} catch {
+				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+			}
+			throw new ApiError(response.status, error);
+		}
+
+		const blob = await response.blob();
+		return { blob, filename };
+	}
+
 	// ============ Authentication ============
 
 	async getAuthStatus(): Promise<AuthStatus> {
@@ -280,10 +305,8 @@ class ApiClient {
 		});
 	}
 
-	getDigestDownloadUrl(filename: string): string {
-		const token = this.getToken();
-		// Construct the download URL with auth
-		return `${BASE_URL}/digests/${filename}${token ? `?api_key=${token}` : ''}`;
+	downloadDigest(filename: string): Promise<{ blob: Blob; filename: string }> {
+		return this.download(`/digests/${filename}`, filename);
 	}
 
 	// ============ Schedules ============
@@ -376,9 +399,8 @@ class ApiClient {
 		return this.request<LogFileInfo[]>('/logs');
 	}
 
-	getLogDownloadUrl(filename: string): string {
-		const token = this.getToken();
-		return `${BASE_URL}/logs/${filename}${token ? `?api_key=${token}` : ''}`;
+	downloadLog(filename: string): Promise<{ blob: Blob; filename: string }> {
+		return this.download(`/logs/${filename}`, filename);
 	}
 }
 
