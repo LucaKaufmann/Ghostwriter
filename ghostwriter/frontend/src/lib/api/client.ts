@@ -18,6 +18,8 @@ import type {
 	WallabagConfigResponse,
 	WallabagConfigUpdate,
 	WallabagTestResult,
+	SummarizeConfigResponse,
+	SummarizeConfigUpdate,
 	PreviewResponse,
 	APIError,
 	DigestPeriod,
@@ -218,6 +220,17 @@ class ApiClient {
 
 	async updateClientConfig(data: ClientConfigUpdate): Promise<ClientConfigResponse> {
 		return this.request<ClientConfigResponse>('/config', {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async getSummarizeConfig(): Promise<SummarizeConfigResponse> {
+		return this.request<SummarizeConfigResponse>('/config/summarize');
+	}
+
+	async updateSummarizeConfig(data: SummarizeConfigUpdate): Promise<SummarizeConfigResponse> {
+		return this.request<SummarizeConfigResponse>('/config/summarize', {
 			method: 'PUT',
 			body: JSON.stringify(data)
 		});
