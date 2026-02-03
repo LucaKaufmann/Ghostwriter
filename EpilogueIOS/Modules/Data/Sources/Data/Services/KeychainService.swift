@@ -9,8 +9,15 @@
 import Foundation
 import Security
 
+public protocol KeychainServiceProtocol: Sendable {
+    func save(_ value: String, forKey key: String) throws
+    func retrieve(forKey key: String) throws -> String?
+    func delete(forKey key: String) throws
+    func deleteAll() throws
+}
+
 /// Service for secure storage of sensitive data using the iOS Keychain
-public final class KeychainService: Sendable {
+public final class KeychainService: KeychainServiceProtocol, Sendable {
     private let serviceName: String
 
     public init(serviceName: String = "com.epilogue.app") {

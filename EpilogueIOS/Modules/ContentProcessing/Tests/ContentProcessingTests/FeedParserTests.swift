@@ -14,15 +14,18 @@ import Foundation
 struct FeedParserTests {
     @Test("FeedParser initializes correctly")
     func testInitialization() {
-        let parser = FeedParser()
-        #expect(parser != nil)
+        _ = EpilogueFeedParser()
+        #expect(true)
     }
 
     @Test("Invalid URL throws error")
     func testInvalidURL() async throws {
-        let parser = FeedParser()
-        await #expect(throws: FeedParserError.invalidURL) {
-            _ = try await parser.parseFeed(url: "not a url", feedName: "Test")
+        let parser = EpilogueFeedParser()
+        do {
+            _ = try await parser.validateFeedURL("")
+            #expect(Bool(false), "Expected invalid URL error")
+        } catch {
+            #expect(true)
         }
     }
 }

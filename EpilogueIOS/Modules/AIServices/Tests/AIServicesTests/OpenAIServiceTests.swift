@@ -22,8 +22,16 @@ struct OpenAIServiceTests {
     @Test("Missing API key throws error")
     func testMissingAPIKey() async throws {
         let service = OpenAIService(apiKey: "")
-        await #expect(throws: AIServiceError.missingAPIKey) {
+        do {
             _ = try await service.summarize(title: "Test", content: "Content", author: nil)
+            #expect(Bool(false), "Expected missing API key error")
+        } catch let error as AIServiceError {
+            switch error {
+            case .missingAPIKey:
+                #expect(true)
+            default:
+                #expect(Bool(false), "Unexpected error: \(error)")
+            }
         }
     }
 

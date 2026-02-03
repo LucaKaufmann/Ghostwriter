@@ -13,12 +13,6 @@ import Foundation
 
 @Suite("EPUBBuilder Tests")
 struct EPUBBuilderTests {
-    @Test("EPUBBuilder initializes correctly")
-    func testInitialization() {
-        let builder = EPUBBuilder()
-        #expect(builder != nil)
-    }
-
     @Test("Generate EPUB with sample articles")
     func testGenerateEPUB() throws {
         let builder = EPUBBuilder()

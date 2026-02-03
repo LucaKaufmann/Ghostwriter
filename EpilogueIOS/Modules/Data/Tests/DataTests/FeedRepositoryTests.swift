@@ -11,6 +11,7 @@ import SwiftData
 @testable import Data
 @testable import Domain
 
+@MainActor
 @Suite("FeedRepository Tests")
 struct FeedRepositoryTests {
     let container: ModelContainer

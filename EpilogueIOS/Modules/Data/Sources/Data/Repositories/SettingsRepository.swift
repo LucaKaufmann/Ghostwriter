@@ -12,7 +12,7 @@ import Domain
 /// Implementation of SettingsRepositoryProtocol using UserDefaults and Keychain
 public final class SettingsRepository: SettingsRepositoryProtocol {
     private let userDefaults: UserDefaults
-    private let keychainService: KeychainService
+    private let keychainService: KeychainServiceProtocol
 
     // Keychain keys
     private enum KeychainKeys {
@@ -60,7 +60,7 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     public init(
         userDefaults: UserDefaults = .standard,
-        keychainService: KeychainService = KeychainService()
+        keychainService: KeychainServiceProtocol = KeychainService()
     ) {
         self.userDefaults = userDefaults
         self.keychainService = keychainService

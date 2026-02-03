@@ -14,13 +14,13 @@ import Foundation
 @Suite("SettingsRepository Tests")
 struct SettingsRepositoryTests {
     let userDefaults: UserDefaults
-    let keychainService: KeychainService
+    let keychainService: KeychainServiceProtocol
     let repository: SettingsRepository
 
     init() {
         // Use a custom suite for testing to avoid affecting user defaults
         userDefaults = UserDefaults(suiteName: "com.epilogue.tests")!
-        keychainService = KeychainService(serviceName: "com.epilogue.tests")
+        keychainService = InMemoryKeychain()
         repository = SettingsRepository(
             userDefaults: userDefaults,
             keychainService: keychainService
@@ -57,7 +57,7 @@ struct SettingsRepositoryTests {
         let enabled = try await repository.isScheduleEnabled()
         #expect(enabled == true) // Default value
 
-        try await repository.setScheduleEnabled(false)
+        try await repository.setEnabledPeriods([])
         let updated = try await repository.isScheduleEnabled()
         #expect(updated == false)
     }
@@ -133,5 +133,81 @@ struct SettingsRepositoryTests {
 
         try await repository.deleteOpenAIKey()
         #expect(try await repository.getOpenAIKey() == nil)
+    }
+
+    @Test("Enabled periods default to morning")
+    func testEnabledPeriodsDefault() async throws {
+        let periods = try await repository.getEnabledPeriods()
+        #expect(periods.contains(.morning))
+        #expect(periods.count == 1)
+    }
+
+    @Test("Toggle period updates enabled set")
+    func testTogglePeriod() async throws {
+        try await repository.togglePeriod(.evening, enabled: true)
+        var periods = try await repository.getEnabledPeriods()
+        #expect(periods.contains(.morning))
+        #expect(periods.contains(.evening))
+
+        try await repository.togglePeriod(.morning, enabled: false)
+        periods = try await repository.getEnabledPeriods()
+        #expect(periods.contains(.morning) == false)
+        #expect(periods.contains(.evening))
+    }
+
+    @Test("Ghostwriter schedule round trip")
+    func testGhostwriterSchedule() async throws {
+        try await repository.setGhostwriterSchedule(
+            morningHour: 7,
+            morningMinute: 15,
+            noonHour: 12,
+            noonMinute: 30,
+            eveningHour: 18,
+            eveningMinute: 45,
+            timezone: "UTC"
+        )
+
+        let schedule = try await repository.getGhostwriterSchedule()
+        #expect(schedule?.morningHour == 7)
+        #expect(schedule?.morningMinute == 15)
+        #expect(schedule?.noonHour == 12)
+        #expect(schedule?.noonMinute == 30)
+        #expect(schedule?.eveningHour == 18)
+        #expect(schedule?.eveningMinute == 45)
+        #expect(schedule?.timezone == "UTC")
+    }
+
+    @Test("Ghostwriter configured requires enabled and URL")
+    func testGhostwriterConfigured() async throws {
+        #expect(try await repository.isGhostwriterConfigured() == false)
+
+        try await repository.setGhostwriterEnabled(true)
+        #expect(try await repository.isGhostwriterConfigured() == false)
+
+        try await repository.setGhostwriterURL("https://ghostwriter.example.com")
+        #expect(try await repository.isGhostwriterConfigured() == true)
+
+        try await repository.setGhostwriterURL("")
+        #expect(try await repository.isGhostwriterConfigured() == false)
+    }
+}
+
+private final class InMemoryKeychain: KeychainServiceProtocol, @unchecked Sendable {
+    private var storage: [String: String] = [:]
+
+    func save(_ value: String, forKey key: String) throws {
+        storage[key] = value
+    }
+
+    func retrieve(forKey key: String) throws -> String? {
+        storage[key]
+    }
+
+    func delete(forKey key: String) throws {
+        storage.removeValue(forKey: key)
+    }
+
+    func deleteAll() throws {
+        storage.removeAll()
     }
 }

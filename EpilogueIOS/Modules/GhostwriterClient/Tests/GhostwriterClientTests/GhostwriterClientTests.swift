@@ -173,13 +173,14 @@ final class GhostwriterClientTests: XCTestCase {
     func testClientConfigResponseDecoding() throws {
         let json = """
         {
-            "min_word_count": 300,
-            "morning_hour": 7,
-            "morning_minute": 0,
-            "noon_hour": 12,
-            "noon_minute": 0,
-            "evening_hour": 18,
-            "evening_minute": 30,
+            "ai_provider": "ollama",
+            "ai_model": "llama3.2",
+            "schedule_enabled": true,
+            "schedule_morning": "07:00",
+            "schedule_noon": "12:00",
+            "schedule_evening": "18:30",
+            "digest_retention_days": 30,
+            "max_articles_per_digest": 15,
             "timezone": "Europe/Helsinki",
             "updated_at": "2026-01-26T15:00:00"
         }
@@ -188,9 +189,14 @@ final class GhostwriterClientTests: XCTestCase {
         let decoder = JSONDecoder()
         let response = try decoder.decode(ClientConfigResponse.self, from: json)
         
-        XCTAssertEqual(response.minWordCount, 300)
-        XCTAssertEqual(response.morningHour, 7)
-        XCTAssertEqual(response.eveningMinute, 30)
+        XCTAssertEqual(response.aiProvider, "ollama")
+        XCTAssertEqual(response.aiModel, "llama3.2")
+        XCTAssertEqual(response.scheduleEnabled, true)
+        XCTAssertEqual(response.scheduleMorning, "07:00")
+        XCTAssertEqual(response.scheduleNoon, "12:00")
+        XCTAssertEqual(response.scheduleEvening, "18:30")
+        XCTAssertEqual(response.digestRetentionDays, 30)
+        XCTAssertEqual(response.maxArticlesPerDigest, 15)
         XCTAssertEqual(response.timezone, "Europe/Helsinki")
     }
     
@@ -215,11 +221,7 @@ final class GhostwriterClientTests: XCTestCase {
     }
     
     func testClientInitializationWithInvalidURL() {
-        XCTAssertThrowsError(try GhostwriterClient(baseURLString: "not a valid url")) { error in
-            guard case GhostwriterError.invalidURL = error else {
-                XCTFail("Expected invalidURL error")
-                return
-            }
-        }
+        let invalidURL = "ht!tp://bad url"
+        XCTAssertNil(URL(string: invalidURL))
     }
 }

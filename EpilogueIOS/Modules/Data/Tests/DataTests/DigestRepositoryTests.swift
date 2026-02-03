@@ -12,6 +12,7 @@ import Foundation
 @testable import Data
 @testable import Domain
 
+@MainActor
 @Suite("DigestRepository Tests")
 struct DigestRepositoryTests {
     let container: ModelContainer
