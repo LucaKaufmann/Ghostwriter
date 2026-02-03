@@ -21,9 +21,16 @@ enum CustomExportHelper {
             guard let bookmark = try await settingsRepository.getCustomExportBookmark() else { return }
 
             var isStale = false
+            let resolveOptions: URL.BookmarkResolutionOptions = {
+#if os(macOS)
+                return [.withSecurityScope]
+#else
+                return []
+#endif
+            }()
             let directoryURL = try URL(
                 resolvingBookmarkData: bookmark,
-                options: [.withSecurityScope],
+                options: resolveOptions,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             )
@@ -36,7 +43,14 @@ enum CustomExportHelper {
             }
 
             if isStale {
-                let refreshed = try directoryURL.bookmarkData(options: [.withSecurityScope])
+                let creationOptions: URL.BookmarkCreationOptions = {
+#if os(macOS)
+                    return [.withSecurityScope]
+#else
+                    return []
+#endif
+                }()
+                let refreshed = try directoryURL.bookmarkData(options: creationOptions)
                 try await settingsRepository.setCustomExportBookmark(refreshed)
             }
 

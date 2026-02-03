@@ -386,7 +386,14 @@ struct SettingsView: View {
 
     private func setExportFolder(_ url: URL) async {
         do {
-            let bookmark = try url.bookmarkData(options: [.withSecurityScope])
+            let creationOptions: URL.BookmarkCreationOptions = {
+#if os(macOS)
+                return [.withSecurityScope]
+#else
+                return []
+#endif
+            }()
+            let bookmark = try url.bookmarkData(options: creationOptions)
             try await settingsRepository.setCustomExportBookmark(bookmark)
             try await settingsRepository.setCustomExportEnabled(true)
             exportFolderURL = url
@@ -420,14 +427,28 @@ struct SettingsView: View {
 
     private func resolveExportBookmark(_ bookmark: Data) throws -> URL {
         var isStale = false
+        let resolveOptions: URL.BookmarkResolutionOptions = {
+#if os(macOS)
+            return [.withSecurityScope]
+#else
+            return []
+#endif
+        }()
         let url = try URL(
             resolvingBookmarkData: bookmark,
-            options: [.withSecurityScope],
+            options: resolveOptions,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         )
         if isStale {
-            let refreshed = try url.bookmarkData(options: [.withSecurityScope])
+            let creationOptions: URL.BookmarkCreationOptions = {
+#if os(macOS)
+                return [.withSecurityScope]
+#else
+                return []
+#endif
+            }()
+            let refreshed = try url.bookmarkData(options: creationOptions)
             Task { try? await settingsRepository.setCustomExportBookmark(refreshed) }
         }
         return url
