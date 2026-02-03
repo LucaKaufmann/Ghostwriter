@@ -293,6 +293,17 @@ export interface WallabagTestResult {
 	detail?: string;
 }
 
+// ============ Summarize.sh ============
+
+export interface SummarizeConfigResponse {
+	config_json: string;
+	source: 'user' | 'default';
+}
+
+export interface SummarizeConfigUpdate {
+	config_json: string;
+}
+
 // ============ Integration Previews ============
 
 export interface PreviewArticle {

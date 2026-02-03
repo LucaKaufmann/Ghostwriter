@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     ai_timeout_seconds: int = Field(default=60, description="Per-article AI timeout")
     ai_max_retries: int = Field(default=2, description="Retries before fallback")
 
+    # Summarize.sh
+    summarize_sh_enabled: bool = Field(
+        default=False, description="Use Summarize.sh for summarize-mode feeds"
+    )
+    summarize_sh_config_path: str = Field(
+        default="~/.summarize/config.json",
+        description="Path to Summarize.sh config.json",
+    )
+    summarize_sh_timeout_seconds: int = Field(
+        default=90, description="Summarize.sh timeout per article"
+    )
+
     # Scheduling
     schedule_morning: str = Field(default="07:00", description="Morning schedule (24h)")
     schedule_noon: str = Field(default="12:00", description="Noon schedule (24h)")

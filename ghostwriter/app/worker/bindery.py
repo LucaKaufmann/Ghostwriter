@@ -19,6 +19,7 @@ from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
 from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
+from app.services.summarize_sh_service import SummarizeShService
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
 
@@ -73,6 +74,7 @@ class BinderyPipeline:
         self.settings = get_settings()
         self.content_processor = ContentProcessor(self.settings)
         self.llm_service = LLMService(self.settings)
+        self.summarize_sh_service = SummarizeShService(self.settings)
         self.epub_generator = EpubGenerator(self.settings)
         self.start_time: float | None = None
 
@@ -286,36 +288,74 @@ class BinderyPipeline:
                 async with extract_sem:
                     article_start = time.time()
 
-                    content = await self.content_processor.extract_content(parsed_article.url)
-                    if not content:
-                        logger.warning(f"Could not extract: {parsed_article.url}")
-                        digest_logger.article_extraction_failed(parsed_article.url, "Content extraction returned empty")
-                        return
-
-                    original_word_count = ContentProcessor.count_words(content)
-                    word_count = original_word_count
-
-                    # Enrich with AI if enabled
+                    content = None
+                    original_word_count = 0
+                    word_count = 0
                     is_summary = False
                     ai_failed = False
 
-                    if feed.mode == "summarize":
-                        summary_content, ai_failed = await self.llm_service.summarize(content)
-                        if not ai_failed:
-                            content = summary_content
+                    if feed.mode == "summarize" and self.settings.summarize_sh_enabled:
+                        summarize_result = await self.summarize_sh_service.summarize_url(
+                            parsed_article.url
+                        )
+                        if not summarize_result.ai_failed and summarize_result.summary:
+                            content = summarize_result.summary
                             is_summary = True
                             word_count = ContentProcessor.count_words(content)
+                            original_word_count = (
+                                summarize_result.original_word_count or word_count
+                            )
                             digest_logger.article_summarized(
                                 parsed_article.title,
                                 original_words=original_word_count,
                                 summary_words=word_count,
                             )
                         else:
+                            ai_failed = True
                             digest_logger.article_summarization_failed(
                                 parsed_article.title,
-                                "AI service returned error",
+                                "Summarize.sh returned error",
                                 fallback=True,
                             )
+
+                    if content is None:
+                        content = await self.content_processor.extract_content(
+                            parsed_article.url
+                        )
+                        if not content:
+                            logger.warning(f"Could not extract: {parsed_article.url}")
+                            digest_logger.article_extraction_failed(
+                                parsed_article.url,
+                                "Content extraction returned empty",
+                            )
+                            return
+
+                        original_word_count = ContentProcessor.count_words(content)
+                        word_count = original_word_count
+
+                        # Enrich with AI if enabled (fallback path)
+                        if (
+                            feed.mode == "summarize"
+                            and not self.settings.summarize_sh_enabled
+                        ):
+                            summary_content, ai_failed = await self.llm_service.summarize(
+                                content
+                            )
+                            if not ai_failed:
+                                content = summary_content
+                                is_summary = True
+                                word_count = ContentProcessor.count_words(content)
+                                digest_logger.article_summarized(
+                                    parsed_article.title,
+                                    original_words=original_word_count,
+                                    summary_words=word_count,
+                                )
+                            else:
+                                digest_logger.article_summarization_failed(
+                                    parsed_article.title,
+                                    "AI service returned error",
+                                    fallback=True,
+                                )
 
                     processing_ms = int((time.time() - article_start) * 1000)
 
