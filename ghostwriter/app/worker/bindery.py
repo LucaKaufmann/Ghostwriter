@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging import digest_logger
 from app.models.digest import Digest, DigestArticle
+from app.models.client_config import ClientConfig
 from app.models.feed import Feed
 from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
@@ -110,10 +111,14 @@ class BinderyPipeline:
         # Pre-create synthetic feeds so feed_id is always available
         self._ensure_synthetic_feeds()
 
-        # Get digest info for logging
+        # Get digest info for logging and current client config
+        summarize_sh_enabled = False
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
             period = digest.period if digest else "manual"
+            client_config = session.exec(select(ClientConfig)).first()
+            if client_config:
+                summarize_sh_enabled = client_config.summarize_sh_enabled
 
         try:
             await self._update_stage("fetching")
@@ -294,7 +299,7 @@ class BinderyPipeline:
                     is_summary = False
                     ai_failed = False
 
-                    if feed.mode == "summarize" and self.settings.summarize_sh_enabled:
+                    if feed.mode == "summarize" and summarize_sh_enabled:
                         summarize_result = await self.summarize_sh_service.summarize_url(
                             parsed_article.url
                         )
@@ -336,7 +341,7 @@ class BinderyPipeline:
                         # Enrich with AI if enabled (fallback path)
                         if (
                             feed.mode == "summarize"
-                            and not self.settings.summarize_sh_enabled
+                            and not summarize_sh_enabled
                         ):
                             summary_content, ai_failed = await self.llm_service.summarize(
                                 content

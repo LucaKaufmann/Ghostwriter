@@ -45,6 +45,7 @@ class ConfigResponse(BaseModel):
     evening_minute: int
     timezone: str
     updated_at: datetime
+    summarize_sh_enabled: bool
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -62,6 +63,9 @@ class ConfigUpdateRequest(BaseModel):
     evening_minute: int | None = Field(default=None, ge=0, le=59, description="Evening minute")
     timezone: str | None = Field(default=None, description="IANA timezone")
     newsletters_enabled: bool | None = Field(default=None, description="Enable newsletter integration")
+    summarize_sh_enabled: bool | None = Field(
+        default=None, description="Enable Summarize.sh for summarize-mode feeds"
+    )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
 
@@ -118,6 +122,7 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         evening_minute=config.evening_minute,
         timezone=config.timezone,
         updated_at=config.updated_at,
+        summarize_sh_enabled=config.summarize_sh_enabled,
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -181,6 +186,9 @@ async def update_config(
 
     if request.newsletters_enabled is not None:
         config.newsletters_enabled = request.newsletters_enabled
+
+    if request.summarize_sh_enabled is not None:
+        config.summarize_sh_enabled = request.summarize_sh_enabled
 
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour

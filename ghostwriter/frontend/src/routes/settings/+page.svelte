@@ -239,6 +239,7 @@
 	let summarizeConfigInitialized = $state(false);
 	let summarizeConfigError = $state<string | null>(null);
 	let summarizeConfigSource = $state<'user' | 'default' | null>(null);
+	let summarizeEnabled = $state(false);
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -267,6 +268,13 @@
 		}
 	});
 
+	$effect(() => {
+		const data = clientConfigQuery.data;
+		if (data) {
+			summarizeEnabled = data.summarize_sh_enabled;
+		}
+	});
+
 	function validateSummarizeConfig(): boolean {
 		try {
 			JSON.parse(summarizeConfig);
@@ -285,6 +293,14 @@
 			return;
 		}
 		updateSummarizeConfigMutation.mutate({ config_json: summarizeConfig });
+	}
+
+	function saveSummarizeEnabled() {
+		const updatedAt = clientConfigQuery.data?.updated_at;
+		updateClientConfigMutation.mutate({
+			summarize_sh_enabled: summarizeEnabled,
+			client_updated_at: updatedAt
+		});
 	}
 
 	function saveWallabag() {
@@ -561,12 +577,36 @@
 					<Skeleton class="h-32 w-full" />
 				</div>
 			{:else if summarizeConfigQuery.data}
+				<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+					<div class="space-y-1">
+						<p class="font-medium">Enable Summarize.sh</p>
+						<p class="text-sm text-muted-foreground">
+							When enabled, summarize-mode feeds use Summarize.sh instead of the LLM pipeline.
+						</p>
+					</div>
+					<div class="flex items-center gap-3">
+						<Switch
+							checked={summarizeEnabled}
+							onCheckedChange={(checked) => (summarizeEnabled = checked)}
+						/>
+						<Button
+							size="sm"
+							onclick={saveSummarizeEnabled}
+							disabled={updateClientConfigMutation.isPending}
+						>
+							{#if updateClientConfigMutation.isPending}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							{:else}
+								<Save class="mr-2 h-4 w-4" />
+							{/if}
+							Save
+						</Button>
+					</div>
+				</div>
+
 				<div class="flex items-center justify-between gap-4 text-sm text-muted-foreground">
 					<span>
 						Source: <span class="font-medium">{summarizeConfigSource ?? 'default'}</span>
-					</span>
-					<span>
-						Requires `SUMMARIZE_SH_ENABLED=true` on the server
 					</span>
 				</div>
 

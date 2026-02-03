@@ -46,9 +46,6 @@ class Settings(BaseSettings):
     ai_max_retries: int = Field(default=2, description="Retries before fallback")
 
     # Summarize.sh
-    summarize_sh_enabled: bool = Field(
-        default=False, description="Use Summarize.sh for summarize-mode feeds"
-    )
     summarize_sh_config_path: str = Field(
         default="~/.summarize/config.json",
         description="Path to Summarize.sh config.json",
