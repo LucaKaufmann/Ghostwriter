@@ -119,6 +119,10 @@ class BinderyPipeline:
             client_config = session.exec(select(ClientConfig)).first()
             if client_config:
                 summarize_sh_enabled = client_config.summarize_sh_enabled
+        logger.info(
+            "Summarize.sh enabled for digest",
+            extra={"digest_id": str(self.digest_id), "enabled": summarize_sh_enabled},
+        )
 
         try:
             await self._update_stage("fetching")
@@ -300,6 +304,10 @@ class BinderyPipeline:
                     ai_failed = False
 
                     if feed.mode == "summarize" and summarize_sh_enabled:
+                        logger.info(
+                            "Summarize.sh path selected",
+                            extra={"url": parsed_article.url, "title": parsed_article.title},
+                        )
                         summarize_result = await self.summarize_sh_service.summarize_url(
                             parsed_article.url
                         )
@@ -339,10 +347,11 @@ class BinderyPipeline:
                         word_count = original_word_count
 
                         # Enrich with AI if enabled (fallback path)
-                        if (
-                            feed.mode == "summarize"
-                            and not summarize_sh_enabled
-                        ):
+                        if feed.mode == "summarize" and not summarize_sh_enabled:
+                            logger.info(
+                                "LLM summarization path selected",
+                                extra={"url": parsed_article.url, "title": parsed_article.title},
+                            )
                             summary_content, ai_failed = await self.llm_service.summarize(
                                 content
                             )
@@ -739,6 +748,16 @@ async def generate_digest(
 
         if running:
             logger.warning(f"Job already running: {running.id}")
+            logger.warning(
+                "Digest start blocked due to existing lock",
+                extra={
+                    "period": period,
+                    "running_id": str(running.id),
+                    "locked_at": running.locked_at.isoformat()
+                    if running.locked_at
+                    else None,
+                },
+            )
             return None
 
         # Release any stale locks
@@ -747,6 +766,15 @@ async def generate_digest(
             Digest.locked_at <= stale_cutoff,
         )
         for stale in session.exec(stale_statement).all():
+            logger.warning(
+                "Releasing stale digest lock",
+                extra={
+                    "digest_id": str(stale.id),
+                    "locked_at": stale.locked_at.isoformat()
+                    if stale.locked_at
+                    else None,
+                },
+            )
             stale.status = "failed"
             stale.error_message = "Stale lock released"
             stale.locked_at = None
@@ -767,9 +795,18 @@ async def generate_digest(
         session.refresh(digest)
         digest_id = digest.id
 
-    # Run pipeline in background
-    pipeline = BinderyPipeline(digest_id)
-    asyncio.create_task(pipeline.run())
+    logger.info(
+        "Digest created",
+        extra={"digest_id": str(digest_id), "period": period},
+    )
+
+        # Run pipeline in background
+        pipeline = BinderyPipeline(digest_id)
+    task = asyncio.create_task(pipeline.run())
+    logger.info(
+        "Digest pipeline task scheduled",
+        extra={"digest_id": str(digest_id), "task_name": task.get_name()},
+    )
 
     logger.info(f"Started digest generation: {digest_id}")
     return digest_id

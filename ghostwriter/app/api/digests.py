@@ -15,6 +15,9 @@ from app.core.database import get_session
 from app.core.security import verify_api_key
 from app.models.digest import Digest, DigestArticle, DigestRead, DigestStatus
 from app.worker.bindery import generate_digest
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -93,14 +96,20 @@ async def trigger_digest(
 
     Returns 409 Conflict if a job is already running.
     """
+    logger.info("Manual digest trigger requested", extra={"period": request.period})
     digest_id = await generate_digest(request.period)
 
     if digest_id is None:
+        logger.warning("Manual digest trigger blocked (job already running)")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A digest job is already running. Please wait for it to complete.",
         )
 
+    logger.info(
+        "Manual digest trigger started",
+        extra={"period": request.period, "digest_id": str(digest_id)},
+    )
     return TriggerResponse(
         id=digest_id,
         status="started",
