@@ -296,10 +296,8 @@
 	}
 
 	function saveSummarizeEnabled() {
-		const updatedAt = clientConfigQuery.data?.updated_at;
 		updateClientConfigMutation.mutate({
-			summarize_sh_enabled: summarizeEnabled,
-			client_updated_at: updatedAt
+			summarize_sh_enabled: summarizeEnabled
 		});
 	}
 
@@ -555,90 +553,6 @@
 						<p class="font-medium">{configQuery.data.ai_model}</p>
 					</div>
 				</div>
-			{/if}
-		</Card.Content>
-	</Card.Root>
-
-	<!-- Summarize.sh Configuration -->
-	<Card.Root>
-		<Card.Header>
-			<Card.Title class="flex items-center gap-2">
-				<FileText class="h-5 w-5" />
-				Summarize.sh Configuration
-			</Card.Title>
-			<Card.Description>
-				Edit the Summarize.sh `config.json` used for summarize-mode feeds
-			</Card.Description>
-		</Card.Header>
-		<Card.Content class="space-y-4">
-			{#if summarizeConfigQuery.isPending}
-				<div class="space-y-3">
-					<Skeleton class="h-4 w-48" />
-					<Skeleton class="h-32 w-full" />
-				</div>
-			{:else if summarizeConfigQuery.data}
-				<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
-					<div class="space-y-1">
-						<p class="font-medium">Enable Summarize.sh</p>
-						<p class="text-sm text-muted-foreground">
-							When enabled, summarize-mode feeds use Summarize.sh instead of the LLM pipeline.
-						</p>
-					</div>
-					<div class="flex items-center gap-3">
-						<Switch
-							checked={summarizeEnabled}
-							onCheckedChange={(checked) => (summarizeEnabled = checked)}
-						/>
-						<Button
-							size="sm"
-							onclick={saveSummarizeEnabled}
-							disabled={updateClientConfigMutation.isPending}
-						>
-							{#if updateClientConfigMutation.isPending}
-								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-							{:else}
-								<Save class="mr-2 h-4 w-4" />
-							{/if}
-							Save
-						</Button>
-					</div>
-				</div>
-
-				<div class="flex items-center justify-between gap-4 text-sm text-muted-foreground">
-					<span>
-						Source: <span class="font-medium">{summarizeConfigSource ?? 'default'}</span>
-					</span>
-				</div>
-
-				<div class="space-y-2">
-					<Label for="summarize-config">config.json</Label>
-					<textarea
-						id="summarize-config"
-						class="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-						bind:value={summarizeConfig}
-						onblur={validateSummarizeConfig}
-						spellcheck={false}
-					/>
-					{#if summarizeConfigError}
-						<p class="text-sm text-destructive">{summarizeConfigError}</p>
-					{/if}
-				</div>
-
-				<div class="flex items-center justify-end gap-2">
-					<Button
-						onclick={saveSummarizeConfig}
-						disabled={updateSummarizeConfigMutation.isPending}
-					>
-						{#if updateSummarizeConfigMutation.isPending}
-							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						{:else}
-							<Save class="mr-2 h-4 w-4" />
-						{/if}
-						Save
-					</Button>
-				</div>
-			{:else}
-				<p class="text-sm text-muted-foreground">Unable to load Summarize.sh config.</p>
 			{/if}
 		</Card.Content>
 	</Card.Root>
@@ -1133,6 +1047,90 @@
 					<p class="mt-3 text-sm text-muted-foreground">No newsletters found.</p>
 				{/if}
 			</div>
+		</Card.Content>
+	</Card.Root>
+
+	<!-- Summarize.sh Configuration -->
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="flex items-center gap-2">
+				<FileText class="h-5 w-5" />
+				Summarize.sh Configuration
+			</Card.Title>
+			<Card.Description>
+				Edit the Summarize.sh `config.json` used for summarize-mode feeds
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="space-y-4">
+			{#if summarizeConfigQuery.isPending}
+				<div class="space-y-3">
+					<Skeleton class="h-4 w-48" />
+					<Skeleton class="h-32 w-full" />
+				</div>
+			{:else if summarizeConfigQuery.data}
+				<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+					<div class="space-y-1">
+						<p class="font-medium">Enable Summarize.sh</p>
+						<p class="text-sm text-muted-foreground">
+							When enabled, summarize-mode feeds use Summarize.sh instead of the LLM pipeline.
+						</p>
+					</div>
+					<div class="flex items-center gap-3">
+						<Switch
+							checked={summarizeEnabled}
+							onCheckedChange={(checked) => (summarizeEnabled = checked)}
+						/>
+						<Button
+							size="sm"
+							onclick={saveSummarizeEnabled}
+							disabled={updateClientConfigMutation.isPending}
+						>
+							{#if updateClientConfigMutation.isPending}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							{:else}
+								<Save class="mr-2 h-4 w-4" />
+							{/if}
+							Save
+						</Button>
+					</div>
+				</div>
+
+				<div class="flex items-center justify-between gap-4 text-sm text-muted-foreground">
+					<span>
+						Source: <span class="font-medium">{summarizeConfigSource ?? 'default'}</span>
+					</span>
+				</div>
+
+				<div class="space-y-2">
+					<Label for="summarize-config">config.json</Label>
+					<textarea
+						id="summarize-config"
+						class="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+						bind:value={summarizeConfig}
+						onblur={validateSummarizeConfig}
+						spellcheck={false}
+					/>
+					{#if summarizeConfigError}
+						<p class="text-sm text-destructive">{summarizeConfigError}</p>
+					{/if}
+				</div>
+
+				<div class="flex items-center justify-end gap-2">
+					<Button
+						onclick={saveSummarizeConfig}
+						disabled={updateSummarizeConfigMutation.isPending}
+					>
+						{#if updateSummarizeConfigMutation.isPending}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+						{:else}
+							<Save class="mr-2 h-4 w-4" />
+						{/if}
+						Save
+					</Button>
+				</div>
+			{:else}
+				<p class="text-sm text-muted-foreground">Unable to load Summarize.sh config.</p>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 </div>
