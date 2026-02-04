@@ -800,8 +800,8 @@ async def generate_digest(
         extra={"digest_id": str(digest_id), "period": period},
     )
 
-        # Run pipeline in background
-        pipeline = BinderyPipeline(digest_id)
+    # Run pipeline in background
+    pipeline = BinderyPipeline(digest_id)
     task = asyncio.create_task(pipeline.run())
     logger.info(
         "Digest pipeline task scheduled",
