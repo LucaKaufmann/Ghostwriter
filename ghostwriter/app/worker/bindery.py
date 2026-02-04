@@ -113,12 +113,14 @@ class BinderyPipeline:
 
         # Get digest info for logging and current client config
         summarize_sh_enabled = False
+        summarize_sh_on_fail = "raw"
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
             period = digest.period if digest else "manual"
             client_config = session.exec(select(ClientConfig)).first()
             if client_config:
                 summarize_sh_enabled = client_config.summarize_sh_enabled
+                summarize_sh_on_fail = client_config.summarize_sh_on_fail or "raw"
         logger.info(
             "Summarize.sh enabled for digest",
             extra={"digest_id": str(self.digest_id), "enabled": summarize_sh_enabled},
@@ -332,6 +334,14 @@ class BinderyPipeline:
                                 fallback=True,
                             )
 
+                    if content is None and summarize_sh_enabled and feed.mode == "summarize":
+                        if summarize_sh_on_fail == "skip":
+                            logger.warning(
+                                "Skipping article after Summarize.sh failure",
+                                extra={"url": parsed_article.url, "title": parsed_article.title},
+                            )
+                            return
+
                     if content is None:
                         content = await self.content_processor.extract_content(
                             parsed_article.url
@@ -371,6 +381,30 @@ class BinderyPipeline:
                                     "AI service returned error",
                                     fallback=True,
                                 )
+                        elif feed.mode == "summarize" and summarize_sh_enabled:
+                            if summarize_sh_on_fail == "fallback_ai":
+                                logger.info(
+                                    "Summarize.sh failed; falling back to LLM",
+                                    extra={"url": parsed_article.url, "title": parsed_article.title},
+                                )
+                                summary_content, ai_failed = await self.llm_service.summarize(
+                                    content
+                                )
+                                if not ai_failed:
+                                    content = summary_content
+                                    is_summary = True
+                                    word_count = ContentProcessor.count_words(content)
+                                    digest_logger.article_summarized(
+                                        parsed_article.title,
+                                        original_words=original_word_count,
+                                        summary_words=word_count,
+                                    )
+                                else:
+                                    digest_logger.article_summarization_failed(
+                                        parsed_article.title,
+                                        "AI service returned error",
+                                        fallback=True,
+                                    )
 
                     processing_ms = int((time.time() - article_start) * 1000)
 

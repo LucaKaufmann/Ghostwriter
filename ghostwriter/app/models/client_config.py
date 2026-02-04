@@ -26,6 +26,10 @@ class ClientConfigBase(SQLModel):
     summarize_sh_enabled: bool = Field(
         default=False, description="Enable Summarize.sh for summarize-mode feeds"
     )
+    summarize_sh_on_fail: str = Field(
+        default="raw",
+        description="Summarize.sh failure behavior: fallback_ai, raw, skip",
+    )
 
 
 class ClientConfig(ClientConfigBase, table=True):
@@ -58,6 +62,9 @@ class ClientConfigUpdate(SQLModel):
     summarize_sh_enabled: bool | None = Field(
         default=None, description="Enable Summarize.sh for summarize-mode feeds"
     )
+    summarize_sh_on_fail: str | None = Field(
+        default=None, description="Summarize.sh failure behavior: fallback_ai, raw, skip"
+    )
 
 
 class ClientConfigRead(SQLModel):
@@ -73,4 +80,5 @@ class ClientConfigRead(SQLModel):
     timezone: str
     newsletters_enabled: bool
     summarize_sh_enabled: bool
+    summarize_sh_on_fail: str
     updated_at: datetime

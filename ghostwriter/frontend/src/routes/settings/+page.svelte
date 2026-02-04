@@ -240,6 +240,7 @@
 	let summarizeConfigError = $state<string | null>(null);
 	let summarizeConfigSource = $state<'user' | 'default' | null>(null);
 	let summarizeEnabled = $state(false);
+	let summarizeOnFail = $state<'fallback_ai' | 'raw' | 'skip'>('raw');
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -272,6 +273,7 @@
 		const data = clientConfigQuery.data;
 		if (data) {
 			summarizeEnabled = data.summarize_sh_enabled;
+			summarizeOnFail = (data.summarize_sh_on_fail as 'fallback_ai' | 'raw' | 'skip') ?? 'raw';
 		}
 	});
 
@@ -297,7 +299,8 @@
 
 	function saveSummarizeEnabled() {
 		updateClientConfigMutation.mutate({
-			summarize_sh_enabled: summarizeEnabled
+			summarize_sh_enabled: summarizeEnabled,
+			summarize_sh_on_fail: summarizeOnFail
 		});
 	}
 
@@ -1093,6 +1096,23 @@
 							Save
 						</Button>
 					</div>
+				</div>
+
+				<div class="flex flex-col gap-2 rounded-lg border p-4">
+					<div class="space-y-1">
+						<p class="font-medium">On Summarize.sh Failure</p>
+						<p class="text-sm text-muted-foreground">
+							Choose what happens when Summarize.sh cannot summarize an article.
+						</p>
+					</div>
+					<select
+						class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+						bind:value={summarizeOnFail}
+					>
+						<option value="fallback_ai">Fall back to Ghostwriter AI</option>
+						<option value="raw">Include raw article text</option>
+						<option value="skip">Do nothing (skip article)</option>
+					</select>
 				</div>
 
 				<div class="flex items-center justify-between gap-4 text-sm text-muted-foreground">

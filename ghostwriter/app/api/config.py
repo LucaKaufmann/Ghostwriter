@@ -46,6 +46,7 @@ class ConfigResponse(BaseModel):
     timezone: str
     updated_at: datetime
     summarize_sh_enabled: bool
+    summarize_sh_on_fail: str
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -65,6 +66,10 @@ class ConfigUpdateRequest(BaseModel):
     newsletters_enabled: bool | None = Field(default=None, description="Enable newsletter integration")
     summarize_sh_enabled: bool | None = Field(
         default=None, description="Enable Summarize.sh for summarize-mode feeds"
+    )
+    summarize_sh_on_fail: str | None = Field(
+        default=None,
+        description="Summarize.sh failure behavior: fallback_ai, raw, skip",
     )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
@@ -123,6 +128,7 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         timezone=config.timezone,
         updated_at=config.updated_at,
         summarize_sh_enabled=config.summarize_sh_enabled,
+        summarize_sh_on_fail=config.summarize_sh_on_fail,
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -193,6 +199,9 @@ async def update_config(
             "Summarize.sh enabled updated",
             extra={"summarize_sh_enabled": config.summarize_sh_enabled},
         )
+
+    if request.summarize_sh_on_fail is not None:
+        config.summarize_sh_on_fail = request.summarize_sh_on_fail
 
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour
