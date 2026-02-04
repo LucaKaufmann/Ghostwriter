@@ -78,12 +78,29 @@
 		}
 	}));
 
+	const toggleFeedMutation = createMutation(() => ({
+		mutationFn: ({ id, data }: { id: string; data: FeedUpdate }) => api.updateFeed(id, data),
+		onSuccess: (_data, variables) => {
+			queryClient.invalidateQueries({ queryKey: ['feeds'] });
+			toast.success(variables.data.is_active ? 'Feed activated' : 'Feed paused');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to update feed status', {
+				description: err.message ?? 'Unknown error'
+			});
+		},
+		onSettled: () => {
+			updatingFeedId = null;
+		}
+	}));
+
 	// State
 	let searchQuery = $state('');
 	let addDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let feedToDelete = $state<Feed | null>(null);
 	let feedToEdit = $state<Feed | null>(null);
+	let updatingFeedId = $state<string | null>(null);
 
 	// Form state (for add)
 	let formUrl = $state('');
@@ -154,6 +171,17 @@
 				mode: editMode,
 				max_articles: editMaxArticles,
 				is_active: editIsActive
+			}
+		});
+	}
+
+	function handleToggleFeed(feed: Feed) {
+		if (toggleFeedMutation.isPending) return;
+		updatingFeedId = feed.id;
+		toggleFeedMutation.mutate({
+			id: feed.id,
+			data: {
+				is_active: !feed.is_active
 			}
 		});
 	}
@@ -273,9 +301,21 @@
 									</Table.Cell>
 									<Table.Cell>{feed.max_articles}</Table.Cell>
 									<Table.Cell>
-										<Badge variant={feed.is_active ? 'default' : 'outline'}>
-											{feed.is_active ? 'Active' : 'Paused'}
-										</Badge>
+										<button
+											type="button"
+											class="inline-flex items-center gap-2"
+											title={feed.is_active ? 'Pause feed' : 'Activate feed'}
+											aria-pressed={feed.is_active}
+											disabled={toggleFeedMutation.isPending && updatingFeedId === feed.id}
+											onclick={() => handleToggleFeed(feed)}
+										>
+											<Badge variant={feed.is_active ? 'default' : 'outline'}>
+												{feed.is_active ? 'Active' : 'Paused'}
+											</Badge>
+											{#if toggleFeedMutation.isPending && updatingFeedId === feed.id}
+												<Loader2 class="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+											{/if}
+										</button>
 									</Table.Cell>
 									<Table.Cell>
 										<DropdownMenu.Root>
@@ -353,9 +393,21 @@
 								<Badge variant={feed.mode === 'summarize' ? 'default' : 'secondary'} class="text-xs">
 									{feed.mode}
 								</Badge>
-								<Badge variant={feed.is_active ? 'default' : 'outline'} class="text-xs">
-									{feed.is_active ? 'Active' : 'Paused'}
-								</Badge>
+								<button
+									type="button"
+									class="inline-flex items-center gap-2"
+									title={feed.is_active ? 'Pause feed' : 'Activate feed'}
+									aria-pressed={feed.is_active}
+									disabled={toggleFeedMutation.isPending && updatingFeedId === feed.id}
+									onclick={() => handleToggleFeed(feed)}
+								>
+									<Badge variant={feed.is_active ? 'default' : 'outline'} class="text-xs">
+										{feed.is_active ? 'Active' : 'Paused'}
+									</Badge>
+									{#if toggleFeedMutation.isPending && updatingFeedId === feed.id}
+										<Loader2 class="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+									{/if}
+								</button>
 								<span class="text-xs text-muted-foreground">Max {feed.max_articles} articles</span>
 							</div>
 						</div>
