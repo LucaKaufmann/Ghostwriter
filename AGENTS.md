@@ -39,3 +39,14 @@
 ## Security & Configuration Tips
 - Do not commit secrets. Use `ghostwriter/.env` from `.env.example` and keep credentials local.
 - Android uses `local.properties` for SDK paths; iOS secrets are stored in Keychain at runtime.
+
+## Mac Dev Environment (Ghostwriter)
+- Local dev directory: `/Users/luca/docker/ghostwriter`
+- Compose file: `/Users/luca/docker/ghostwriter/docker-compose.yml`
+- Env file: `/Users/luca/docker/ghostwriter/.env`
+- Data: `/Users/luca/docker/ghostwriter/data`
+- EPUBs: `/Users/luca/docker/ghostwriter/epubs`
+- Logs: `/Users/luca/docker/ghostwriter/logs`
+- Deploy (mac): `ghostwriter/deploy.sh mac`
+- Access: `http://localhost:8159`
+- Container logs: `docker logs -f ghostwriter-dev`
