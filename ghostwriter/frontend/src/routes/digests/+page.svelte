@@ -311,17 +311,14 @@
 													{#if digest.filename}
 														<DropdownMenu.Item>
 															{#snippet child({ props })}
-																<a
+																<button
 																	{...props}
-																	href="#"
-																	onclick={(event) => {
-																		event.preventDefault();
-																		downloadDigest(digest.filename);
-																	}}
+																	type="button"
+																	onclick={() => downloadDigest(digest.filename)}
 																>
 																	<Download class="mr-2 h-4 w-4" />
 																	Download EPUB
-																</a>
+																</button>
 															{/snippet}
 														</DropdownMenu.Item>
 													{/if}
