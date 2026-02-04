@@ -59,6 +59,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
 COPY --chown=ghostwriter:ghostwriter scripts/ ./scripts/
+COPY --chown=ghostwriter:ghostwriter alembic/ ./alembic/
+COPY --chown=ghostwriter:ghostwriter alembic.ini ./alembic.ini
 COPY --chown=ghostwriter:ghostwriter entrypoint.sh ./entrypoint.sh
 
 # Copy frontend build output
