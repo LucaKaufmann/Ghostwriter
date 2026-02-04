@@ -235,7 +235,6 @@ class BinderyPipeline:
 
             newsletters_enabled = True
             with Session(engine) as nl_session:
-                from app.models.client_config import ClientConfig
                 nl_config = nl_session.exec(select(ClientConfig)).first()
                 if nl_config:
                     newsletters_enabled = nl_config.newsletters_enabled
