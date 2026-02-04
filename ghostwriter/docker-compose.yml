@@ -1,10 +1,9 @@
-version: "3.8"
-
 services:
   ghostwriter:
     build:
       context: .
       dockerfile: Dockerfile
+    image: ghostwriter:latest
     container_name: ghostwriter
     restart: unless-stopped
     ports:
@@ -80,6 +79,86 @@ services:
       - default
       - with-ollama
 
+  ghostwriter-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghostwriter:dev
+    pull_policy: never
+    container_name: ghostwriter-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      # General
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TIMEZONE=${TIMEZONE:-UTC}
+      - API_KEY=${GHOSTWRITER_API_KEY:-}
+
+      # AI Provider (openai, gemini, ollama)
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+
+      # OpenAI config
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+
+      # Gemini config
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-flash}
+
+      # Ollama config (default: use sidecar)
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+
+      # AI behavior
+      - AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-60}
+      - AI_MAX_RETRIES=${AI_MAX_RETRIES:-2}
+
+      # Scheduling (24h format, leave empty to disable)
+      - SCHEDULE_ENABLED=${SCHEDULE_ENABLED:-true}
+      - SCHEDULE_MORNING=${SCHEDULE_MORNING:-07:00}
+      - SCHEDULE_NOON=${SCHEDULE_NOON:-}
+      - SCHEDULE_EVENING=${SCHEDULE_EVENING:-18:00}
+
+      # Rate limits
+      - FETCH_DELAY_MS=${FETCH_DELAY_MS:-500}
+      - FETCH_TIMEOUT_SECONDS=${FETCH_TIMEOUT_SECONDS:-30}
+      - MAX_ARTICLES_PER_FEED=${MAX_ARTICLES_PER_FEED:-10}
+      - MAX_ARTICLES_PER_DIGEST=${MAX_ARTICLES_PER_DIGEST:-50}
+
+      # Retention
+      - DIGEST_RETENTION_DAYS=${DIGEST_RETENTION_DAYS:-7}
+      - SEEN_ARTICLE_RETENTION_DAYS=${SEEN_ARTICLE_RETENTION_DAYS:-30}
+
+      # Wallabag
+      - WALLABAG_URL=${WALLABAG_URL:-}
+      - WALLABAG_CLIENT_ID=${WALLABAG_CLIENT_ID:-}
+      - WALLABAG_CLIENT_SECRET=${WALLABAG_CLIENT_SECRET:-}
+      - WALLABAG_USERNAME=${WALLABAG_USERNAME:-}
+      - WALLABAG_PASSWORD=${WALLABAG_PASSWORD:-}
+      - WALLABAG_MODE=${WALLABAG_MODE:-raw}
+      - WALLABAG_MAX_ARTICLES=${WALLABAG_MAX_ARTICLES:-20}
+      - WALLABAG_TAG_ON_PROCESS=${WALLABAG_TAG_ON_PROCESS:-ghostwriter}
+
+      # Notifications
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_ON_COMPLETE=${WEBHOOK_ON_COMPLETE:-true}
+      - WEBHOOK_ON_FAILURE=${WEBHOOK_ON_FAILURE:-true}
+    volumes:
+      - ghostwriter_dev_data:/app/data
+      - ghostwriter_dev_epubs:/app/output
+      - ghostwriter_dev_logs:/app/logs
+    depends_on:
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - dev
+
   # Local Ollama sidecar (optional)
   ollama:
     image: ollama/ollama:latest
@@ -108,5 +187,11 @@ volumes:
     name: ghostwriter_epubs
   ghostwriter_logs:
     name: ghostwriter_logs
+  ghostwriter_dev_data:
+    name: ghostwriter_dev_data
+  ghostwriter_dev_epubs:
+    name: ghostwriter_dev_epubs
+  ghostwriter_dev_logs:
+    name: ghostwriter_dev_logs
   ollama_data:
     name: ollama_data
