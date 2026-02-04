@@ -209,7 +209,7 @@ class ApiClient {
 
 	async getPublicConfig(): Promise<ConfigResponse> {
 		// Config endpoint doesn't need auth
-		const response = await fetch(`${BASE_URL}/config`);
+		const response = await fetch(`${BASE_URL}/health/config`);
 		if (!response.ok) throw new ApiError(response.status, { detail: 'Config fetch failed' });
 		return response.json();
 	}

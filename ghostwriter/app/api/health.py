@@ -102,7 +102,7 @@ async def health_check(
     )
 
 
-@router.get("/config", response_model=ConfigResponse)
+@router.get("/health/config", response_model=ConfigResponse)
 async def get_config(
     settings: Settings = Depends(get_settings),
 ) -> ConfigResponse:
