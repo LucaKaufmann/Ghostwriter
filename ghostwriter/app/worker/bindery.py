@@ -291,6 +291,7 @@ class BinderyPipeline:
             extracted_articles: list[tuple[Feed, ExtractedArticle]] = []
             extracted_lock = asyncio.Lock()
             extract_sem = asyncio.Semaphore(5)
+            summarize_sh_sem = asyncio.Semaphore(1)
 
             async def _extract_one(feed: Feed, parsed_article) -> None:
                 async with extract_sem:
@@ -303,13 +304,14 @@ class BinderyPipeline:
                     ai_failed = False
 
                     if feed.mode == "summarize" and summarize_sh_enabled:
-                        logger.info(
-                            "Summarize.sh path selected",
-                            extra={"url": parsed_article.url, "title": parsed_article.title},
-                        )
-                        summarize_result = await self.summarize_sh_service.summarize_url(
-                            parsed_article.url
-                        )
+                        async with summarize_sh_sem:
+                            logger.info(
+                                "Summarize.sh path selected",
+                                extra={"url": parsed_article.url, "title": parsed_article.title},
+                            )
+                            summarize_result = await self.summarize_sh_service.summarize_url(
+                                parsed_article.url
+                            )
                         if not summarize_result.ai_failed and summarize_result.summary:
                             content = summarize_result.summary
                             is_summary = True
