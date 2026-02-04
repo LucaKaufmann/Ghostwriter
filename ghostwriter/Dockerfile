@@ -44,8 +44,10 @@ WORKDIR /app
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends \
     nodejs \
-    npm \
     && npm install -g @steipete/summarize \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 ghostwriter
