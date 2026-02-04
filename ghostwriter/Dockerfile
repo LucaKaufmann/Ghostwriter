@@ -44,6 +44,11 @@ WORKDIR /app
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends \
+    nodejs \
+    && npm install -g @steipete/summarize \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 ghostwriter
 
@@ -54,6 +59,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
 COPY --chown=ghostwriter:ghostwriter scripts/ ./scripts/
+COPY --chown=ghostwriter:ghostwriter alembic/ ./alembic/
+COPY --chown=ghostwriter:ghostwriter alembic.ini ./alembic.ini
 COPY --chown=ghostwriter:ghostwriter entrypoint.sh ./entrypoint.sh
 
 # Copy frontend build output

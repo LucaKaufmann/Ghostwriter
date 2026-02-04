@@ -95,6 +95,10 @@ All configuration via environment variables. See `.env.example` for full list.
 # AI Provider: openai, gemini, ollama
 AI_PROVIDER=ollama
 
+# Summarize.sh (optional, for summarize-mode feeds)
+SUMMARIZE_SH_CONFIG_PATH=~/.summarize/config.json
+SUMMARIZE_SH_TIMEOUT_SECONDS=90
+
 # Scheduling (24h format)
 SCHEDULE_MORNING=07:00
 SCHEDULE_EVENING=18:00

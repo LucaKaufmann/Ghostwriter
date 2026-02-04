@@ -14,11 +14,13 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging import digest_logger
 from app.models.digest import Digest, DigestArticle
+from app.models.client_config import ClientConfig
 from app.models.feed import Feed
 from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
 from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
+from app.services.summarize_sh_service import SummarizeShService
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
 
@@ -73,6 +75,7 @@ class BinderyPipeline:
         self.settings = get_settings()
         self.content_processor = ContentProcessor(self.settings)
         self.llm_service = LLMService(self.settings)
+        self.summarize_sh_service = SummarizeShService(self.settings)
         self.epub_generator = EpubGenerator(self.settings)
         self.start_time: float | None = None
 
@@ -108,10 +111,20 @@ class BinderyPipeline:
         # Pre-create synthetic feeds so feed_id is always available
         self._ensure_synthetic_feeds()
 
-        # Get digest info for logging
+        # Get digest info for logging and current client config
+        summarize_sh_enabled = False
+        summarize_sh_on_fail = "raw"
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
             period = digest.period if digest else "manual"
+            client_config = session.exec(select(ClientConfig)).first()
+            if client_config:
+                summarize_sh_enabled = client_config.summarize_sh_enabled
+                summarize_sh_on_fail = client_config.summarize_sh_on_fail or "raw"
+        logger.info(
+            "Summarize.sh enabled for digest",
+            extra={"digest_id": str(self.digest_id), "enabled": summarize_sh_enabled},
+        )
 
         try:
             await self._update_stage("fetching")
@@ -224,7 +237,6 @@ class BinderyPipeline:
 
             newsletters_enabled = True
             with Session(engine) as nl_session:
-                from app.models.client_config import ClientConfig
                 nl_config = nl_session.exec(select(ClientConfig)).first()
                 if nl_config:
                     newsletters_enabled = nl_config.newsletters_enabled
@@ -281,41 +293,118 @@ class BinderyPipeline:
             extracted_articles: list[tuple[Feed, ExtractedArticle]] = []
             extracted_lock = asyncio.Lock()
             extract_sem = asyncio.Semaphore(5)
+            summarize_sh_sem = asyncio.Semaphore(1)
 
             async def _extract_one(feed: Feed, parsed_article) -> None:
                 async with extract_sem:
                     article_start = time.time()
 
-                    content = await self.content_processor.extract_content(parsed_article.url)
-                    if not content:
-                        logger.warning(f"Could not extract: {parsed_article.url}")
-                        digest_logger.article_extraction_failed(parsed_article.url, "Content extraction returned empty")
-                        return
-
-                    original_word_count = ContentProcessor.count_words(content)
-                    word_count = original_word_count
-
-                    # Enrich with AI if enabled
+                    content = None
+                    original_word_count = 0
+                    word_count = 0
                     is_summary = False
                     ai_failed = False
 
-                    if feed.mode == "summarize":
-                        summary_content, ai_failed = await self.llm_service.summarize(content)
-                        if not ai_failed:
-                            content = summary_content
+                    if feed.mode == "summarize" and summarize_sh_enabled:
+                        async with summarize_sh_sem:
+                            logger.info(
+                                "Summarize.sh path selected",
+                                extra={"url": parsed_article.url, "title": parsed_article.title},
+                            )
+                            summarize_result = await self.summarize_sh_service.summarize_url(
+                                parsed_article.url
+                            )
+                        if not summarize_result.ai_failed and summarize_result.summary:
+                            content = summarize_result.summary
                             is_summary = True
                             word_count = ContentProcessor.count_words(content)
+                            original_word_count = (
+                                summarize_result.original_word_count or word_count
+                            )
                             digest_logger.article_summarized(
                                 parsed_article.title,
                                 original_words=original_word_count,
                                 summary_words=word_count,
                             )
                         else:
+                            ai_failed = True
                             digest_logger.article_summarization_failed(
                                 parsed_article.title,
-                                "AI service returned error",
+                                "Summarize.sh returned error",
                                 fallback=True,
                             )
+
+                    if content is None and summarize_sh_enabled and feed.mode == "summarize":
+                        if summarize_sh_on_fail == "skip":
+                            logger.warning(
+                                "Skipping article after Summarize.sh failure",
+                                extra={"url": parsed_article.url, "title": parsed_article.title},
+                            )
+                            return
+
+                    if content is None:
+                        content = await self.content_processor.extract_content(
+                            parsed_article.url
+                        )
+                        if not content:
+                            logger.warning(f"Could not extract: {parsed_article.url}")
+                            digest_logger.article_extraction_failed(
+                                parsed_article.url,
+                                "Content extraction returned empty",
+                            )
+                            return
+
+                        original_word_count = ContentProcessor.count_words(content)
+                        word_count = original_word_count
+
+                        # Enrich with AI if enabled (fallback path)
+                        if feed.mode == "summarize" and not summarize_sh_enabled:
+                            logger.info(
+                                "LLM summarization path selected",
+                                extra={"url": parsed_article.url, "title": parsed_article.title},
+                            )
+                            summary_content, ai_failed = await self.llm_service.summarize(
+                                content
+                            )
+                            if not ai_failed:
+                                content = summary_content
+                                is_summary = True
+                                word_count = ContentProcessor.count_words(content)
+                                digest_logger.article_summarized(
+                                    parsed_article.title,
+                                    original_words=original_word_count,
+                                    summary_words=word_count,
+                                )
+                            else:
+                                digest_logger.article_summarization_failed(
+                                    parsed_article.title,
+                                    "AI service returned error",
+                                    fallback=True,
+                                )
+                        elif feed.mode == "summarize" and summarize_sh_enabled:
+                            if summarize_sh_on_fail == "fallback_ai":
+                                logger.info(
+                                    "Summarize.sh failed; falling back to LLM",
+                                    extra={"url": parsed_article.url, "title": parsed_article.title},
+                                )
+                                summary_content, ai_failed = await self.llm_service.summarize(
+                                    content
+                                )
+                                if not ai_failed:
+                                    content = summary_content
+                                    is_summary = True
+                                    word_count = ContentProcessor.count_words(content)
+                                    digest_logger.article_summarized(
+                                        parsed_article.title,
+                                        original_words=original_word_count,
+                                        summary_words=word_count,
+                                    )
+                                else:
+                                    digest_logger.article_summarization_failed(
+                                        parsed_article.title,
+                                        "AI service returned error",
+                                        fallback=True,
+                                    )
 
                     processing_ms = int((time.time() - article_start) * 1000)
 
@@ -694,6 +783,16 @@ async def generate_digest(
 
         if running:
             logger.warning(f"Job already running: {running.id}")
+            logger.warning(
+                "Digest start blocked due to existing lock",
+                extra={
+                    "period": period,
+                    "running_id": str(running.id),
+                    "locked_at": running.locked_at.isoformat()
+                    if running.locked_at
+                    else None,
+                },
+            )
             return None
 
         # Release any stale locks
@@ -702,6 +801,15 @@ async def generate_digest(
             Digest.locked_at <= stale_cutoff,
         )
         for stale in session.exec(stale_statement).all():
+            logger.warning(
+                "Releasing stale digest lock",
+                extra={
+                    "digest_id": str(stale.id),
+                    "locked_at": stale.locked_at.isoformat()
+                    if stale.locked_at
+                    else None,
+                },
+            )
             stale.status = "failed"
             stale.error_message = "Stale lock released"
             stale.locked_at = None
@@ -722,9 +830,18 @@ async def generate_digest(
         session.refresh(digest)
         digest_id = digest.id
 
+    logger.info(
+        "Digest created",
+        extra={"digest_id": str(digest_id), "period": period},
+    )
+
     # Run pipeline in background
     pipeline = BinderyPipeline(digest_id)
-    asyncio.create_task(pipeline.run())
+    task = asyncio.create_task(pipeline.run())
+    logger.info(
+        "Digest pipeline task scheduled",
+        extra={"digest_id": str(digest_id), "task_name": task.get_name()},
+    )
 
     logger.info(f"Started digest generation: {digest_id}")
     return digest_id
