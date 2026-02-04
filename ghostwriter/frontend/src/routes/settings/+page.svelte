@@ -1109,7 +1109,7 @@
 						bind:value={summarizeConfig}
 						onblur={validateSummarizeConfig}
 						spellcheck={false}
-					/>
+					></textarea>
 					{#if summarizeConfigError}
 						<p class="text-sm text-destructive">{summarizeConfigError}</p>
 					{/if}
