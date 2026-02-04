@@ -10,6 +10,7 @@ import secrets
 import time
 
 import httpx
+from lxml import etree
 from lxml import html as lxml_html
 from lxml.html import tostring as html_tostring
 
@@ -385,8 +386,16 @@ class NewsletterService:
         for svg in doc.xpath(".//*[local-name()='svg']"):
             svg.getparent().remove(svg)
 
-        # 4. Remove footer/unsubscribe sections
+        # 4. Remove comments (tracking and markup noise)
+        for comment in doc.xpath("//comment()"):
+            parent = comment.getparent()
+            if parent is not None:
+                parent.remove(comment)
+
+        # 5. Remove footer/unsubscribe sections
         for el in doc.iter():
+            if not self._is_element(el):
+                continue
             text_content = el.text_content().strip()
             # Remove small blocks that look like footers
             if text_content and len(text_content) < 500 and self._FOOTER_RE.search(text_content):
@@ -396,29 +405,33 @@ class NewsletterService:
                     if parent is not None:
                         parent.remove(el)
 
-        # 5. Flatten tables to divs (tables in newsletters are almost always layout)
+        # 6. Flatten tables to divs (tables in newsletters are almost always layout)
         for table in doc.xpath(".//table"):
             self._flatten_table(table)
 
-        # 6. Unwrap non-semantic tags (keep text, drop the tag)
+        # 7. Unwrap non-semantic tags (keep text, drop the tag)
         # Process bottom-up to handle nesting
         for el in reversed(list(doc.iter())):
+            if not self._is_element(el):
+                continue
             if el.tag not in self._KEEP_TAGS and el.tag not in ("html", "body", "div"):
                 el.drop_tag()
 
-        # 7. Collapse nested divs into paragraphs where sensible
+        # 8. Collapse nested divs into paragraphs where sensible
         self._collapse_divs(doc)
 
-        # 8. Strip all attributes except href
+        # 9. Strip all attributes except href
         for el in doc.iter():
+            if not self._is_element(el):
+                continue
             attrs_to_remove = [a for a in el.attrib if a not in self._KEEP_ATTRS]
             for attr in attrs_to_remove:
                 del el.attrib[attr]
 
-        # 9. Remove empty elements
+        # 10. Remove empty elements
         self._remove_empty(doc)
 
-        # 10. Serialize the body content
+        # 11. Serialize the body content
         body = doc.xpath(".//body")
         if body:
             content_el = body[0]
@@ -429,6 +442,8 @@ class NewsletterService:
         if content_el.text and content_el.text.strip():
             parts.append(content_el.text.strip())
         for child in content_el:
+            if not self._is_element(child):
+                continue
             serialized = html_tostring(child, encoding="unicode", method="html")
             if serialized.strip():
                 parts.append(serialized.strip())
@@ -484,6 +499,8 @@ class NewsletterService:
         while changed:
             changed = False
             for el in doc.iter():
+                if not NewsletterService._is_element(el):
+                    continue
                 if el.tag in ("br", "hr", "html", "body"):
                     continue
                 if not el.text_content().strip() and len(el) == 0:
@@ -491,3 +508,8 @@ class NewsletterService:
                     if parent is not None:
                         parent.remove(el)
                         changed = True
+
+    @staticmethod
+    def _is_element(node) -> bool:
+        """True for real element nodes, false for comments/PIs/etc."""
+        return isinstance(node, etree._Element) and not isinstance(node, etree._Comment)
