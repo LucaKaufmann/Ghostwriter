@@ -27,6 +27,7 @@ class ParsedArticle:
     guid: str
     url: str
     title: str
+    content_url: str | None = None
     published: str | None = None
     author: str | None = None
 
@@ -88,11 +89,80 @@ class ContentProcessor:
                 logger.error(f"Failed to parse feed {feed_url}: {feed.bozo_exception}")
                 return []
 
+            def _is_media_type(value: str | None) -> bool:
+                if not value:
+                    return False
+                lowered = value.lower()
+                return (
+                    lowered.startswith("audio/")
+                    or lowered.startswith("video/")
+                    or lowered in {"application/octet-stream"}
+                )
+
+            def _looks_like_media_url(value: str | None) -> bool:
+                if not value:
+                    return False
+                lowered = value.lower()
+                return lowered.endswith(
+                    (
+                        ".mp3",
+                        ".m4a",
+                        ".aac",
+                        ".ogg",
+                        ".opus",
+                        ".wav",
+                        ".flac",
+                        ".mp4",
+                        ".m4v",
+                        ".mov",
+                        ".webm",
+                        ".mkv",
+                    )
+                )
+
+            def _extract_media_url(entry: dict) -> str | None:
+                media_content = entry.get("media_content") or []
+                for item in media_content:
+                    if not isinstance(item, dict):
+                        continue
+                    url_value = item.get("url") or item.get("href")
+                    if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
+                        return url_value
+
+                enclosures = entry.get("enclosures") or []
+                for item in enclosures:
+                    if not isinstance(item, dict):
+                        continue
+                    url_value = item.get("url") or item.get("href")
+                    if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
+                        return url_value
+
+                links = entry.get("links") or []
+                for item in links:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("rel") != "enclosure":
+                        continue
+                    url_value = item.get("href") or item.get("url")
+                    if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
+                        return url_value
+
+                for collection in (media_content, enclosures, links):
+                    for item in collection:
+                        if not isinstance(item, dict):
+                            continue
+                        url_value = item.get("url") or item.get("href")
+                        if url_value:
+                            return url_value
+
+                return None
+
             articles = []
             for entry in feed.entries[: self.settings.max_articles_per_feed]:
                 # Use GUID if available, otherwise hash the URL
                 guid = entry.get("id") or entry.get("guid")
                 url = entry.get("link", "")
+                content_url = _extract_media_url(entry)
 
                 if not guid:
                     guid = hashlib.sha256(url.encode()).hexdigest()[:16]
@@ -101,6 +171,7 @@ class ContentProcessor:
                     ParsedArticle(
                         guid=guid,
                         url=url,
+                        content_url=content_url,
                         title=entry.get("title", "Untitled"),
                         published=entry.get("published"),
                         author=entry.get("author"),

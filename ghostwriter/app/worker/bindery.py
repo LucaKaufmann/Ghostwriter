@@ -311,8 +311,9 @@ class BinderyPipeline:
                                 "Summarize.sh path selected",
                                 extra={"url": parsed_article.url, "title": parsed_article.title},
                             )
+                            summarize_target = parsed_article.content_url or parsed_article.url
                             summarize_result = await self.summarize_sh_service.summarize_url(
-                                parsed_article.url
+                                summarize_target
                             )
                         if not summarize_result.ai_failed and summarize_result.summary:
                             content = summarize_result.summary
