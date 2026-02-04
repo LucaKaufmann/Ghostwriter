@@ -189,6 +189,10 @@ async def update_config(
 
     if request.summarize_sh_enabled is not None:
         config.summarize_sh_enabled = request.summarize_sh_enabled
+        logger.info(
+            "Summarize.sh enabled updated",
+            extra={"summarize_sh_enabled": config.summarize_sh_enabled},
+        )
 
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour

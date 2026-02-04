@@ -152,6 +152,7 @@ class SummarizeShService:
             payload = json.loads(output)
             summary = self._extract_summary(payload)
             if summary:
+                logger.info("Summarize.sh returned summary", extra={"url": url})
                 return SummarizeResult(summary=summary, ai_failed=False)
             logger.warning("Summarize.sh JSON output missing summary field")
         except json.JSONDecodeError:
