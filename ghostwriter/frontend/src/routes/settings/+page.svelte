@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type SummarizeConfigUpdate } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -113,6 +113,11 @@
 		queryFn: () => api.getWallabagConfig()
 	}));
 
+	const summarizeConfigQuery = createQuery(() => ({
+		queryKey: ['summarize-config'],
+		queryFn: () => api.getSummarizeConfig()
+	}));
+
 	const updateWallabagMutation = createMutation(() => ({
 		mutationFn: (data: WallabagConfigUpdate) => api.updateWallabagConfig(data),
 		onSuccess: (data) => {
@@ -156,6 +161,19 @@
 		},
 		onError: (err: Error) => {
 			toast.error('Failed to update config', { description: err.message });
+		}
+	}));
+
+	const updateSummarizeConfigMutation = createMutation(() => ({
+		mutationFn: (data: SummarizeConfigUpdate) => api.updateSummarizeConfig(data),
+		onSuccess: (data) => {
+			summarizeConfig = data.config_json;
+			summarizeConfigSource = data.source;
+			queryClient.invalidateQueries({ queryKey: ['summarize-config'] });
+			toast.success('Summarize.sh configuration saved');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to save Summarize.sh config', { description: err.message });
 		}
 	}));
 
@@ -216,6 +234,14 @@
 
 	let wbEnabled = $state(true);
 
+	// Summarize.sh config state
+	let summarizeConfig = $state('');
+	let summarizeConfigInitialized = $state(false);
+	let summarizeConfigError = $state<string | null>(null);
+	let summarizeConfigSource = $state<'user' | 'default' | null>(null);
+	let summarizeEnabled = $state(false);
+	let summarizeOnFail = $state<'fallback_ai' | 'raw' | 'skip'>('raw');
+
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
 		if (data && !wbFormInitialized) {
@@ -233,6 +259,50 @@
 			wbFormInitialized = true;
 		}
 	});
+
+	$effect(() => {
+		const data = summarizeConfigQuery.data;
+		if (data && !summarizeConfigInitialized) {
+			summarizeConfig = data.config_json;
+			summarizeConfigSource = data.source;
+			summarizeConfigInitialized = true;
+		}
+	});
+
+	$effect(() => {
+		const data = clientConfigQuery.data;
+		if (data) {
+			summarizeEnabled = data.summarize_sh_enabled;
+			summarizeOnFail = (data.summarize_sh_on_fail as 'fallback_ai' | 'raw' | 'skip') ?? 'raw';
+		}
+	});
+
+	function validateSummarizeConfig(): boolean {
+		try {
+			JSON.parse(summarizeConfig);
+			summarizeConfigError = null;
+			return true;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Invalid JSON';
+			summarizeConfigError = message;
+			return false;
+		}
+	}
+
+	function saveSummarizeConfig() {
+		if (!validateSummarizeConfig()) {
+			toast.error('Invalid JSON', { description: summarizeConfigError ?? '' });
+			return;
+		}
+		updateSummarizeConfigMutation.mutate({ config_json: summarizeConfig });
+	}
+
+	function saveSummarizeEnabled() {
+		updateClientConfigMutation.mutate({
+			summarize_sh_enabled: summarizeEnabled,
+			summarize_sh_on_fail: summarizeOnFail
+		});
+	}
 
 	function saveWallabag() {
 		updateWallabagMutation.mutate(wbForm);
@@ -980,6 +1050,107 @@
 					<p class="mt-3 text-sm text-muted-foreground">No newsletters found.</p>
 				{/if}
 			</div>
+		</Card.Content>
+	</Card.Root>
+
+	<!-- Summarize.sh Configuration -->
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="flex items-center gap-2">
+				<FileText class="h-5 w-5" />
+				Summarize.sh Configuration
+			</Card.Title>
+			<Card.Description>
+				Edit the Summarize.sh `config.json` used for summarize-mode feeds
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="space-y-4">
+			{#if summarizeConfigQuery.isPending}
+				<div class="space-y-3">
+					<Skeleton class="h-4 w-48" />
+					<Skeleton class="h-32 w-full" />
+				</div>
+			{:else if summarizeConfigQuery.data}
+				<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+					<div class="space-y-1">
+						<p class="font-medium">Enable Summarize.sh</p>
+						<p class="text-sm text-muted-foreground">
+							When enabled, summarize-mode feeds use Summarize.sh instead of the LLM pipeline.
+						</p>
+					</div>
+					<div class="flex items-center gap-3">
+						<Switch
+							checked={summarizeEnabled}
+							onCheckedChange={(checked) => (summarizeEnabled = checked)}
+						/>
+						<Button
+							size="sm"
+							onclick={saveSummarizeEnabled}
+							disabled={updateClientConfigMutation.isPending}
+						>
+							{#if updateClientConfigMutation.isPending}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							{:else}
+								<Save class="mr-2 h-4 w-4" />
+							{/if}
+							Save
+						</Button>
+					</div>
+				</div>
+
+				<div class="flex flex-col gap-2 rounded-lg border p-4">
+					<div class="space-y-1">
+						<p class="font-medium">On Summarize.sh Failure</p>
+						<p class="text-sm text-muted-foreground">
+							Choose what happens when Summarize.sh cannot summarize an article.
+						</p>
+					</div>
+					<select
+						class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+						bind:value={summarizeOnFail}
+					>
+						<option value="fallback_ai">Fall back to Ghostwriter AI</option>
+						<option value="raw">Include raw article text</option>
+						<option value="skip">Do nothing (skip article)</option>
+					</select>
+				</div>
+
+				<div class="flex items-center justify-between gap-4 text-sm text-muted-foreground">
+					<span>
+						Source: <span class="font-medium">{summarizeConfigSource ?? 'default'}</span>
+					</span>
+				</div>
+
+				<div class="space-y-2">
+					<Label for="summarize-config">config.json</Label>
+					<textarea
+						id="summarize-config"
+						class="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+						bind:value={summarizeConfig}
+						onblur={validateSummarizeConfig}
+						spellcheck={false}
+					></textarea>
+					{#if summarizeConfigError}
+						<p class="text-sm text-destructive">{summarizeConfigError}</p>
+					{/if}
+				</div>
+
+				<div class="flex items-center justify-end gap-2">
+					<Button
+						onclick={saveSummarizeConfig}
+						disabled={updateSummarizeConfigMutation.isPending}
+					>
+						{#if updateSummarizeConfigMutation.isPending}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+						{:else}
+							<Save class="mr-2 h-4 w-4" />
+						{/if}
+						Save
+					</Button>
+				</div>
+			{:else}
+				<p class="text-sm text-muted-foreground">Unable to load Summarize.sh config.</p>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 </div>

@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -16,9 +17,10 @@ from app.models.feed import Feed
 from app.models.seen_article import SeenArticle
 from app.models.wallabag_config import WallabagConfig, WallabagConfigRead, WallabagConfigUpdate
 from app.services.newsletter_service import NewsletterService
+from app.services.summarize_sh_service import SummarizeShService
 from app.services.wallabag_service import WallabagService
 from app.worker import scheduler as scheduler_module
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -43,6 +45,8 @@ class ConfigResponse(BaseModel):
     evening_minute: int
     timezone: str
     updated_at: datetime
+    summarize_sh_enabled: bool
+    summarize_sh_on_fail: str
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -60,8 +64,28 @@ class ConfigUpdateRequest(BaseModel):
     evening_minute: int | None = Field(default=None, ge=0, le=59, description="Evening minute")
     timezone: str | None = Field(default=None, description="IANA timezone")
     newsletters_enabled: bool | None = Field(default=None, description="Enable newsletter integration")
+    summarize_sh_enabled: bool | None = Field(
+        default=None, description="Enable Summarize.sh for summarize-mode feeds"
+    )
+    summarize_sh_on_fail: str | None = Field(
+        default=None,
+        description="Summarize.sh failure behavior: fallback_ai, raw, skip",
+    )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
+
+
+class SummarizeConfigResponse(BaseModel):
+    """Response model for Summarize.sh config."""
+
+    config_json: str
+    source: Literal["user", "default"]
+
+
+class SummarizeConfigUpdate(BaseModel):
+    """Request model for updating Summarize.sh config."""
+
+    config_json: str = Field(description="Raw Summarize.sh config.json contents")
 
 
 def get_or_create_config(session: Session) -> ClientConfig:
@@ -103,6 +127,8 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         evening_minute=config.evening_minute,
         timezone=config.timezone,
         updated_at=config.updated_at,
+        summarize_sh_enabled=config.summarize_sh_enabled,
+        summarize_sh_on_fail=config.summarize_sh_on_fail,
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -167,6 +193,16 @@ async def update_config(
     if request.newsletters_enabled is not None:
         config.newsletters_enabled = request.newsletters_enabled
 
+    if request.summarize_sh_enabled is not None:
+        config.summarize_sh_enabled = request.summarize_sh_enabled
+        logger.info(
+            "Summarize.sh enabled updated",
+            extra={"summarize_sh_enabled": config.summarize_sh_enabled},
+        )
+
+    if request.summarize_sh_on_fail is not None:
+        config.summarize_sh_on_fail = request.summarize_sh_on_fail
+
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour
         schedule_updates.setdefault("morning", {})["hour"] = request.morning_hour
@@ -213,6 +249,37 @@ async def update_config(
 
     logger.info(f"Updated client configuration: {request.model_dump(exclude_none=True)}")
     return _config_to_response(config, session)
+
+
+# ============ Summarize.sh Configuration ============
+
+
+@router.get("/summarize", response_model=SummarizeConfigResponse, dependencies=[Depends(verify_api_key)])
+async def get_summarize_config(
+    settings: Settings = Depends(get_settings),
+) -> SummarizeConfigResponse:
+    """Get the Summarize.sh config.json contents."""
+    service = SummarizeShService(settings)
+    config_json, source = service.get_config()
+    return SummarizeConfigResponse(config_json=config_json, source=source)
+
+
+@router.put("/summarize", response_model=SummarizeConfigResponse, dependencies=[Depends(verify_api_key)])
+async def update_summarize_config(
+    request: SummarizeConfigUpdate,
+    settings: Settings = Depends(get_settings),
+) -> SummarizeConfigResponse:
+    """Validate and update Summarize.sh config.json contents."""
+    service = SummarizeShService(settings)
+    try:
+        service.save_config(request.config_json)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    config_json, source = service.get_config()
+    return SummarizeConfigResponse(config_json=config_json, source=source)
 
 
 # ============ Wallabag Configuration ============

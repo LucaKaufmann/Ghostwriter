@@ -47,6 +47,16 @@ def setup_scheduler() -> None:
         )
         return
 
+    logger.info(
+        "Scheduler enabled",
+        extra={
+            "timezone": settings.timezone,
+            "morning": settings.schedule_morning,
+            "noon": settings.schedule_noon,
+            "evening": settings.schedule_evening,
+        },
+    )
+
     # Ensure default schedules exist in database
     _ensure_default_schedules()
 
@@ -247,6 +257,10 @@ async def _scheduled_digest(period: str) -> None:
             _update_last_run(period, digest_id)
         else:
             logger.warning(f"Could not start scheduled {period} digest (job running?)")
+            logger.warning(
+                "Scheduled digest blocked due to running job",
+                extra={"period": period},
+            )
             digest_logger.schedule_skipped(period, "Another digest job is already running")
     except Exception as e:
         logger.exception(f"Scheduled {period} digest failed: {e}")

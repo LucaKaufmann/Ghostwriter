@@ -116,7 +116,10 @@ class GhostwriterRepository @Inject constructor(
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
-            val syncRequests = feeds.map { feed ->
+            // Filter out synthetic feeds (wallabag, newsletters) - these are server-side integrations
+            val realFeeds = feeds.filter { !it.url.startsWith("synthetic://") }
+
+            val syncRequests = realFeeds.map { feed ->
                 FeedSyncRequest(
                     url = feed.url,
                     title = feed.name,

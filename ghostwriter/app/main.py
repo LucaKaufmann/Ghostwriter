@@ -16,8 +16,10 @@ from app import __version__
 from app.api.health import set_startup_time
 from app.api.router import api_router
 from app.core.config import get_settings
-from app.core.database import init_db
+from app.core.database import init_db, engine
 from app.core.logging import configure_logging, digest_logger
+from app.models.digest import Digest
+from sqlmodel import Session, select
 from app.worker.scheduler import setup_scheduler, shutdown_scheduler
 
 # Configure logging (both standard and digest activity logging)
@@ -100,6 +102,25 @@ async def lifespan(app: FastAPI):
     # Initialize database
     init_db()
     logger.info("Database initialized")
+
+    # Clean up any stuck processing digests on restart
+    cleared = 0
+    with Session(engine) as session:
+        statement = select(Digest).where(Digest.status == "processing")
+        for digest in session.exec(statement).all():
+            digest.status = "failed"
+            digest.error_message = "Cleared on restart"
+            digest.locked_at = None
+            digest.locked_by = None
+            session.add(digest)
+            cleared += 1
+        if cleared:
+            session.commit()
+    if cleared:
+        logger.warning(
+            "Cleared stuck processing digests on startup",
+            extra={"count": cleared},
+        )
 
     # Track startup time
     set_startup_time(datetime.utcnow())

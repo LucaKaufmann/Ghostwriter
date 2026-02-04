@@ -18,6 +18,8 @@ import type {
 	WallabagConfigResponse,
 	WallabagConfigUpdate,
 	WallabagTestResult,
+	SummarizeConfigResponse,
+	SummarizeConfigUpdate,
 	PreviewResponse,
 	APIError,
 	DigestPeriod,
@@ -207,7 +209,7 @@ class ApiClient {
 
 	async getPublicConfig(): Promise<ConfigResponse> {
 		// Config endpoint doesn't need auth
-		const response = await fetch(`${BASE_URL}/config`);
+		const response = await fetch(`${BASE_URL}/health/config`);
 		if (!response.ok) throw new ApiError(response.status, { detail: 'Config fetch failed' });
 		return response.json();
 	}
@@ -218,6 +220,17 @@ class ApiClient {
 
 	async updateClientConfig(data: ClientConfigUpdate): Promise<ClientConfigResponse> {
 		return this.request<ClientConfigResponse>('/config', {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async getSummarizeConfig(): Promise<SummarizeConfigResponse> {
+		return this.request<SummarizeConfigResponse>('/config/summarize');
+	}
+
+	async updateSummarizeConfig(data: SummarizeConfigUpdate): Promise<SummarizeConfigResponse> {
+		return this.request<SummarizeConfigResponse>('/config/summarize', {
 			method: 'PUT',
 			body: JSON.stringify(data)
 		});

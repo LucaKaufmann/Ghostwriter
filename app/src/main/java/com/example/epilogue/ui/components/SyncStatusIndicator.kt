@@ -31,7 +31,7 @@ fun SyncStatusIndicator(
     }.flatten()
 
     val isRunning = workInfos.any { info ->
-        info.state == WorkInfo.State.RUNNING || info.state == WorkInfo.State.ENQUEUED
+        info.state == WorkInfo.State.RUNNING
     }
     val hasFailed = workInfos.any { info ->
         info.state == WorkInfo.State.FAILED
