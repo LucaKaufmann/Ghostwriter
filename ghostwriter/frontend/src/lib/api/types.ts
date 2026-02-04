@@ -100,6 +100,7 @@ export interface ClientConfigResponse {
 	evening_minute: number;
 	timezone: string;
 	summarize_sh_enabled: boolean;
+	summarize_sh_on_fail: string;
 	updated_at: string;
 	wallabag?: IntegrationStatus | null;
 	newsletters?: IntegrationStatus | null;
@@ -116,6 +117,7 @@ export interface ClientConfigUpdate {
 	timezone?: string;
 	newsletters_enabled?: boolean;
 	summarize_sh_enabled?: boolean;
+	summarize_sh_on_fail?: string;
 	client_updated_at?: string;
 }
 
