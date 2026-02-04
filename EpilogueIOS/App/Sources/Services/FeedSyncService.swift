@@ -95,12 +95,15 @@ public final class FeedSyncService {
 
         let localFeeds = try await feedRepository.getAllFeeds()
 
-        guard !localFeeds.isEmpty else {
+        // Filter out synthetic feeds (wallabag, newsletters) - these are server-side integrations
+        let realFeeds = localFeeds.filter { !$0.url.hasPrefix("synthetic://") }
+
+        guard !realFeeds.isEmpty else {
             logger.debug("No local feeds to push")
             return
         }
 
-        let syncRequests = localFeeds.map { feed -> FeedSyncRequest in
+        let syncRequests = realFeeds.map { feed -> FeedSyncRequest in
             FeedSyncRequest(
                 url: feed.url,
                 title: feed.name,
