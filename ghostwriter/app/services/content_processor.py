@@ -64,12 +64,15 @@ class ContentProcessor:
         self.settings = settings or get_settings()
         self._executor = ThreadPoolExecutor(max_workers=4)
 
-    async def parse_feed(self, feed_url: str) -> list[ParsedArticle]:
+    async def parse_feed(
+        self, feed_url: str, max_entries: int | None = None
+    ) -> list[ParsedArticle]:
         """
         Parse an RSS/Atom feed and return article metadata.
 
         Args:
             feed_url: URL of the RSS feed.
+            max_entries: Optional cap on number of entries to parse.
 
         Returns:
             List of ParsedArticle objects.
@@ -157,8 +160,12 @@ class ContentProcessor:
 
                 return None
 
+            limit = self.settings.max_articles_per_feed
+            if max_entries is not None:
+                limit = max_entries
+
             articles = []
-            for entry in feed.entries[: self.settings.max_articles_per_feed]:
+            for entry in feed.entries[:limit]:
                 # Use GUID if available, otherwise hash the URL
                 guid = entry.get("id") or entry.get("guid")
                 url = entry.get("link", "")
