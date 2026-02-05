@@ -6,10 +6,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import Settings, get_settings
+from app.services.whisper_models import resolve_whisper_model_path
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,33 @@ class SummarizeShService:
             return path.read_text(encoding="utf-8"), "user"
         return self._read_default_config(), "default"
 
+    def _summarize_config_details(self) -> dict[str, str | None]:
+        raw, source = self.get_config()
+        model = "auto"
+        language = None
+        error = None
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, dict):
+                value = payload.get("model")
+                if isinstance(value, str) and value.strip():
+                    model = value.strip()
+                output = payload.get("output")
+                if isinstance(output, dict):
+                    lang_value = output.get("language")
+                    if isinstance(lang_value, str) and lang_value.strip():
+                        language = lang_value.strip()
+        except json.JSONDecodeError as exc:
+            error = f"invalid_json: {exc.msg}"
+            model = "invalid"
+        return {
+            "path": str(self._resolve_config_path()),
+            "source": source,
+            "model": model,
+            "language": language,
+            "error": error,
+        }
+
     def validate_config_json(self, raw_json: str) -> None:
         """
         Validate that config JSON parses correctly.
@@ -110,7 +139,64 @@ class SummarizeShService:
                     return value.strip()
         return None
 
-    async def summarize_url(self, url: str) -> SummarizeResult:
+    @staticmethod
+    def _extract_model_info(payload: object) -> tuple[str | None, list[str]]:
+        input_model = None
+        provider_models: list[str] = []
+        if isinstance(payload, dict):
+            input_block = payload.get("input")
+            if isinstance(input_block, dict):
+                model_value = input_block.get("model")
+                if isinstance(model_value, str) and model_value.strip():
+                    input_model = model_value.strip()
+            metrics = payload.get("metrics")
+            if isinstance(metrics, dict):
+                providers = metrics.get("providers")
+                if isinstance(providers, list):
+                    for provider in providers:
+                        if not isinstance(provider, dict):
+                            continue
+                        model_value = provider.get("model")
+                        if isinstance(model_value, str) and model_value.strip():
+                            provider_models.append(model_value.strip())
+        return input_model, provider_models
+
+    @staticmethod
+    def _extract_model_from_metrics(stderr_text: str) -> str | None:
+        for line in stderr_text.splitlines():
+            if "·" not in line:
+                continue
+            parts = [part.strip() for part in line.split("·")]
+            if len(parts) >= 3 and parts[2]:
+                return parts[2]
+        match = re.search(r"\b(?:openai|google|anthropic|xai|zai|openrouter|cli)/\S+", stderr_text)
+        if match:
+            return match.group(0)
+        return None
+
+    def _build_env(self, whisper_model: str | None) -> dict[str, str]:
+        env = os.environ.copy()
+
+        binary_path = Path(
+            os.path.expanduser(self.settings.summarize_sh_whisper_cpp_binary)
+        )
+        if self.settings.summarize_sh_whisper_cpp_binary and binary_path.exists():
+            env["SUMMARIZE_WHISPER_CPP_BINARY"] = str(binary_path)
+        else:
+            env.pop("SUMMARIZE_WHISPER_CPP_BINARY", None)
+
+        models_dir = Path(
+            os.path.expanduser(self.settings.summarize_sh_whisper_models_dir)
+        )
+        model_path = resolve_whisper_model_path(models_dir, whisper_model)
+        if model_path:
+            env["SUMMARIZE_WHISPER_CPP_MODEL_PATH"] = str(model_path)
+        else:
+            env.pop("SUMMARIZE_WHISPER_CPP_MODEL_PATH", None)
+
+        return env
+
+    async def summarize_url(self, url: str, whisper_model: str | None = None) -> SummarizeResult:
         """
         Summarize a URL using Summarize.sh.
 
@@ -118,15 +204,29 @@ class SummarizeShService:
             SummarizeResult with summary and ai_failed flag.
         """
         self._ensure_config_exists()
+        config_details = self._summarize_config_details()
+        logger.info(
+            "Summarize.sh config in use",
+            extra={
+                "config_path": config_details["path"],
+                "config_source": config_details["source"],
+                "config_model": config_details["model"],
+                "config_language": config_details["language"],
+                "config_error": config_details["error"],
+                "whisper_model": whisper_model,
+            },
+        )
 
-        cmd = ["summarize", url, "--json"]
+        cmd = ["summarize", url, "--plain"]
         logger.debug("Running Summarize.sh: %s", " ".join(cmd))
+        env = self._build_env(whisper_model)
 
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
         except FileNotFoundError as exc:
             logger.error("Summarize.sh CLI not found: %s", exc)
@@ -168,14 +268,15 @@ class SummarizeShService:
             logger.warning("Summarize.sh returned empty output for %s", url)
             return SummarizeResult(summary="", ai_failed=True, error="empty output")
 
-        try:
-            payload = json.loads(output)
-            summary = self._extract_summary(payload)
-            if summary:
-                logger.info("Summarize.sh returned summary", extra={"url": url})
-                return SummarizeResult(summary=summary, ai_failed=False)
-            logger.warning("Summarize.sh JSON output missing summary field")
-        except json.JSONDecodeError:
-            logger.warning("Summarize.sh output was not JSON; using raw output")
-
+        stderr_text = stderr.decode("utf-8", errors="ignore")
+        observed_model = self._extract_model_from_metrics(stderr_text)
+        logger.info(
+            "Summarize.sh model selection",
+            extra={
+                "url": url,
+                "config_model": config_details["model"],
+                "observed_model": observed_model,
+            },
+        )
+        logger.info("Summarize.sh returned summary", extra={"url": url})
         return SummarizeResult(summary=output, ai_failed=False)

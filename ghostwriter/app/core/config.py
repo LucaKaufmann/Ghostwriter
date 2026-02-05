@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     summarize_sh_timeout_seconds: int = Field(
         default=90, description="Summarize.sh timeout per article"
     )
+    summarize_sh_whisper_cpp_binary: str = Field(
+        default="/usr/local/bin/whisper-cli",
+        description="Path to whisper.cpp binary for Summarize.sh",
+    )
+    summarize_sh_whisper_models_dir: str = Field(
+        default="/app/data/models/whisper",
+        description="Directory for whisper.cpp models",
+    )
 
     # Scheduling
     schedule_morning: str = Field(default="07:00", description="Morning schedule (24h)")
