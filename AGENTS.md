@@ -82,7 +82,8 @@
 - Naming: `*Test.kt`, `*_tests.py`, `*Tests.swift`.
 
 ## Commit & Pull Request Guidelines
-- Commit messages generally follow a conventional pattern: `feat: ...`, `fix: ...`, `perf: ...`, `tweak: ...` (lowercase preferred).
+- Commit messages must follow Conventional Commits (e.g. `feat: ...`, `fix: ...`, `perf: ...`, `tweak: ...`).
+- PR titles must also follow Conventional Commits format.
 - Keep commits scoped and descriptive; include a short summary of behavior changes.
 - PRs should include: summary, testing performed, and screenshots for UI changes (Android, iOS, or Ghostwriter web).
 
