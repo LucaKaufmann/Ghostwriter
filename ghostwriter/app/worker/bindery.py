@@ -294,7 +294,9 @@ class BinderyPipeline:
             extracted_articles: list[tuple[Feed, ExtractedArticle]] = []
             extracted_lock = asyncio.Lock()
             extract_sem = asyncio.Semaphore(5)
-            summarize_sh_sem = asyncio.Semaphore(1)
+            summarize_sh_sem = asyncio.Semaphore(
+                max(1, self.settings.summarize_sh_max_concurrency)
+            )
 
             async def _extract_one(feed: Feed, parsed_article) -> None:
                 async with extract_sem:

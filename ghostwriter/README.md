@@ -98,6 +98,7 @@ AI_PROVIDER=ollama
 # Summarize.sh (optional, for summarize-mode feeds)
 SUMMARIZE_SH_CONFIG_PATH=~/.summarize/config.json
 SUMMARIZE_SH_TIMEOUT_SECONDS=90
+SUMMARIZE_SH_MAX_CONCURRENCY=5
 
 # Scheduling (24h format)
 SCHEDULE_MORNING=07:00

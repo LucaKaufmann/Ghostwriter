@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     summarize_sh_timeout_seconds: int = Field(
         default=90, description="Summarize.sh timeout per article"
     )
+    summarize_sh_max_concurrency: int = Field(
+        default=5, description="Max parallel Summarize.sh calls"
+    )
 
     # Scheduling
     schedule_morning: str = Field(default="07:00", description="Morning schedule (24h)")
