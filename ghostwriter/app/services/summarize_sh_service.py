@@ -67,6 +67,33 @@ class SummarizeShService:
             return path.read_text(encoding="utf-8"), "user"
         return self._read_default_config(), "default"
 
+    def _summarize_config_details(self) -> dict[str, str | None]:
+        raw, source = self.get_config()
+        model = "auto"
+        language = None
+        error = None
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, dict):
+                value = payload.get("model")
+                if isinstance(value, str) and value.strip():
+                    model = value.strip()
+                output = payload.get("output")
+                if isinstance(output, dict):
+                    lang_value = output.get("language")
+                    if isinstance(lang_value, str) and lang_value.strip():
+                        language = lang_value.strip()
+        except json.JSONDecodeError as exc:
+            error = f"invalid_json: {exc.msg}"
+            model = "invalid"
+        return {
+            "path": str(self._resolve_config_path()),
+            "source": source,
+            "model": model,
+            "language": language,
+            "error": error,
+        }
+
     def validate_config_json(self, raw_json: str) -> None:
         """
         Validate that config JSON parses correctly.
@@ -111,6 +138,28 @@ class SummarizeShService:
                     return value.strip()
         return None
 
+    @staticmethod
+    def _extract_model_info(payload: object) -> tuple[str | None, list[str]]:
+        input_model = None
+        provider_models: list[str] = []
+        if isinstance(payload, dict):
+            input_block = payload.get("input")
+            if isinstance(input_block, dict):
+                model_value = input_block.get("model")
+                if isinstance(model_value, str) and model_value.strip():
+                    input_model = model_value.strip()
+            metrics = payload.get("metrics")
+            if isinstance(metrics, dict):
+                providers = metrics.get("providers")
+                if isinstance(providers, list):
+                    for provider in providers:
+                        if not isinstance(provider, dict):
+                            continue
+                        model_value = provider.get("model")
+                        if isinstance(model_value, str) and model_value.strip():
+                            provider_models.append(model_value.strip())
+        return input_model, provider_models
+
     def _build_env(self, whisper_model: str | None) -> dict[str, str]:
         env = os.environ.copy()
 
@@ -141,6 +190,18 @@ class SummarizeShService:
             SummarizeResult with summary and ai_failed flag.
         """
         self._ensure_config_exists()
+        config_details = self._summarize_config_details()
+        logger.info(
+            "Summarize.sh config in use",
+            extra={
+                "config_path": config_details["path"],
+                "config_source": config_details["source"],
+                "config_model": config_details["model"],
+                "config_language": config_details["language"],
+                "config_error": config_details["error"],
+                "whisper_model": whisper_model,
+            },
+        )
 
         cmd = ["summarize", url, "--json"]
         logger.debug("Running Summarize.sh: %s", " ".join(cmd))
@@ -195,6 +256,16 @@ class SummarizeShService:
 
         try:
             payload = json.loads(output)
+            input_model, provider_models = self._extract_model_info(payload)
+            logger.info(
+                "Summarize.sh model selection",
+                extra={
+                    "url": url,
+                    "config_model": config_details["model"],
+                    "input_model": input_model,
+                    "provider_models": provider_models,
+                },
+            )
             summary = self._extract_summary(payload)
             if summary:
                 logger.info("Summarize.sh returned summary", extra={"url": url})
