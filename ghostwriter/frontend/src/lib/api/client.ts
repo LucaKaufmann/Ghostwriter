@@ -20,6 +20,8 @@ import type {
 	WallabagTestResult,
 	SummarizeConfigResponse,
 	SummarizeConfigUpdate,
+	WhisperModelsResponse,
+	WhisperModelRequest,
 	PreviewResponse,
 	APIError,
 	DigestPeriod,
@@ -231,6 +233,30 @@ class ApiClient {
 
 	async updateSummarizeConfig(data: SummarizeConfigUpdate): Promise<SummarizeConfigResponse> {
 		return this.request<SummarizeConfigResponse>('/config/summarize', {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async getWhisperModels(): Promise<WhisperModelsResponse> {
+		return this.request<WhisperModelsResponse>('/config/summarize/models');
+	}
+
+	async downloadWhisperModel(data: WhisperModelRequest): Promise<WhisperModelsResponse> {
+		return this.request<WhisperModelsResponse>('/config/summarize/models/download', {
+			method: 'POST',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async deleteWhisperModel(model: string): Promise<WhisperModelsResponse> {
+		return this.request<WhisperModelsResponse>(`/config/summarize/models/${model}`, {
+			method: 'DELETE'
+		});
+	}
+
+	async setActiveWhisperModel(data: WhisperModelRequest): Promise<WhisperModelsResponse> {
+		return this.request<WhisperModelsResponse>('/config/summarize/models/active', {
 			method: 'PUT',
 			body: JSON.stringify(data)
 		});

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -18,6 +18,8 @@ from app.models.seen_article import SeenArticle
 from app.models.wallabag_config import WallabagConfig, WallabagConfigRead, WallabagConfigUpdate
 from app.services.newsletter_service import NewsletterService
 from app.services.summarize_sh_service import SummarizeShService
+from app.services.whisper_model_service import WhisperModelService
+from app.services.whisper_models import WHISPER_MODELS
 from app.services.wallabag_service import WallabagService
 from app.worker import scheduler as scheduler_module
 from app.core.config import Settings, get_settings
@@ -47,6 +49,7 @@ class ConfigResponse(BaseModel):
     updated_at: datetime
     summarize_sh_enabled: bool
     summarize_sh_on_fail: str
+    summarize_sh_whisper_model: str
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -71,6 +74,9 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Summarize.sh failure behavior: fallback_ai, raw, skip",
     )
+    summarize_sh_whisper_model: str | None = Field(
+        default=None, description="whisper.cpp model name for Summarize.sh"
+    )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
 
@@ -86,6 +92,32 @@ class SummarizeConfigUpdate(BaseModel):
     """Request model for updating Summarize.sh config."""
 
     config_json: str = Field(description="Raw Summarize.sh config.json contents")
+
+
+class WhisperModelInfo(BaseModel):
+    """Information about a whisper.cpp model."""
+
+    name: str
+    filename: str
+    downloaded: bool
+    size_bytes: int | None = None
+    status: Literal["not_downloaded", "downloading", "downloaded", "failed"]
+    bytes_downloaded: int | None = None
+    total_bytes: int | None = None
+    error: str | None = None
+
+
+class WhisperModelsResponse(BaseModel):
+    """Response model for whisper.cpp model management."""
+
+    active_model: str
+    models: list[WhisperModelInfo]
+
+
+class WhisperModelRequest(BaseModel):
+    """Request for whisper.cpp model actions."""
+
+    model: str
 
 
 def get_or_create_config(session: Session) -> ClientConfig:
@@ -129,6 +161,7 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         updated_at=config.updated_at,
         summarize_sh_enabled=config.summarize_sh_enabled,
         summarize_sh_on_fail=config.summarize_sh_on_fail,
+        summarize_sh_whisper_model=config.summarize_sh_whisper_model,
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -202,6 +235,20 @@ async def update_config(
 
     if request.summarize_sh_on_fail is not None:
         config.summarize_sh_on_fail = request.summarize_sh_on_fail
+
+    if request.summarize_sh_whisper_model is not None:
+        if request.summarize_sh_whisper_model not in WHISPER_MODELS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown whisper model",
+            )
+        service = WhisperModelService(get_settings())
+        if not service.is_downloaded(request.summarize_sh_whisper_model):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Model must be downloaded before activation",
+            )
+        config.summarize_sh_whisper_model = request.summarize_sh_whisper_model
 
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour
@@ -280,6 +327,115 @@ async def update_summarize_config(
         ) from exc
     config_json, source = service.get_config()
     return SummarizeConfigResponse(config_json=config_json, source=source)
+
+
+@router.get(
+    "/summarize/models",
+    response_model=WhisperModelsResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def list_whisper_models(
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> WhisperModelsResponse:
+    """List whisper.cpp models and download status."""
+    config = get_or_create_config(session)
+    service = WhisperModelService(settings)
+    return WhisperModelsResponse(
+        active_model=config.summarize_sh_whisper_model or "base.en",
+        models=service.list_models(),
+    )
+
+
+@router.post(
+    "/summarize/models/download",
+    response_model=WhisperModelsResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def download_whisper_model(
+    request: WhisperModelRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> WhisperModelsResponse:
+    """Start a whisper.cpp model download."""
+    if request.model not in WHISPER_MODELS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown whisper model"
+        )
+    service = WhisperModelService(settings)
+    if service.is_downloading(request.model):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Model download already in progress",
+        )
+    background_tasks.add_task(service.download_model, request.model)
+    config = get_or_create_config(session)
+    return WhisperModelsResponse(
+        active_model=config.summarize_sh_whisper_model or "base.en",
+        models=service.list_models(),
+    )
+
+
+@router.delete(
+    "/summarize/models/{model_name}",
+    response_model=WhisperModelsResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def delete_whisper_model(
+    model_name: str,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> WhisperModelsResponse:
+    """Delete a downloaded whisper.cpp model."""
+    if model_name not in WHISPER_MODELS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown whisper model"
+        )
+    service = WhisperModelService(settings)
+    try:
+        service.delete_model(model_name)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    config = get_or_create_config(session)
+    return WhisperModelsResponse(
+        active_model=config.summarize_sh_whisper_model or "base.en",
+        models=service.list_models(),
+    )
+
+
+@router.put(
+    "/summarize/models/active",
+    response_model=WhisperModelsResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def set_active_whisper_model(
+    request: WhisperModelRequest,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> WhisperModelsResponse:
+    """Set the active whisper.cpp model."""
+    if request.model not in WHISPER_MODELS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown whisper model"
+        )
+    service = WhisperModelService(settings)
+    if not service.is_downloaded(request.model):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Model must be downloaded before activation",
+        )
+    config = get_or_create_config(session)
+    config.summarize_sh_whisper_model = request.model
+    config.updated_at = datetime.now(timezone.utc)
+    session.add(config)
+    session.commit()
+    return WhisperModelsResponse(
+        active_model=config.summarize_sh_whisper_model or "base.en",
+        models=service.list_models(),
+    )
 
 
 # ============ Wallabag Configuration ============

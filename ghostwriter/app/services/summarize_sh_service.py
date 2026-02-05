@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import Settings, get_settings
+from app.services.whisper_models import resolve_whisper_model_path
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,29 @@ class SummarizeShService:
                     return value.strip()
         return None
 
-    async def summarize_url(self, url: str) -> SummarizeResult:
+    def _build_env(self, whisper_model: str | None) -> dict[str, str]:
+        env = os.environ.copy()
+
+        binary_path = Path(
+            os.path.expanduser(self.settings.summarize_sh_whisper_cpp_binary)
+        )
+        if self.settings.summarize_sh_whisper_cpp_binary and binary_path.exists():
+            env["SUMMARIZE_WHISPER_CPP_BINARY"] = str(binary_path)
+        else:
+            env.pop("SUMMARIZE_WHISPER_CPP_BINARY", None)
+
+        models_dir = Path(
+            os.path.expanduser(self.settings.summarize_sh_whisper_models_dir)
+        )
+        model_path = resolve_whisper_model_path(models_dir, whisper_model)
+        if model_path:
+            env["SUMMARIZE_WHISPER_CPP_MODEL_PATH"] = str(model_path)
+        else:
+            env.pop("SUMMARIZE_WHISPER_CPP_MODEL_PATH", None)
+
+        return env
+
+    async def summarize_url(self, url: str, whisper_model: str | None = None) -> SummarizeResult:
         """
         Summarize a URL using Summarize.sh.
 
@@ -121,12 +144,14 @@ class SummarizeShService:
 
         cmd = ["summarize", url, "--json"]
         logger.debug("Running Summarize.sh: %s", " ".join(cmd))
+        env = self._build_env(whisper_model)
 
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
         except FileNotFoundError as exc:
             logger.error("Summarize.sh CLI not found: %s", exc)

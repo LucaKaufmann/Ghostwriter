@@ -115,6 +115,7 @@ class BinderyPipeline:
         # Get digest info for logging and current client config
         summarize_sh_enabled = False
         summarize_sh_on_fail = "raw"
+        summarize_sh_whisper_model = None
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
             period = digest.period if digest else "manual"
@@ -122,6 +123,9 @@ class BinderyPipeline:
             if client_config:
                 summarize_sh_enabled = client_config.summarize_sh_enabled
                 summarize_sh_on_fail = client_config.summarize_sh_on_fail or "raw"
+                summarize_sh_whisper_model = (
+                    client_config.summarize_sh_whisper_model or "base.en"
+                )
         logger.info(
             "Summarize.sh enabled for digest",
             extra={"digest_id": str(self.digest_id), "enabled": summarize_sh_enabled},
@@ -314,7 +318,8 @@ class BinderyPipeline:
                             )
                             summarize_target = parsed_article.content_url or parsed_article.url
                             summarize_result = await self.summarize_sh_service.summarize_url(
-                                summarize_target
+                                summarize_target,
+                                whisper_model=summarize_sh_whisper_model,
                             )
                         if not summarize_result.ai_failed and summarize_result.summary:
                             content = markdown_to_html_basic(summarize_result.summary)
