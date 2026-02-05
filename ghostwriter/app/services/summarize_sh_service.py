@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -160,6 +161,19 @@ class SummarizeShService:
                             provider_models.append(model_value.strip())
         return input_model, provider_models
 
+    @staticmethod
+    def _extract_model_from_metrics(stderr_text: str) -> str | None:
+        for line in stderr_text.splitlines():
+            if "·" not in line:
+                continue
+            parts = [part.strip() for part in line.split("·")]
+            if len(parts) >= 3 and parts[2]:
+                return parts[2]
+        match = re.search(r"\b(?:openai|google|anthropic|xai|zai|openrouter|cli)/\S+", stderr_text)
+        if match:
+            return match.group(0)
+        return None
+
     def _build_env(self, whisper_model: str | None) -> dict[str, str]:
         env = os.environ.copy()
 
@@ -203,7 +217,7 @@ class SummarizeShService:
             },
         )
 
-        cmd = ["summarize", url, "--json"]
+        cmd = ["summarize", url, "--plain"]
         logger.debug("Running Summarize.sh: %s", " ".join(cmd))
         env = self._build_env(whisper_model)
 
@@ -254,24 +268,15 @@ class SummarizeShService:
             logger.warning("Summarize.sh returned empty output for %s", url)
             return SummarizeResult(summary="", ai_failed=True, error="empty output")
 
-        try:
-            payload = json.loads(output)
-            input_model, provider_models = self._extract_model_info(payload)
-            logger.info(
-                "Summarize.sh model selection",
-                extra={
-                    "url": url,
-                    "config_model": config_details["model"],
-                    "input_model": input_model,
-                    "provider_models": provider_models,
-                },
-            )
-            summary = self._extract_summary(payload)
-            if summary:
-                logger.info("Summarize.sh returned summary", extra={"url": url})
-                return SummarizeResult(summary=summary, ai_failed=False)
-            logger.warning("Summarize.sh JSON output missing summary field")
-        except json.JSONDecodeError:
-            logger.warning("Summarize.sh output was not JSON; using raw output")
-
+        stderr_text = stderr.decode("utf-8", errors="ignore")
+        observed_model = self._extract_model_from_metrics(stderr_text)
+        logger.info(
+            "Summarize.sh model selection",
+            extra={
+                "url": url,
+                "config_model": config_details["model"],
+                "observed_model": observed_model,
+            },
+        )
+        logger.info("Summarize.sh returned summary", extra={"url": url})
         return SummarizeResult(summary=output, ai_failed=False)
