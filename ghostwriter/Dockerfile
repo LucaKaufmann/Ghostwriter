@@ -36,6 +36,21 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 
+# Stage 2.5: whisper.cpp Builder
+FROM python:3.11-slim AS whisper-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    cmake \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth=1 https://github.com/ggml-org/whisper.cpp /opt/whisper && \
+    cmake -S /opt/whisper -B /opt/whisper/build && \
+    cmake --build /opt/whisper/build -j && \
+    strip -s /opt/whisper/build/bin/whisper-cli || true
+
+
 # Stage 3: Runtime
 FROM python:3.11-slim AS runtime
 
@@ -59,6 +74,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Media helpers for Summarize.sh (yt-dlp used for media fetching)
 RUN pip install --no-cache-dir yt-dlp
+
+# Copy whisper.cpp binary
+COPY --from=whisper-builder /opt/whisper/build/bin/whisper-cli /usr/local/bin/whisper-cli
 
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
