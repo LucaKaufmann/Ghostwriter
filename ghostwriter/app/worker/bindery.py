@@ -21,6 +21,7 @@ from app.services.content_processor import ContentProcessor, ExtractedArticle
 from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
 from app.services.summarize_sh_service import SummarizeShService
+from app.services.markdown_utils import markdown_to_html_basic
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
 
@@ -316,7 +317,7 @@ class BinderyPipeline:
                                 summarize_target
                             )
                         if not summarize_result.ai_failed and summarize_result.summary:
-                            content = summarize_result.summary
+                            content = markdown_to_html_basic(summarize_result.summary)
                             is_summary = True
                             word_count = ContentProcessor.count_words(content)
                             original_word_count = (
