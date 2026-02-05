@@ -99,6 +99,9 @@ Thumbs.db
 # Test data / examples
 examples/
 
+# Task tracking
+tasks/
+
 # Secrets (ensure these are never committed)
 secrets.properties
 *.pem
