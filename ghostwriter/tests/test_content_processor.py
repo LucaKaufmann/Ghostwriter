@@ -80,3 +80,22 @@ async def test_parse_feed_uses_enclosure_link_rel(monkeypatch):
 
     assert len(articles) == 1
     assert articles[0].content_url == "https://cdn.example.com/episode3.ogg"
+
+
+@pytest.mark.asyncio
+async def test_parse_feed_respects_max_entries(monkeypatch):
+    settings = Settings(allow_private_hosts=True, max_articles_per_feed=10)
+    processor = ContentProcessor(settings=settings)
+
+    entries = [
+        {"id": "a1", "link": "https://example.com/1", "title": "One"},
+        {"id": "a2", "link": "https://example.com/2", "title": "Two"},
+        {"id": "a3", "link": "https://example.com/3", "title": "Three"},
+    ]
+    feed = SimpleNamespace(bozo=False, entries=entries)
+    monkeypatch.setattr("feedparser.parse", lambda *_args, **_kwargs: feed)
+
+    articles = await processor.parse_feed("https://example.com/feed.xml", max_entries=1)
+
+    assert len(articles) == 1
+    assert articles[0].url == "https://example.com/1"

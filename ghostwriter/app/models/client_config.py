@@ -30,6 +30,10 @@ class ClientConfigBase(SQLModel):
         default="raw",
         description="Summarize.sh failure behavior: fallback_ai, raw, skip",
     )
+    summarize_sh_whisper_model: str = Field(
+        default="base.en",
+        description="whisper.cpp model name for Summarize.sh",
+    )
 
 
 class ClientConfig(ClientConfigBase, table=True):
@@ -65,6 +69,9 @@ class ClientConfigUpdate(SQLModel):
     summarize_sh_on_fail: str | None = Field(
         default=None, description="Summarize.sh failure behavior: fallback_ai, raw, skip"
     )
+    summarize_sh_whisper_model: str | None = Field(
+        default=None, description="whisper.cpp model name for Summarize.sh"
+    )
 
 
 class ClientConfigRead(SQLModel):
@@ -81,4 +88,5 @@ class ClientConfigRead(SQLModel):
     newsletters_enabled: bool
     summarize_sh_enabled: bool
     summarize_sh_on_fail: str
+    summarize_sh_whisper_model: str
     updated_at: datetime

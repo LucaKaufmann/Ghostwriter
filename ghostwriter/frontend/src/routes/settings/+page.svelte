@@ -118,6 +118,16 @@
 		queryFn: () => api.getSummarizeConfig()
 	}));
 
+	const whisperModelsQuery = createQuery(() => ({
+		queryKey: ['whisper-models'],
+		queryFn: () => api.getWhisperModels(),
+		refetchInterval: (query) => {
+			const data = query.state.data;
+			if (!data) return false;
+			return data.models.some((model) => model.status === 'downloading') ? 2000 : false;
+		}
+	}));
+
 	const updateWallabagMutation = createMutation(() => ({
 		mutationFn: (data: WallabagConfigUpdate) => api.updateWallabagConfig(data),
 		onSuccess: (data) => {
@@ -174,6 +184,39 @@
 		},
 		onError: (err: Error) => {
 			toast.error('Failed to save Summarize.sh config', { description: err.message });
+		}
+	}));
+
+	const downloadWhisperModelMutation = createMutation(() => ({
+		mutationFn: (model: string) => api.downloadWhisperModel({ model }),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['whisper-models'] });
+			toast.success('Model download started');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to download model', { description: err.message });
+		}
+	}));
+
+	const deleteWhisperModelMutation = createMutation(() => ({
+		mutationFn: (model: string) => api.deleteWhisperModel(model),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['whisper-models'] });
+			toast.success('Model removed');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to remove model', { description: err.message });
+		}
+	}));
+
+	const setActiveWhisperModelMutation = createMutation(() => ({
+		mutationFn: (model: string) => api.setActiveWhisperModel({ model }),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['whisper-models'] });
+			toast.success('Active model updated');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to update active model', { description: err.message });
 		}
 	}));
 
@@ -241,6 +284,7 @@
 	let summarizeConfigSource = $state<'user' | 'default' | null>(null);
 	let summarizeEnabled = $state(false);
 	let summarizeOnFail = $state<'fallback_ai' | 'raw' | 'skip'>('raw');
+	let summarizeEnabledSaved = $derived(clientConfigQuery.data?.summarize_sh_enabled ?? false);
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -476,6 +520,14 @@
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
+	function getDownloadProgress(model: { bytes_downloaded?: number | null; total_bytes?: number | null }): string | null {
+		if (!model.total_bytes || model.total_bytes === 0 || model.bytes_downloaded == null) {
+			return null;
+		}
+		const percent = Math.min(100, Math.round((model.bytes_downloaded / model.total_bytes) * 100));
+		return `${percent}%`;
 	}
 
 	function formatDate(dateStr: string): string {
@@ -1113,6 +1165,97 @@
 						<option value="raw">Include raw article text</option>
 						<option value="skip">Do nothing (skip article)</option>
 					</select>
+				</div>
+
+				<div class="flex flex-col gap-3 rounded-lg border p-4">
+					<div class="space-y-1">
+						<p class="font-medium">Whisper.cpp Models</p>
+						<p class="text-sm text-muted-foreground">
+							Download a model to enable local audio transcription for Summarize.sh.
+						</p>
+					</div>
+
+					{#if !summarizeEnabledSaved}
+						<p class="text-sm text-muted-foreground">
+							Enable Summarize.sh and save to manage models.
+						</p>
+					{/if}
+
+					{#if whisperModelsQuery.isPending}
+						<div class="space-y-2">
+							<Skeleton class="h-4 w-40" />
+							<Skeleton class="h-10 w-full" />
+						</div>
+					{:else if whisperModelsQuery.data}
+						<div class="space-y-2">
+							{#each whisperModelsQuery.data.models as model}
+								<div class="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
+									<div class="space-y-1">
+										<div class="flex items-center gap-2">
+											<p class="font-medium">{model.name}</p>
+											{#if whisperModelsQuery.data.active_model === model.name}
+												<span class="rounded-full bg-muted px-2 py-0.5 text-xs">Active</span>
+											{/if}
+										</div>
+										<p class="text-xs text-muted-foreground">
+											{#if model.status === 'downloaded'}
+												Downloaded{#if model.size_bytes} • {formatFileSize(model.size_bytes)}{/if}
+											{:else if model.status === 'downloading'}
+												Downloading{#if getDownloadProgress(model)} • {getDownloadProgress(model)}{/if}
+											{:else if model.status === 'failed'}
+												Download failed
+											{:else}
+												Not downloaded
+											{/if}
+										</p>
+										{#if model.error}
+											<p class="text-xs text-destructive">{model.error}</p>
+										{/if}
+									</div>
+
+									<div class="flex items-center gap-2">
+										{#if model.status === 'downloaded'}
+											{#if whisperModelsQuery.data.active_model !== model.name}
+												<Button
+													variant="outline"
+													size="sm"
+													onclick={() => setActiveWhisperModelMutation.mutate(model.name)}
+													disabled={!summarizeEnabledSaved || setActiveWhisperModelMutation.isPending}
+												>
+													Use
+												</Button>
+											{/if}
+											<Button
+												variant="outline"
+												size="sm"
+												onclick={() => deleteWhisperModelMutation.mutate(model.name)}
+												disabled={!summarizeEnabledSaved || deleteWhisperModelMutation.isPending}
+											>
+												<Trash2 class="mr-2 h-4 w-4" />
+												Remove
+											</Button>
+										{:else if model.status === 'downloading'}
+											<Button variant="outline" size="sm" disabled>
+												<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+												Downloading
+											</Button>
+										{:else}
+											<Button
+												size="sm"
+												onclick={() => downloadWhisperModelMutation.mutate(model.name)}
+												disabled={!summarizeEnabledSaved || downloadWhisperModelMutation.isPending}
+											>
+												<Download class="mr-2 h-4 w-4" />
+												Download
+											</Button>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<p class="text-sm text-muted-foreground">Unable to load model status.</p>
+					{/if}
 				</div>
 
 				<div class="flex items-center justify-between gap-4 text-sm text-muted-foreground">

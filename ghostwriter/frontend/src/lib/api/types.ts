@@ -101,6 +101,7 @@ export interface ClientConfigResponse {
 	timezone: string;
 	summarize_sh_enabled: boolean;
 	summarize_sh_on_fail: string;
+	summarize_sh_whisper_model: string;
 	updated_at: string;
 	wallabag?: IntegrationStatus | null;
 	newsletters?: IntegrationStatus | null;
@@ -118,6 +119,7 @@ export interface ClientConfigUpdate {
 	newsletters_enabled?: boolean;
 	summarize_sh_enabled?: boolean;
 	summarize_sh_on_fail?: string;
+	summarize_sh_whisper_model?: string;
 	client_updated_at?: string;
 }
 
@@ -306,6 +308,26 @@ export interface SummarizeConfigResponse {
 
 export interface SummarizeConfigUpdate {
 	config_json: string;
+}
+
+export interface WhisperModelInfo {
+	name: string;
+	filename: string;
+	downloaded: boolean;
+	size_bytes?: number | null;
+	status: 'not_downloaded' | 'downloading' | 'downloaded' | 'failed';
+	bytes_downloaded?: number | null;
+	total_bytes?: number | null;
+	error?: string | null;
+}
+
+export interface WhisperModelsResponse {
+	active_model: string;
+	models: WhisperModelInfo[];
+}
+
+export interface WhisperModelRequest {
+	model: string;
 }
 
 // ============ Integration Previews ============
