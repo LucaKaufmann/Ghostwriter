@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import datetime
 from uuid import uuid4
 
@@ -261,12 +262,18 @@ class EpubGenerator:
         def escape_html(text: str) -> str:
             return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-        content = escape_html(article.content)
+        def looks_like_html(text: str) -> bool:
+            return bool(re.search(r"<[a-zA-Z][^>]*>", text))
+
         title = escape_html(article.title)
 
-        # Convert newlines to paragraphs
-        paragraphs = content.split("\n\n")
-        content_html = "".join(f"<p>{p.strip()}</p>" for p in paragraphs if p.strip())
+        if looks_like_html(article.content):
+            content_html = article.content
+        else:
+            content = escape_html(article.content)
+            # Convert newlines to paragraphs
+            paragraphs = content.split("\n\n")
+            content_html = "".join(f"<p>{p.strip()}</p>" for p in paragraphs if p.strip())
 
         # Badge for summarized articles
         badge = ""

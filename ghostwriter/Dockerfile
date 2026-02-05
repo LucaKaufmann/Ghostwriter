@@ -45,6 +45,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    ffmpeg \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends \
     nodejs \
@@ -55,6 +56,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy virtual environment from builder
 COPY --from=python-builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+
+# Media helpers for Summarize.sh (yt-dlp used for media fetching)
+RUN pip install --no-cache-dir yt-dlp
 
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
