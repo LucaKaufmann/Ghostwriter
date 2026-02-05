@@ -571,7 +571,9 @@ class BinderyPipeline:
         Returns:
             Tuple of (list of (feed, parsed_article) tuples, total article count).
         """
-        parsed = await self.content_processor.parse_feed(feed.url)
+        parsed = await self.content_processor.parse_feed(
+            feed.url, max_entries=feed.max_articles
+        )
         total_count = len(parsed)
 
         # Filter out already seen articles
