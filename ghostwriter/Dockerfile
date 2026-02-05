@@ -75,8 +75,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Media helpers for Summarize.sh (yt-dlp used for media fetching)
 RUN pip install --no-cache-dir yt-dlp
 
-# Copy whisper.cpp binary
+# Copy whisper.cpp binary + shared libs
 COPY --from=whisper-builder /opt/whisper/build/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=whisper-builder /opt/whisper/build/src/libwhisper.so* /usr/local/lib/
+COPY --from=whisper-builder /opt/whisper/build/ggml/src/libggml*.so* /usr/local/lib/
+RUN ldconfig
 
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
