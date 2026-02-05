@@ -23,10 +23,18 @@ class SummarizeResult:
     summary: str
     ai_failed: bool
     original_word_count: int | None = None
+    error: str | None = None
 
 
 class SummarizeShService:
     """Wrapper around the Summarize.sh CLI."""
+
+    @staticmethod
+    def _sanitize_error(message: str, max_len: int = 300) -> str:
+        cleaned = " ".join(message.split())
+        if len(cleaned) <= max_len:
+            return cleaned
+        return f"{cleaned[: max_len - 3]}..."
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -122,7 +130,11 @@ class SummarizeShService:
             )
         except FileNotFoundError as exc:
             logger.error("Summarize.sh CLI not found: %s", exc)
-            return SummarizeResult(summary="", ai_failed=True)
+            return SummarizeResult(
+                summary="",
+                ai_failed=True,
+                error="summarize CLI not found in PATH",
+            )
 
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -136,17 +148,25 @@ class SummarizeShService:
                 "Summarize.sh timed out after %ss",
                 self.settings.summarize_sh_timeout_seconds,
             )
-            return SummarizeResult(summary="", ai_failed=True)
+            return SummarizeResult(
+                summary="",
+                ai_failed=True,
+                error=f"timed out after {self.settings.summarize_sh_timeout_seconds}s",
+            )
 
         if process.returncode != 0:
             err_text = stderr.decode("utf-8", errors="ignore").strip()
             logger.error("Summarize.sh failed: %s", err_text)
-            return SummarizeResult(summary="", ai_failed=True)
+            if err_text:
+                error = f"exit {process.returncode}: {self._sanitize_error(err_text)}"
+            else:
+                error = f"exit {process.returncode} with empty stderr"
+            return SummarizeResult(summary="", ai_failed=True, error=error)
 
         output = stdout.decode("utf-8", errors="ignore").strip()
         if not output:
             logger.warning("Summarize.sh returned empty output for %s", url)
-            return SummarizeResult(summary="", ai_failed=True)
+            return SummarizeResult(summary="", ai_failed=True, error="empty output")
 
         try:
             payload = json.loads(output)
