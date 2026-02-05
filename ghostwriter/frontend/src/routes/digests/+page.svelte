@@ -407,7 +407,9 @@
 
 <!-- View Articles Dialog -->
 <Dialog.Root open={!!viewingDigest} onOpenChange={(open) => !open && (viewingDigest = null)}>
-	<Dialog.Content class="max-w-2xl max-h-[80vh] w-[calc(100vw-2rem)] sm:w-auto flex flex-col">
+<Dialog.Content
+	class="max-w-2xl max-h-[80vh] w-[calc(100vw-2rem)] sm:w-auto flex flex-col min-h-0 overflow-hidden"
+>
 		<Dialog.Header>
 			<Dialog.Title class="capitalize">
 				{viewingDigest?.period} Digest Articles
@@ -417,7 +419,7 @@
 				{viewingArticles.length} articles
 			</Dialog.Description>
 		</Dialog.Header>
-		<ScrollArea.Root class="flex-1 -mx-6 px-6">
+		<ScrollArea.Root class="flex-1 min-h-0 -mx-6 px-6">
 			{#if loadingArticles}
 				<div class="space-y-3 py-4">
 					{#each [1, 2, 3] as _}

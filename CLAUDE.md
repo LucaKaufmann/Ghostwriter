@@ -52,6 +52,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
+## Commit & Pull Request Guidelines
+- Commit messages must follow Conventional Commits (e.g. `feat: ...`, `fix: ...`, `perf: ...`, `tweak: ...`).
+- PR titles must also follow Conventional Commits format.
+- Keep commits scoped and descriptive; include a short summary of behavior changes.
+- PRs should include: summary, testing performed, and screenshots for UI changes (Android, iOS, or Ghostwriter web).
+
 ## Project Overview
 
 Epilogue is an Android application that aggregates RSS/Atom feeds, Wallabag bookmarks, and Gmail newsletters, processes content through either full extraction or AI summarization, and compiles results into daily EPUB files for offline reading on e-ink devices (optimized for Onyx Boox Palma 2).
