@@ -330,9 +330,10 @@ class BinderyPipeline:
                             )
                         else:
                             ai_failed = True
+                            error_detail = summarize_result.error or "Summarize.sh returned error"
                             digest_logger.article_summarization_failed(
                                 parsed_article.title,
-                                "Summarize.sh returned error",
+                                error_detail,
                                 fallback=True,
                             )
 
