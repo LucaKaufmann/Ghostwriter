@@ -547,6 +547,38 @@ class BinderyPipeline:
                 await asyncio.gather(*[_summarize_wb(a) for a in wallabag_articles])
                 wallabag_articles = enriched_wallabag
 
+            # Enrich newsletter articles with AI if configured (parallel)
+            if newsletter_articles and self.settings.newsletter_mode == "summarize":
+                await self._update_stage("enriching")
+                llm_sem = asyncio.Semaphore(3)
+                enriched_newsletters: list[ExtractedArticle] = []
+                nl_lock = asyncio.Lock()
+
+                async def _summarize_nl(article: ExtractedArticle) -> None:
+                    async with llm_sem:
+                        summary_content, ai_failed = await self.llm_service.summarize(article.content)
+                        if not ai_failed:
+                            result = ExtractedArticle(
+                                guid=article.guid,
+                                url=article.url,
+                                title=article.title,
+                                content=summary_content,
+                                author=article.author,
+                                word_count=ContentProcessor.count_words(summary_content),
+                                is_summary=True,
+                                ai_failed=False,
+                                processing_ms=article.processing_ms,
+                                feed_title=article.feed_title,
+                            )
+                        else:
+                            result = article
+                    async with nl_lock:
+                        enriched_newsletters.append(result)
+
+                logger.info(f"Summarizing {len(newsletter_articles)} newsletter articles with concurrency=3")
+                await asyncio.gather(*[_summarize_nl(a) for a in newsletter_articles])
+                newsletter_articles = enriched_newsletters
+
             if not extracted_articles and not wallabag_articles and not newsletter_articles:
                 logger.warning("No articles extracted successfully")
                 digest_logger.pipeline_no_articles(str(self.digest_id), "All article extractions failed")
