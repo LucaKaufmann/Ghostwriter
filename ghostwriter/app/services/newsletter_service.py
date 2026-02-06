@@ -695,7 +695,7 @@ class NewsletterService:
         for child in content_el:
             if not self._is_element(child):
                 continue
-            serialized = html_tostring(child, encoding="unicode", method="html")
+            serialized = html_tostring(child, encoding="unicode", method="xml")
             if serialized.strip():
                 parts.append(serialized.strip())
 
