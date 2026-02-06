@@ -286,10 +286,12 @@ class BinderyPipeline:
             newsletter_service = NewsletterService(self.settings)
 
             newsletters_enabled = True
+            newsletter_mode = "summarize"
             with Session(engine) as nl_session:
                 nl_config = nl_session.exec(select(ClientConfig)).first()
                 if nl_config:
                     newsletters_enabled = nl_config.newsletters_enabled
+                    newsletter_mode = nl_config.newsletter_mode
 
             if newsletter_service.is_configured and newsletters_enabled:
                 try:
@@ -436,7 +438,11 @@ class BinderyPipeline:
                                 extra={"url": parsed_article.url, "title": parsed_article.title},
                             )
                             summary_content, ai_failed = await self.llm_service.summarize(
-                                content
+                                content,
+                                title=parsed_article.title,
+                                url=parsed_article.url,
+                                author=parsed_article.author,
+                                source=feed.name,
                             )
                             if not ai_failed:
                                 content = summary_content
@@ -460,7 +466,11 @@ class BinderyPipeline:
                                     extra={"url": parsed_article.url, "title": parsed_article.title},
                                 )
                                 summary_content, ai_failed = await self.llm_service.summarize(
-                                    content
+                                    content,
+                                    title=parsed_article.title,
+                                    url=parsed_article.url,
+                                    author=parsed_article.author,
+                                    source=feed.name,
                                 )
                                 if not ai_failed:
                                     content = summary_content
@@ -524,7 +534,13 @@ class BinderyPipeline:
 
                 async def _summarize_wb(article: ExtractedArticle) -> None:
                     async with llm_sem:
-                        summary_content, ai_failed = await self.llm_service.summarize(article.content)
+                        summary_content, ai_failed = await self.llm_service.summarize(
+                            article.content,
+                            title=article.title,
+                            url=article.url,
+                            author=article.author,
+                            source="Wallabag",
+                        )
                         if not ai_failed:
                             result = ExtractedArticle(
                                 guid=article.guid,
@@ -548,7 +564,7 @@ class BinderyPipeline:
                 wallabag_articles = enriched_wallabag
 
             # Enrich newsletter articles with AI if configured (parallel)
-            if newsletter_articles and self.settings.newsletter_mode == "summarize":
+            if newsletter_articles and newsletter_mode == "summarize":
                 await self._update_stage("enriching")
                 llm_sem = asyncio.Semaphore(3)
                 enriched_newsletters: list[ExtractedArticle] = []
@@ -556,7 +572,13 @@ class BinderyPipeline:
 
                 async def _summarize_nl(article: ExtractedArticle) -> None:
                     async with llm_sem:
-                        summary_content, ai_failed = await self.llm_service.summarize(article.content)
+                        summary_content, ai_failed = await self.llm_service.summarize(
+                            article.content,
+                            title=article.title,
+                            url=article.url,
+                            author=article.author,
+                            source="Newsletter",
+                        )
                         if not ai_failed:
                             result = ExtractedArticle(
                                 guid=article.guid,
