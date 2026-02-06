@@ -102,13 +102,13 @@ async def newsletter_status(
 async def oauth_start(
     request: Request,
     settings: Settings = Depends(get_settings),
-    _: None = Depends(verify_api_key),
 ) -> RedirectResponse:
     """
     Start OAuth flow - redirects to Google consent screen.
 
     Open this URL in a browser to authorize Gmail access.
-    No API key required (user must be present to authorize).
+    No API key required - this is a browser redirect flow that requires
+    user presence to complete the Google OAuth consent.
     """
     service = NewsletterService(settings)
     if not settings.gmail_client_id or not settings.gmail_client_secret:
