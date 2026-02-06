@@ -174,6 +174,16 @@ class SummarizeShService:
             return match.group(0)
         return None
 
+    @staticmethod
+    def _looks_like_unsummarized_output(text: str, is_media: bool) -> bool:
+        stripped = text.lstrip().lower()
+        if stripped.startswith("transcript:") or stripped.startswith("transkript:"):
+            return True
+        if not is_media:
+            return False
+        # Media summaries should not return near full transcripts.
+        return len(text.split()) >= 2500
+
     def _build_env(self, whisper_model: str | None) -> dict[str, str]:
         env = os.environ.copy()
 
@@ -196,7 +206,12 @@ class SummarizeShService:
 
         return env
 
-    async def summarize_url(self, url: str, whisper_model: str | None = None) -> SummarizeResult:
+    async def summarize_url(
+        self,
+        url: str,
+        whisper_model: str | None = None,
+        is_media: bool = False,
+    ) -> SummarizeResult:
         """
         Summarize a URL using Summarize.sh.
 
@@ -271,12 +286,28 @@ class SummarizeShService:
         stderr_text = stderr.decode("utf-8", errors="ignore")
         observed_model = self._extract_model_from_metrics(stderr_text)
         logger.info(
-            "Summarize.sh model selection",
+            "Summarize.sh model selection: config=%s observed=%s",
+            config_details["model"],
+            observed_model,
             extra={
                 "url": url,
                 "config_model": config_details["model"],
                 "observed_model": observed_model,
             },
         )
+        if self._looks_like_unsummarized_output(output, is_media=is_media):
+            logger.warning(
+                "Summarize.sh returned transcript-like output; treating as failure",
+                extra={
+                    "url": url,
+                    "is_media": is_media,
+                    "word_count": len(output.split()),
+                },
+            )
+            return SummarizeResult(
+                summary=output,
+                ai_failed=True,
+                error="output looked like unsummarized transcript",
+            )
         logger.info("Summarize.sh returned summary", extra={"url": url})
         return SummarizeResult(summary=output, ai_failed=False)
