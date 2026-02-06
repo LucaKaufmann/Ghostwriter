@@ -11,7 +11,7 @@ alembic upgrade head || {
 
 # Legacy migration scripts (for pre-existing databases)
 python scripts/migrate_add_article_content.py || true
-# Note: feed_id stays NOT NULL - newsletters/wallabag use synthetic feed rows instead
+python scripts/migrate_add_newsletter_mode.py || true
 
 echo "Starting Ghostwriter..."
 exec python -OO -m uvicorn app.main:app --host 0.0.0.0 --port 8080
