@@ -31,6 +31,30 @@ Requirements:
 Article:
 {content}"""
 
+    CHUNK_SUMMARIZE_PROMPT = """You are a concise news editor. You are summarizing part {part}/{total} of a long article or transcript.
+
+Requirements:
+- Keep only key facts, events, and decisions
+- Keep it concise and avoid repetition
+- Maximum 8 bullet points
+
+Content:
+{content}"""
+
+    REDUCE_PROMPT = """You are a concise news editor. Combine the following partial summaries into one final digest summary.
+
+Requirements:
+- Focus on key facts and main points
+- Use neutral, informative tone
+- Maximum 3 paragraphs
+- Do not include any preamble like "Here's a summary"
+
+Partial summaries:
+{content}"""
+
+    DIRECT_SUMMARY_CHAR_LIMIT = 15000
+    CHUNK_CHAR_LIMIT = 12000
+
     def __init__(self, settings: Settings | None = None) -> None:
         """
         Initialize the LLM service.
@@ -76,16 +100,49 @@ Article:
             retries = self.settings.ai_max_retries
 
         model = self.settings.get_llm_model_string()
-        prompt = self.SUMMARIZE_PROMPT.format(content=content[:15000])  # Truncate long content
+        if len(content) <= self.DIRECT_SUMMARY_CHAR_LIMIT:
+            prompt = self.SUMMARIZE_PROMPT.format(content=content)
+            direct_summary, direct_failed = await self._run_completion(prompt, model, retries)
+            if direct_failed:
+                return content, True
+            return direct_summary, False
 
-        # Build kwargs for LiteLLM
+        chunks = self._chunk_text(content, self.CHUNK_CHAR_LIMIT)
+        logger.info(
+            "Using chunked LLM summarization",
+            extra={"char_count": len(content), "chunks": len(chunks)},
+        )
+
+        partials: list[str] = []
+        total = len(chunks)
+        for index, chunk in enumerate(chunks, start=1):
+            prompt = self.CHUNK_SUMMARIZE_PROMPT.format(
+                part=index,
+                total=total,
+                content=chunk,
+            )
+            partial_summary, partial_failed = await self._run_completion(prompt, model, retries)
+            if partial_failed:
+                return content, True
+            partials.append(partial_summary)
+
+        reduce_input = "\n\n".join(partials)
+        reduce_prompt = self.REDUCE_PROMPT.format(content=reduce_input)
+        final_summary, final_failed = await self._run_completion(reduce_prompt, model, retries)
+        if final_failed:
+            return content, True
+        return final_summary, False
+
+    async def _run_completion(
+        self, prompt: str, model: str, retries: int
+    ) -> tuple[str, bool]:
+        """Run one LLM completion with retries, returning (output, failed)."""
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "timeout": self.settings.ai_timeout_seconds,
         }
 
-        # Add provider-specific config
         if self.settings.ai_provider == "ollama":
             kwargs["api_base"] = self.settings.ollama_base_url
         elif self.settings.ai_provider == "gemini":
@@ -94,40 +151,54 @@ Article:
             kwargs["api_key"] = self.settings.openai_api_key
 
         last_error: Exception | None = None
-
         for attempt in range(retries + 1):
             try:
-                logger.debug(
-                    f"LLM summarize attempt {attempt + 1}/{retries + 1} with model {model}"
-                )
-
+                logger.debug("LLM completion attempt %s/%s with model %s", attempt + 1, retries + 1, model)
                 response = await acompletion(**kwargs)
-                summary = response.choices[0].message.content
-
-                if summary:
-                    logger.info(f"Successfully summarized content with {model}")
-                    return summary.strip(), False
-
+                text = response.choices[0].message.content
+                if text:
+                    return text.strip(), False
                 logger.warning("Empty response from LLM, retrying...")
-
             except Exception as e:
                 last_error = e
-                logger.warning(
-                    f"LLM summarize attempt {attempt + 1} failed: {e}"
-                )
-
+                logger.warning(f"LLM summarize attempt {attempt + 1} failed: {e}")
                 if attempt < retries:
-                    # Exponential backoff: 1s, 2s, 4s...
-                    wait_time = 2**attempt
-                    logger.debug(f"Waiting {wait_time}s before retry...")
-                    await asyncio.sleep(wait_time)
+                    await asyncio.sleep(2**attempt)
 
-        # All retries failed - fall back to raw content
         logger.error(
             f"All LLM summarize attempts failed. Last error: {last_error}. "
             "Falling back to raw content."
         )
-        return content, True
+        return "", True
+
+    @staticmethod
+    def _chunk_text(text: str, chunk_size: int) -> list[str]:
+        """Split long text into roughly chunk_size character chunks."""
+        source = text.strip()
+        if len(source) <= chunk_size:
+            return [source]
+
+        chunks: list[str] = []
+        start = 0
+        end_limit = len(source)
+        while start < end_limit:
+            end = min(start + chunk_size, end_limit)
+            if end < end_limit:
+                split = source.rfind("\n\n", start, end)
+                if split <= start + chunk_size // 2:
+                    split = source.rfind(". ", start, end)
+                if split <= start + chunk_size // 2:
+                    split = source.rfind(" ", start, end)
+                if split > start:
+                    end = split + 1
+            chunk = source[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            if end <= start:
+                end = min(start + chunk_size, end_limit)
+            start = end
+
+        return chunks
 
     async def health_check(self) -> dict[str, Any]:
         """

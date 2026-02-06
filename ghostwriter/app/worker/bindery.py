@@ -309,6 +309,7 @@ class BinderyPipeline:
                     word_count = 0
                     is_summary = False
                     ai_failed = False
+                    fallback_source_content: str | None = None
 
                     if feed.mode == "summarize" and summarize_sh_enabled:
                         async with summarize_sh_sem:
@@ -320,6 +321,7 @@ class BinderyPipeline:
                             summarize_result = await self.summarize_sh_service.summarize_url(
                                 summarize_target,
                                 whisper_model=summarize_sh_whisper_model,
+                                is_media=bool(parsed_article.content_url),
                             )
                         if not summarize_result.ai_failed and summarize_result.summary:
                             content = markdown_to_html_basic(summarize_result.summary)
@@ -335,6 +337,8 @@ class BinderyPipeline:
                             )
                         else:
                             ai_failed = True
+                            if summarize_result.summary:
+                                fallback_source_content = summarize_result.summary
                             error_detail = summarize_result.error or "Summarize.sh returned error"
                             digest_logger.article_summarization_failed(
                                 parsed_article.title,
@@ -351,16 +355,27 @@ class BinderyPipeline:
                             return
 
                     if content is None:
-                        content = await self.content_processor.extract_content(
-                            parsed_article.url
-                        )
-                        if not content:
-                            logger.warning(f"Could not extract: {parsed_article.url}")
-                            digest_logger.article_extraction_failed(
-                                parsed_article.url,
-                                "Content extraction returned empty",
+                        if fallback_source_content:
+                            content = fallback_source_content
+                            logger.info(
+                                "Using Summarize.sh fallback content",
+                                extra={
+                                    "url": parsed_article.url,
+                                    "title": parsed_article.title,
+                                    "word_count": ContentProcessor.count_words(content),
+                                },
                             )
-                            return
+                        else:
+                            content = await self.content_processor.extract_content(
+                                parsed_article.url
+                            )
+                            if not content:
+                                logger.warning(f"Could not extract: {parsed_article.url}")
+                                digest_logger.article_extraction_failed(
+                                    parsed_article.url,
+                                    "Content extraction returned empty",
+                                )
+                                return
 
                         original_word_count = ContentProcessor.count_words(content)
                         word_count = original_word_count
