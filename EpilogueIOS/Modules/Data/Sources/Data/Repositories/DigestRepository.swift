@@ -174,7 +174,7 @@ public final class DigestRepository: DigestRepositoryProtocol {
                     feedUrl: "", // Not provided by Ghostwriter API
                     feedName: articleData.feedTitle,
                     contentType: contentType,
-                    orderIndex: articleData.sortOrder > 0 ? articleData.sortOrder : index,
+                    orderIndex: articleData.sortOrder >= 0 ? articleData.sortOrder : index,
                     wordCount: articleData.wordCount
                 )
 

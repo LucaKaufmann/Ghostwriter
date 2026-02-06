@@ -92,6 +92,11 @@ private data class Chapter(
     val content: SpannableStringBuilder
 )
 
+private data class FeedChapterGroup(
+    val feedName: String,
+    val articles: List<DigestArticle>
+)
+
 /**
  * E-ink optimized book reader that combines all articles into one continuous
  * paginated text flow, like a real e-book reader.
@@ -144,11 +149,31 @@ fun EinkBookReader(
 
     val pages = paginationResult.pages
     val chapterStartPages = paginationResult.chapterStartPages
+    val chapterStartPageByArticleId = remember(articles, chapterStartPages) {
+        buildMap<Long, Int> {
+            articles.forEachIndexed { index, article ->
+                put(article.id, chapterStartPages.getOrElse(index) { 0 })
+            }
+        }
+    }
     val totalPages = pages.size.coerceAtLeast(1)
 
     // Derive current chapter from current page
     val currentChapterIndex = remember(currentPage, pages) {
         pages.getOrNull(currentPage)?.chapterIndex ?: 0
+    }
+    val currentArticleId = remember(currentChapterIndex, articles) {
+        articles.getOrNull(currentChapterIndex)?.id
+    }
+    val feedChapterGroups = remember(articles) {
+        val grouped = linkedMapOf<String, MutableList<DigestArticle>>()
+        for (article in articles) {
+            val feedName = article.feedName.ifBlank { "Unknown Feed" }
+            grouped.getOrPut(feedName) { mutableListOf() }.add(article)
+        }
+        grouped.map { (feedName, feedArticles) ->
+            FeedChapterGroup(feedName = feedName, articles = feedArticles)
+        }
     }
 
     // Ensure currentPage is within bounds
@@ -278,9 +303,9 @@ fun EinkBookReader(
     // Chapter list dialog
     if (showChapterDialog) {
         ChapterListDialog(
-            articles = articles,
-            currentChapterIndex = currentChapterIndex,
-            chapterStartPages = chapterStartPages,
+            feedGroups = feedChapterGroups,
+            currentArticleId = currentArticleId,
+            chapterStartPageByArticleId = chapterStartPageByArticleId,
             onChapterSelected = { pageIndex ->
                 currentPage = pageIndex
                 showChapterDialog = false
@@ -572,25 +597,17 @@ private fun BookNavigationBar(
     }
 }
 
-private const val CHAPTERS_PER_PAGE = 5
-
 /**
- * Dialog showing the table of contents with all chapters (articles).
- * Uses pagination instead of scrolling for e-ink friendliness.
+ * Dialog showing feed chapters and article sub-chapters.
  */
 @Composable
 private fun ChapterListDialog(
-    articles: List<DigestArticle>,
-    currentChapterIndex: Int,
-    chapterStartPages: List<Int>,
+    feedGroups: List<FeedChapterGroup>,
+    currentArticleId: Long?,
+    chapterStartPageByArticleId: Map<Long, Int>,
     onChapterSelected: (pageIndex: Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Start on the page containing the current chapter
-    val initialPage = currentChapterIndex / CHAPTERS_PER_PAGE
-    var currentListPage by rememberSaveable { mutableIntStateOf(initialPage) }
-    val totalListPages = ((articles.size + CHAPTERS_PER_PAGE - 1) / CHAPTERS_PER_PAGE).coerceAtLeast(1)
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -600,72 +617,33 @@ private fun ChapterListDialog(
             )
         },
         text = {
-            if (articles.isEmpty()) {
+            if (feedGroups.isEmpty()) {
                 Text("No chapters available")
             } else {
-                Column {
-                    // Chapter items for current page
-                    val startIndex = currentListPage * CHAPTERS_PER_PAGE
-                    val endIndex = minOf(startIndex + CHAPTERS_PER_PAGE, articles.size)
-                    val pageArticles = articles.subList(startIndex, endIndex)
-
-                    pageArticles.forEachIndexed { localIndex, article ->
-                        val globalIndex = startIndex + localIndex
-                        ChapterListItem(
-                            article = article,
-                            chapterNumber = globalIndex + 1,
-                            isCurrentChapter = globalIndex == currentChapterIndex,
-                            onClick = {
-                                val targetPage = chapterStartPages.getOrElse(globalIndex) { 0 }
-                                onChapterSelected(targetPage)
-                            }
-                        )
-                        if (localIndex < pageArticles.lastIndex) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-                    }
-
-                    // Pagination controls (only show if more than one page)
-                    if (totalListPages > 1) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Divider()
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedButton(
-                                onClick = { currentListPage-- },
-                                enabled = currentListPage > 0,
-                                modifier = Modifier.height(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                    contentDescription = "Previous",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text("Prev")
-                            }
-
+                LazyColumn(
+                    modifier = Modifier.height(360.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    feedGroups.forEach { group ->
+                        item(key = "feed-${group.feedName}") {
                             Text(
-                                text = "${currentListPage + 1} / $totalListPages",
-                                style = MaterialTheme.typography.bodySmall
+                                text = group.feedName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
                             )
+                        }
 
-                            OutlinedButton(
-                                onClick = { currentListPage++ },
-                                enabled = currentListPage < totalListPages - 1,
-                                modifier = Modifier.height(36.dp)
-                            ) {
-                                Text("Next")
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = "Next",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                        itemsIndexed(group.articles, key = { _, article -> article.id }) { index, article ->
+                            ChapterListItem(
+                                article = article,
+                                chapterNumber = index + 1,
+                                isCurrentChapter = currentArticleId == article.id,
+                                onClick = {
+                                    val targetPage = chapterStartPageByArticleId[article.id] ?: 0
+                                    onChapterSelected(targetPage)
+                                }
+                            )
                         }
                     }
                 }
@@ -712,7 +690,7 @@ private fun ChapterListItem(
     ) {
         // Chapter number
         Text(
-            text = "$chapterNumber.",
+            text = "$chapterNumber",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.width(32.dp)

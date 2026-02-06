@@ -82,13 +82,27 @@ public final class DigestGenerator {
                 return articles
             }
 
-            guard !allArticles.isEmpty else {
+            let feedOrder = Dictionary(
+                uniqueKeysWithValues: feeds.enumerated().map { index, feed in
+                    (feed.url, index)
+                }
+            )
+            let orderedArticles = allArticles.enumerated().sorted { lhs, rhs in
+                let lhsOrder = feedOrder[lhs.element.feedUrl] ?? Int.max
+                let rhsOrder = feedOrder[rhs.element.feedUrl] ?? Int.max
+                if lhsOrder != rhsOrder {
+                    return lhsOrder < rhsOrder
+                }
+                return lhs.offset < rhs.offset
+            }.map(\.element)
+
+            guard !orderedArticles.isEmpty else {
                 throw DigestGeneratorError.noArticlesFound
             }
 
             // Generate EPUB
             let epubURL = try epubBuilder.generateEPUB(
-                articles: allArticles,
+                articles: orderedArticles,
                 outputPath: epubFilePath,
                 date: date
             )
@@ -98,12 +112,12 @@ public final class DigestGenerator {
             let fileSize = attributes[.size] as? Int64 ?? 0
 
             // Count article types
-            let briefings = allArticles.filter { $0.isSummary }
-            let deepDives = allArticles.filter { !$0.isSummary }
+            let briefings = orderedArticles.filter { $0.isSummary }
+            let deepDives = orderedArticles.filter { !$0.isSummary }
 
             // Update digest with results
             digest.isComplete = true
-            digest.articleCount = allArticles.count
+            digest.articleCount = orderedArticles.count
             digest.briefingCount = briefings.count
             digest.deepDiveCount = deepDives.count
             digest.fileSizeBytes = fileSize
@@ -112,18 +126,10 @@ public final class DigestGenerator {
             // Create digest articles
             var digestArticles: [DigestArticle] = []
 
-            for (index, article) in briefings.enumerated() {
+            for (index, article) in orderedArticles.enumerated() {
+                let contentType: ContentType = article.isSummary ? .briefing : .deepDive
                 let digestArticle = article.toDigestArticle(
-                    contentType: .briefing,
-                    orderIndex: index
-                )
-                digestArticle.digest = digest
-                digestArticles.append(digestArticle)
-            }
-
-            for (index, article) in deepDives.enumerated() {
-                let digestArticle = article.toDigestArticle(
-                    contentType: .deepDive,
+                    contentType: contentType,
                     orderIndex: index
                 )
                 digestArticle.digest = digest
