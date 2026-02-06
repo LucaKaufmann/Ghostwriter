@@ -20,37 +20,79 @@ class LLMService:
     Implements retry logic with fallback to raw text on failure.
     """
 
-    SUMMARIZE_PROMPT = """You are a concise news editor. Summarize the following article for a daily digest.
+    SYSTEM_PROMPT = """You are a precise summarization engine for a daily reading digest.
+Follow the instructions in <instructions> exactly.
+Hard rules:
+- Never mention sponsors, ads, promos, or that they were skipped.
+- Do not output sponsor/ad/promo language, brand names, or CTA phrases.
+- Use straight quotes only (no curly quotes). Apostrophes in contractions are OK.
+- If you include exact excerpts, italicize them using single asterisks.
+- Never output literal "Title:" or "Summary:" prefixes.
+- Do not use emojis."""
+
+    SUMMARIZE_PROMPT = """<instructions>
+Summarize this article for a daily reading digest on an e-ink device.
+
+Content guidance:
+- Lead with the primary claim or most important finding.
+- Include 2-3 key supporting facts, data points, or events.
+- Preserve 1-2 short exact excerpts (max 25 words each) when there's a strong, memorable line. Italicize excerpts with *single asterisks*.
+- Omit sponsor messages, ads, calls-to-action, and boilerplate. Do not mention or acknowledge them.
+
+Length: Target around 800-1,200 characters. Use 2-3 short paragraphs.
+
+Formatting:
+- Write in direct, factual language with a neutral tone.
+- Use short paragraphs. Bullet lists only when they improve scanability.
+- Keep compact: no extra blank lines between sentences.
+- Do not start with preambles like "Here's a summary" or "This article discusses".
+
+Final check: Ensure no sponsor/ad content remains. Verify excerpts are italicized.
+</instructions>
+
+<context>
+{context}
+</context>
+
+<content>
+{content}
+</content>"""
+
+    CHUNK_SUMMARIZE_PROMPT = """<instructions>
+You are summarizing part {part} of {total} of a long article or transcript.
 
 Requirements:
-- Focus on key facts and main points
-- Use neutral, informative tone
-- Maximum 3 paragraphs
-- Do not include any preamble like "Here's a summary"
+- Extract only key facts, events, decisions, and notable quotes.
+- Maximum 8 bullet points.
+- Omit sponsor messages, ads, and boilerplate entirely.
+- Keep it concise; avoid repetition.
+</instructions>
 
-Article:
-{content}"""
+<content>
+{content}
+</content>"""
 
-    CHUNK_SUMMARIZE_PROMPT = """You are a concise news editor. You are summarizing part {part}/{total} of a long article or transcript.
+    REDUCE_PROMPT = """<instructions>
+Combine these partial summaries into one cohesive final summary.
 
-Requirements:
-- Keep only key facts, events, and decisions
-- Keep it concise and avoid repetition
-- Maximum 8 bullet points
+Content guidance:
+- Lead with the most important point across all sections.
+- Synthesize related points; eliminate redundancy.
+- Preserve any strong exact excerpts from the partials.
 
-Content:
-{content}"""
+Length: Target around 800-1,200 characters. Use 2-3 short paragraphs.
 
-    REDUCE_PROMPT = """You are a concise news editor. Combine the following partial summaries into one final digest summary.
+Formatting:
+- Write in direct, factual language with a neutral tone.
+- Keep compact: no extra blank lines.
+- Do not start with preambles like "Here's a summary".
 
-Requirements:
-- Focus on key facts and main points
-- Use neutral, informative tone
-- Maximum 3 paragraphs
-- Do not include any preamble like "Here's a summary"
+Final check: Ensure the summary flows naturally and captures the full scope.
+</instructions>
 
-Partial summaries:
-{content}"""
+<content>
+{content}
+</content>"""
 
     DIRECT_SUMMARY_CHAR_LIMIT = 15000
     CHUNK_CHAR_LIMIT = 12000
@@ -80,7 +122,14 @@ Partial summaries:
         litellm.request_timeout = self.settings.ai_timeout_seconds
 
     async def summarize(
-        self, content: str, retries: int | None = None
+        self,
+        content: str,
+        retries: int | None = None,
+        *,
+        title: str | None = None,
+        url: str | None = None,
+        author: str | None = None,
+        source: str | None = None,
     ) -> tuple[str, bool]:
         """
         Summarize article content using the configured LLM.
@@ -91,6 +140,10 @@ Partial summaries:
         Args:
             content: The article content to summarize.
             retries: Number of retries (defaults to settings.ai_max_retries).
+            title: Article title for context.
+            url: Source URL for context.
+            author: Author name for context.
+            source: Source name (feed title, "Newsletter", etc.) for context.
 
         Returns:
             Tuple of (summarized_content, ai_failed).
@@ -99,10 +152,24 @@ Partial summaries:
         if retries is None:
             retries = self.settings.ai_max_retries
 
+        # Build context from metadata
+        context_lines = []
+        if title:
+            context_lines.append(f"Title: {title}")
+        if source:
+            context_lines.append(f"Source: {source}")
+        if author:
+            context_lines.append(f"Author: {author}")
+        if url:
+            context_lines.append(f"URL: {url}")
+        context = "\n".join(context_lines) if context_lines else "No metadata available."
+
         model = self.settings.get_llm_model_string()
         if len(content) <= self.DIRECT_SUMMARY_CHAR_LIMIT:
-            prompt = self.SUMMARIZE_PROMPT.format(content=content)
-            direct_summary, direct_failed = await self._run_completion(prompt, model, retries)
+            prompt = self.SUMMARIZE_PROMPT.format(context=context, content=content)
+            direct_summary, direct_failed = await self._run_completion(
+                prompt, model, retries, system_prompt=self.SYSTEM_PROMPT
+            )
             if direct_failed:
                 return content, True
             return direct_summary, False
@@ -121,25 +188,39 @@ Partial summaries:
                 total=total,
                 content=chunk,
             )
-            partial_summary, partial_failed = await self._run_completion(prompt, model, retries)
+            partial_summary, partial_failed = await self._run_completion(
+                prompt, model, retries, system_prompt=self.SYSTEM_PROMPT
+            )
             if partial_failed:
                 return content, True
             partials.append(partial_summary)
 
         reduce_input = "\n\n".join(partials)
         reduce_prompt = self.REDUCE_PROMPT.format(content=reduce_input)
-        final_summary, final_failed = await self._run_completion(reduce_prompt, model, retries)
+        final_summary, final_failed = await self._run_completion(
+            reduce_prompt, model, retries, system_prompt=self.SYSTEM_PROMPT
+        )
         if final_failed:
             return content, True
         return final_summary, False
 
     async def _run_completion(
-        self, prompt: str, model: str, retries: int
+        self,
+        prompt: str,
+        model: str,
+        retries: int,
+        *,
+        system_prompt: str | None = None,
     ) -> tuple[str, bool]:
         """Run one LLM completion with retries, returning (output, failed)."""
+        messages: list[dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "timeout": self.settings.ai_timeout_seconds,
         }
 
