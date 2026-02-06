@@ -18,20 +18,13 @@ struct DigestDetailView: View {
         return formatter
     }
 
-    private var briefings: [DigestArticle] {
-        digest.articles.filter { $0.contentType == .briefing }
-            .sorted { $0.orderIndex < $1.orderIndex }
-    }
-
-    private var deepDives: [DigestArticle] {
-        digest.articles.filter { $0.contentType == .deepDive }
-            .sorted { $0.orderIndex < $1.orderIndex }
+    private var orderedArticles: [DigestArticle] {
+        digest.articles.sorted { $0.orderIndex < $1.orderIndex }
     }
 
     var body: some View {
         EinkReaderView(
-            articles: briefings + deepDives,
-            briefingCount: briefings.count,
+            articles: orderedArticles,
             epubFilePath: digest.epubFilePath
         )
         .navigationTitle(dateFormatter.string(from: digest.generatedAt))
@@ -42,42 +35,19 @@ struct DigestDetailView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 // Briefings section
-                if !briefings.isEmpty {
+                if !orderedArticles.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("The Briefing")
+                        Text("Articles")
                             .font(.title2)
                             .fontWeight(.semibold)
-                        Text("AI-generated summaries for quick catch-up")
+                        Text("Grouped by feed in digest order")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
 
-                    ForEach(briefings) { article in
-                        ArticleCard(article: article)
-                            .padding(.horizontal)
-                    }
-                }
-
-                // Deep Dives section
-                if !deepDives.isEmpty {
-                    if !briefings.isEmpty {
-                        Divider()
-                            .padding(.vertical, 8)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Deep Dives")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        Text("Full articles for in-depth reading")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal)
-
-                    ForEach(deepDives) { article in
+                    ForEach(orderedArticles) { article in
                         ArticleCard(article: article)
                             .padding(.horizontal)
                     }

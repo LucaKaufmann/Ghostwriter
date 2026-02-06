@@ -82,13 +82,20 @@ class DigestRepository @Inject constructor(
         val briefingCount = articles.count { it.isSummary }
         val fidelityCount = articles.count { !it.isSummary }
 
-        // Map articles to entities and determine feed names from actual articles
-        // We try to match articles to feeds by URL, but fall back to "Unknown" if no match
+        // Map articles to entities and determine feed names from article metadata.
+        // Fallback to domain matching only when metadata is unavailable.
         val articleEntities = articles.mapIndexed { index, article ->
-            val feedName = feeds.find { feed ->
-                val feedDomain = feed.url.removePrefix("https://").removePrefix("http://").split("/").firstOrNull() ?: ""
-                article.originalUrl.contains(feedDomain)
-            }?.name ?: "Unknown"
+            val feedName = article.feedName.ifBlank {
+                feeds.find { feed ->
+                    val feedDomain = feed.url
+                        .removePrefix("https://")
+                        .removePrefix("http://")
+                        .split("/")
+                        .firstOrNull()
+                        ?: ""
+                    article.originalUrl.contains(feedDomain)
+                }?.name ?: "Unknown"
+            }
 
             DigestArticleEntity(
                 digestId = 0, // Will be set by transaction

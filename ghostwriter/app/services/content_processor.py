@@ -45,6 +45,7 @@ class ExtractedArticle:
     is_summary: bool = False
     ai_failed: bool = False
     processing_ms: int = 0
+    feed_title: str = ""
 
 
 class ContentProcessor:

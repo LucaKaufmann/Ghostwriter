@@ -35,7 +35,7 @@ data class EpubGenerationResult(
 
 /**
  * Generates EPUB files from processed articles.
- * Separates content into Briefings (summaries) and Deep Dives (full articles).
+ * Organizes content into feed chapters with article sub-chapters.
  */
 @Singleton
 class EpubGenerator @Inject constructor(
@@ -101,77 +101,61 @@ class EpubGenerator @Inject constructor(
         book.coverPage = coverResource
         book.addSection("Cover", coverResource)
 
-        // Separate articles by type
-        val briefings = articles.filter { it.isSummary }
-        val deepDives = articles.filter { !it.isSummary }
-
-        // Section 1: The Briefing (summaries)
-        if (briefings.isNotEmpty()) {
-            addBriefingsSection(book, briefings)
-        }
-
-        // Section 2: Deep Dives (full articles)
-        if (deepDives.isNotEmpty()) {
-            addDeepDivesSection(book, deepDives)
+        // Feed chapters with article sub-chapters
+        val groupedByFeed = groupArticlesByFeed(articles)
+        groupedByFeed.forEachIndexed { feedIndex, (feedName, feedArticles) ->
+            addFeedSection(
+                book = book,
+                feedName = feedName,
+                articles = feedArticles,
+                feedIndex = feedIndex
+            )
         }
 
         return book
     }
 
     /**
-     * Adds the Briefings section containing all AI summaries.
+     * Groups articles by feed while preserving first-seen feed order.
      */
-    private fun addBriefingsSection(book: Book, briefings: List<ProcessedArticle>) {
-        val briefingHtml = buildString {
-            append(createHtmlHeader("The Briefing"))
-            append("<body>\n")
-            append("<h1>The Briefing</h1>\n")
-            append("<p class=\"section-intro\">AI-generated summaries for quick catch-up</p>\n")
-
-            briefings.forEachIndexed { index, article ->
-                append("<article>\n")
-                append("<h2>${escapeHtml(article.title)}</h2>\n")
-                if (article.author.isNotBlank()) {
-                    append("<p class=\"byline\">${escapeHtml(article.author)}</p>\n")
-                }
-                append("<div class=\"content\">${sanitizeHtmlToXhtml(article.content)}</div>\n")
-                append("<p class=\"source\"><a href=\"${escapeHtml(article.originalUrl)}\">Source</a></p>\n")
-                if (index < briefings.lastIndex) {
-                    append("<hr/>\n")
-                }
-                append("</article>\n")
-            }
-
-            append("</body>\n</html>")
+    private fun groupArticlesByFeed(
+        articles: List<ProcessedArticle>
+    ): List<Pair<String, List<ProcessedArticle>>> {
+        val grouped = linkedMapOf<String, MutableList<ProcessedArticle>>()
+        articles.forEach { article ->
+            val feedName = article.feedName.ifBlank { "Unknown Feed" }
+            grouped.getOrPut(feedName) { mutableListOf() }.add(article)
         }
-
-        val resource = Resource(briefingHtml.toByteArray(), "briefings.xhtml")
-        book.addSection("The Briefing", resource)
+        return grouped.map { (feedName, feedArticles) ->
+            feedName to feedArticles.toList()
+        }
     }
 
     /**
-     * Adds the Deep Dives section with each full article as a separate chapter.
+     * Adds a feed chapter and each feed article as a sub-chapter.
      */
-    private fun addDeepDivesSection(book: Book, deepDives: List<ProcessedArticle>) {
-        // Create section header
+    private fun addFeedSection(
+        book: Book,
+        feedName: String,
+        articles: List<ProcessedArticle>,
+        feedIndex: Int
+    ) {
         val sectionHeaderHtml = buildString {
-            append(createHtmlHeader("Deep Dives"))
+            append(createHtmlHeader(feedName))
             append("<body>\n")
-            append("<h1>Deep Dives</h1>\n")
-            append("<p class=\"section-intro\">Full articles for in-depth reading</p>\n")
-            append("<ul>\n")
-            deepDives.forEach { article ->
-                append("<li>${escapeHtml(article.title)}</li>\n")
-            }
-            append("</ul>\n")
+            append("<h1>${escapeHtml(feedName)}</h1>\n")
+            append("<p class=\"section-intro\">${articles.size} article${if (articles.size == 1) "" else "s"}</p>\n")
             append("</body>\n</html>")
         }
 
-        val sectionResource = Resource(sectionHeaderHtml.toByteArray(), "deep-dives.xhtml")
-        val sectionToc = book.addSection("Deep Dives", sectionResource)
+        val feedSlug = slugify(feedName)
+        val sectionResource = Resource(
+            sectionHeaderHtml.toByteArray(),
+            "feed-${feedIndex + 1}-$feedSlug.xhtml"
+        )
+        val sectionToc = book.addSection(feedName, sectionResource)
 
-        // Add each article as a sub-chapter
-        deepDives.forEachIndexed { index, article ->
+        articles.forEachIndexed { index, article ->
             val articleHtml = buildString {
                 append(createHtmlHeader(article.title))
                 append("<body>\n")
@@ -179,6 +163,9 @@ class EpubGenerator @Inject constructor(
                 append("<h1>${escapeHtml(article.title)}</h1>\n")
                 if (article.author.isNotBlank()) {
                     append("<p class=\"byline\">By ${escapeHtml(article.author)}</p>\n")
+                }
+                if (article.isSummary) {
+                    append("<p class=\"section-intro\">Briefing</p>\n")
                 }
                 append("<div class=\"content\">${sanitizeHtmlToXhtml(article.content)}</div>\n")
                 append("<p class=\"source\"><a href=\"${escapeHtml(article.originalUrl)}\">Original article</a></p>\n")
@@ -188,10 +175,17 @@ class EpubGenerator @Inject constructor(
 
             val articleResource = Resource(
                 articleHtml.toByteArray(),
-                "article-${index + 1}.xhtml"
+                "feed-${feedIndex + 1}-article-${index + 1}-$feedSlug.xhtml"
             )
             book.addSection(sectionToc, article.title, articleResource)
         }
+    }
+
+    private fun slugify(value: String): String {
+        val normalized = value.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]+"), "-")
+            .trim('-')
+        return if (normalized.isBlank()) "feed" else normalized
     }
 
     /**

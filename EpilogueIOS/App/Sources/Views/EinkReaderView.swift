@@ -13,6 +13,13 @@ import Domain
 
 // MARK: - Page Model
 
+private struct FeedGroup: Identifiable {
+    let feedName: String
+    var articles: [DigestArticle]
+
+    var id: String { feedName }
+}
+
 private enum PageItem: Identifiable {
     case sectionHeader(title: String, subtitle: String)
     case articlePage(article: DigestArticle, attributedText: NSAttributedString, pageIndex: Int, totalArticlePages: Int)
@@ -204,7 +211,6 @@ private struct TextPaginator {
 
 struct EinkReaderView: View {
     let articles: [DigestArticle]
-    let briefingCount: Int
     var epubFilePath: String? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -238,6 +244,21 @@ struct EinkReaderView: View {
 
     private static func randomLoadingPhrase() -> String {
         loadingPhrases.randomElement() ?? "Loading…"
+    }
+
+    private var feedGroups: [FeedGroup] {
+        var groups: [FeedGroup] = []
+        for article in articles {
+            let feedName = article.feedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Unknown Feed"
+                : article.feedName
+            if let index = groups.firstIndex(where: { $0.feedName == feedName }) {
+                groups[index].articles.append(article)
+            } else {
+                groups.append(FeedGroup(feedName: feedName, articles: [article]))
+            }
+        }
+        return groups
     }
 
     var body: some View {
@@ -348,31 +369,15 @@ struct EinkReaderView: View {
         var result: [PageItem] = []
         var firstPageMap: [UUID: Int] = [:]
 
-        let briefings = Array(articles.prefix(briefingCount))
-        let deepDives = Array(articles.dropFirst(briefingCount))
+        for group in feedGroups {
+            result.append(
+                .sectionHeader(
+                    title: group.feedName,
+                    subtitle: "\(group.articles.count) article\(group.articles.count == 1 ? "" : "s")"
+                )
+            )
 
-        if !briefings.isEmpty {
-            result.append(.sectionHeader(title: "The Briefing", subtitle: "AI-generated summaries"))
-
-            for article in briefings {
-                firstPageMap[article.id] = result.count
-                let fullText = TextPaginator.buildFullArticle(article: article)
-                let articlePages = TextPaginator.paginate(attributedString: fullText, size: textSize)
-                for (i, pageText) in articlePages.enumerated() {
-                    result.append(.articlePage(
-                        article: article,
-                        attributedText: pageText,
-                        pageIndex: i,
-                        totalArticlePages: articlePages.count
-                    ))
-                }
-            }
-        }
-
-        if !deepDives.isEmpty {
-            result.append(.sectionHeader(title: "Deep Dives", subtitle: "Full articles for in-depth reading"))
-
-            for article in deepDives {
+            for article in group.articles {
                 firstPageMap[article.id] = result.count
                 let fullText = TextPaginator.buildFullArticle(article: article)
                 let articlePages = TextPaginator.paginate(attributedString: fullText, size: textSize)
@@ -511,34 +516,33 @@ struct EinkReaderView: View {
     private var tableOfContents: some View {
         NavigationStack {
             List {
-                ForEach(Array(articles.enumerated()), id: \.element.id) { index, article in
-                    Button {
-                        if let pageIdx = articleFirstPageIndex[article.id] {
-                            currentPage = pageIdx
-                        }
-                        showTableOfContents = false
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(article.title)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
+                ForEach(feedGroups) { group in
+                    Section(group.feedName) {
+                        ForEach(group.articles) { article in
+                            Button {
+                                if let pageIdx = articleFirstPageIndex[article.id] {
+                                    currentPage = pageIdx
+                                }
+                                showTableOfContents = false
+                            } label: {
                                 HStack {
-                                    Text(article.feedName)
-                                    if index < briefingCount {
-                                        Text("• Briefing")
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(article.title)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        Text(article.contentType == .briefing ? "Briefing" : "Deep Dive")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if articleFirstPageIndex[article.id] != nil,
+                                       let currentArticleId = paginatedPages[safe: currentPage]?.articleId,
+                                       currentArticleId == article.id {
+                                        Text("Reading")
+                                            .font(.caption2)
+                                            .foregroundStyle(.blue)
                                     }
                                 }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if let firstPage = articleFirstPageIndex[article.id],
-                               let currentArticleId = paginatedPages[safe: currentPage]?.articleId,
-                               currentArticleId == article.id {
-                                Text("Reading")
-                                    .font(.caption2)
-                                    .foregroundStyle(.blue)
                             }
                         }
                     }
