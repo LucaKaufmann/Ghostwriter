@@ -8,6 +8,11 @@ import os
 import re
 import secrets
 import time
+from email import policy
+from email.message import EmailMessage
+from email.parser import BytesHeaderParser, BytesParser
+from email.utils import parseaddr
+from html import escape as html_escape
 
 import httpx
 from lxml import etree
@@ -198,6 +203,9 @@ class NewsletterService:
 
         articles: list[ExtractedArticle] = []
         message_ids: list[str] = []
+        parse_errors_by_sender: dict[str, int] = {}
+        skipped_messages = 0
+        messages: list[dict] = []
 
         async with httpx.AsyncClient(timeout=30) as client:
             # Find the label ID
@@ -236,15 +244,58 @@ class NewsletterService:
                 resp = await client.get(
                     f"{GMAIL_API_BASE}/messages/{msg_id}",
                     headers=headers,
-                    params={"format": "full"},
+                    params={"format": "raw"},
                 )
                 resp.raise_for_status()
                 msg_data = resp.json()
 
-                article = self._parse_email(msg_data)
-                if article:
-                    articles.append(article)
-                    message_ids.append(msg_id)
+                try:
+                    article = self._parse_email(msg_data)
+                except Exception as e:
+                    sender_domain = self._extract_sender_domain(msg_data) or "unknown"
+                    logger.warning(
+                        "Failed to parse newsletter message id=%s sender_domain=%s: %s",
+                        msg_id,
+                        sender_domain,
+                        e,
+                    )
+                    parse_errors_by_sender[sender_domain] = (
+                        parse_errors_by_sender.get(sender_domain, 0) + 1
+                    )
+                    continue
+
+                if not article:
+                    skipped_messages += 1
+                    continue
+
+                articles.append(article)
+                message_ids.append(msg_id)
+
+        total_messages = len(messages)
+        parse_error_count = sum(parse_errors_by_sender.values())
+        if parse_error_count and total_messages:
+            parse_error_rate = (parse_error_count / total_messages) * 100
+            top_senders = ", ".join(
+                f"{sender}:{count}"
+                for sender, count in sorted(
+                    parse_errors_by_sender.items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )[:5]
+            )
+            logger.warning(
+                "Newsletter parsing errors %d/%d (%.1f%%). by_sender=%s",
+                parse_error_count,
+                total_messages,
+                parse_error_rate,
+                top_senders,
+            )
+        if skipped_messages:
+            logger.info(
+                "Skipped %d/%d newsletters with no usable content",
+                skipped_messages,
+                total_messages,
+            )
 
         logger.info(f"Fetched {len(articles)} newsletter emails")
         return articles, message_ids
@@ -271,26 +322,58 @@ class NewsletterService:
 
     def _parse_email(self, msg: dict) -> ExtractedArticle | None:
         """Extract article data from a Gmail message."""
-        headers_list = msg.get("payload", {}).get("headers", [])
-        headers_map = {h["name"].lower(): h["value"] for h in headers_list}
+        headers_map, plain_body, html_body = self._extract_raw_message_parts(msg)
+        if not headers_map:
+            headers_map = self._extract_headers_map(msg.get("payload", {}))
+            if not plain_body:
+                plain_body = self._extract_plain_body(msg.get("payload", {}))
+            if not html_body:
+                html_body = self._extract_html_body(msg.get("payload", {}))
 
         subject = headers_map.get("subject", "Untitled Newsletter")
         sender = headers_map.get("from", "")
+        has_list_unsubscribe = (
+            "list-unsubscribe" in headers_map
+            or "list-unsubscribe-post" in headers_map
+        )
 
-        html_body = self._extract_html_body(msg.get("payload", {}))
-        if not html_body:
-            logger.debug(f"No HTML body for email: {subject}")
+        plain_for_count = ""
+        if plain_body:
+            plain_for_count = self._clean_newsletter_plain_text(
+                plain_body,
+                has_list_unsubscribe=has_list_unsubscribe,
+            )
+            if plain_for_count:
+                cleaned = self._plain_text_to_html(plain_for_count)
+            else:
+                cleaned = ""
+        elif html_body:
+            try:
+                cleaned = self._clean_newsletter_html(html_body)
+            except Exception as e:
+                logger.warning(
+                    "HTML newsletter cleaning failed for subject=%s: %s",
+                    subject,
+                    e,
+                )
+                recovered_plain = self._clean_newsletter_plain_text(
+                    re.sub(r"<[^>]+>", " ", html_body),
+                    has_list_unsubscribe=has_list_unsubscribe,
+                )
+                cleaned = self._plain_text_to_html(recovered_plain)
+            plain_for_count = re.sub(r"<[^>]+>", " ", cleaned)
+            plain_for_count = re.sub(r"\s+", " ", plain_for_count).strip()
+        else:
+            logger.debug(f"No body found for email: {subject}")
             return None
 
-        cleaned = self._clean_newsletter_html(html_body)
-        # Strip tags for plain text content
-        plain = re.sub(r"<[^>]+>", "", cleaned)
-        plain = re.sub(r"\s+", " ", plain).strip()
-
-        if not plain:
+        if not cleaned.strip():
             return None
 
-        word_count = ContentProcessor.count_words(plain)
+        word_count = ContentProcessor.count_words(plain_for_count)
+        if word_count == 0:
+            return None
+
         msg_id = msg.get("id", "")
 
         return ExtractedArticle(
@@ -305,6 +388,106 @@ class NewsletterService:
             processing_ms=0,
         )
 
+    @staticmethod
+    def _decode_base64url(data: str) -> bytes:
+        """Decode Gmail's URL-safe base64 payload."""
+        padded = data + "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode(padded)
+
+    def _extract_raw_message_parts(
+        self,
+        msg: dict,
+    ) -> tuple[dict[str, str], str | None, str | None]:
+        """Parse a Gmail message in `raw` format into headers/plain/html content."""
+        raw_data = msg.get("raw")
+        if not raw_data:
+            return {}, None, None
+
+        try:
+            raw_bytes = self._decode_base64url(raw_data)
+            parsed = BytesParser(policy=policy.default).parsebytes(raw_bytes)
+        except Exception:
+            logger.debug("Unable to parse Gmail raw message id=%s", msg.get("id", ""))
+            return {}, None, None
+
+        headers_map = {key.lower(): value for key, value in parsed.items()}
+        plain_body = self._extract_text_part(parsed, "text/plain")
+        html_body = self._extract_text_part(parsed, "text/html")
+        return headers_map, plain_body, html_body
+
+    def _extract_text_part(
+        self,
+        parsed_message: EmailMessage,
+        content_type: str,
+    ) -> str | None:
+        """Extract and decode the first non-attachment text part of a type."""
+        preferred = "plain" if content_type == "text/plain" else "html"
+        candidate = parsed_message.get_body(preferencelist=(preferred,))
+        if candidate and candidate.get_content_type() == content_type:
+            decoded = self._decode_email_part(candidate)
+            if decoded:
+                return decoded
+
+        for part in parsed_message.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            if part.get_content_disposition() == "attachment":
+                continue
+            if part.get_content_type() != content_type:
+                continue
+            decoded = self._decode_email_part(part)
+            if decoded:
+                return decoded
+
+        return None
+
+    @staticmethod
+    def _decode_email_part(part: EmailMessage) -> str | None:
+        """Decode a MIME text part with charset fallback."""
+        try:
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                content = part.get_content()
+                return str(content) if content is not None else None
+
+            charset = part.get_content_charset() or "utf-8"
+            try:
+                return payload.decode(charset, errors="replace")
+            except LookupError:
+                return payload.decode("utf-8", errors="replace")
+        except Exception:
+            return None
+
+    def _extract_headers_map(self, payload: dict) -> dict[str, str]:
+        """Extract lower-cased header map from Gmail payload format."""
+        headers_list = payload.get("headers", [])
+        headers_map: dict[str, str] = {}
+        for header in headers_list:
+            name = header.get("name")
+            value = header.get("value")
+            if not name or value is None:
+                continue
+            headers_map[name.lower()] = value
+        return headers_map
+
+    def _extract_sender_domain(self, msg: dict) -> str:
+        """Get sender domain for telemetry even when parsing fails."""
+        headers_map = self._extract_headers_map(msg.get("payload", {}))
+        sender = headers_map.get("from", "")
+
+        if not sender and msg.get("raw"):
+            try:
+                raw_bytes = self._decode_base64url(msg["raw"])
+                parsed = BytesHeaderParser(policy=policy.default).parsebytes(raw_bytes)
+                sender = parsed.get("From", "")
+            except Exception:
+                sender = ""
+
+        _name, address = parseaddr(sender)
+        if "@" in address:
+            return address.rsplit("@", maxsplit=1)[1].lower()
+        return "unknown"
+
     def _extract_html_body(self, payload: dict) -> str | None:
         """Recursively walk MIME parts to find text/html."""
         mime_type = payload.get("mimeType", "")
@@ -312,7 +495,7 @@ class NewsletterService:
         if mime_type == "text/html":
             data = payload.get("body", {}).get("data", "")
             if data:
-                return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+                return self._decode_base64url(data).decode("utf-8", errors="replace")
 
         # Walk multipart
         for part in payload.get("parts", []):
@@ -321,6 +504,73 @@ class NewsletterService:
                 return result
 
         return None
+
+    def _extract_plain_body(self, payload: dict) -> str | None:
+        """Recursively walk MIME parts to find text/plain."""
+        mime_type = payload.get("mimeType", "")
+
+        if mime_type == "text/plain":
+            data = payload.get("body", {}).get("data", "")
+            if data:
+                return self._decode_base64url(data).decode("utf-8", errors="replace")
+
+        for part in payload.get("parts", []):
+            result = self._extract_plain_body(part)
+            if result:
+                return result
+
+        return None
+
+    def _clean_newsletter_plain_text(
+        self,
+        raw_text: str,
+        *,
+        has_list_unsubscribe: bool,
+    ) -> str:
+        """Normalize plain text newsletters and trim obvious footer sections."""
+        normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.rstrip() for line in normalized.split("\n")]
+
+        if has_list_unsubscribe:
+            footer_idx = None
+            for idx, line in enumerate(lines):
+                if self._FOOTER_RE.search(line):
+                    footer_idx = idx
+                    break
+            if footer_idx is not None:
+                lines = lines[:footer_idx]
+
+        compact_lines: list[str] = []
+        previous_blank = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                if compact_lines and not previous_blank:
+                    compact_lines.append("")
+                previous_blank = True
+                continue
+
+            compact_lines.append(stripped)
+            previous_blank = False
+
+        return "\n".join(compact_lines).strip()
+
+    @staticmethod
+    def _plain_text_to_html(plain_text: str) -> str:
+        """Convert plain text content to paragraph-based HTML for EPUB rendering."""
+        if not plain_text.strip():
+            return ""
+
+        paragraphs = [
+            paragraph.strip()
+            for paragraph in re.split(r"\n\s*\n", plain_text)
+            if paragraph.strip()
+        ]
+        html_paragraphs = []
+        for paragraph in paragraphs:
+            escaped = html_escape(paragraph).replace("\n", "<br/>")
+            html_paragraphs.append(f"<p>{escaped}</p>")
+        return "\n".join(html_paragraphs)
 
     # Tags whose content we want to keep (semantic / readable)
     _KEEP_TAGS = frozenset({
