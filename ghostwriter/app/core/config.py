@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     gmail_client_secret: str = Field(default="", description="Google OAuth client secret")
     gmail_label: str = Field(default="Ghostwriter", description="Gmail label to fetch newsletters from")
     gmail_max_articles: int = Field(default=20, description="Max newsletter emails per digest")
+    newsletter_mode: str = Field(default="summarize", description="Processing mode: raw or summarize")
 
     # Network safety
     allow_private_hosts: bool = Field(default=False, description="Allow private/localhost outbound URLs")
