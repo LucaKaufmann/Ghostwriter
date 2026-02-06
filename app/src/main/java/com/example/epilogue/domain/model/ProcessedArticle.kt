@@ -5,5 +5,7 @@ data class ProcessedArticle(
     val author: String,
     val content: String,  // HTML or Markdown
     val originalUrl: String,
-    val isSummary: Boolean
+    val isSummary: Boolean,
+    val feedUrl: String = "",
+    val feedName: String = ""
 )

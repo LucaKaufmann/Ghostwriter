@@ -287,7 +287,7 @@
 					{/if}
 				</Button>
 				{#if latestDigest?.filename}
-					<Button variant="outline" onclick={() => downloadDigest(latestDigest.filename)}>
+					<Button variant="outline" onclick={() => downloadDigest(latestDigest.filename!)}>
 						<Download class="mr-2 h-4 w-4" />
 						Download Latest
 					</Button>
@@ -418,7 +418,7 @@
 									<Button
 										variant="ghost"
 										size="icon"
-										onclick={() => downloadDigest(digest.filename)}
+										onclick={() => downloadDigest(digest.filename!)}
 									>
 										<Download class="h-4 w-4" />
 									</Button>

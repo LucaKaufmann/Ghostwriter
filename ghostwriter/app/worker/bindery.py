@@ -105,6 +105,48 @@ class BinderyPipeline:
         for source in _SYNTHETIC_FEED_URLS:
             self._get_synthetic_feed_id(source)
 
+    @staticmethod
+    def _order_fetched_articles_by_feed(
+        articles: list[tuple[Feed, any]],
+        feed_order: dict[UUID, int],
+    ) -> list[tuple[Feed, any]]:
+        """
+        Order fetched articles by feed while preserving original per-feed article order.
+
+        Fetching happens concurrently, so raw append order depends on task completion.
+        This restores deterministic grouping by configured feed order.
+        """
+        indexed = list(enumerate(articles))
+        indexed.sort(
+            key=lambda item: (
+                feed_order.get(item[1][0].id, len(feed_order)),
+                item[0],
+            )
+        )
+        return [article for _, article in indexed]
+
+    @staticmethod
+    def _order_extracted_articles(
+        extracted_articles: list[tuple[Feed, ExtractedArticle]],
+        article_order: dict[tuple[UUID, str], int],
+    ) -> list[tuple[Feed, ExtractedArticle]]:
+        """
+        Restore extracted article order to match the deterministic fetch ordering.
+
+        Extraction runs concurrently, so completion order is non-deterministic.
+        """
+        indexed = list(enumerate(extracted_articles))
+        indexed.sort(
+            key=lambda item: (
+                article_order.get(
+                    (item[1][0].id, item[1][1].guid),
+                    len(article_order) + item[0],
+                ),
+                item[0],
+            )
+        )
+        return [article for _, article in indexed]
+
     async def run(self) -> None:
         """Execute the full pipeline."""
         self.start_time = time.time()
@@ -183,6 +225,8 @@ class BinderyPipeline:
             logger.info(f"Fetching {len(feeds)} feeds with concurrency={self.settings.max_concurrent_fetches}")
             await asyncio.gather(*[_fetch_one(f) for f in feeds])
             await self._flush_progress_if_needed(force=True)
+            feed_order = {feed.id: idx for idx, feed in enumerate(feeds)}
+            all_articles = self._order_fetched_articles_by_feed(all_articles, feed_order)
 
             # Fetch Wallabag articles (separate from RSS pipeline)
             wallabag_articles: list[ExtractedArticle] = []
@@ -223,6 +267,7 @@ class BinderyPipeline:
                                 is_summary=False,
                                 ai_failed=False,
                                 processing_ms=0,
+                                feed_title="Wallabag",
                             ))
                             wallabag_entry_ids.append(wb["id"])
                             await self._mark_seen_raw(wb_feed_id, guid, wb["url"], wb["title"])
@@ -287,6 +332,10 @@ class BinderyPipeline:
                     context={"original": original_count, "capped": len(all_articles)},
                 )
             await self._update_progress(total_articles=len(all_articles))
+            article_order = {
+                (feed.id, article.guid): idx
+                for idx, (feed, article) in enumerate(all_articles)
+            }
 
             # Stage 2 & 3: Extract and enrich (parallel with semaphore)
             await self._update_stage("extracting")
@@ -441,6 +490,7 @@ class BinderyPipeline:
                         is_summary=is_summary,
                         ai_failed=ai_failed,
                         processing_ms=processing_ms,
+                        feed_title=feed.title,
                     )
                     async with extracted_lock:
                         extracted_articles.append((feed, extracted))
@@ -460,6 +510,10 @@ class BinderyPipeline:
             logger.info(f"Extracting {len(all_articles)} articles with concurrency=5")
             await asyncio.gather(*[_extract_one(feed, art) for feed, art in all_articles])
             await self._flush_progress_if_needed(force=True)
+            extracted_articles = self._order_extracted_articles(
+                extracted_articles,
+                article_order,
+            )
 
             # Enrich Wallabag articles with AI if configured (parallel)
             if wallabag_articles and self.settings.wallabag_mode == "summarize":
@@ -482,6 +536,7 @@ class BinderyPipeline:
                                 is_summary=True,
                                 ai_failed=False,
                                 processing_ms=article.processing_ms,
+                                feed_title=article.feed_title,
                             )
                         else:
                             result = article
@@ -573,7 +628,11 @@ class BinderyPipeline:
     async def _get_active_feeds(self) -> list[Feed]:
         """Get all active feeds."""
         with Session(engine) as session:
-            statement = select(Feed).where(Feed.is_active == True)
+            statement = (
+                select(Feed)
+                .where(Feed.is_active == True)
+                .order_by(Feed.title)
+            )
             return list(session.exec(statement).all())
 
     async def _fetch_feed(self, feed: Feed) -> tuple[list[tuple[Feed, any]], int]:
@@ -658,7 +717,7 @@ class BinderyPipeline:
                     processing_ms=article.processing_ms,
                     content=article.content,
                     author=article.author,
-                    feed_title="Wallabag",
+                    feed_title=article.feed_title or "Wallabag",
                     sort_order=sort_order,
                 )
                 session.add(record)
@@ -681,7 +740,7 @@ class BinderyPipeline:
                     processing_ms=article.processing_ms,
                     content=article.content,
                     author=article.author,
-                    feed_title="Newsletter",
+                    feed_title=article.feed_title or "Newsletter",
                     sort_order=sort_order,
                 )
                 session.add(record)
@@ -705,7 +764,7 @@ class BinderyPipeline:
                     # Article content for client syncing
                     content=article.content,
                     author=article.author,
-                    feed_title=feed.title,
+                    feed_title=article.feed_title or feed.title,
                     sort_order=sort_order,
                 )
                 session.add(record)

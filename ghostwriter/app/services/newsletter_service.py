@@ -386,6 +386,7 @@ class NewsletterService:
             is_summary=False,
             ai_failed=False,
             processing_ms=0,
+            feed_title="Newsletter",
         )
 
     @staticmethod

@@ -155,7 +155,9 @@ class OpenAIService @Inject constructor(
                     author = originalArticle.author,
                     content = markdownToHtml(result.summary),
                     originalUrl = originalArticle.originalUrl,
-                    isSummary = true
+                    isSummary = true,
+                    feedUrl = originalArticle.feedUrl,
+                    feedName = originalArticle.feedName
                 )
             }
             else -> null

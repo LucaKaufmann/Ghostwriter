@@ -105,7 +105,10 @@ class ArticleRepository @Inject constructor(
                         processed.copy(isSummary = false)
                     }
                 }
-            }
+            }.copy(
+                feedUrl = feed.url,
+                feedName = feed.name
+            )
         }
 
         // Update lastFetched timestamp
@@ -123,7 +126,7 @@ class ArticleRepository @Inject constructor(
      *
      * @param feeds List of feeds to fetch from
      * @param onlyNew If true, only fetch articles published after lastFetched
-     * @return List of all processed articles, sorted with summaries first
+     * @return List of all processed articles, grouped by feed
      */
     suspend fun fetchAllArticles(
         feeds: List<Feed>,
@@ -135,7 +138,7 @@ class ArticleRepository @Inject constructor(
             async { fetchArticles(feed, onlyNew) }
         }.awaitAll()
 
-        // Combine all articles, summaries first
+        // Combine all articles in feed order so each feed's articles stay together
         val allArticles = results.flatMap { it.articles }
 
         Log.d(TAG, "Total articles from all feeds: ${allArticles.size}")
@@ -143,7 +146,7 @@ class ArticleRepository @Inject constructor(
             Log.d(TAG, "  - ${result.feed.name}: ${result.articles.size} articles, ${result.errors} errors")
         }
 
-        allArticles.sortedByDescending { it.isSummary }
+        allArticles
     }
 
     /**
