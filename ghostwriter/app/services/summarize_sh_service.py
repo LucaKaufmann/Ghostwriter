@@ -130,6 +130,47 @@ class SummarizeShService:
                 default_json += "\n"
             path.write_text(default_json, encoding="utf-8")
 
+    def _resolve_cli_home(self) -> Path:
+        return Path(os.path.expanduser(self.settings.data_dir))
+
+    def _resolve_cli_config_path(self) -> Path:
+        return self._resolve_cli_home() / ".summarize" / "config.json"
+
+    def _prepare_cli_config(self) -> tuple[Path, Path, str]:
+        """
+        Ensure summarize CLI can read the UI-managed config from the data volume.
+
+        summarize currently reads ~/.summarize/config.json; we force HOME=/app/data
+        and link that expected location to the configured path.
+        """
+        source = self._resolve_config_path()
+        cli_home = self._resolve_cli_home()
+        target = self._resolve_cli_config_path()
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        if source.resolve() == target.resolve():
+            return cli_home, target, "direct"
+
+        if target.exists() or target.is_symlink():
+            same_file = False
+            try:
+                same_file = target.resolve() == source.resolve()
+            except OSError:
+                same_file = False
+            if same_file:
+                return cli_home, target, "existing_link"
+            target.unlink()
+
+        try:
+            target.symlink_to(source)
+            sync_mode = "symlink"
+        except OSError:
+            target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            sync_mode = "copy"
+
+        return cli_home, target, sync_mode
+
     @staticmethod
     def _extract_summary(payload: object) -> str | None:
         if isinstance(payload, dict):
@@ -174,8 +215,23 @@ class SummarizeShService:
             return match.group(0)
         return None
 
-    def _build_env(self, whisper_model: str | None) -> dict[str, str]:
+    @staticmethod
+    def _looks_like_unsummarized_output(text: str, is_media: bool) -> bool:
+        stripped = text.lstrip().lower()
+        if stripped.startswith("transcript:") or stripped.startswith("transkript:"):
+            return True
+        if not is_media:
+            return False
+        # Media summaries should not return near full transcripts.
+        return len(text.split()) >= 2500
+
+    def _build_env(self, whisper_model: str | None, cli_home: Path | None) -> dict[str, str]:
         env = os.environ.copy()
+
+        if cli_home is not None:
+            home_value = str(cli_home)
+            env["HOME"] = home_value
+            env["USERPROFILE"] = home_value
 
         binary_path = Path(
             os.path.expanduser(self.settings.summarize_sh_whisper_cpp_binary)
@@ -196,7 +252,12 @@ class SummarizeShService:
 
         return env
 
-    async def summarize_url(self, url: str, whisper_model: str | None = None) -> SummarizeResult:
+    async def summarize_url(
+        self,
+        url: str,
+        whisper_model: str | None = None,
+        is_media: bool = False,
+    ) -> SummarizeResult:
         """
         Summarize a URL using Summarize.sh.
 
@@ -204,6 +265,13 @@ class SummarizeShService:
             SummarizeResult with summary and ai_failed flag.
         """
         self._ensure_config_exists()
+        cli_home = self._resolve_cli_home()
+        cli_config_path = self._resolve_cli_config_path()
+        cli_config_mode = "none"
+        try:
+            cli_home, cli_config_path, cli_config_mode = self._prepare_cli_config()
+        except OSError as exc:
+            logger.warning("Failed to prepare summarize CLI config: %s", exc)
         config_details = self._summarize_config_details()
         logger.info(
             "Summarize.sh config in use",
@@ -213,13 +281,16 @@ class SummarizeShService:
                 "config_model": config_details["model"],
                 "config_language": config_details["language"],
                 "config_error": config_details["error"],
+                "cli_home": str(cli_home),
+                "cli_config_path": str(cli_config_path),
+                "cli_config_mode": cli_config_mode,
                 "whisper_model": whisper_model,
             },
         )
 
         cmd = ["summarize", url, "--plain"]
         logger.debug("Running Summarize.sh: %s", " ".join(cmd))
-        env = self._build_env(whisper_model)
+        env = self._build_env(whisper_model, cli_home=cli_home)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -271,12 +342,28 @@ class SummarizeShService:
         stderr_text = stderr.decode("utf-8", errors="ignore")
         observed_model = self._extract_model_from_metrics(stderr_text)
         logger.info(
-            "Summarize.sh model selection",
+            "Summarize.sh model selection: config=%s observed=%s",
+            config_details["model"],
+            observed_model,
             extra={
                 "url": url,
                 "config_model": config_details["model"],
                 "observed_model": observed_model,
             },
         )
+        if self._looks_like_unsummarized_output(output, is_media=is_media):
+            logger.warning(
+                "Summarize.sh returned transcript-like output; treating as failure",
+                extra={
+                    "url": url,
+                    "is_media": is_media,
+                    "word_count": len(output.split()),
+                },
+            )
+            return SummarizeResult(
+                summary=output,
+                ai_failed=True,
+                error="output looked like unsummarized transcript",
+            )
         logger.info("Summarize.sh returned summary", extra={"url": url})
         return SummarizeResult(summary=output, ai_failed=False)
