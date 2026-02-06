@@ -75,6 +75,20 @@
 
 	// Computed
 	const processingDigest = $derived(digestsQuery.data?.find((d) => d.status === 'processing'));
+	const groupedViewingArticles = $derived.by(() => {
+		const groups = new Map<string, DigestArticle[]>();
+		for (const article of viewingArticles) {
+			const feedTitle = article.feed_title?.trim() || 'Unknown Feed';
+			if (!groups.has(feedTitle)) {
+				groups.set(feedTitle, []);
+			}
+			groups.get(feedTitle)!.push(article);
+		}
+		return Array.from(groups.entries()).map(([feedTitle, articles]) => ({
+			feedTitle,
+			articles
+		}));
+	});
 
 	async function viewArticles(digest: Digest) {
 		viewingDigest = digest;
@@ -314,7 +328,7 @@
 																<button
 																	{...props}
 																	type="button"
-																	onclick={() => downloadDigest(digest.filename)}
+																	onclick={() => downloadDigest(digest.filename!)}
 																>
 																	<Download class="mr-2 h-4 w-4" />
 																	Download EPUB
@@ -377,7 +391,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											onclick={() => downloadDigest(digest.filename)}
+											onclick={() => downloadDigest(digest.filename!)}
 										>
 											<Download class="h-4 w-4" />
 										</Button>
@@ -434,34 +448,49 @@
 					No articles in this digest
 				</div>
 			{:else}
-				<div class="space-y-3 py-4">
-					{#each viewingArticles as article}
-						<div class="rounded-lg border p-3 space-y-1">
-							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0 flex-1">
-									<p class="font-medium">{article.title}</p>
-									<p class="text-sm text-muted-foreground">{article.feed_title}</p>
+				<div class="space-y-6 py-4">
+					{#each groupedViewingArticles as feedGroup}
+						<div class="space-y-3">
+							<div>
+								<p class="text-sm font-semibold tracking-wide uppercase text-muted-foreground">
+									{feedGroup.feedTitle}
+								</p>
+								<p class="text-xs text-muted-foreground">
+									{feedGroup.articles.length} article{feedGroup.articles.length === 1 ? '' : 's'}
+								</p>
+							</div>
+
+							{#each feedGroup.articles as article, idx}
+								<div class="rounded-lg border p-3 space-y-1">
+									<div class="flex items-start justify-between gap-2">
+										<div class="min-w-0 flex-1">
+											<p class="font-medium">{idx + 1}. {article.title}</p>
+										</div>
+										<a
+											href={article.url}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="flex-shrink-0"
+										>
+											<Button variant="ghost" size="icon">
+												<ExternalLink class="h-4 w-4" />
+											</Button>
+										</a>
+									</div>
+									<div class="flex items-center gap-2 text-xs text-muted-foreground">
+										<Badge
+											variant={article.mode === 'summarize' ? 'default' : 'secondary'}
+											class="text-xs"
+										>
+											{article.mode}
+										</Badge>
+										<span>{article.word_count} words</span>
+										{#if article.ai_failed}
+											<Badge variant="destructive" class="text-xs">AI failed</Badge>
+										{/if}
+									</div>
 								</div>
-								<a
-									href={article.url}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="flex-shrink-0"
-								>
-									<Button variant="ghost" size="icon">
-										<ExternalLink class="h-4 w-4" />
-									</Button>
-								</a>
-							</div>
-							<div class="flex items-center gap-2 text-xs text-muted-foreground">
-								<Badge variant={article.mode === 'summarize' ? 'default' : 'secondary'} class="text-xs">
-									{article.mode}
-								</Badge>
-								<span>{article.word_count} words</span>
-								{#if article.ai_failed}
-									<Badge variant="destructive" class="text-xs">AI failed</Badge>
-								{/if}
-							</div>
+							{/each}
 						</div>
 					{/each}
 				</div>
@@ -470,7 +499,7 @@
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (viewingDigest = null)}>Close</Button>
 			{#if viewingDigest?.filename}
-				<Button onclick={() => downloadDigest(viewingDigest.filename)}>
+				<Button onclick={() => downloadDigest(viewingDigest!.filename!)}>
 					<Download class="mr-2 h-4 w-4" />
 					Download EPUB
 				</Button>

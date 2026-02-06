@@ -156,7 +156,7 @@ async def combined_sync(
         articles_statement = (
             select(DigestArticle)
             .where(col(DigestArticle.digest_id).in_(digest_id_list))
-            .order_by(DigestArticle.sort_order)
+            .order_by(DigestArticle.digest_id, DigestArticle.sort_order)
         )
         all_articles = list(session.exec(articles_statement).all())
 

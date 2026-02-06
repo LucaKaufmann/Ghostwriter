@@ -105,9 +105,7 @@ public final class EPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
         let contentURL = oebpsDir.appendingPathComponent("content.opf")
         let dateFormatter = ISO8601DateFormatter()
         let dateString = dateFormatter.string(from: date)
-
-        let briefings = articles.filter { $0.isSummary }
-        let deepDives = articles.filter { !$0.isSummary }
+        let feedGroups = groupArticlesByFeed(articles: articles)
 
         var manifest = """
             <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>
@@ -117,14 +115,14 @@ public final class EPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
 
         var spine = "<itemref idref=\"cover\"/>"
 
-        for (index, _) in briefings.enumerated() {
-            manifest += "\n    <item id=\"briefing\(index)\" href=\"briefing\(index).xhtml\" media-type=\"application/xhtml+xml\"/>"
-            spine += "\n    <itemref idref=\"briefing\(index)\"/>"
-        }
+        for (feedIndex, (_, feedArticles)) in feedGroups.enumerated() {
+            manifest += "\n    <item id=\"feedSection\(feedIndex)\" href=\"feed\(feedIndex).xhtml\" media-type=\"application/xhtml+xml\"/>"
+            spine += "\n    <itemref idref=\"feedSection\(feedIndex)\"/>"
 
-        for (index, _) in deepDives.enumerated() {
-            manifest += "\n    <item id=\"deepdive\(index)\" href=\"deepdive\(index).xhtml\" media-type=\"application/xhtml+xml\"/>"
-            spine += "\n    <itemref idref=\"deepdive\(index)\"/>"
+            for articleIndex in feedArticles.indices {
+                manifest += "\n    <item id=\"feed\(feedIndex)Article\(articleIndex)\" href=\"feed\(feedIndex)_article\(articleIndex).xhtml\" media-type=\"application/xhtml+xml\"/>"
+                spine += "\n    <itemref idref=\"feed\(feedIndex)Article\(articleIndex)\"/>"
+            }
         }
 
         let xml = """
@@ -151,9 +149,7 @@ public final class EPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
 
     private func createTOCNCX(in oebpsDir: URL, articles: [ProcessedArticle]) throws {
         let tocURL = oebpsDir.appendingPathComponent("toc.ncx")
-
-        let briefings = articles.filter { $0.isSummary }
-        let deepDives = articles.filter { !$0.isSummary }
+        let feedGroups = groupArticlesByFeed(articles: articles)
 
         var navPoints = """
             <navPoint id="cover" playOrder="1">
@@ -164,21 +160,27 @@ public final class EPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
 
         var playOrder = 2
 
-        if !briefings.isEmpty {
-            navPoints += """
-            \n    <navPoint id="briefings" playOrder="\(playOrder)">
-                <navLabel><text>Briefings</text></navLabel>
-                <content src="briefing0.xhtml"/>
-            </navPoint>
-            """
+        for (feedIndex, (feedName, feedArticles)) in feedGroups.enumerated() {
+            let feedPlayOrder = playOrder
             playOrder += 1
-        }
 
-        if !deepDives.isEmpty {
+            var feedChildren = ""
+            for (articleIndex, article) in feedArticles.enumerated() {
+                let articlePlayOrder = playOrder
+                playOrder += 1
+                feedChildren += """
+                
+                    <navPoint id="feed\(feedIndex)-article\(articleIndex)" playOrder="\(articlePlayOrder)">
+                        <navLabel><text>\(escapeXML(article.title))</text></navLabel>
+                        <content src="feed\(feedIndex)_article\(articleIndex).xhtml"/>
+                    </navPoint>
+                """
+            }
+
             navPoints += """
-            \n    <navPoint id="deepdives" playOrder="\(playOrder)">
-                <navLabel><text>Deep Dives</text></navLabel>
-                <content src="deepdive0.xhtml"/>
+            \n    <navPoint id="feed\(feedIndex)" playOrder="\(feedPlayOrder)">
+                <navLabel><text>\(escapeXML(feedName))</text></navLabel>
+                <content src="feed\(feedIndex).xhtml"/>\(feedChildren)
             </navPoint>
             """
         }
@@ -231,40 +233,58 @@ public final class EPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
     }
 
     private func createChapters(in oebpsDir: URL, articles: [ProcessedArticle]) throws {
-        let briefings = articles.filter { $0.isSummary }
-        let deepDives = articles.filter { !$0.isSummary }
+        let feedGroups = groupArticlesByFeed(articles: articles)
 
-        for (index, article) in briefings.enumerated() {
-            try createChapter(
+        for (feedIndex, (feedName, feedArticles)) in feedGroups.enumerated() {
+            try createFeedSectionChapter(
                 in: oebpsDir,
-                article: article,
-                filename: "briefing\(index).xhtml",
-                sectionTitle: index == 0 ? "Briefings" : nil
+                feedName: feedName,
+                articleCount: feedArticles.count,
+                filename: "feed\(feedIndex).xhtml"
             )
-        }
 
-        for (index, article) in deepDives.enumerated() {
-            try createChapter(
-                in: oebpsDir,
-                article: article,
-                filename: "deepdive\(index).xhtml",
-                sectionTitle: index == 0 ? "Deep Dives" : nil
-            )
+            for (articleIndex, article) in feedArticles.enumerated() {
+                try createChapter(
+                    in: oebpsDir,
+                    article: article,
+                    filename: "feed\(feedIndex)_article\(articleIndex).xhtml"
+                )
+            }
         }
+    }
+
+    private func createFeedSectionChapter(
+        in oebpsDir: URL,
+        feedName: String,
+        articleCount: Int,
+        filename: String
+    ) throws {
+        let chapterURL = oebpsDir.appendingPathComponent(filename)
+        let articleLabel = articleCount == 1 ? "article" : "articles"
+
+        let xhtml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE html>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+        <head>
+            <title>\(feedName)</title>
+            <link rel="stylesheet" type="text/css" href="stylesheet.css"/>
+        </head>
+        <body>
+            <h1 class="section-title">\(feedName)</h1>
+            <p class="section-intro">\(articleCount) \(articleLabel)</p>
+        </body>
+        </html>
+        """
+        try xhtml.write(to: chapterURL, atomically: true, encoding: .utf8)
     }
 
     private func createChapter(
         in oebpsDir: URL,
         article: ProcessedArticle,
-        filename: String,
-        sectionTitle: String?
+        filename: String
     ) throws {
         let chapterURL = oebpsDir.appendingPathComponent(filename)
-
-        var sectionHTML = ""
-        if let section = sectionTitle {
-            sectionHTML = "<h1 class=\"section-title\">\(section)</h1>\n    "
-        }
 
         let authorHTML = article.author.isEmpty ? "" : "<p class=\"author\">By \(article.author)</p>\n    "
 
@@ -277,7 +297,7 @@ public final class EPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
             <link rel="stylesheet" type="text/css" href="stylesheet.css"/>
         </head>
         <body>
-            \(sectionHTML)<h2 class="article-title">\(article.title)</h2>
+            <h2 class="article-title">\(article.title)</h2>
             \(authorHTML)<div class="article-content">
         \(article.content)
             </div>
@@ -286,6 +306,33 @@ public final class EPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
         </html>
         """
         try xhtml.write(to: chapterURL, atomically: true, encoding: .utf8)
+    }
+
+    private func groupArticlesByFeed(articles: [ProcessedArticle]) -> [(String, [ProcessedArticle])] {
+        var grouped: [(String, [ProcessedArticle])] = []
+
+        for article in articles {
+            let feedName = article.feedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Unknown Feed"
+                : article.feedName
+
+            if let index = grouped.firstIndex(where: { $0.0 == feedName }) {
+                grouped[index].1.append(article)
+            } else {
+                grouped.append((feedName, [article]))
+            }
+        }
+
+        return grouped
+    }
+
+    private func escapeXML(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
     }
 
     private func createZIPArchive(from source: URL, to destination: URL) throws {

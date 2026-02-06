@@ -21,7 +21,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -151,8 +150,7 @@ fun DigestDetailScreen(
             else -> {
                 val digest = uiState.digest!!
                 val isRemoteDigest = digest.remoteId != null
-                val briefings = uiState.articles.filter { it.isSummary }
-                val deepDives = uiState.articles.filter { !it.isSummary }
+                val orderedArticles = uiState.articles
 
                 // For remote digests (synced from Ghostwriter), show prompt to open EPUB
                 // since we don't have individual article records
@@ -168,7 +166,7 @@ fun DigestDetailScreen(
                     // E-ink mode: Book-style reader with all articles as chapters
                     // Only apply top padding (for app bar), ignore bottom system padding
                     EinkBookReader(
-                        articles = briefings + deepDives,
+                        articles = orderedArticles,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(top = innerPadding.calculateTopPadding())
@@ -176,8 +174,7 @@ fun DigestDetailScreen(
                 } else {
                     // Standard mode: Scrollable list
                     ScrollableArticleList(
-                        briefings = briefings,
-                        deepDives = deepDives,
+                        articles = orderedArticles,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
@@ -194,11 +191,18 @@ fun DigestDetailScreen(
  */
 @Composable
 fun ScrollableArticleList(
-    briefings: List<DigestArticle>,
-    deepDives: List<DigestArticle>,
+    articles: List<DigestArticle>,
     modifier: Modifier = Modifier
 ) {
     val einkMode = LocalEinkMode.current
+    val groupedArticles = remember(articles) {
+        val grouped = linkedMapOf<String, MutableList<DigestArticle>>()
+        for (article in articles) {
+            val feed = article.feedName.ifBlank { "Unknown Feed" }
+            grouped.getOrPut(feed) { mutableListOf() }.add(article)
+        }
+        grouped.toList()
+    }
 
     LazyColumn(
         modifier = modifier,
@@ -206,47 +210,32 @@ fun ScrollableArticleList(
     ) {
         item { Spacer(modifier = Modifier.height(8.dp)) }
 
-        // Briefings section
-        if (briefings.isNotEmpty()) {
+        if (groupedArticles.isEmpty()) {
             item {
                 Text(
-                    text = "The Briefing",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                Text(
-                    text = "AI-generated summaries for quick catch-up",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "No articles in this digest",
+                    style = MaterialTheme.typography.bodyLarge
                 )
             }
-
-            items(briefings, key = { it.id }) { article ->
-                ArticleCard(article = article, einkMode = einkMode)
-            }
-        }
-
-        // Deep Dives section
-        if (deepDives.isNotEmpty()) {
-            if (briefings.isNotEmpty()) {
+        } else {
+            groupedArticles.forEach { (feedName, feedArticles) ->
                 item {
-                    Divider(modifier = Modifier.padding(vertical = 8.dp))
+                    Column {
+                        Text(
+                            text = feedName,
+                            style = MaterialTheme.typography.headlineSmall
+                        )
+                        Text(
+                            text = "${feedArticles.size} article${if (feedArticles.size == 1) "" else "s"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-            }
 
-            item {
-                Text(
-                    text = "Deep Dives",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                Text(
-                    text = "Full articles for in-depth reading",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            items(deepDives, key = { it.id }) { article ->
-                ArticleCard(article = article, einkMode = einkMode)
+                items(feedArticles, key = { it.id }) { article ->
+                    ArticleCard(article = article, einkMode = einkMode)
+                }
             }
         }
 

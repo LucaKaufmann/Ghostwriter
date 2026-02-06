@@ -105,6 +105,12 @@ class EpubGenerator:
         if date is None:
             date = datetime.utcnow()
 
+        all_articles: list[ExtractedArticle] = list(articles)
+        if saved_articles:
+            all_articles.extend(saved_articles)
+        if newsletter_articles:
+            all_articles.extend(newsletter_articles)
+
         # Create EPUB book
         book = epub.EpubBook()
         book.set_identifier(str(uuid4()))
@@ -122,7 +128,7 @@ class EpubGenerator:
         book.add_item(css)
 
         # Create cover page
-        cover_content = self._create_cover(date, period, len(articles))
+        cover_content = self._create_cover(date, period, len(all_articles))
         cover = epub.EpubHtml(
             title="Cover",
             file_name="cover.xhtml",
@@ -132,49 +138,47 @@ class EpubGenerator:
         cover.add_item(css)
         book.add_item(cover)
 
-        # Create chapters for each article
-        chapters = []
-        for i, article in enumerate(articles, 1):
-            chapter = self._create_chapter(article, i, css)
-            book.add_item(chapter)
-            chapters.append(chapter)
-
-        # Saved Articles section (Wallabag etc.)
-        saved_chapters = []
-        if saved_articles:
-            divider = self._create_section_divider("Saved Articles", css)
-            book.add_item(divider)
-            saved_chapters.append(divider)
-
-            offset = len(articles) + 1
-            for i, article in enumerate(saved_articles, offset):
-                chapter = self._create_chapter(article, i, css)
-                book.add_item(chapter)
-                saved_chapters.append(chapter)
-
-        # Newsletter section
-        newsletter_chapters = []
-        if newsletter_articles:
-            divider = self._create_section_divider(
-                "Newsletters", css, file_name="section_newsletters.xhtml"
+        # Create one chapter per feed with sub-chapters for each feed article.
+        toc_entries: list = [cover]
+        spine_entries: list = ["nav", cover]
+        for feed_index, (feed_title, feed_articles) in enumerate(
+            self._group_articles_by_feed(all_articles),
+            start=1,
+        ):
+            feed_slug = self._slugify(feed_title)
+            feed_section = self._create_section_divider(
+                feed_title,
+                css,
+                file_name=f"feed_{feed_index:03d}_{feed_slug}.xhtml",
             )
-            book.add_item(divider)
-            newsletter_chapters.append(divider)
+            book.add_item(feed_section)
+            spine_entries.append(feed_section)
 
-            for i, article in enumerate(newsletter_articles):
-                chapter = self._create_newsletter_chapter(article, i, css)
+            feed_chapters: list[epub.EpubHtml] = []
+            for article_index, article in enumerate(feed_articles, start=1):
+                chapter = self._create_chapter(
+                    article,
+                    css,
+                    file_name=(
+                        f"feed_{feed_index:03d}_article_"
+                        f"{article_index:03d}_{feed_slug}.xhtml"
+                    ),
+                )
                 book.add_item(chapter)
-                newsletter_chapters.append(chapter)
+                feed_chapters.append(chapter)
+                spine_entries.append(chapter)
+
+            toc_entries.append((epub.Section(feed_title), [feed_section] + feed_chapters))
 
         # Build table of contents
-        book.toc = [cover] + chapters + saved_chapters + newsletter_chapters
+        book.toc = toc_entries
 
         # Add navigation files
         book.add_item(epub.EpubNcx())
         book.add_item(epub.EpubNav())
 
         # Set spine (reading order)
-        book.spine = ["nav", cover] + chapters + saved_chapters + newsletter_chapters
+        book.spine = spine_entries
 
         # Generate filename and save
         filename = f"{date.strftime('%Y-%m-%d')}_{period}.epub"
@@ -184,9 +188,26 @@ class EpubGenerator:
         os.makedirs(self.settings.output_dir, exist_ok=True)
 
         epub.write_epub(output_path, book)
-        logger.info(f"Generated EPUB: {output_path} with {len(articles)} articles")
+        logger.info(f"Generated EPUB: {output_path} with {len(all_articles)} articles")
 
         return output_path
+
+    @staticmethod
+    def _slugify(value: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+        return slug or "feed"
+
+    @staticmethod
+    def _group_articles_by_feed(
+        articles: list[ExtractedArticle],
+    ) -> list[tuple[str, list[ExtractedArticle]]]:
+        grouped: dict[str, list[ExtractedArticle]] = {}
+        for article in articles:
+            title = article.feed_title.strip() or "Unknown Feed"
+            if title not in grouped:
+                grouped[title] = []
+            grouped[title].append(article)
+        return list(grouped.items())
 
     def _create_cover(self, date: datetime, period: str, article_count: int) -> str:
         """
@@ -245,15 +266,18 @@ class EpubGenerator:
         return page
 
     def _create_chapter(
-        self, article: ExtractedArticle, index: int, css: epub.EpubItem
+        self,
+        article: ExtractedArticle,
+        css: epub.EpubItem,
+        file_name: str,
     ) -> epub.EpubHtml:
         """
         Create a chapter for an article.
 
         Args:
             article: The extracted article.
-            index: Chapter index.
             css: CSS item to attach.
+            file_name: Chapter file name.
 
         Returns:
             EpubHtml chapter.
@@ -305,51 +329,7 @@ class EpubGenerator:
 
         chapter = epub.EpubHtml(
             title=article.title,
-            file_name=f"chapter_{index:03d}.xhtml",
-            lang="en",
-        )
-        chapter.content = html_content.encode("utf-8")
-        chapter.add_item(css)
-
-        return chapter
-
-    def _create_newsletter_chapter(
-        self, article: ExtractedArticle, index: int, css: epub.EpubItem
-    ) -> epub.EpubHtml:
-        """
-        Create a chapter for a newsletter article.
-
-        Inserts article content as raw HTML (already cleaned) rather than escaping it.
-        """
-        def escape_html(text: str) -> str:
-            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-        title = escape_html(article.title)
-
-        html_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head>
-    <title>{title}</title>
-    <link rel="stylesheet" type="text/css" href="style/main.css"/>
-</head>
-<body>
-    <div class="article">
-        <h1>{title}<span class="summary-badge">Newsletter</span></h1>
-        <div class="article-meta">
-            {f'<span>From {escape_html(article.author)}</span> | ' if article.author else ''}
-            <span>{article.word_count} words</span>
-        </div>
-        <div class="article-content">
-            {article.content}
-        </div>
-    </div>
-</body>
-</html>"""
-
-        chapter = epub.EpubHtml(
-            title=article.title,
-            file_name=f"newsletter_{index:03d}.xhtml",
+            file_name=file_name,
             lang="en",
         )
         chapter.content = html_content.encode("utf-8")
