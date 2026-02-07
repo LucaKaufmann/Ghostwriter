@@ -1,23 +1,30 @@
-"""Pytest configuration for Ghostwriter.
-
-The application defaults to container paths like /app/data and /app/logs.
-When running tests locally those paths may be unwritable or not exist, so we
-force them to a temporary writable directory before the app is imported.
-"""
+"""Global pytest fixtures and environment setup for Ghostwriter tests."""
 
 from __future__ import annotations
 
 import os
 import tempfile
-from pathlib import Path
 
-_TEST_ROOT = Path(tempfile.mkdtemp(prefix="ghostwriter-tests-"))
+import pytest
+from fastapi.testclient import TestClient
 
-os.environ.setdefault("DATA_DIR", str(_TEST_ROOT / "data"))
-os.environ.setdefault("OUTPUT_DIR", str(_TEST_ROOT / "output"))
-os.environ.setdefault("LOGS_DIR", str(_TEST_ROOT / "logs"))
+# Configure writable directories for tests before importing the FastAPI app.
+_BASE_DIR = tempfile.mkdtemp(prefix="ghostwriter_test_")
+os.environ["DATA_DIR"] = os.path.join(_BASE_DIR, "data")
+os.environ["OUTPUT_DIR"] = os.path.join(_BASE_DIR, "output")
+os.environ["LOGS_DIR"] = os.path.join(_BASE_DIR, "logs")
 
-Path(os.environ["DATA_DIR"]).mkdir(parents=True, exist_ok=True)
-Path(os.environ["OUTPUT_DIR"]).mkdir(parents=True, exist_ok=True)
-Path(os.environ["LOGS_DIR"]).mkdir(parents=True, exist_ok=True)
+# Disable auth for tests (setup-mode behavior).
+os.environ["API_KEY"] = ""
 
+# Avoid starting background schedulers during tests.
+os.environ["SCHEDULE_ENABLED"] = "false"
+
+from app.main import app  # noqa: E402  # env must be set before import
+
+
+@pytest.fixture
+def client():
+    """Create a FastAPI TestClient."""
+    with TestClient(app) as client:
+        yield client

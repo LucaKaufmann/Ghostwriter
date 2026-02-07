@@ -1,18 +1,5 @@
 """Tests for feed management endpoints."""
 
-import pytest
-from fastapi.testclient import TestClient
-
-from app.main import app
-
-
-@pytest.fixture
-def client():
-    """Create a test client."""
-    with TestClient(app) as client:
-        yield client
-
-
 def test_list_feeds_empty(client):
     """Test listing feeds when none exist."""
     response = client.get("/api/feeds")
