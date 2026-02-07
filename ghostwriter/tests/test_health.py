@@ -9,7 +9,8 @@ from app.main import app
 @pytest.fixture
 def client():
     """Create a test client."""
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 def test_root(client):
@@ -23,7 +24,7 @@ def test_root(client):
 
 def test_health(client):
     """Test health endpoint."""
-    response = client.get("/health")
+    response = client.get("/api/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
@@ -33,7 +34,7 @@ def test_health(client):
 
 def test_config(client):
     """Test config endpoint."""
-    response = client.get("/config")
+    response = client.get("/api/health/config")
     assert response.status_code == 200
     data = response.json()
     assert "timezone" in data

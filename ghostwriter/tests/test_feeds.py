@@ -1,14 +1,7 @@
 """Tests for feed management endpoints."""
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
-
-# Set test environment before importing app
-os.environ["DATA_DIR"] = "/tmp/ghostwriter_test"
-os.environ["OUTPUT_DIR"] = "/tmp/ghostwriter_test_output"
-os.environ["API_KEY"] = ""  # Disable auth for tests
 
 from app.main import app
 
@@ -16,12 +9,13 @@ from app.main import app
 @pytest.fixture
 def client():
     """Create a test client."""
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 def test_list_feeds_empty(client):
     """Test listing feeds when none exist."""
-    response = client.get("/feeds")
+    response = client.get("/api/feeds")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
@@ -35,7 +29,7 @@ def test_create_feed(client):
         "is_active": True,
         "max_articles": 5,
     }
-    response = client.post("/feeds", json=feed_data)
+    response = client.post("/api/feeds", json=feed_data)
     assert response.status_code == 200
     data = response.json()
     assert data["url"] == feed_data["url"]
@@ -57,7 +51,7 @@ def test_sync_feeds(client):
             "mode": "summarize",
         },
     ]
-    response = client.post("/feeds/sync", json=feeds)
+    response = client.post("/api/feeds/sync", json=feeds)
     assert response.status_code == 200
     data = response.json()
     assert data["synced"] == 2
