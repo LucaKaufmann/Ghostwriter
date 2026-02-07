@@ -39,6 +39,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Stage 2.5: whisper.cpp Builder
 FROM python:3.11-slim AS whisper-builder
 
+ARG TARGETARCH
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     cmake \
@@ -46,7 +48,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth=1 https://github.com/ggml-org/whisper.cpp /opt/whisper && \
-    cmake -S /opt/whisper -B /opt/whisper/build && \
+    if [ "${TARGETARCH:-}" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
+        CMAKE_FLAGS="-DCMAKE_C_FLAGS=-march=armv8-a -DCMAKE_CXX_FLAGS=-march=armv8-a"; \
+    else \
+        CMAKE_FLAGS=""; \
+    fi && \
+    cmake -S /opt/whisper -B /opt/whisper/build ${CMAKE_FLAGS} && \
     cmake --build /opt/whisper/build -j && \
     strip -s /opt/whisper/build/bin/whisper-cli || true
 
