@@ -1,15 +1,14 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Digest, type DigestArticle } from '$lib/api';
+	import { api, type Digest } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Table from '$lib/components/ui/table';
-	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Progress } from '$lib/components/ui/progress';
-	import * as ScrollArea from '$lib/components/ui/scroll-area';
 	import { toast } from 'svelte-sonner';
 	import {
 		Play,
@@ -20,9 +19,7 @@
 		Calendar,
 		Loader2,
 		MoreHorizontal,
-		RefreshCw,
-		FileText,
-		ExternalLink
+		RefreshCw
 	} from 'lucide-svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 
@@ -69,39 +66,12 @@
 
 	// State
 	let digestToDelete = $state<Digest | null>(null);
-	let viewingDigest = $state<Digest | null>(null);
-	let viewingArticles = $state<DigestArticle[]>([]);
-	let loadingArticles = $state(false);
 
 	// Computed
 	const processingDigest = $derived(digestsQuery.data?.find((d) => d.status === 'processing'));
-	const groupedViewingArticles = $derived.by(() => {
-		const groups = new Map<string, DigestArticle[]>();
-		for (const article of viewingArticles) {
-			const feedTitle = article.feed_title?.trim() || 'Unknown Feed';
-			if (!groups.has(feedTitle)) {
-				groups.set(feedTitle, []);
-			}
-			groups.get(feedTitle)!.push(article);
-		}
-		return Array.from(groups.entries()).map(([feedTitle, articles]) => ({
-			feedTitle,
-			articles
-		}));
-	});
 
-	async function viewArticles(digest: Digest) {
-		viewingDigest = digest;
-		loadingArticles = true;
-		try {
-			const response = await api.getDigestArticles(digest.id);
-			viewingArticles = response.articles;
-		} catch (err) {
-			toast.error('Failed to load articles');
-			viewingDigest = null;
-		} finally {
-			loadingArticles = false;
-		}
+	function openReader(digest: Digest) {
+		goto(`/digests/${digest.id}/read`);
 	}
 
 	function parseUTC(dateStr: string): Date {
@@ -336,7 +306,7 @@
 															{/snippet}
 														</DropdownMenu.Item>
 													{/if}
-													<DropdownMenu.Item onclick={() => viewArticles(digest)}>
+													<DropdownMenu.Item onclick={() => openReader(digest)}>
 														<Eye class="mr-2 h-4 w-4" />
 														View Articles
 													</DropdownMenu.Item>
@@ -395,7 +365,7 @@
 										>
 											<Download class="h-4 w-4" />
 										</Button>
-										<Button variant="ghost" size="icon" onclick={() => viewArticles(digest)}>
+										<Button variant="ghost" size="icon" onclick={() => openReader(digest)}>
 											<Eye class="h-4 w-4" />
 										</Button>
 									{/if}
@@ -418,95 +388,6 @@
 		</Card.Content>
 	</Card.Root>
 </div>
-
-<!-- View Articles Dialog -->
-<Dialog.Root open={!!viewingDigest} onOpenChange={(open) => !open && (viewingDigest = null)}>
-<Dialog.Content
-	class="max-w-2xl max-h-[80vh] w-[calc(100vw-2rem)] sm:w-auto flex flex-col min-h-0 overflow-hidden"
->
-		<Dialog.Header>
-			<Dialog.Title class="capitalize">
-				{viewingDigest?.period} Digest Articles
-			</Dialog.Title>
-			<Dialog.Description>
-				{viewingDigest ? formatDate(viewingDigest.created_at) : ''} •
-				{viewingArticles.length} articles
-			</Dialog.Description>
-		</Dialog.Header>
-		<ScrollArea.Root class="flex-1 min-h-0 -mx-6 px-6">
-			{#if loadingArticles}
-				<div class="space-y-3 py-4">
-					{#each [1, 2, 3] as _}
-						<div class="space-y-2">
-							<Skeleton class="h-5 w-3/4" />
-							<Skeleton class="h-4 w-1/2" />
-						</div>
-					{/each}
-				</div>
-			{:else if viewingArticles.length === 0}
-				<div class="py-8 text-center text-muted-foreground">
-					No articles in this digest
-				</div>
-			{:else}
-				<div class="space-y-6 py-4">
-					{#each groupedViewingArticles as feedGroup}
-						<div class="space-y-3">
-							<div>
-								<p class="text-sm font-semibold tracking-wide uppercase text-muted-foreground">
-									{feedGroup.feedTitle}
-								</p>
-								<p class="text-xs text-muted-foreground">
-									{feedGroup.articles.length} article{feedGroup.articles.length === 1 ? '' : 's'}
-								</p>
-							</div>
-
-							{#each feedGroup.articles as article, idx}
-								<div class="rounded-lg border p-3 space-y-1">
-									<div class="flex items-start justify-between gap-2">
-										<div class="min-w-0 flex-1">
-											<p class="font-medium">{idx + 1}. {article.title}</p>
-										</div>
-										<a
-											href={article.url}
-											target="_blank"
-											rel="noopener noreferrer"
-											class="flex-shrink-0"
-										>
-											<Button variant="ghost" size="icon">
-												<ExternalLink class="h-4 w-4" />
-											</Button>
-										</a>
-									</div>
-									<div class="flex items-center gap-2 text-xs text-muted-foreground">
-										<Badge
-											variant={article.mode === 'summarize' ? 'default' : 'secondary'}
-											class="text-xs"
-										>
-											{article.mode}
-										</Badge>
-										<span>{article.word_count} words</span>
-										{#if article.ai_failed}
-											<Badge variant="destructive" class="text-xs">AI failed</Badge>
-										{/if}
-									</div>
-								</div>
-							{/each}
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</ScrollArea.Root>
-		<Dialog.Footer>
-			<Button variant="outline" onclick={() => (viewingDigest = null)}>Close</Button>
-			{#if viewingDigest?.filename}
-				<Button onclick={() => downloadDigest(viewingDigest!.filename!)}>
-					<Download class="mr-2 h-4 w-4" />
-					Download EPUB
-				</Button>
-			{/if}
-		</Dialog.Footer>
-	</Dialog.Content>
-</Dialog.Root>
 
 <!-- Delete Confirmation -->
 <AlertDialog.Root open={!!digestToDelete} onOpenChange={(open) => !open && (digestToDelete = null)}>
