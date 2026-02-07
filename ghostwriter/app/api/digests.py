@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -14,6 +15,11 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.core.security import verify_api_key
 from app.models.digest import Digest, DigestArticle, DigestRead, DigestStatus
+from app.services.reader_service import (
+    DocumentTooLargeError,
+    NonHtmlContentError,
+    fetch_html_document,
+)
 from app.worker.bindery import generate_digest
 import logging
 
@@ -85,6 +91,19 @@ class DigestArticlesResponse(BaseModel):
     digest_id: UUID
     article_count: int
     articles: list[DigestArticleRead]
+
+
+class DigestArticleSourceResponse(BaseModel):
+    """Raw upstream HTML for an article (used by the web reader)."""
+
+    digest_id: UUID
+    article_id: UUID
+    url: str
+    final_url: str
+    content_type: str | None = None
+    fetched_at: datetime
+    size_bytes: int
+    html: str
 
 
 @router.post("/trigger", response_model=TriggerResponse, dependencies=[Depends(verify_api_key)])
@@ -296,6 +315,54 @@ async def get_digest_articles(
             )
             for article in articles
         ],
+    )
+
+
+@router.get(
+    "/{digest_id}/articles/{article_id}/source",
+    response_model=DigestArticleSourceResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_digest_article_source(
+    digest_id: UUID,
+    article_id: UUID,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> DigestArticleSourceResponse:
+    """Fetch raw upstream HTML for a digest article (SSRF-safe)."""
+    statement = (
+        select(DigestArticle)
+        .where(DigestArticle.id == article_id)
+        .where(DigestArticle.digest_id == digest_id)
+    )
+    article = session.exec(statement).first()
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+    try:
+        doc = await fetch_html_document(article.url, settings=settings)
+    except ValueError as e:
+        # validate_public_url failures
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except NonHtmlContentError as e:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
+    except DocumentTooLargeError as e:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e))
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Upstream fetch timed out")
+    except httpx.HTTPError as e:
+        logger.warning("Upstream fetch failed", extra={"url": article.url, "error": repr(e)})
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Upstream fetch failed")
+
+    return DigestArticleSourceResponse(
+        digest_id=digest_id,
+        article_id=article_id,
+        url=article.url,
+        final_url=doc.final_url,
+        content_type=doc.content_type,
+        fetched_at=doc.fetched_at,
+        size_bytes=doc.size_bytes,
+        html=doc.html,
     )
 
 

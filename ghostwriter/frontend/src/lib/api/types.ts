@@ -223,6 +223,17 @@ export interface DigestArticlesResponse {
 	articles: DigestArticle[];
 }
 
+export interface DigestArticleSourceResponse {
+	digest_id: string;
+	article_id: string;
+	url: string;
+	final_url: string;
+	content_type?: string | null;
+	fetched_at: string;
+	size_bytes: number;
+	html: string;
+}
+
 export interface TriggerResponse {
 	id: string | null;
 	status: string;
