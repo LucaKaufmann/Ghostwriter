@@ -293,6 +293,12 @@ class ApiClient {
 		});
 	}
 
+	async clearSeenArticles(id: string): Promise<{ status: string; feed_id: string; cleared_count: number }> {
+		return this.request(`/feeds/${id}/clear-seen`, {
+			method: 'POST'
+		});
+	}
+
 	async syncFeeds(feeds: FeedSync[]): Promise<SyncResponse> {
 		return this.request<SyncResponse>('/feeds/sync', {
 			method: 'POST',
