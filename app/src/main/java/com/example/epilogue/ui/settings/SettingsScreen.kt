@@ -1,6 +1,9 @@
 package com.example.epilogue.ui.settings
 
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.widget.Toast
+import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -58,6 +61,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
@@ -228,6 +232,8 @@ fun SettingsScreen(
                     enabled = uiState.ghostwriterEnabled,
                     url = uiState.ghostwriterUrl,
                     apiKey = uiState.ghostwriterApiKey,
+                    pushEnabled = uiState.ghostwriterPushEnabled,
+                    pushError = uiState.ghostwriterPushError,
                     isTesting = uiState.ghostwriterTesting,
                     health = uiState.ghostwriterHealth,
                     wallabagIntegration = uiState.wallabagIntegration,
@@ -237,6 +243,7 @@ fun SettingsScreen(
                     onSaveUrl = viewModel::saveGhostwriterUrl,
                     onApiKeyChange = viewModel::updateGhostwriterApiKey,
                     onSaveApiKey = viewModel::saveGhostwriterApiKey,
+                    onPushEnabledChange = viewModel::updateGhostwriterPushEnabled,
                     onTestConnection = viewModel::testGhostwriterConnection
                 )
             }
@@ -596,6 +603,8 @@ fun GhostwriterInput(
     enabled: Boolean,
     url: String,
     apiKey: String,
+    pushEnabled: Boolean,
+    pushError: String?,
     isTesting: Boolean,
     health: HealthResponse?,
     wallabagIntegration: IntegrationStatus?,
@@ -605,9 +614,22 @@ fun GhostwriterInput(
     onSaveUrl: () -> Unit,
     onApiKeyChange: (String) -> Unit,
     onSaveApiKey: () -> Unit,
+    onPushEnabledChange: (Boolean) -> Unit,
     onTestConnection: () -> Unit
 ) {
     var showApiKey by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    val notificationsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            onPushEnabledChange(true)
+        } else {
+            Toast.makeText(context, "Notification permission denied", Toast.LENGTH_SHORT).show()
+            onPushEnabledChange(false)
+        }
+    }
 
     Column {
         // Enable toggle
@@ -730,6 +752,61 @@ fun GhostwriterInput(
                     text = "Run Ghostwriter on your home server or NAS. Supports local AI (Ollama) or cloud providers.",
                     style = MaterialTheme.typography.bodySmall
                 )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Notifications",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Push notifications",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = "Notify when a new digest is ready",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = pushEnabled,
+                        onCheckedChange = { wantEnabled ->
+                            if (!wantEnabled) {
+                                onPushEnabledChange(false)
+                                return@Switch
+                            }
+                            val granted = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (granted) {
+                                onPushEnabledChange(true)
+                            } else {
+                                notificationsPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                    )
+                }
+
+                if (pushError != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = pushError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
 
                 // Server health summary (shown after successful test)
                 if (health != null) {

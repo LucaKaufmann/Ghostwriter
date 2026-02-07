@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
+import com.example.epilogue.BuildConfig
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
@@ -16,6 +17,7 @@ import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.service.ConfigSyncManager
 import com.example.epilogue.service.DigestScheduler
+import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 
 @HiltViewModel
@@ -63,7 +66,8 @@ class SettingsViewModel @Inject constructor(
                 // Ghostwriter settings
                 ghostwriterEnabled = settingsRepository.isGhostwriterEnabled(),
                 ghostwriterUrl = settingsRepository.getGhostwriterUrl() ?: "",
-                ghostwriterApiKey = settingsRepository.getGhostwriterApiKey() ?: ""
+                ghostwriterApiKey = settingsRepository.getGhostwriterApiKey() ?: "",
+                ghostwriterPushEnabled = settingsRepository.isGhostwriterPushEnabled()
             )
         }
     }
@@ -436,6 +440,12 @@ class SettingsViewModel @Inject constructor(
                 digestScheduler.cancelDigestSync()
                 // Re-enable local scheduled generation
                 digestScheduler.scheduleAllPeriods()
+                // Also disable push notifications (per device)
+                if (settingsRepository.isGhostwriterPushEnabled()) {
+                    settingsRepository.setGhostwriterPushEnabled(false)
+                    _uiState.update { it.copy(ghostwriterPushEnabled = false, ghostwriterPushError = null) }
+                    unregisterPushDeviceBestEffort()
+                }
             }
         }
     }
@@ -465,6 +475,74 @@ class SettingsViewModel @Inject constructor(
             val apiKey = _uiState.value.ghostwriterApiKey.trim()
             settingsRepository.setGhostwriterApiKey(apiKey.ifBlank { null })
             _uiState.update { it.copy(ghostwriterApiKeySaved = true) }
+        }
+    }
+
+    fun updateGhostwriterPushEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(ghostwriterPushError = null) }
+
+            if (!enabled) {
+                settingsRepository.setGhostwriterPushEnabled(false)
+                _uiState.update { it.copy(ghostwriterPushEnabled = false) }
+                unregisterPushDeviceBestEffort()
+                return@launch
+            }
+
+            if (!settingsRepository.isGhostwriterConfigured()) {
+                _uiState.update { it.copy(ghostwriterPushEnabled = false, ghostwriterPushError = "Ghostwriter is not configured") }
+                return@launch
+            }
+
+            val apiKey = settingsRepository.getGhostwriterApiKey()
+            if (apiKey.isNullOrBlank()) {
+                _uiState.update { it.copy(ghostwriterPushEnabled = false, ghostwriterPushError = "API token required for push notifications") }
+                return@launch
+            }
+
+            val token = try {
+                FirebaseMessaging.getInstance().token.await()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(ghostwriterPushEnabled = false, ghostwriterPushError = "FCM not configured: ${e.message}") }
+                return@launch
+            }
+
+            settingsRepository.setGhostwriterPushEnabled(true)
+            _uiState.update { it.copy(ghostwriterPushEnabled = true) }
+
+            val deviceId = settingsRepository.getOrCreateGhostwriterDeviceId()
+            val appVersion = BuildConfig.VERSION_NAME
+            val deviceModel = android.os.Build.MODEL
+
+            when (val result = ghostwriterRepository.registerPushDevice(
+                deviceId = deviceId,
+                token = token,
+                appVersion = appVersion,
+                deviceModel = deviceModel
+            )) {
+                is GhostwriterResult.Success -> {
+                    Log.i(TAG, "Push device registered: ${result.data.id}")
+                }
+                is GhostwriterResult.Error -> {
+                    settingsRepository.setGhostwriterPushEnabled(false)
+                    _uiState.update { it.copy(ghostwriterPushEnabled = false, ghostwriterPushError = result.message) }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    settingsRepository.setGhostwriterPushEnabled(false)
+                    _uiState.update { it.copy(ghostwriterPushEnabled = false, ghostwriterPushError = "Ghostwriter not configured") }
+                }
+            }
+        }
+    }
+
+    private fun unregisterPushDeviceBestEffort() {
+        viewModelScope.launch {
+            val deviceId = settingsRepository.getOrCreateGhostwriterDeviceId()
+            when (val result = ghostwriterRepository.unregisterPushDevice(deviceId)) {
+                is GhostwriterResult.Success -> Log.i(TAG, "Push device unregistered")
+                is GhostwriterResult.Error -> Log.w(TAG, "Push unregistration failed: ${result.message}")
+                is GhostwriterResult.NotConfigured -> { /* ignore */ }
+            }
         }
     }
 
@@ -695,6 +773,8 @@ data class SettingsUiState(
     val ghostwriterUrlSaved: Boolean = false,
     val ghostwriterApiKey: String = "",
     val ghostwriterApiKeySaved: Boolean = false,
+    val ghostwriterPushEnabled: Boolean = false,
+    val ghostwriterPushError: String? = null,
     val ghostwriterTesting: Boolean = false,
     val ghostwriterTestResult: String? = null,
     val ghostwriterProgress: DigestStatusResponse? = null,

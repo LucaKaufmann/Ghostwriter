@@ -63,6 +63,14 @@
             </intent-filter>
         </receiver>
 
+        <service
+            android:name=".service.GhostwriterPushMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <!-- WorkManager foreground service for long-running tasks -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"

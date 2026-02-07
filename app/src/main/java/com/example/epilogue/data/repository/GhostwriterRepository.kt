@@ -19,6 +19,9 @@ import com.example.epilogue.data.remote.ghostwriter.HeartbeatResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.PushDeviceRegisterRequest
+import com.example.epilogue.data.remote.ghostwriter.PushDeviceResponse
+import com.example.epilogue.data.remote.ghostwriter.StatusResponse
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -63,9 +66,9 @@ class GhostwriterRepository @Inject constructor(
     /**
      * Get the API instance if Ghostwriter is configured.
      */
-    private fun getApi(): GhostwriterApi? {
+    private fun getApi(ignoreEnabled: Boolean = false): GhostwriterApi? {
         val url = settingsRepository.getGhostwriterUrl()
-        if (url.isNullOrBlank() || !settingsRepository.isGhostwriterEnabled()) {
+        if (url.isNullOrBlank() || (!ignoreEnabled && !settingsRepository.isGhostwriterEnabled())) {
             return null
         }
         return apiFactory.create(url)
@@ -607,6 +610,58 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Update config failed", e)
             GhostwriterResult.Error("Failed to update config: ${e.message}")
+        }
+    }
+
+    // ===== Push Notifications =====
+
+    suspend fun registerPushDevice(
+        deviceId: String,
+        token: String,
+        appVersion: String? = null,
+        deviceModel: String? = null
+    ): GhostwriterResult<PushDeviceResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = PushDeviceRegisterRequest(
+                deviceId = deviceId,
+                platform = "android",
+                token = token,
+                appVersion = appVersion,
+                deviceModel = deviceModel
+            )
+            val response = api.registerPushDevice(getAuthHeader(), request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Push registration failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Push registration failed", e)
+            GhostwriterResult.Error("Push registration failed: ${e.message}")
+        }
+    }
+
+    suspend fun unregisterPushDevice(deviceId: String): GhostwriterResult<StatusResponse> = withContext(Dispatchers.IO) {
+        val api = getApi(ignoreEnabled = true) ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.unregisterPushDevice(getAuthHeader(), deviceId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Push unregistration failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Push unregistration failed", e)
+            GhostwriterResult.Error("Push unregistration failed: ${e.message}")
         }
     }
 }

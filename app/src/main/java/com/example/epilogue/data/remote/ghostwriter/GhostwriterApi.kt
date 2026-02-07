@@ -201,4 +201,32 @@ interface GhostwriterApi {
         @Header("Authorization") authorization: String?,
         @Body request: ClientConfigUpdateRequest
     ): Response<ClientConfigResponse>
+
+    // ===== Notifications =====
+
+    /**
+     * List registered push devices for the current user.
+     */
+    @GET("notifications/devices")
+    suspend fun listPushDevices(
+        @Header("Authorization") authorization: String?
+    ): Response<List<PushDeviceResponse>>
+
+    /**
+     * Register or update this device for push notifications.
+     */
+    @POST("notifications/devices")
+    suspend fun registerPushDevice(
+        @Header("Authorization") authorization: String?,
+        @Body request: PushDeviceRegisterRequest
+    ): Response<PushDeviceResponse>
+
+    /**
+     * Unregister this device from push notifications (idempotent).
+     */
+    @DELETE("notifications/devices/{deviceId}")
+    suspend fun unregisterPushDevice(
+        @Header("Authorization") authorization: String?,
+        @Path("deviceId") deviceId: String
+    ): Response<StatusResponse>
 }

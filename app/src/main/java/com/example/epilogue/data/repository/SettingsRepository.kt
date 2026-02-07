@@ -40,6 +40,8 @@ class SettingsRepository @Inject constructor(
         // Ghostwriter settings keys
         private const val KEY_GHOSTWRITER_ENABLED = "ghostwriter_enabled"
         private const val KEY_GHOSTWRITER_URL = "ghostwriter_url"
+        private const val KEY_GHOSTWRITER_PUSH_ENABLED = "ghostwriter_push_enabled"
+        private const val KEY_GHOSTWRITER_DEVICE_ID = "ghostwriter_device_id"
 
         // Encrypted settings keys
         private const val KEY_OPENAI_API_KEY = "openai_api_key"
@@ -335,6 +337,23 @@ class SettingsRepository @Inject constructor(
      */
     fun getGhostwriterUrl(): String? {
         return prefs.getString(KEY_GHOSTWRITER_URL, null)
+    }
+
+    fun isGhostwriterPushEnabled(): Boolean {
+        return prefs.getBoolean(KEY_GHOSTWRITER_PUSH_ENABLED, false)
+    }
+
+    suspend fun setGhostwriterPushEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        prefs.edit().putBoolean(KEY_GHOSTWRITER_PUSH_ENABLED, enabled).apply()
+    }
+
+    fun getOrCreateGhostwriterDeviceId(): String {
+        val existing = prefs.getString(KEY_GHOSTWRITER_DEVICE_ID, null)
+        if (!existing.isNullOrBlank()) return existing
+
+        val created = java.util.UUID.randomUUID().toString().lowercase()
+        prefs.edit().putString(KEY_GHOSTWRITER_DEVICE_ID, created).apply()
+        return created
     }
 
     /**

@@ -221,6 +221,34 @@ data class ClientConfigResponse(
     @SerializedName("newsletters") val newsletters: IntegrationStatus? = null
 )
 
+// ===== Push Notification Models =====
+
+data class PushDeviceRegisterRequest(
+    @SerializedName("device_id") val deviceId: String,
+    @SerializedName("platform") val platform: String, // ios | android
+    @SerializedName("token") val token: String,
+    @SerializedName("app_version") val appVersion: String? = null,
+    @SerializedName("device_model") val deviceModel: String? = null
+)
+
+data class PushDeviceResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("device_id") val deviceId: String,
+    @SerializedName("platform") val platform: String,
+    @SerializedName("enabled") val enabled: Boolean,
+    @SerializedName("disabled_at") val disabledAt: String? = null,
+    @SerializedName("app_version") val appVersion: String? = null,
+    @SerializedName("device_model") val deviceModel: String? = null,
+    @SerializedName("last_seen_at") val lastSeenAt: String,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("updated_at") val updatedAt: String
+)
+
+data class StatusResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String? = null
+)
+
 /**
  * Request model for updating client configuration.
  */
