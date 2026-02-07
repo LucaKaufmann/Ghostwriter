@@ -18,6 +18,7 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
     private enum KeychainKeys {
         static let openAIKey = "openai_api_key"
         static let ghostwriterAPIKey = "ghostwriter_api_key"
+        static let ghostwriterDeviceId = "ghostwriter_device_id"
     }
 
     // UserDefaults keys
@@ -38,6 +39,7 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         static let lastFeedSyncTime = "ghostwriter_last_feed_sync"
         static let lastDigestSyncTime = "ghostwriter_last_digest_sync"
         static let ghostwriterConfigUpdatedAt = "ghostwriter_config_updated_at"
+        static let ghostwriterPushEnabled = "ghostwriter_push_enabled"
         // Ghostwriter schedule (synced from server)
         static let ghostwriterMorningHour = "ghostwriter_morning_hour"
         static let ghostwriterMorningMinute = "ghostwriter_morning_minute"
@@ -333,6 +335,28 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
             eveningMinute: userDefaults.integer(forKey: DefaultsKeys.ghostwriterEveningMinute),
             timezone: timezone
         )
+    }
+
+    // MARK: - Ghostwriter Push Notifications
+
+    public func isGhostwriterPushEnabled() async throws -> Bool {
+        if userDefaults.object(forKey: DefaultsKeys.ghostwriterPushEnabled) == nil {
+            return false
+        }
+        return userDefaults.bool(forKey: DefaultsKeys.ghostwriterPushEnabled)
+    }
+
+    public func setGhostwriterPushEnabled(_ enabled: Bool) async throws {
+        userDefaults.set(enabled, forKey: DefaultsKeys.ghostwriterPushEnabled)
+    }
+
+    public func getGhostwriterDeviceId() async throws -> String {
+        if let existing = try keychainService.retrieve(forKey: KeychainKeys.ghostwriterDeviceId) {
+            return existing
+        }
+        let deviceId = UUID().uuidString.lowercased()
+        try keychainService.save(deviceId, forKey: KeychainKeys.ghostwriterDeviceId)
+        return deviceId
     }
 }
 

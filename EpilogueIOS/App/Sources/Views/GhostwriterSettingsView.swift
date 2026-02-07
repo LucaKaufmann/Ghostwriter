@@ -9,6 +9,8 @@
 import SwiftUI
 import Domain
 import GhostwriterClient
+import UIKit
+import UserNotifications
 
 /// Settings view for configuring Ghostwriter sync
 struct GhostwriterSettingsView: View {
@@ -67,6 +69,25 @@ struct GhostwriterSettingsView: View {
                 Text("Use a Ghostwriter API token (gw_...) or a JWT from the web UI.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
+
+            // MARK: - Push Notifications
+            Section {
+                Toggle("Notify When Digest Is Ready", isOn: $viewModel.pushEnabled)
+                    .disabled(!viewModel.isConfigured)
+                    .onChange(of: viewModel.pushEnabled) { _, newValue in
+                        Task { await viewModel.setPushEnabled(newValue) }
+                    }
+
+                if let error = viewModel.pushError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("When enabled, Ghostwriter will send a notification when a new digest is available. iOS may also fetch it in the background.")
             }
 
             // MARK: - Connection Test
@@ -270,6 +291,8 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var serverURL = ""
     @Published var hasAPIKey = false
     @Published var newAPIKey = ""
+    @Published var pushEnabled = false
+    @Published var pushError: String?
     @Published var connectionStatus: ConnectionStatus?
     @Published var connectionError: String?
     @Published var serverHealth: HealthResponse?
@@ -297,6 +320,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
             isEnabled = try await settingsRepository.isGhostwriterEnabled()
             serverURL = try await settingsRepository.getGhostwriterURL() ?? ""
             hasAPIKey = (try await settingsRepository.getGhostwriterAPIKey()) != nil
+            pushEnabled = try await settingsRepository.isGhostwriterPushEnabled()
             lastSyncTime = try await settingsRepository.getLastFeedSyncTime()
             serverSchedule = try await settingsRepository.getGhostwriterSchedule()
 
@@ -311,6 +335,12 @@ class GhostwriterSettingsViewModel: ObservableObject {
     func setEnabled(_ enabled: Bool) async {
         do {
             try await settingsRepository.setGhostwriterEnabled(enabled)
+            if !enabled {
+                pushEnabled = false
+                try? await settingsRepository.setGhostwriterPushEnabled(false)
+                await GhostwriterPushService.unregisterCurrentDevice()
+                UIApplication.shared.unregisterForRemoteNotifications()
+            }
         } catch {
             isEnabled = !enabled // Revert on error
         }
@@ -341,6 +371,61 @@ class GhostwriterSettingsViewModel: ObservableObject {
             newAPIKey = ""
         } catch {
             // Ignore save errors
+        }
+    }
+
+    func setPushEnabled(_ enabled: Bool) async {
+        pushError = nil
+
+        guard isConfigured else {
+            pushEnabled = false
+            try? await settingsRepository.setGhostwriterPushEnabled(false)
+            return
+        }
+
+        if enabled {
+            let granted = await requestNotificationPermission()
+            guard granted else {
+                pushEnabled = false
+                try? await settingsRepository.setGhostwriterPushEnabled(false)
+                pushError = "Notifications permission is not granted."
+                return
+            }
+
+            do {
+                try await settingsRepository.setGhostwriterPushEnabled(true)
+                UIApplication.shared.registerForRemoteNotifications()
+            } catch {
+                pushEnabled = false
+                pushError = error.localizedDescription
+            }
+        } else {
+            do {
+                try await settingsRepository.setGhostwriterPushEnabled(false)
+            } catch {
+                pushError = error.localizedDescription
+            }
+            UIApplication.shared.unregisterForRemoteNotifications()
+            await GhostwriterPushService.unregisterCurrentDevice()
+        }
+    }
+
+    private func requestNotificationPermission() async -> Bool {
+        do {
+            return try await withCheckedThrowingContinuation { continuation in
+                UNUserNotificationCenter.current().requestAuthorization(
+                    options: [.alert, .badge, .sound]
+                ) { granted, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: granted)
+                    }
+                }
+            }
+        } catch {
+            pushError = error.localizedDescription
+            return false
         }
     }
 
@@ -489,4 +574,9 @@ private final class MockSettingsRepository: SettingsRepositoryProtocol, @uncheck
     func getGhostwriterSchedule() async throws -> GhostwriterSchedule? {
         GhostwriterSchedule(morningHour: 7, morningMinute: 0, noonHour: 12, noonMinute: 0, eveningHour: 18, eveningMinute: 0, timezone: "Europe/Helsinki")
     }
+
+    // Ghostwriter push notifications
+    func isGhostwriterPushEnabled() async throws -> Bool { false }
+    func setGhostwriterPushEnabled(_ enabled: Bool) async throws {}
+    func getGhostwriterDeviceId() async throws -> String { "mock-device-id" }
 }

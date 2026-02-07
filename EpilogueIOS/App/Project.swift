@@ -28,12 +28,14 @@ let project = Project(
                         "com.epilogue.app.digestSync"
                     ],
                     "UIBackgroundModes": [
-                        "processing"
+                        "processing",
+                        "remote-notification"
                     ]
                 ]
             ),
             sources: ["Sources/**"],
             resources: ["Resources/**"],
+            entitlements: "Epilogue.entitlements",
             dependencies: [
                 .project(target: "Domain", path: "../Modules/Domain"),
                 .project(target: "Data", path: "../Modules/Data"),

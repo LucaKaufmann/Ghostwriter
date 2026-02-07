@@ -14,6 +14,8 @@ import GhostwriterClient
 
 @main
 struct EpilogueApp: App {
+    @UIApplicationDelegateAdaptor(EpilogueAppDelegate.self) private var appDelegate
+
     let persistenceController = PersistenceController.shared
 
     // Repositories
@@ -47,6 +49,7 @@ struct EpilogueApp: App {
             digestRepository: digests
         )
         _ghostwriterCoordinator = StateObject(wrappedValue: coordinator)
+        GhostwriterServiceLocator.shared.coordinator = coordinator
 
         // Initialize local digest service
         let localDigest = LocalDigestService(

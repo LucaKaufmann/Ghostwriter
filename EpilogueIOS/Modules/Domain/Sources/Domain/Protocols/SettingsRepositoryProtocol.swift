@@ -156,6 +156,17 @@ public protocol SettingsRepositoryProtocol: Sendable {
 
     /// Gets the Ghostwriter server schedule
     func getGhostwriterSchedule() async throws -> GhostwriterSchedule?
+
+    // MARK: - Ghostwriter Push Notifications
+
+    /// Gets whether Ghostwriter push notifications are enabled for this device
+    func isGhostwriterPushEnabled() async throws -> Bool
+
+    /// Sets whether Ghostwriter push notifications are enabled for this device
+    func setGhostwriterPushEnabled(_ enabled: Bool) async throws
+
+    /// Gets a stable, client-generated device identifier used for push registration
+    func getGhostwriterDeviceId() async throws -> String
 }
 
 /// Server schedule times synced from Ghostwriter

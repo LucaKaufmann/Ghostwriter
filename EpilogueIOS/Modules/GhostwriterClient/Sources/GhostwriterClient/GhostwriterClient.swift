@@ -303,6 +303,23 @@ public actor GhostwriterClient {
     public func updateConfig(_ request: ClientConfigUpdateRequest) async throws -> ClientConfigResponse {
         return try await put(path: "/config", body: request)
     }
+
+    // MARK: - Notifications
+
+    /// List registered push devices for the current user
+    public func listPushDevices() async throws -> [PushDeviceResponse] {
+        return try await get(path: "/notifications/devices")
+    }
+
+    /// Register or update this device for push notifications
+    public func registerPushDevice(_ request: PushDeviceRegisterRequest) async throws -> PushDeviceResponse {
+        return try await post(path: "/notifications/devices", body: request)
+    }
+
+    /// Unregister this device from push notifications (idempotent)
+    public func unregisterPushDevice(deviceId: String) async throws -> StatusResponse {
+        return try await delete(path: "/notifications/devices/\(deviceId)")
+    }
     
     // MARK: - Private Helpers
     
