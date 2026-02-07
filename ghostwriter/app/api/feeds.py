@@ -14,6 +14,7 @@ from app.core.net import validate_public_url
 from app.core.logging import digest_logger
 from app.core.security import verify_api_key
 from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync, FeedUpdate
+from app.models.seen_article import SeenArticle
 
 router = APIRouter()
 
@@ -338,17 +339,37 @@ async def delete_feed_by_url(
     session.commit()
 
     return {"status": "deleted", "url": feed_url}
-    try:
-        validate_public_url(feed_data.url)
-    except ValueError as e:
+
+
+@router.post("/{feed_id}/clear-seen", dependencies=[Depends(verify_api_key)])
+async def clear_seen_articles(
+    feed_id: UUID,
+    session: Session = Depends(get_session),
+) -> dict:
+    """
+    Clear seen article history for a specific feed.
+
+    This removes all seen_articles entries for the feed, allowing
+    previously processed articles to be included in future digests.
+    """
+    from sqlmodel import delete as sql_delete
+
+    feed = session.get(Feed, feed_id)
+    if not feed:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid feed URL '{feed_data.url}': {e}",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Feed not found",
         )
-    try:
-        validate_public_url(feed_data.url)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid feed URL '{feed_data.url}': {e}",
-        )
+
+    result = session.exec(
+        sql_delete(SeenArticle).where(SeenArticle.feed_id == feed_id)
+    )
+    session.commit()
+
+    deleted_count = result.rowcount  # type: ignore
+
+    return {
+        "status": "cleared",
+        "feed_id": str(feed_id),
+        "cleared_count": deleted_count,
+    }

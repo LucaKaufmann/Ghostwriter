@@ -21,7 +21,8 @@
 		Rss,
 		ExternalLink,
 		MoreHorizontal,
-		Loader2
+		Loader2,
+		RotateCcw
 	} from 'lucide-svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 
@@ -94,12 +95,26 @@
 		}
 	}));
 
+	const clearSeenMutation = createMutation(() => ({
+		mutationFn: (id: string) => api.clearSeenArticles(id),
+		onSuccess: (data) => {
+			toast.success(`Cleared ${data.cleared_count} seen articles`);
+			feedToClearSeen = null;
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to clear seen articles', {
+				description: err.message ?? 'Unknown error'
+			});
+		}
+	}));
+
 	// State
 	let searchQuery = $state('');
 	let addDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let feedToDelete = $state<Feed | null>(null);
 	let feedToEdit = $state<Feed | null>(null);
+	let feedToClearSeen = $state<Feed | null>(null);
 	let updatingFeedId = $state<string | null>(null);
 
 	// Form state (for add)
@@ -149,6 +164,16 @@
 	function confirmDelete() {
 		if (feedToDelete) {
 			deleteFeedMutation.mutate(feedToDelete.id);
+		}
+	}
+
+	function handleClearSeen(feed: Feed) {
+		feedToClearSeen = feed;
+	}
+
+	function confirmClearSeen() {
+		if (feedToClearSeen) {
+			clearSeenMutation.mutate(feedToClearSeen.id);
 		}
 	}
 
@@ -331,6 +356,10 @@
 													<Pencil class="mr-2 h-4 w-4" />
 													Edit
 												</DropdownMenu.Item>
+												<DropdownMenu.Item onclick={() => handleClearSeen(feed)}>
+													<RotateCcw class="mr-2 h-4 w-4" />
+													Clear Seen Articles
+												</DropdownMenu.Item>
 												<DropdownMenu.Separator />
 												<DropdownMenu.Item
 													class="text-destructive"
@@ -377,6 +406,10 @@
 										<DropdownMenu.Item onclick={() => handleEditFeed(feed)}>
 											<Pencil class="mr-2 h-4 w-4" />
 											Edit
+										</DropdownMenu.Item>
+										<DropdownMenu.Item onclick={() => handleClearSeen(feed)}>
+											<RotateCcw class="mr-2 h-4 w-4" />
+											Clear Seen Articles
 										</DropdownMenu.Item>
 										<DropdownMenu.Separator />
 										<DropdownMenu.Item
@@ -497,6 +530,27 @@
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 				{/if}
 				Delete
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
+
+<!-- Clear Seen Articles Confirmation -->
+<AlertDialog.Root open={!!feedToClearSeen} onOpenChange={(open) => !open && (feedToClearSeen = null)}>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>Clear Seen Articles</AlertDialog.Title>
+			<AlertDialog.Description>
+				This will reset the "seen" history for "{feedToClearSeen?.title}". Previously processed articles will appear in future digests again.
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+			<AlertDialog.Action onclick={confirmClearSeen}>
+				{#if clearSeenMutation.isPending}
+					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+				{/if}
+				Clear History
 			</AlertDialog.Action>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
