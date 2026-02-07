@@ -1,16 +1,15 @@
 """Tests for health and system endpoints."""
 
 def test_root(client):
-    """Test root endpoint returns service info."""
-    response = client.get("/")
+    """Test root health endpoint (Docker healthcheck)."""
+    response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
-    assert data["service"] == "Ghostwriter"
-    assert "version" in data
+    assert data["status"] == "healthy"
 
 
 def test_health(client):
-    """Test health endpoint."""
+    """Test API health endpoint."""
     response = client.get("/api/health")
     assert response.status_code == 200
     data = response.json()

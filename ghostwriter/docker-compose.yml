@@ -63,6 +63,16 @@ services:
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - WEBHOOK_ON_COMPLETE=${WEBHOOK_ON_COMPLETE:-true}
       - WEBHOOK_ON_FAILURE=${WEBHOOK_ON_FAILURE:-true}
+
+      # Push notifications (optional)
+      - APNS_TEAM_ID=${APNS_TEAM_ID:-}
+      - APNS_KEY_ID=${APNS_KEY_ID:-}
+      - APNS_PRIVATE_KEY_PATH=${APNS_PRIVATE_KEY_PATH:-}
+      - APNS_BUNDLE_ID=${APNS_BUNDLE_ID:-com.epilogue.app}
+      - APNS_USE_SANDBOX=${APNS_USE_SANDBOX:-false}
+
+      - FCM_SERVICE_ACCOUNT_PATH=${FCM_SERVICE_ACCOUNT_PATH:-}
+      - FCM_PROJECT_ID=${FCM_PROJECT_ID:-}
     volumes:
       - ghostwriter_data:/app/data
       - ghostwriter_epubs:/app/output
@@ -144,6 +154,16 @@ services:
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - WEBHOOK_ON_COMPLETE=${WEBHOOK_ON_COMPLETE:-true}
       - WEBHOOK_ON_FAILURE=${WEBHOOK_ON_FAILURE:-true}
+
+      # Push notifications (optional)
+      - APNS_TEAM_ID=${APNS_TEAM_ID:-}
+      - APNS_KEY_ID=${APNS_KEY_ID:-}
+      - APNS_PRIVATE_KEY_PATH=${APNS_PRIVATE_KEY_PATH:-}
+      - APNS_BUNDLE_ID=${APNS_BUNDLE_ID:-com.epilogue.app}
+      - APNS_USE_SANDBOX=${APNS_USE_SANDBOX:-false}
+
+      - FCM_SERVICE_ACCOUNT_PATH=${FCM_SERVICE_ACCOUNT_PATH:-}
+      - FCM_PROJECT_ID=${FCM_PROJECT_ID:-}
     volumes:
       - ghostwriter_dev_data:/app/data
       - ghostwriter_dev_epubs:/app/output

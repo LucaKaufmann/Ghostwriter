@@ -85,6 +85,22 @@ class Settings(BaseSettings):
     webhook_on_complete: bool = Field(default=True, description="Notify on success")
     webhook_on_failure: bool = Field(default=True, description="Notify on failure")
 
+    # Push notifications (optional)
+    apns_team_id: str = Field(default="", description="Apple Developer Team ID for APNs")
+    apns_key_id: str = Field(default="", description="APNs auth key ID (10 chars)")
+    apns_private_key_path: str = Field(default="", description="Path to APNs .p8 private key")
+    apns_bundle_id: str = Field(default="com.epilogue.app", description="APNs topic (iOS bundle ID)")
+    apns_use_sandbox: bool = Field(default=False, description="Use APNs sandbox environment")
+
+    fcm_service_account_path: str = Field(
+        default="",
+        description="Path to Firebase service account JSON (FCM HTTP v1)",
+    )
+    fcm_project_id: str = Field(
+        default="",
+        description="Firebase project ID (optional; derived from service account if empty)",
+    )
+
     # Wallabag
     wallabag_url: str = Field(default="", description="Wallabag instance URL")
     wallabag_client_id: str = Field(default="", description="Wallabag OAuth client ID")

@@ -823,6 +823,19 @@ class BinderyPipeline:
             epub_path=epub_path,
         )
 
+        # Best-effort push notification for non-empty digests.
+        if article_count > 0:
+            try:
+                from app.services.push_notification_service import PushNotificationService
+
+                service = PushNotificationService(self.settings)
+                asyncio.create_task(service.notify_digest_ready(self.digest_id))
+            except Exception:
+                logger.exception(
+                    "Failed to schedule push notification",
+                    extra={"digest_id": str(self.digest_id)},
+                )
+
     async def _fail(self, error: str) -> None:
         """Mark digest as failed."""
         with Session(engine) as session:
