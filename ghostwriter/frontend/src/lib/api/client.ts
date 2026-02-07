@@ -11,6 +11,7 @@ import type {
 	Digest,
 	DigestStatusResponse,
 	DigestArticlesResponse,
+	DigestArticleSourceResponse,
 	TriggerResponse,
 	Schedule,
 	ScheduleUpdate,
@@ -329,6 +330,15 @@ class ApiClient {
 
 	async getDigestArticles(id: string): Promise<DigestArticlesResponse> {
 		return this.request<DigestArticlesResponse>(`/digests/${id}/articles`);
+	}
+
+	async getDigestArticleSource(
+		digestId: string,
+		articleId: string
+	): Promise<DigestArticleSourceResponse> {
+		return this.request<DigestArticleSourceResponse>(
+			`/digests/${digestId}/articles/${articleId}/source`
+		);
 	}
 
 	async triggerDigest(period: DigestPeriod = 'manual'): Promise<TriggerResponse> {
