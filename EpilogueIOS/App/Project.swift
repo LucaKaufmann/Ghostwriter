@@ -43,7 +43,14 @@ let project = Project(
                 .project(target: "EPUBGeneration", path: "../Modules/EPUBGeneration"),
                 .project(target: "AIServices", path: "../Modules/AIServices"),
                 .project(target: "GhostwriterClient", path: "../Modules/GhostwriterClient")
-            ]
+            ],
+            settings: .settings(
+                base: [:],
+                configurations: [
+                    .debug(name: .debug, settings: ["APS_ENVIRONMENT": "development"]),
+                    .release(name: .release, settings: ["APS_ENVIRONMENT": "production"])
+                ]
+            )
         ),
         .target(
             name: "EpilogueTests",
