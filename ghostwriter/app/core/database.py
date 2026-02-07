@@ -7,6 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.core.config import get_settings
 from app.models.wallabag_config import WallabagConfig  # noqa: F401 - ensure table creation
+import app.models  # noqa: F401  # ensure all SQLModel tables are registered
 
 
 def get_database_url() -> str:

@@ -1,5 +1,7 @@
 """Global pytest fixtures and environment setup for Ghostwriter tests."""
 
+from __future__ import annotations
+
 import os
 import tempfile
 
@@ -18,7 +20,7 @@ os.environ["API_KEY"] = ""
 # Avoid starting background schedulers during tests.
 os.environ["SCHEDULE_ENABLED"] = "false"
 
-from app.main import app
+from app.main import app  # noqa: E402  # env must be set before import
 
 
 @pytest.fixture

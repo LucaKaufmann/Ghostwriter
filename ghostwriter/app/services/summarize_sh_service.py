@@ -233,11 +233,46 @@ class SummarizeShService:
             env["HOME"] = home_value
             env["USERPROFILE"] = home_value
 
-        binary_path = Path(
-            os.path.expanduser(self.settings.summarize_sh_whisper_cpp_binary)
+        override_path = (
+            Path(os.path.expanduser(self.settings.data_dir)) / "bin" / "whisper-cli"
         )
-        if self.settings.summarize_sh_whisper_cpp_binary and binary_path.exists():
-            env["SUMMARIZE_WHISPER_CPP_BINARY"] = str(binary_path)
+        configured_binary = (self.settings.summarize_sh_whisper_cpp_binary or "").strip()
+        configured_path = (
+            Path(os.path.expanduser(configured_binary)) if configured_binary else None
+        )
+
+        resolved_binary_path: Path | None = None
+        resolved_binary_source: str | None = None
+        if override_path.is_file():
+            if os.access(override_path, os.X_OK):
+                resolved_binary_path = override_path
+                resolved_binary_source = "user override"
+            else:
+                logger.warning(
+                    "Whisper override binary exists but is not executable: %s",
+                    override_path,
+                )
+
+        if (
+            resolved_binary_path is None
+            and configured_path is not None
+            and configured_path.is_file()
+            and os.access(configured_path, os.X_OK)
+        ):
+            resolved_binary_path = configured_path
+            resolved_binary_source = (
+                "bundled"
+                if str(configured_path) == "/usr/local/bin/whisper-cli"
+                else "configured"
+            )
+
+        if resolved_binary_path is not None:
+            env["SUMMARIZE_WHISPER_CPP_BINARY"] = str(resolved_binary_path)
+            logger.info(
+                "Whisper binary resolved: %s (%s)",
+                resolved_binary_path,
+                resolved_binary_source,
+            )
         else:
             env.pop("SUMMARIZE_WHISPER_CPP_BINARY", None)
 

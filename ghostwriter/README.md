@@ -99,6 +99,10 @@ AI_PROVIDER=ollama
 SUMMARIZE_SH_CONFIG_PATH=~/.summarize/config.json
 SUMMARIZE_SH_TIMEOUT_SECONDS=90
 
+# whisper.cpp (local transcription used by Summarize.sh when available)
+SUMMARIZE_SH_WHISPER_CPP_BINARY=/usr/local/bin/whisper-cli
+SUMMARIZE_SH_WHISPER_MODELS_DIR=/app/data/models/whisper
+
 # Scheduling (24h format)
 SCHEDULE_MORNING=07:00
 SCHEDULE_EVENING=18:00
@@ -112,6 +116,29 @@ CORS_ALLOW_ORIGINS=https://ghostwriter.example.com
 ENABLE_API_DOCS=false
 TRUSTED_PROXY_HOSTS=203.0.113.10/32
 AUTH_RATE_LIMIT_ENABLED=true
+```
+
+### whisper.cpp Binary Override (ARM / Raspberry Pi)
+
+Ghostwriter's Docker image includes a bundled `whisper-cli` binary for local transcription via Summarize.sh. If transcription fails (for example with `Illegal instruction (core dumped)` on some ARM devices) or you want an optimized build for your specific CPU, you can provide your own binary via the data volume.
+
+Ghostwriter resolves the whisper binary in this order:
+
+1. `/app/data/bin/whisper-cli` (user override; persistent in the data volume)
+2. `/usr/local/bin/whisper-cli` (bundled in the Docker image)
+3. Unset (Summarize.sh falls back to other providers, e.g. OpenAI Whisper API if configured)
+
+Build and install your own binary:
+
+```bash
+git clone https://github.com/ggml-org/whisper.cpp.git
+cd whisper.cpp
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+
+# Copy into your Ghostwriter data volume and make it executable:
+cp build/bin/whisper-cli /path/to/ghostwriter/data/bin/whisper-cli
+chmod +x /path/to/ghostwriter/data/bin/whisper-cli
 ```
 
 ## Authentication
