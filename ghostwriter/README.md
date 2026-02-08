@@ -11,6 +11,7 @@ RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts artic
 - **AI Summarization** - Provider-agnostic AI via LiteLLM (OpenAI, Gemini, Ollama)
 - **EPUB Generation** - Compile articles into e-reader friendly digests
 - **Scheduled Jobs** - Automatic morning/noon/evening digest generation
+- **Push Notifications (Optional)** - APNs (iOS) + FCM (Android) notification when a non-empty digest is ready
 - **REST API** - Full API for feed management and digest downloads
 
 ## Quick Start
@@ -58,6 +59,8 @@ uvicorn app.main:app --reload --port 8080
 
 ## API Reference
 
+All API endpoints below are served under the `/api` prefix (for example: `GET /api/feeds`). For backwards compatibility, `GET /health` is also available at the root.
+
 ### Feeds
 
 | Method | Endpoint | Description |
@@ -84,6 +87,14 @@ uvicorn app.main:app --reload --port 8080
 |--------|----------|-------------|
 | `GET` | `/health` | Service health |
 | `GET` | `/config` | Current configuration |
+
+### Notifications
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/notifications/devices` | List registered devices for the current user |
+| `POST` | `/notifications/devices` | Register/update a device token (upsert by `device_id`) |
+| `DELETE` | `/notifications/devices/{device_id}` | Disable a device token (idempotent) |
 
 ## Configuration
 
@@ -185,6 +196,97 @@ A deprecation warning is logged when `API_KEY` is used.
 - If `JWT_SECRET` is not set, a random one is generated (tokens won't survive restarts)
 - Download endpoints require `Authorization: Bearer <token>` (no query-string tokens)
 - For public deployments, keep `ALLOW_PRIVATE_HOSTS=false` to avoid SSRF risks
+
+## Push Notifications (Optional)
+
+Ghostwriter can send a push notification when a new **non-empty** digest is completed. The Epilogue apps can use this to trigger an immediate sync and (best-effort) background fetch.
+
+How it works:
+
+- When you enable the toggle in the mobile app, the app registers its device token against your Ghostwriter user via the API.
+- When a digest completes (`status=completed` and `article_count > 0`), Ghostwriter sends a `digest_ready` push to all enabled devices.
+- iOS: APNs alert notification with `content-available: 1` (best-effort background fetch plus a visible notification).
+- Android: FCM data message; the app shows a local notification (if permitted) and schedules a sync.
+
+### Prerequisites
+
+- You need a push-capable client (the Epilogue apps in this repo include support).
+- Push credentials must match the exact app build you are running:
+  - iOS: `APNS_BUNDLE_ID` must match the iOS app bundle identifier, and sandbox vs production must match the app's `aps-environment`.
+  - Android: `FCM_PROJECT_ID` must match the Firebase project used by the Android app build.
+- Store push keys outside the repo and never commit them.
+
+### iOS (APNs) Setup
+
+1. In the Apple Developer portal:
+   - Enable **Push Notifications** for your App ID (bundle identifier).
+   - Create an APNs Authentication Key (`.p8`) with the **Apple Push Notifications service (APNs)** entitlement.
+   - Note your **Team ID** and the key's **Key ID**.
+2. Copy the `.p8` file to the machine running Ghostwriter (do not commit it).
+3. Set the APNs environment variables (e.g., in `.env`):
+
+```bash
+APNS_TEAM_ID=YOUR_TEAM_ID
+APNS_KEY_ID=YOUR_KEY_ID
+APNS_PRIVATE_KEY_PATH=/run/secrets/apns.p8
+APNS_BUNDLE_ID=com.your.bundle.id
+# true for Debug/dev builds, false for TestFlight/App Store builds
+APNS_USE_SANDBOX=true
+```
+
+4. If you run Ghostwriter with Docker, mount the key into the container and make the path match `APNS_PRIVATE_KEY_PATH`:
+
+```yaml
+services:
+  ghostwriter:
+    environment:
+      - APNS_PRIVATE_KEY_PATH=/run/secrets/apns.p8
+    volumes:
+      - /absolute/path/to/AuthKey_XXXXXXXXXX.p8:/run/secrets/apns.p8:ro
+```
+
+5. Restart Ghostwriter.
+
+### Android (FCM) Setup
+
+1. Create a Firebase project and add an Android app.
+2. Build your Android app with the matching Firebase config (`google-services.json`) so it can obtain FCM tokens.
+3. Create a Firebase service account JSON key (used by Ghostwriter to send notifications):
+   - Google Cloud Console → **IAM & Admin** → **Service Accounts** → select/create one → **Keys** → **Add key** → **JSON**
+4. Copy the JSON key to the machine running Ghostwriter (do not commit it).
+5. Set the FCM environment variables:
+
+```bash
+FCM_SERVICE_ACCOUNT_PATH=/run/secrets/fcm-service-account.json
+FCM_PROJECT_ID=your-firebase-project-id
+```
+
+6. If you run Ghostwriter with Docker, mount the JSON file into the container:
+
+```yaml
+services:
+  ghostwriter:
+    environment:
+      - FCM_SERVICE_ACCOUNT_PATH=/run/secrets/fcm-service-account.json
+    volumes:
+      - /absolute/path/to/fcm-service-account.json:/run/secrets/fcm-service-account.json:ro
+```
+
+7. Restart Ghostwriter.
+
+### Enable In The App
+
+1. Configure Ghostwriter in the app (URL + API token).
+2. Go to **Settings** → **Ghostwriter** → **Notifications**.
+3. Enable the toggle and accept the OS permission prompt.
+4. Trigger a digest (or wait for the schedule) and verify you receive a notification.
+
+### Troubleshooting
+
+- Verify a device registered successfully:
+  - `GET /api/notifications/devices` (requires auth)
+- iOS `BadDeviceToken` usually means a sandbox vs production mismatch (`APNS_USE_SANDBOX` vs the app's `aps-environment`).
+- If you are behind a reverse proxy, the Ghostwriter host must still be able to reach APNs/FCM over outbound HTTPS.
 
 ## Web UI
 
