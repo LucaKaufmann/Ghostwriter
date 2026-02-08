@@ -105,6 +105,7 @@ tasks/
 # Secrets (ensure these are never committed)
 secrets.properties
 *.pem
+*.p8
 *.p12
 
 # Claude Code local settings
