@@ -402,6 +402,7 @@ class BinderyPipeline:
                             url=parsed_article.url,
                             author=parsed_article.author,
                             source=feed.title,
+                            content_type="transcript" if media_result.is_media else "article",
                         )
                         if not ai_failed:
                             content = summary_content
