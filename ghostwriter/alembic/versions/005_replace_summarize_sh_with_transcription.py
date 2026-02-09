@@ -20,24 +20,38 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Add whisper_provider and whisper_model columns, copy existing model value."""
     if context.get_context().dialect.name == "sqlite":
-        # Add new columns
-        op.execute(
-            "ALTER TABLE client_config "
-            "ADD COLUMN whisper_provider VARCHAR(16) "
-            "NOT NULL DEFAULT 'local'"
-        )
-        op.execute(
-            "ALTER TABLE client_config "
-            "ADD COLUMN whisper_model VARCHAR(32) "
-            "NOT NULL DEFAULT 'base.en'"
-        )
+        # Check which columns already exist (some may have been added by manual scripts)
+        conn = op.get_bind()
+        result = conn.execute(sa.text("PRAGMA table_info(client_config)"))
+        existing = {row[1] for row in result}
+
+        # Add new columns only if missing
+        if "whisper_provider" not in existing:
+            op.execute(
+                "ALTER TABLE client_config "
+                "ADD COLUMN whisper_provider VARCHAR(16) "
+                "NOT NULL DEFAULT 'local'"
+            )
+        if "whisper_model" not in existing:
+            op.execute(
+                "ALTER TABLE client_config "
+                "ADD COLUMN whisper_model VARCHAR(32) "
+                "NOT NULL DEFAULT 'base.en'"
+            )
+        if "whisper_timeout_minutes" not in existing:
+            op.execute(
+                "ALTER TABLE client_config "
+                "ADD COLUMN whisper_timeout_minutes INTEGER "
+                "NOT NULL DEFAULT 30"
+            )
         # Copy existing whisper model value from old column
-        op.execute(
-            "UPDATE client_config "
-            "SET whisper_model = summarize_sh_whisper_model "
-            "WHERE summarize_sh_whisper_model IS NOT NULL "
-            "AND summarize_sh_whisper_model != ''"
-        )
+        if "summarize_sh_whisper_model" in existing:
+            op.execute(
+                "UPDATE client_config "
+                "SET whisper_model = summarize_sh_whisper_model "
+                "WHERE summarize_sh_whisper_model IS NOT NULL "
+                "AND summarize_sh_whisper_model != ''"
+            )
         # SQLite: leave old columns as dead weight (established pattern)
     else:
         with op.batch_alter_table("client_config") as batch_op:
@@ -55,6 +69,14 @@ def upgrade() -> None:
                     sa.String(length=32),
                     nullable=False,
                     server_default="base.en",
+                )
+            )
+            batch_op.add_column(
+                sa.Column(
+                    "whisper_timeout_minutes",
+                    sa.Integer(),
+                    nullable=False,
+                    server_default="30",
                 )
             )
         # Copy existing model value
