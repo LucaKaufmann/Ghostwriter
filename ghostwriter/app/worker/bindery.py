@@ -157,6 +157,7 @@ class BinderyPipeline:
         # Get digest info for logging and current client config
         whisper_provider = "local"
         whisper_model = "base.en"
+        whisper_timeout_seconds: int | None = None
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
             period = digest.period if digest else "manual"
@@ -164,6 +165,7 @@ class BinderyPipeline:
             if client_config:
                 whisper_provider = client_config.whisper_provider or "local"
                 whisper_model = client_config.whisper_model or "base.en"
+                whisper_timeout_seconds = client_config.whisper_timeout_minutes * 60
 
         try:
             await self._update_stage("fetching")
@@ -358,6 +360,7 @@ class BinderyPipeline:
                         content_url=parsed_article.content_url,
                         whisper_provider=whisper_provider,
                         whisper_model=whisper_model,
+                        timeout_seconds=whisper_timeout_seconds,
                     )
 
                     if media_result.is_media:

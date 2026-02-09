@@ -32,6 +32,12 @@ class ClientConfigBase(SQLModel):
         default="base.en",
         description="whisper.cpp model name for local transcription",
     )
+    whisper_timeout_minutes: int = Field(
+        default=30,
+        ge=1,
+        le=120,
+        description="Transcription timeout in minutes",
+    )
 
 
 class ClientConfig(ClientConfigBase, table=True):
@@ -68,6 +74,9 @@ class ClientConfigUpdate(SQLModel):
     whisper_model: str | None = Field(
         default=None, description="whisper.cpp model name for local transcription"
     )
+    whisper_timeout_minutes: int | None = Field(
+        default=None, ge=1, le=120, description="Transcription timeout in minutes"
+    )
 
 
 class ClientConfigRead(SQLModel):
@@ -85,4 +94,5 @@ class ClientConfigRead(SQLModel):
     newsletter_mode: str
     whisper_provider: str
     whisper_model: str
+    whisper_timeout_minutes: int
     updated_at: datetime

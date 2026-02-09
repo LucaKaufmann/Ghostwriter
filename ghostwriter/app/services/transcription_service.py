@@ -53,7 +53,7 @@ class TranscriptionService:
         return None
 
     async def _transcribe_local(
-        self, audio_path: str, whisper_model: str
+        self, audio_path: str, whisper_model: str, timeout_seconds: int | None = None
     ) -> TranscriptionResult:
         """Transcribe using local whisper.cpp binary."""
         binary = self._resolve_whisper_binary()
@@ -79,6 +79,7 @@ class TranscriptionService:
             "-f", audio_path,
             "--no-timestamps",
         ]
+        effective_timeout = timeout_seconds or self.settings.whisper_transcription_timeout_seconds
         logger.info("Running whisper-cli: %s", " ".join(cmd))
 
         try:
@@ -89,7 +90,7 @@ class TranscriptionService:
             )
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
-                timeout=self.settings.whisper_transcription_timeout_seconds,
+                timeout=effective_timeout,
             )
         except asyncio.TimeoutError:
             process.kill()
@@ -97,7 +98,7 @@ class TranscriptionService:
             return TranscriptionResult(
                 text="",
                 provider="local",
-                error=f"whisper-cli timed out after {self.settings.whisper_transcription_timeout_seconds}s",
+                error=f"whisper-cli timed out after {effective_timeout}s",
             )
         except FileNotFoundError:
             return TranscriptionResult(
@@ -122,7 +123,7 @@ class TranscriptionService:
 
         return TranscriptionResult(text=text, provider="local")
 
-    async def _transcribe_openai(self, audio_path: str) -> TranscriptionResult:
+    async def _transcribe_openai(self, audio_path: str, timeout_seconds: int | None = None) -> TranscriptionResult:
         """Transcribe using OpenAI Whisper API."""
         api_key = self.settings.openai_api_key
         if not api_key:
@@ -135,18 +136,19 @@ class TranscriptionService:
         file_size = os.path.getsize(audio_path)
 
         if file_size <= _OPENAI_MAX_FILE_SIZE:
-            return await self._openai_transcribe_file(audio_path, api_key)
+            return await self._openai_transcribe_file(audio_path, api_key, timeout_seconds)
 
         # File too large — segment into 10-minute WAV chunks
-        return await self._openai_transcribe_chunked(audio_path, api_key)
+        return await self._openai_transcribe_chunked(audio_path, api_key, timeout_seconds)
 
     async def _openai_transcribe_file(
-        self, audio_path: str, api_key: str
+        self, audio_path: str, api_key: str, timeout_seconds: int | None = None
     ) -> TranscriptionResult:
         """Send a single file to OpenAI Whisper API."""
+        effective_timeout = timeout_seconds or self.settings.openai_whisper_timeout_seconds
         try:
             async with httpx.AsyncClient(
-                timeout=self.settings.openai_whisper_timeout_seconds
+                timeout=effective_timeout
             ) as client:
                 with open(audio_path, "rb") as f:
                     response = await client.post(
@@ -169,7 +171,7 @@ class TranscriptionService:
             return TranscriptionResult(
                 text="",
                 provider="openai",
-                error=f"OpenAI API timed out after {self.settings.openai_whisper_timeout_seconds}s",
+                error=f"OpenAI API timed out after {effective_timeout}s",
             )
         except Exception as e:
             return TranscriptionResult(
@@ -177,7 +179,7 @@ class TranscriptionService:
             )
 
     async def _openai_transcribe_chunked(
-        self, audio_path: str, api_key: str
+        self, audio_path: str, api_key: str, timeout_seconds: int | None = None
     ) -> TranscriptionResult:
         """Split audio into 10-minute WAV chunks and transcribe each."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -213,7 +215,7 @@ class TranscriptionService:
 
             texts: list[str] = []
             for chunk in chunks:
-                result = await self._openai_transcribe_file(str(chunk), api_key)
+                result = await self._openai_transcribe_file(str(chunk), api_key, timeout_seconds)
                 if result.error:
                     return result
                 texts.append(result.text)
@@ -227,6 +229,7 @@ class TranscriptionService:
         audio_path: str,
         provider: str = "local",
         whisper_model: str = "base.en",
+        timeout_seconds: int | None = None,
     ) -> TranscriptionResult:
         """
         Transcribe an audio file.
@@ -235,22 +238,23 @@ class TranscriptionService:
             audio_path: Path to the audio file (WAV preferred).
             provider: "local", "openai", or "auto".
             whisper_model: whisper.cpp model name (for local provider).
+            timeout_seconds: Override timeout for transcription (applies to both providers).
 
         Returns:
             TranscriptionResult with transcribed text or error.
         """
         if provider == "local":
-            return await self._transcribe_local(audio_path, whisper_model)
+            return await self._transcribe_local(audio_path, whisper_model, timeout_seconds)
         elif provider == "openai":
-            return await self._transcribe_openai(audio_path)
+            return await self._transcribe_openai(audio_path, timeout_seconds)
         elif provider == "auto":
-            result = await self._transcribe_local(audio_path, whisper_model)
+            result = await self._transcribe_local(audio_path, whisper_model, timeout_seconds)
             if result.error:
                 logger.warning(
                     "Local transcription failed, falling back to OpenAI: %s",
                     result.error,
                 )
-                return await self._transcribe_openai(audio_path)
+                return await self._transcribe_openai(audio_path, timeout_seconds)
             return result
         else:
             return TranscriptionResult(
