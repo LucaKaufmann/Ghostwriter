@@ -99,9 +99,9 @@ export interface ClientConfigResponse {
 	evening_hour: number;
 	evening_minute: number;
 	timezone: string;
-	summarize_sh_enabled: boolean;
-	summarize_sh_on_fail: string;
-	summarize_sh_whisper_model: string;
+	whisper_provider: string;
+	whisper_model: string;
+	whisper_timeout_minutes: number;
 	updated_at: string;
 	wallabag?: IntegrationStatus | null;
 	newsletters?: IntegrationStatus | null;
@@ -117,9 +117,9 @@ export interface ClientConfigUpdate {
 	evening_minute?: number;
 	timezone?: string;
 	newsletters_enabled?: boolean;
-	summarize_sh_enabled?: boolean;
-	summarize_sh_on_fail?: string;
-	summarize_sh_whisper_model?: string;
+	whisper_provider?: string;
+	whisper_model?: string;
+	whisper_timeout_minutes?: number;
 	client_updated_at?: string;
 }
 
@@ -310,16 +310,7 @@ export interface WallabagTestResult {
 	detail?: string;
 }
 
-// ============ Summarize.sh ============
-
-export interface SummarizeConfigResponse {
-	config_json: string;
-	source: 'user' | 'default';
-}
-
-export interface SummarizeConfigUpdate {
-	config_json: string;
-}
+// ============ Whisper Models ============
 
 export interface WhisperModelInfo {
 	name: string;

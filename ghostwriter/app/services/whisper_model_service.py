@@ -32,7 +32,7 @@ class WhisperModelService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.models_dir = Path(
-            os.path.expanduser(self.settings.summarize_sh_whisper_models_dir)
+            os.path.expanduser(self.settings.whisper_models_dir)
         )
 
     def list_models(self) -> list[dict]:

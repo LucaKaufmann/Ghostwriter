@@ -68,10 +68,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     ffmpeg \
-    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends \
-    nodejs \
-    && npm install -g @steipete/summarize \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 ghostwriter
 
@@ -79,7 +75,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=python-builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Media helpers for Summarize.sh (yt-dlp used for media fetching)
+# Media download for YouTube/podcast audio
 RUN pip install --no-cache-dir yt-dlp
 
 # Copy whisper.cpp binary + shared libs

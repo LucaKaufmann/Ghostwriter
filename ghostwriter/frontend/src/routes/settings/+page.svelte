@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type SummarizeConfigUpdate } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -113,11 +113,6 @@
 		queryFn: () => api.getWallabagConfig()
 	}));
 
-	const summarizeConfigQuery = createQuery(() => ({
-		queryKey: ['summarize-config'],
-		queryFn: () => api.getSummarizeConfig()
-	}));
-
 	const whisperModelsQuery = createQuery(() => ({
 		queryKey: ['whisper-models'],
 		queryFn: () => api.getWhisperModels(),
@@ -171,19 +166,6 @@
 		},
 		onError: (err: Error) => {
 			toast.error('Failed to update config', { description: err.message });
-		}
-	}));
-
-	const updateSummarizeConfigMutation = createMutation(() => ({
-		mutationFn: (data: SummarizeConfigUpdate) => api.updateSummarizeConfig(data),
-		onSuccess: (data) => {
-			summarizeConfig = data.config_json;
-			summarizeConfigSource = data.source;
-			queryClient.invalidateQueries({ queryKey: ['summarize-config'] });
-			toast.success('Summarize.sh configuration saved');
-		},
-		onError: (err: Error) => {
-			toast.error('Failed to save Summarize.sh config', { description: err.message });
 		}
 	}));
 
@@ -277,14 +259,10 @@
 
 	let wbEnabled = $state(true);
 
-	// Summarize.sh config state
-	let summarizeConfig = $state('');
-	let summarizeConfigInitialized = $state(false);
-	let summarizeConfigError = $state<string | null>(null);
-	let summarizeConfigSource = $state<'user' | 'default' | null>(null);
-	let summarizeEnabled = $state(false);
-	let summarizeOnFail = $state<'fallback_ai' | 'raw' | 'skip'>('raw');
-	let summarizeEnabledSaved = $derived(clientConfigQuery.data?.summarize_sh_enabled ?? false);
+	// Transcription config state
+	let whisperProvider = $state<'local' | 'openai' | 'auto'>('local');
+	let whisperTimeout = $state(30);
+	let whisperProviderInitialized = $state(false);
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -305,47 +283,22 @@
 	});
 
 	$effect(() => {
-		const data = summarizeConfigQuery.data;
-		if (data && !summarizeConfigInitialized) {
-			summarizeConfig = data.config_json;
-			summarizeConfigSource = data.source;
-			summarizeConfigInitialized = true;
-		}
-	});
-
-	$effect(() => {
 		const data = clientConfigQuery.data;
-		if (data) {
-			summarizeEnabled = data.summarize_sh_enabled;
-			summarizeOnFail = (data.summarize_sh_on_fail as 'fallback_ai' | 'raw' | 'skip') ?? 'raw';
+		if (data && !whisperProviderInitialized) {
+			whisperProvider = (data.whisper_provider as 'local' | 'openai' | 'auto') ?? 'local';
+			whisperTimeout = data.whisper_timeout_minutes ?? 30;
+			whisperProviderInitialized = true;
 		}
 	});
 
-	function validateSummarizeConfig(): boolean {
-		try {
-			JSON.parse(summarizeConfig);
-			summarizeConfigError = null;
-			return true;
-		} catch (err) {
-			const message = err instanceof Error ? err.message : 'Invalid JSON';
-			summarizeConfigError = message;
-			return false;
-		}
+	function saveWhisperProvider() {
+		updateClientConfigMutation.mutate({ whisper_provider: whisperProvider });
 	}
 
-	function saveSummarizeConfig() {
-		if (!validateSummarizeConfig()) {
-			toast.error('Invalid JSON', { description: summarizeConfigError ?? '' });
-			return;
-		}
-		updateSummarizeConfigMutation.mutate({ config_json: summarizeConfig });
-	}
-
-	function saveSummarizeEnabled() {
-		updateClientConfigMutation.mutate({
-			summarize_sh_enabled: summarizeEnabled,
-			summarize_sh_on_fail: summarizeOnFail
-		});
+	function saveWhisperTimeout() {
+		const clamped = Math.max(1, Math.min(120, whisperTimeout));
+		whisperTimeout = clamped;
+		updateClientConfigMutation.mutate({ whisper_timeout_minutes: clamped });
 	}
 
 	function saveWallabag() {
@@ -1105,81 +1058,107 @@
 		</Card.Content>
 	</Card.Root>
 
-	<!-- Summarize.sh Configuration -->
+	<!-- Transcription -->
 	<Card.Root>
 		<Card.Header>
 			<Card.Title class="flex items-center gap-2">
 				<FileText class="h-5 w-5" />
-				Summarize.sh Configuration
+				Transcription
 			</Card.Title>
 			<Card.Description>
-				Edit the Summarize.sh `config.json` used for summarize-mode feeds
+				Configure audio transcription for YouTube videos and podcast episodes
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="space-y-4">
-			{#if summarizeConfigQuery.isPending}
-				<div class="space-y-3">
-					<Skeleton class="h-4 w-48" />
-					<Skeleton class="h-32 w-full" />
+			<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+				<div class="space-y-1">
+					<p class="font-medium">Transcription Provider</p>
+					<p class="text-sm text-muted-foreground">
+						Choose how audio content is transcribed to text.
+					</p>
 				</div>
-			{:else if summarizeConfigQuery.data}
-				<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
-					<div class="space-y-1">
-						<p class="font-medium">Enable Summarize.sh</p>
-						<p class="text-sm text-muted-foreground">
-							When enabled, summarize-mode feeds use Summarize.sh instead of the LLM pipeline.
-						</p>
-					</div>
-					<div class="flex items-center gap-3">
-						<Switch
-							checked={summarizeEnabled}
-							onCheckedChange={(checked) => (summarizeEnabled = checked)}
-						/>
-						<Button
-							size="sm"
-							onclick={saveSummarizeEnabled}
-							disabled={updateClientConfigMutation.isPending}
-						>
-							{#if updateClientConfigMutation.isPending}
-								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-							{:else}
-								<Save class="mr-2 h-4 w-4" />
-							{/if}
-							Save
-						</Button>
-					</div>
-				</div>
-
-				<div class="flex flex-col gap-2 rounded-lg border p-4">
-					<div class="space-y-1">
-						<p class="font-medium">On Summarize.sh Failure</p>
-						<p class="text-sm text-muted-foreground">
-							Choose what happens when Summarize.sh cannot summarize an article.
-						</p>
-					</div>
+				<div class="flex items-center gap-3">
 					<select
-						class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-						bind:value={summarizeOnFail}
+						class="flex h-10 w-48 rounded-md border border-input bg-background px-3 py-2 text-sm"
+						bind:value={whisperProvider}
 					>
-						<option value="fallback_ai">Fall back to Ghostwriter AI</option>
-						<option value="raw">Include raw article text</option>
-						<option value="skip">Do nothing (skip article)</option>
+						<option value="local">Local whisper.cpp</option>
+						<option value="openai">OpenAI Whisper API</option>
+						<option value="auto">Auto (local, then OpenAI)</option>
 					</select>
+					<Button
+						size="sm"
+						onclick={saveWhisperProvider}
+						disabled={updateClientConfigMutation.isPending || whisperProvider === (clientConfigQuery.data?.whisper_provider ?? 'local')}
+					>
+						{#if updateClientConfigMutation.isPending}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+						{:else}
+							<Save class="mr-2 h-4 w-4" />
+						{/if}
+						Save
+					</Button>
 				</div>
+			</div>
 
+			<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+				<div class="space-y-1">
+					<p class="font-medium">Transcription Timeout</p>
+					<p class="text-sm text-muted-foreground">
+						Maximum time allowed for audio transcription (1–120 minutes).
+					</p>
+				</div>
+				<div class="flex items-center gap-3">
+					<div class="flex items-center gap-2">
+						<Input
+							type="number"
+							min={1}
+							max={120}
+							bind:value={whisperTimeout}
+							class="w-20"
+						/>
+						<span class="text-sm text-muted-foreground">min</span>
+					</div>
+					<Button
+						size="sm"
+						onclick={saveWhisperTimeout}
+						disabled={updateClientConfigMutation.isPending || whisperTimeout === (clientConfigQuery.data?.whisper_timeout_minutes ?? 30)}
+					>
+						{#if updateClientConfigMutation.isPending}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+						{:else}
+							<Save class="mr-2 h-4 w-4" />
+						{/if}
+						Save
+					</Button>
+				</div>
+			</div>
+
+			{#if whisperProvider === 'openai' || whisperProvider === 'auto'}
+				<div class="flex items-center gap-2 rounded-lg border p-4">
+					<div class="space-y-1 flex-1">
+						<p class="font-medium">OpenAI Whisper API</p>
+						<p class="text-sm text-muted-foreground">
+							Uses the OPENAI_API_KEY environment variable configured on the server.
+						</p>
+					</div>
+					{#if configQuery.data?.ai_provider === 'openai'}
+						<CheckCircle2 class="h-5 w-5 text-green-500" />
+					{:else}
+						<AlertTriangle class="h-5 w-5 text-amber-500" />
+						<span class="text-sm text-muted-foreground">Key not configured</span>
+					{/if}
+				</div>
+			{/if}
+
+			{#if whisperProvider === 'local' || whisperProvider === 'auto'}
 				<div class="flex flex-col gap-3 rounded-lg border p-4">
 					<div class="space-y-1">
 						<p class="font-medium">Whisper.cpp Models</p>
 						<p class="text-sm text-muted-foreground">
-							Download a model to enable local audio transcription for Summarize.sh.
+							Download a model to enable local audio transcription.
 						</p>
 					</div>
-
-					{#if !summarizeEnabledSaved}
-						<p class="text-sm text-muted-foreground">
-							Enable Summarize.sh and save to manage models.
-						</p>
-					{/if}
 
 					{#if whisperModelsQuery.isPending}
 						<div class="space-y-2">
@@ -1220,7 +1199,7 @@
 													variant="outline"
 													size="sm"
 													onclick={() => setActiveWhisperModelMutation.mutate(model.name)}
-													disabled={!summarizeEnabledSaved || setActiveWhisperModelMutation.isPending}
+													disabled={setActiveWhisperModelMutation.isPending}
 												>
 													Use
 												</Button>
@@ -1229,7 +1208,7 @@
 												variant="outline"
 												size="sm"
 												onclick={() => deleteWhisperModelMutation.mutate(model.name)}
-												disabled={!summarizeEnabledSaved || deleteWhisperModelMutation.isPending}
+												disabled={deleteWhisperModelMutation.isPending}
 											>
 												<Trash2 class="mr-2 h-4 w-4" />
 												Remove
@@ -1243,7 +1222,7 @@
 											<Button
 												size="sm"
 												onclick={() => downloadWhisperModelMutation.mutate(model.name)}
-												disabled={!summarizeEnabledSaved || downloadWhisperModelMutation.isPending}
+												disabled={downloadWhisperModelMutation.isPending}
 											>
 												<Download class="mr-2 h-4 w-4" />
 												Download
@@ -1257,42 +1236,6 @@
 						<p class="text-sm text-muted-foreground">Unable to load model status.</p>
 					{/if}
 				</div>
-
-				<div class="flex items-center justify-between gap-4 text-sm text-muted-foreground">
-					<span>
-						Source: <span class="font-medium">{summarizeConfigSource ?? 'default'}</span>
-					</span>
-				</div>
-
-				<div class="space-y-2">
-					<Label for="summarize-config">config.json</Label>
-					<textarea
-						id="summarize-config"
-						class="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-						bind:value={summarizeConfig}
-						onblur={validateSummarizeConfig}
-						spellcheck={false}
-					></textarea>
-					{#if summarizeConfigError}
-						<p class="text-sm text-destructive">{summarizeConfigError}</p>
-					{/if}
-				</div>
-
-				<div class="flex items-center justify-end gap-2">
-					<Button
-						onclick={saveSummarizeConfig}
-						disabled={updateSummarizeConfigMutation.isPending}
-					>
-						{#if updateSummarizeConfigMutation.isPending}
-							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						{:else}
-							<Save class="mr-2 h-4 w-4" />
-						{/if}
-						Save
-					</Button>
-				</div>
-			{:else}
-				<p class="text-sm text-muted-foreground">Unable to load Summarize.sh config.</p>
 			{/if}
 		</Card.Content>
 	</Card.Root>
