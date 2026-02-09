@@ -45,21 +45,20 @@ class Settings(BaseSettings):
     ai_timeout_seconds: int = Field(default=60, description="Per-article AI timeout")
     ai_max_retries: int = Field(default=2, description="Retries before fallback")
 
-    # Summarize.sh
-    summarize_sh_config_path: str = Field(
-        default="~/.summarize/config.json",
-        description="Path to Summarize.sh config.json",
-    )
-    summarize_sh_timeout_seconds: int = Field(
-        default=90, description="Summarize.sh timeout per article"
-    )
-    summarize_sh_whisper_cpp_binary: str = Field(
+    # Transcription (whisper.cpp / OpenAI Whisper API)
+    whisper_cpp_binary: str = Field(
         default="/usr/local/bin/whisper-cli",
-        description="Path to whisper.cpp binary for Summarize.sh",
+        description="Path to whisper.cpp binary",
     )
-    summarize_sh_whisper_models_dir: str = Field(
+    whisper_models_dir: str = Field(
         default="/app/data/models/whisper",
         description="Directory for whisper.cpp models",
+    )
+    whisper_transcription_timeout_seconds: int = Field(
+        default=300, description="Local whisper.cpp transcription timeout"
+    )
+    openai_whisper_timeout_seconds: int = Field(
+        default=120, description="OpenAI Whisper API timeout"
     )
 
     # Scheduling

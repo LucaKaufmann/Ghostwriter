@@ -19,8 +19,6 @@ import type {
 	WallabagConfigResponse,
 	WallabagConfigUpdate,
 	WallabagTestResult,
-	SummarizeConfigResponse,
-	SummarizeConfigUpdate,
 	WhisperModelsResponse,
 	WhisperModelRequest,
 	PreviewResponse,
@@ -228,36 +226,25 @@ class ApiClient {
 		});
 	}
 
-	async getSummarizeConfig(): Promise<SummarizeConfigResponse> {
-		return this.request<SummarizeConfigResponse>('/config/summarize');
-	}
-
-	async updateSummarizeConfig(data: SummarizeConfigUpdate): Promise<SummarizeConfigResponse> {
-		return this.request<SummarizeConfigResponse>('/config/summarize', {
-			method: 'PUT',
-			body: JSON.stringify(data)
-		});
-	}
-
 	async getWhisperModels(): Promise<WhisperModelsResponse> {
-		return this.request<WhisperModelsResponse>('/config/summarize/models');
+		return this.request<WhisperModelsResponse>('/config/whisper/models');
 	}
 
 	async downloadWhisperModel(data: WhisperModelRequest): Promise<WhisperModelsResponse> {
-		return this.request<WhisperModelsResponse>('/config/summarize/models/download', {
+		return this.request<WhisperModelsResponse>('/config/whisper/models/download', {
 			method: 'POST',
 			body: JSON.stringify(data)
 		});
 	}
 
 	async deleteWhisperModel(model: string): Promise<WhisperModelsResponse> {
-		return this.request<WhisperModelsResponse>(`/config/summarize/models/${model}`, {
+		return this.request<WhisperModelsResponse>(`/config/whisper/models/${model}`, {
 			method: 'DELETE'
 		});
 	}
 
 	async setActiveWhisperModel(data: WhisperModelRequest): Promise<WhisperModelsResponse> {
-		return this.request<WhisperModelsResponse>('/config/summarize/models/active', {
+		return this.request<WhisperModelsResponse>('/config/whisper/models/active', {
 			method: 'PUT',
 			body: JSON.stringify(data)
 		});
@@ -290,6 +277,12 @@ class ApiClient {
 	async deleteFeed(id: string): Promise<{ status: string; id: string }> {
 		return this.request(`/feeds/${id}`, {
 			method: 'DELETE'
+		});
+	}
+
+	async clearSeenArticles(id: string): Promise<{ status: string; feed_id: string; cleared_count: number }> {
+		return this.request(`/feeds/${id}/clear-seen`, {
+			method: 'POST'
 		});
 	}
 
