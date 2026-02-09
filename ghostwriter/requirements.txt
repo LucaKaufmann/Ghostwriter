@@ -21,6 +21,7 @@ litellm>=1.30.0,<2.0.0
 # Content Processing
 trafilatura>=1.8.0,<2.0.0
 feedparser>=6.0.10,<7.0.0
+youtube-transcript-api>=0.6.0,<1.0.0
 
 # EPUB Generation
 ebooklib>=0.18,<1.0.0

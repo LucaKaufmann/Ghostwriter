@@ -95,13 +95,11 @@ All configuration via environment variables. See `.env.example` for full list.
 # AI Provider: openai, gemini, ollama
 AI_PROVIDER=ollama
 
-# Summarize.sh (optional, for summarize-mode feeds)
-SUMMARIZE_SH_CONFIG_PATH=~/.summarize/config.json
-SUMMARIZE_SH_TIMEOUT_SECONDS=90
-
-# whisper.cpp (local transcription used by Summarize.sh when available)
-SUMMARIZE_SH_WHISPER_CPP_BINARY=/usr/local/bin/whisper-cli
-SUMMARIZE_SH_WHISPER_MODELS_DIR=/app/data/models/whisper
+# Transcription (local whisper.cpp and/or OpenAI Whisper API)
+WHISPER_CPP_BINARY=/usr/local/bin/whisper-cli
+WHISPER_MODELS_DIR=/app/data/models/whisper
+WHISPER_TRANSCRIPTION_TIMEOUT_SECONDS=300
+OPENAI_WHISPER_TIMEOUT_SECONDS=120
 
 # Scheduling (24h format)
 SCHEDULE_MORNING=07:00
@@ -120,13 +118,13 @@ AUTH_RATE_LIMIT_ENABLED=true
 
 ### whisper.cpp Binary Override (ARM / Raspberry Pi)
 
-Ghostwriter's Docker image includes a bundled `whisper-cli` binary for local transcription via Summarize.sh. If transcription fails (for example with `Illegal instruction (core dumped)` on some ARM devices) or you want an optimized build for your specific CPU, you can provide your own binary via the data volume.
+Ghostwriter's Docker image includes a bundled `whisper-cli` binary for local audio transcription (YouTube, podcasts). If transcription fails (for example with `Illegal instruction (core dumped)` on some ARM devices) or you want an optimized build for your specific CPU, you can provide your own binary via the data volume.
 
 Ghostwriter resolves the whisper binary in this order:
 
 1. `/app/data/bin/whisper-cli` (user override; persistent in the data volume)
 2. `/usr/local/bin/whisper-cli` (bundled in the Docker image)
-3. Unset (Summarize.sh falls back to other providers, e.g. OpenAI Whisper API if configured)
+3. Not found (falls back to OpenAI Whisper API if provider is set to "auto")
 
 Build and install your own binary:
 
