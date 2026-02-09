@@ -45,6 +45,7 @@ def init_db() -> None:
         for stmt in [
             "ALTER TABLE wallabag_config ADD COLUMN enabled BOOLEAN DEFAULT 1",
             "ALTER TABLE client_config ADD COLUMN newsletters_enabled BOOLEAN DEFAULT 1",
+            "ALTER TABLE client_config ADD COLUMN whisper_timeout_minutes INTEGER DEFAULT 30",
         ]:
             try:
                 conn.execute(__import__("sqlalchemy").text(stmt))

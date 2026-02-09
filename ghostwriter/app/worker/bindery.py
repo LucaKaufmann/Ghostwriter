@@ -20,7 +20,7 @@ from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
 from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
-from app.services.summarize_sh_service import SummarizeShService
+from app.services.media_processor import MediaProcessor
 from app.services.markdown_utils import markdown_to_html_basic
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
@@ -76,7 +76,7 @@ class BinderyPipeline:
         self.settings = get_settings()
         self.content_processor = ContentProcessor(self.settings)
         self.llm_service = LLMService(self.settings)
-        self.summarize_sh_service = SummarizeShService(self.settings)
+        self.media_processor = MediaProcessor(self.settings)
         self.epub_generator = EpubGenerator(self.settings)
         self.start_time: float | None = None
 
@@ -155,23 +155,17 @@ class BinderyPipeline:
         self._ensure_synthetic_feeds()
 
         # Get digest info for logging and current client config
-        summarize_sh_enabled = False
-        summarize_sh_on_fail = "raw"
-        summarize_sh_whisper_model = None
+        whisper_provider = "local"
+        whisper_model = "base.en"
+        whisper_timeout_seconds: int | None = None
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
             period = digest.period if digest else "manual"
             client_config = session.exec(select(ClientConfig)).first()
             if client_config:
-                summarize_sh_enabled = client_config.summarize_sh_enabled
-                summarize_sh_on_fail = client_config.summarize_sh_on_fail or "raw"
-                summarize_sh_whisper_model = (
-                    client_config.summarize_sh_whisper_model or "base.en"
-                )
-        logger.info(
-            "Summarize.sh enabled for digest",
-            extra={"digest_id": str(self.digest_id), "enabled": summarize_sh_enabled},
-        )
+                whisper_provider = client_config.whisper_provider or "local"
+                whisper_model = client_config.whisper_model or "base.en"
+                whisper_timeout_seconds = client_config.whisper_timeout_minutes * 60
 
         try:
             await self._update_stage("fetching")
@@ -349,7 +343,6 @@ class BinderyPipeline:
             extracted_articles: list[tuple[Feed, ExtractedArticle]] = []
             extracted_lock = asyncio.Lock()
             extract_sem = asyncio.Semaphore(5)
-            summarize_sh_sem = asyncio.Semaphore(1)
 
             async def _extract_one(feed: Feed, parsed_article) -> None:
                 async with extract_sem:
@@ -360,133 +353,72 @@ class BinderyPipeline:
                     word_count = 0
                     is_summary = False
                     ai_failed = False
-                    fallback_source_content: str | None = None
 
-                    if feed.mode == "summarize" and summarize_sh_enabled:
-                        async with summarize_sh_sem:
-                            logger.info(
-                                "Summarize.sh path selected",
-                                extra={"url": parsed_article.url, "title": parsed_article.title},
+                    # Step 1: Try media processing (YouTube, podcast audio)
+                    media_result = await self.media_processor.process(
+                        parsed_article.url,
+                        content_url=parsed_article.content_url,
+                        whisper_provider=whisper_provider,
+                        whisper_model=whisper_model,
+                        timeout_seconds=whisper_timeout_seconds,
+                    )
+
+                    if media_result.is_media:
+                        if media_result.error or not media_result.text:
+                            logger.warning(
+                                "Media processing failed, skipping",
+                                extra={
+                                    "url": parsed_article.url,
+                                    "error": media_result.error,
+                                },
                             )
-                            summarize_target = parsed_article.content_url or parsed_article.url
-                            summarize_result = await self.summarize_sh_service.summarize_url(
-                                summarize_target,
-                                whisper_model=summarize_sh_whisper_model,
-                                is_media=bool(parsed_article.content_url),
+                            digest_logger.article_extraction_failed(
+                                parsed_article.url,
+                                media_result.error or "Media processing returned empty",
                             )
-                        if not summarize_result.ai_failed and summarize_result.summary:
-                            content = markdown_to_html_basic(summarize_result.summary)
+                            return
+                        content = media_result.text
+                    else:
+                        # Step 2: Standard article extraction via trafilatura
+                        content = await self.content_processor.extract_content(
+                            parsed_article.url
+                        )
+                        if not content:
+                            logger.warning(f"Could not extract: {parsed_article.url}")
+                            digest_logger.article_extraction_failed(
+                                parsed_article.url,
+                                "Content extraction returned empty",
+                            )
+                            return
+
+                    original_word_count = ContentProcessor.count_words(content)
+                    word_count = original_word_count
+
+                    # Step 3: AI summarization if feed mode is "summarize"
+                    if feed.mode == "summarize":
+                        summary_content, ai_failed = await self.llm_service.summarize(
+                            content,
+                            title=parsed_article.title,
+                            url=parsed_article.url,
+                            author=parsed_article.author,
+                            source=feed.title,
+                            content_type="transcript" if media_result.is_media else "article",
+                        )
+                        if not ai_failed:
+                            content = summary_content
                             is_summary = True
                             word_count = ContentProcessor.count_words(content)
-                            original_word_count = (
-                                summarize_result.original_word_count or word_count
-                            )
                             digest_logger.article_summarized(
                                 parsed_article.title,
                                 original_words=original_word_count,
                                 summary_words=word_count,
                             )
                         else:
-                            ai_failed = True
-                            if summarize_result.summary:
-                                fallback_source_content = summarize_result.summary
-                            error_detail = summarize_result.error or "Summarize.sh returned error"
                             digest_logger.article_summarization_failed(
                                 parsed_article.title,
-                                error_detail,
+                                "AI service returned error",
                                 fallback=True,
                             )
-
-                    if content is None and summarize_sh_enabled and feed.mode == "summarize":
-                        if summarize_sh_on_fail == "skip":
-                            logger.warning(
-                                "Skipping article after Summarize.sh failure",
-                                extra={"url": parsed_article.url, "title": parsed_article.title},
-                            )
-                            return
-
-                    if content is None:
-                        if fallback_source_content:
-                            content = fallback_source_content
-                            logger.info(
-                                "Using Summarize.sh fallback content",
-                                extra={
-                                    "url": parsed_article.url,
-                                    "title": parsed_article.title,
-                                    "word_count": ContentProcessor.count_words(content),
-                                },
-                            )
-                        else:
-                            content = await self.content_processor.extract_content(
-                                parsed_article.url
-                            )
-                            if not content:
-                                logger.warning(f"Could not extract: {parsed_article.url}")
-                                digest_logger.article_extraction_failed(
-                                    parsed_article.url,
-                                    "Content extraction returned empty",
-                                )
-                                return
-
-                        original_word_count = ContentProcessor.count_words(content)
-                        word_count = original_word_count
-
-                        # Enrich with AI if enabled (fallback path)
-                        if feed.mode == "summarize" and not summarize_sh_enabled:
-                            logger.info(
-                                "LLM summarization path selected",
-                                extra={"url": parsed_article.url, "title": parsed_article.title},
-                            )
-                            summary_content, ai_failed = await self.llm_service.summarize(
-                                content,
-                                title=parsed_article.title,
-                                url=parsed_article.url,
-                                author=parsed_article.author,
-                                source=feed.name,
-                            )
-                            if not ai_failed:
-                                content = summary_content
-                                is_summary = True
-                                word_count = ContentProcessor.count_words(content)
-                                digest_logger.article_summarized(
-                                    parsed_article.title,
-                                    original_words=original_word_count,
-                                    summary_words=word_count,
-                                )
-                            else:
-                                digest_logger.article_summarization_failed(
-                                    parsed_article.title,
-                                    "AI service returned error",
-                                    fallback=True,
-                                )
-                        elif feed.mode == "summarize" and summarize_sh_enabled:
-                            if summarize_sh_on_fail == "fallback_ai":
-                                logger.info(
-                                    "Summarize.sh failed; falling back to LLM",
-                                    extra={"url": parsed_article.url, "title": parsed_article.title},
-                                )
-                                summary_content, ai_failed = await self.llm_service.summarize(
-                                    content,
-                                    title=parsed_article.title,
-                                    url=parsed_article.url,
-                                    author=parsed_article.author,
-                                    source=feed.name,
-                                )
-                                if not ai_failed:
-                                    content = summary_content
-                                    is_summary = True
-                                    word_count = ContentProcessor.count_words(content)
-                                    digest_logger.article_summarized(
-                                        parsed_article.title,
-                                        original_words=original_word_count,
-                                        summary_words=word_count,
-                                    )
-                                else:
-                                    digest_logger.article_summarization_failed(
-                                        parsed_article.title,
-                                        "AI service returned error",
-                                        fallback=True,
-                                    )
 
                     processing_ms = int((time.time() - article_start) * 1000)
 
