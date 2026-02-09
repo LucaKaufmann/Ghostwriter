@@ -107,7 +107,8 @@ class YouTubeService:
             return None
 
     async def _transcribe_audio(
-        self, url: str, whisper_provider: str, whisper_model: str
+        self, url: str, whisper_provider: str, whisper_model: str,
+        timeout_seconds: int | None = None,
     ) -> YouTubeResult:
         """Download audio with yt-dlp and transcribe."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -157,7 +158,8 @@ class YouTubeService:
                 )
 
             result = await self.transcription_service.transcribe(
-                wav_files[0], provider=whisper_provider, whisper_model=whisper_model
+                wav_files[0], provider=whisper_provider, whisper_model=whisper_model,
+                timeout_seconds=timeout_seconds,
             )
             if result.error:
                 return YouTubeResult(
@@ -170,6 +172,7 @@ class YouTubeService:
         url: str,
         whisper_provider: str = "local",
         whisper_model: str = "base.en",
+        timeout_seconds: int | None = None,
     ) -> YouTubeResult:
         """
         Get transcript for a YouTube video.
@@ -201,4 +204,4 @@ class YouTubeService:
 
         # Fall back to audio transcription
         logger.info("No captions available for %s, falling back to audio transcription", video_id)
-        return await self._transcribe_audio(url, whisper_provider, whisper_model)
+        return await self._transcribe_audio(url, whisper_provider, whisper_model, timeout_seconds)

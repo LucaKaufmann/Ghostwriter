@@ -101,6 +101,7 @@ export interface ClientConfigResponse {
 	timezone: string;
 	whisper_provider: string;
 	whisper_model: string;
+	whisper_timeout_minutes: number;
 	updated_at: string;
 	wallabag?: IntegrationStatus | null;
 	newsletters?: IntegrationStatus | null;
@@ -118,6 +119,7 @@ export interface ClientConfigUpdate {
 	newsletters_enabled?: boolean;
 	whisper_provider?: string;
 	whisper_model?: string;
+	whisper_timeout_minutes?: number;
 	client_updated_at?: string;
 }
 

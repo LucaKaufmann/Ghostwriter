@@ -261,6 +261,7 @@
 
 	// Transcription config state
 	let whisperProvider = $state<'local' | 'openai' | 'auto'>('local');
+	let whisperTimeout = $state(30);
 	let whisperProviderInitialized = $state(false);
 
 	$effect(() => {
@@ -285,12 +286,19 @@
 		const data = clientConfigQuery.data;
 		if (data && !whisperProviderInitialized) {
 			whisperProvider = (data.whisper_provider as 'local' | 'openai' | 'auto') ?? 'local';
+			whisperTimeout = data.whisper_timeout_minutes ?? 30;
 			whisperProviderInitialized = true;
 		}
 	});
 
 	function saveWhisperProvider() {
 		updateClientConfigMutation.mutate({ whisper_provider: whisperProvider });
+	}
+
+	function saveWhisperTimeout() {
+		const clamped = Math.max(1, Math.min(120, whisperTimeout));
+		whisperTimeout = clamped;
+		updateClientConfigMutation.mutate({ whisper_timeout_minutes: clamped });
 	}
 
 	function saveWallabag() {
@@ -1082,6 +1090,39 @@
 						size="sm"
 						onclick={saveWhisperProvider}
 						disabled={updateClientConfigMutation.isPending || whisperProvider === (clientConfigQuery.data?.whisper_provider ?? 'local')}
+					>
+						{#if updateClientConfigMutation.isPending}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+						{:else}
+							<Save class="mr-2 h-4 w-4" />
+						{/if}
+						Save
+					</Button>
+				</div>
+			</div>
+
+			<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+				<div class="space-y-1">
+					<p class="font-medium">Transcription Timeout</p>
+					<p class="text-sm text-muted-foreground">
+						Maximum time allowed for audio transcription (1–120 minutes).
+					</p>
+				</div>
+				<div class="flex items-center gap-3">
+					<div class="flex items-center gap-2">
+						<Input
+							type="number"
+							min={1}
+							max={120}
+							bind:value={whisperTimeout}
+							class="w-20"
+						/>
+						<span class="text-sm text-muted-foreground">min</span>
+					</div>
+					<Button
+						size="sm"
+						onclick={saveWhisperTimeout}
+						disabled={updateClientConfigMutation.isPending || whisperTimeout === (clientConfigQuery.data?.whisper_timeout_minutes ?? 30)}
 					>
 						{#if updateClientConfigMutation.isPending}
 							<Loader2 class="mr-2 h-4 w-4 animate-spin" />

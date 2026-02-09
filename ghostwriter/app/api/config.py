@@ -48,6 +48,7 @@ class ConfigResponse(BaseModel):
     updated_at: datetime
     whisper_provider: str
     whisper_model: str
+    whisper_timeout_minutes: int
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -70,6 +71,9 @@ class ConfigUpdateRequest(BaseModel):
     )
     whisper_model: str | None = Field(
         default=None, description="whisper.cpp model name for local transcription"
+    )
+    whisper_timeout_minutes: int | None = Field(
+        default=None, ge=1, le=120, description="Transcription timeout in minutes"
     )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
@@ -142,6 +146,7 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         updated_at=config.updated_at,
         whisper_provider=config.whisper_provider,
         whisper_model=config.whisper_model,
+        whisper_timeout_minutes=config.whisper_timeout_minutes,
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -227,6 +232,9 @@ async def update_config(
                 detail="Model must be downloaded before activation",
             )
         config.whisper_model = request.whisper_model
+
+    if request.whisper_timeout_minutes is not None:
+        config.whisper_timeout_minutes = request.whisper_timeout_minutes
 
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour

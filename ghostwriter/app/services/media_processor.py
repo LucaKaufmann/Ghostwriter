@@ -55,6 +55,7 @@ class MediaProcessor:
         content_url: str | None = None,
         whisper_provider: str = "local",
         whisper_model: str = "base.en",
+        timeout_seconds: int | None = None,
     ) -> MediaResult:
         """
         Process a URL for media content.
@@ -73,7 +74,7 @@ class MediaProcessor:
         if YouTubeService.is_youtube_url(url):
             logger.info("YouTube URL detected: %s", url)
             result = await self.youtube_service.get_transcript(
-                url, whisper_provider, whisper_model
+                url, whisper_provider, whisper_model, timeout_seconds
             )
             source = f"youtube_{result.source}"
             return MediaResult(
@@ -87,7 +88,7 @@ class MediaProcessor:
         if self._is_audio_url(content_url):
             logger.info("Audio enclosure detected: %s", content_url)
             return await self._process_audio(
-                content_url, whisper_provider, whisper_model
+                content_url, whisper_provider, whisper_model, timeout_seconds
             )
 
         # Not media — caller should use trafilatura
@@ -98,6 +99,7 @@ class MediaProcessor:
         audio_url: str,
         whisper_provider: str,
         whisper_model: str,
+        timeout_seconds: int | None = None,
     ) -> MediaResult:
         """Download and transcribe a podcast/audio URL."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -144,7 +146,8 @@ class MediaProcessor:
 
             # Transcribe
             result = await self.transcription_service.transcribe(
-                wav_path, provider=whisper_provider, whisper_model=whisper_model
+                wav_path, provider=whisper_provider, whisper_model=whisper_model,
+                timeout_seconds=timeout_seconds,
             )
             if result.error:
                 return MediaResult(
