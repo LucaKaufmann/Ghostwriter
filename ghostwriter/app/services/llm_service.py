@@ -94,6 +94,74 @@ Final check: Ensure the summary flows naturally and captures the full scope.
 {content}
 </content>"""
 
+    SUMMARIZE_TRANSCRIPT_PROMPT = """<instructions>
+Summarize this podcast or video transcript for a daily reading digest on an e-ink device.
+
+Content guidance:
+- Lead with a one-sentence overview of what this episode/video covers.
+- Organize the summary by topics discussed, in the order they appear.
+- For each major topic, include 2-3 key points, arguments, or findings.
+- Preserve 2-4 short exact excerpts (max 25 words each) when there's a strong, memorable line. Italicize excerpts with *single asterisks*.
+- Note any notable disagreements, surprising claims, or actionable advice.
+- Omit sponsor messages, ads, calls-to-action, and boilerplate. Do not mention or acknowledge them.
+
+Length: Target around 3,000-4,000 characters. Use 5-8 short paragraphs.
+
+Formatting:
+- Write in direct, factual language with a neutral tone.
+- Use short paragraphs. Bullet lists only when they improve scanability.
+- Keep compact: no extra blank lines between sentences.
+- Do not start with preambles like "Here's a summary" or "In this episode".
+
+Final check: Ensure no sponsor/ad content remains. Verify excerpts are italicized.
+</instructions>
+
+<context>
+{context}
+</context>
+
+<content>
+{content}
+</content>"""
+
+    CHUNK_SUMMARIZE_TRANSCRIPT_PROMPT = """<instructions>
+You are summarizing part {part} of {total} of a long podcast or video transcript.
+
+Requirements:
+- Extract key topics discussed, arguments made, and notable quotes.
+- Maximum 12 bullet points.
+- Omit sponsor messages, ads, and boilerplate entirely.
+- Keep it concise; avoid repetition.
+</instructions>
+
+<content>
+{content}
+</content>"""
+
+    REDUCE_TRANSCRIPT_PROMPT = """<instructions>
+Combine these partial summaries of a podcast or video transcript into one cohesive final summary.
+
+Content guidance:
+- Lead with a one-sentence overview of the episode/video.
+- Organize by topics discussed, synthesizing related points across sections.
+- For each major topic, include 2-3 key points or arguments.
+- Preserve any strong exact excerpts from the partials.
+- Note any notable disagreements, surprising claims, or actionable advice.
+
+Length: Target around 3,000-4,000 characters. Use 5-8 short paragraphs.
+
+Formatting:
+- Write in direct, factual language with a neutral tone.
+- Keep compact: no extra blank lines.
+- Do not start with preambles like "Here's a summary".
+
+Final check: Ensure the summary flows naturally and captures the full scope of the discussion.
+</instructions>
+
+<content>
+{content}
+</content>"""
+
     DIRECT_SUMMARY_CHAR_LIMIT = 15000
     CHUNK_CHAR_LIMIT = 12000
 
@@ -130,6 +198,7 @@ Final check: Ensure the summary flows naturally and captures the full scope.
         url: str | None = None,
         author: str | None = None,
         source: str | None = None,
+        content_type: str = "article",
     ) -> tuple[str, bool]:
         """
         Summarize article content using the configured LLM.
@@ -144,6 +213,7 @@ Final check: Ensure the summary flows naturally and captures the full scope.
             url: Source URL for context.
             author: Author name for context.
             source: Source name (feed title, "Newsletter", etc.) for context.
+            content_type: "article" or "transcript" — selects prompt style.
 
         Returns:
             Tuple of (summarized_content, ai_failed).
@@ -151,6 +221,16 @@ Final check: Ensure the summary flows naturally and captures the full scope.
         """
         if retries is None:
             retries = self.settings.ai_max_retries
+
+        # Select prompts based on content type
+        if content_type == "transcript":
+            summarize_prompt = self.SUMMARIZE_TRANSCRIPT_PROMPT
+            chunk_prompt = self.CHUNK_SUMMARIZE_TRANSCRIPT_PROMPT
+            reduce_prompt_template = self.REDUCE_TRANSCRIPT_PROMPT
+        else:
+            summarize_prompt = self.SUMMARIZE_PROMPT
+            chunk_prompt = self.CHUNK_SUMMARIZE_PROMPT
+            reduce_prompt_template = self.REDUCE_PROMPT
 
         # Build context from metadata
         context_lines = []
@@ -166,7 +246,7 @@ Final check: Ensure the summary flows naturally and captures the full scope.
 
         model = self.settings.get_llm_model_string()
         if len(content) <= self.DIRECT_SUMMARY_CHAR_LIMIT:
-            prompt = self.SUMMARIZE_PROMPT.format(context=context, content=content)
+            prompt = summarize_prompt.format(context=context, content=content)
             direct_summary, direct_failed = await self._run_completion(
                 prompt, model, retries, system_prompt=self.SYSTEM_PROMPT
             )
@@ -183,7 +263,7 @@ Final check: Ensure the summary flows naturally and captures the full scope.
         partials: list[str] = []
         total = len(chunks)
         for index, chunk in enumerate(chunks, start=1):
-            prompt = self.CHUNK_SUMMARIZE_PROMPT.format(
+            prompt = chunk_prompt.format(
                 part=index,
                 total=total,
                 content=chunk,
@@ -196,7 +276,7 @@ Final check: Ensure the summary flows naturally and captures the full scope.
             partials.append(partial_summary)
 
         reduce_input = "\n\n".join(partials)
-        reduce_prompt = self.REDUCE_PROMPT.format(content=reduce_input)
+        reduce_prompt = reduce_prompt_template.format(content=reduce_input)
         final_summary, final_failed = await self._run_completion(
             reduce_prompt, model, retries, system_prompt=self.SYSTEM_PROMPT
         )

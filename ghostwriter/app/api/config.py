@@ -17,7 +17,6 @@ from app.models.feed import Feed
 from app.models.seen_article import SeenArticle
 from app.models.wallabag_config import WallabagConfig, WallabagConfigRead, WallabagConfigUpdate
 from app.services.newsletter_service import NewsletterService
-from app.services.summarize_sh_service import SummarizeShService
 from app.services.whisper_model_service import WhisperModelService
 from app.services.whisper_models import WHISPER_MODELS
 from app.services.wallabag_service import WallabagService
@@ -47,9 +46,9 @@ class ConfigResponse(BaseModel):
     evening_minute: int
     timezone: str
     updated_at: datetime
-    summarize_sh_enabled: bool
-    summarize_sh_on_fail: str
-    summarize_sh_whisper_model: str
+    whisper_provider: str
+    whisper_model: str
+    whisper_timeout_minutes: int
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -67,31 +66,17 @@ class ConfigUpdateRequest(BaseModel):
     evening_minute: int | None = Field(default=None, ge=0, le=59, description="Evening minute")
     timezone: str | None = Field(default=None, description="IANA timezone")
     newsletters_enabled: bool | None = Field(default=None, description="Enable newsletter integration")
-    summarize_sh_enabled: bool | None = Field(
-        default=None, description="Enable Summarize.sh for summarize-mode feeds"
+    whisper_provider: str | None = Field(
+        default=None, description="Transcription provider: local, openai, auto"
     )
-    summarize_sh_on_fail: str | None = Field(
-        default=None,
-        description="Summarize.sh failure behavior: fallback_ai, raw, skip",
+    whisper_model: str | None = Field(
+        default=None, description="whisper.cpp model name for local transcription"
     )
-    summarize_sh_whisper_model: str | None = Field(
-        default=None, description="whisper.cpp model name for Summarize.sh"
+    whisper_timeout_minutes: int | None = Field(
+        default=None, ge=1, le=120, description="Transcription timeout in minutes"
     )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
-
-
-class SummarizeConfigResponse(BaseModel):
-    """Response model for Summarize.sh config."""
-
-    config_json: str
-    source: Literal["user", "default"]
-
-
-class SummarizeConfigUpdate(BaseModel):
-    """Request model for updating Summarize.sh config."""
-
-    config_json: str = Field(description="Raw Summarize.sh config.json contents")
 
 
 class WhisperModelInfo(BaseModel):
@@ -159,9 +144,9 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         evening_minute=config.evening_minute,
         timezone=config.timezone,
         updated_at=config.updated_at,
-        summarize_sh_enabled=config.summarize_sh_enabled,
-        summarize_sh_on_fail=config.summarize_sh_on_fail,
-        summarize_sh_whisper_model=config.summarize_sh_whisper_model,
+        whisper_provider=config.whisper_provider,
+        whisper_model=config.whisper_model,
+        whisper_timeout_minutes=config.whisper_timeout_minutes,
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -226,29 +211,30 @@ async def update_config(
     if request.newsletters_enabled is not None:
         config.newsletters_enabled = request.newsletters_enabled
 
-    if request.summarize_sh_enabled is not None:
-        config.summarize_sh_enabled = request.summarize_sh_enabled
-        logger.info(
-            "Summarize.sh enabled updated",
-            extra={"summarize_sh_enabled": config.summarize_sh_enabled},
-        )
+    if request.whisper_provider is not None:
+        if request.whisper_provider not in ("local", "openai", "auto"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="whisper_provider must be 'local', 'openai', or 'auto'",
+            )
+        config.whisper_provider = request.whisper_provider
 
-    if request.summarize_sh_on_fail is not None:
-        config.summarize_sh_on_fail = request.summarize_sh_on_fail
-
-    if request.summarize_sh_whisper_model is not None:
-        if request.summarize_sh_whisper_model not in WHISPER_MODELS:
+    if request.whisper_model is not None:
+        if request.whisper_model not in WHISPER_MODELS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Unknown whisper model",
             )
         service = WhisperModelService(get_settings())
-        if not service.is_downloaded(request.summarize_sh_whisper_model):
+        if not service.is_downloaded(request.whisper_model):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Model must be downloaded before activation",
             )
-        config.summarize_sh_whisper_model = request.summarize_sh_whisper_model
+        config.whisper_model = request.whisper_model
+
+    if request.whisper_timeout_minutes is not None:
+        config.whisper_timeout_minutes = request.whisper_timeout_minutes
 
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour
@@ -298,39 +284,11 @@ async def update_config(
     return _config_to_response(config, session)
 
 
-# ============ Summarize.sh Configuration ============
-
-
-@router.get("/summarize", response_model=SummarizeConfigResponse, dependencies=[Depends(verify_api_key)])
-async def get_summarize_config(
-    settings: Settings = Depends(get_settings),
-) -> SummarizeConfigResponse:
-    """Get the Summarize.sh config.json contents."""
-    service = SummarizeShService(settings)
-    config_json, source = service.get_config()
-    return SummarizeConfigResponse(config_json=config_json, source=source)
-
-
-@router.put("/summarize", response_model=SummarizeConfigResponse, dependencies=[Depends(verify_api_key)])
-async def update_summarize_config(
-    request: SummarizeConfigUpdate,
-    settings: Settings = Depends(get_settings),
-) -> SummarizeConfigResponse:
-    """Validate and update Summarize.sh config.json contents."""
-    service = SummarizeShService(settings)
-    try:
-        service.save_config(request.config_json)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    config_json, source = service.get_config()
-    return SummarizeConfigResponse(config_json=config_json, source=source)
+# ============ Whisper Model Management ============
 
 
 @router.get(
-    "/summarize/models",
+    "/whisper/models",
     response_model=WhisperModelsResponse,
     dependencies=[Depends(verify_api_key)],
 )
@@ -342,13 +300,13 @@ async def list_whisper_models(
     config = get_or_create_config(session)
     service = WhisperModelService(settings)
     return WhisperModelsResponse(
-        active_model=config.summarize_sh_whisper_model or "base.en",
+        active_model=config.whisper_model or "base.en",
         models=service.list_models(),
     )
 
 
 @router.post(
-    "/summarize/models/download",
+    "/whisper/models/download",
     response_model=WhisperModelsResponse,
     dependencies=[Depends(verify_api_key)],
 )
@@ -372,13 +330,13 @@ async def download_whisper_model(
     background_tasks.add_task(service.download_model, request.model)
     config = get_or_create_config(session)
     return WhisperModelsResponse(
-        active_model=config.summarize_sh_whisper_model or "base.en",
+        active_model=config.whisper_model or "base.en",
         models=service.list_models(),
     )
 
 
 @router.delete(
-    "/summarize/models/{model_name}",
+    "/whisper/models/{model_name}",
     response_model=WhisperModelsResponse,
     dependencies=[Depends(verify_api_key)],
 )
@@ -401,13 +359,13 @@ async def delete_whisper_model(
         ) from exc
     config = get_or_create_config(session)
     return WhisperModelsResponse(
-        active_model=config.summarize_sh_whisper_model or "base.en",
+        active_model=config.whisper_model or "base.en",
         models=service.list_models(),
     )
 
 
 @router.put(
-    "/summarize/models/active",
+    "/whisper/models/active",
     response_model=WhisperModelsResponse,
     dependencies=[Depends(verify_api_key)],
 )
@@ -428,12 +386,12 @@ async def set_active_whisper_model(
             detail="Model must be downloaded before activation",
         )
     config = get_or_create_config(session)
-    config.summarize_sh_whisper_model = request.model
+    config.whisper_model = request.model
     config.updated_at = datetime.now(timezone.utc)
     session.add(config)
     session.commit()
     return WhisperModelsResponse(
-        active_model=config.summarize_sh_whisper_model or "base.en",
+        active_model=config.whisper_model or "base.en",
         models=service.list_models(),
     )
 
