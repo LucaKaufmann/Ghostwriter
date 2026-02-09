@@ -24,16 +24,13 @@ class ClientConfigBase(SQLModel):
     # Integration toggles
     newsletters_enabled: bool = Field(default=True, description="Enable newsletter integration")
     newsletter_mode: str = Field(default="summarize", description="Newsletter processing mode: raw or summarize")
-    summarize_sh_enabled: bool = Field(
-        default=False, description="Enable Summarize.sh for summarize-mode feeds"
+    whisper_provider: str = Field(
+        default="local",
+        description="Transcription provider: local, openai, auto",
     )
-    summarize_sh_on_fail: str = Field(
-        default="raw",
-        description="Summarize.sh failure behavior: fallback_ai, raw, skip",
-    )
-    summarize_sh_whisper_model: str = Field(
+    whisper_model: str = Field(
         default="base.en",
-        description="whisper.cpp model name for Summarize.sh",
+        description="whisper.cpp model name for local transcription",
     )
 
 
@@ -65,14 +62,11 @@ class ClientConfigUpdate(SQLModel):
     timezone: str | None = Field(default=None, description="IANA timezone")
     newsletters_enabled: bool | None = Field(default=None, description="Enable newsletter integration")
     newsletter_mode: str | None = Field(default=None, description="Newsletter processing mode: raw or summarize")
-    summarize_sh_enabled: bool | None = Field(
-        default=None, description="Enable Summarize.sh for summarize-mode feeds"
+    whisper_provider: str | None = Field(
+        default=None, description="Transcription provider: local, openai, auto"
     )
-    summarize_sh_on_fail: str | None = Field(
-        default=None, description="Summarize.sh failure behavior: fallback_ai, raw, skip"
-    )
-    summarize_sh_whisper_model: str | None = Field(
-        default=None, description="whisper.cpp model name for Summarize.sh"
+    whisper_model: str | None = Field(
+        default=None, description="whisper.cpp model name for local transcription"
     )
 
 
@@ -89,7 +83,6 @@ class ClientConfigRead(SQLModel):
     timezone: str
     newsletters_enabled: bool
     newsletter_mode: str
-    summarize_sh_enabled: bool
-    summarize_sh_on_fail: str
-    summarize_sh_whisper_model: str
+    whisper_provider: str
+    whisper_model: str
     updated_at: datetime
