@@ -290,24 +290,26 @@ docker run -d \
 
 ### Database Migrations
 
-After updating the codebase, run migrations before deploying:
+All schema migrations use **Alembic** (`ghostwriter/alembic/`). The Docker entrypoint runs `alembic upgrade head` automatically on container start.
+
+Local development:
 ```bash
 cd ghostwriter
-python scripts/migrate_add_article_content.py
-python scripts/migrate_nullable_feed_id.py
-python scripts/migrate_add_digest_indexes.py
-python scripts/migrate_add_integration_enabled.py
-python scripts/migrate_add_content_type.py
+alembic upgrade head
 ```
 
-On Docker, exec into the container:
+On Docker (manual):
 ```bash
-docker exec -it ghostwriter python scripts/migrate_add_article_content.py
-docker exec -it ghostwriter python scripts/migrate_nullable_feed_id.py
-docker exec -it ghostwriter python scripts/migrate_add_digest_indexes.py
-docker exec -it ghostwriter python scripts/migrate_add_integration_enabled.py
-docker exec -it ghostwriter python scripts/migrate_add_content_type.py
+docker exec -it ghostwriter alembic upgrade head
 ```
+
+Creating a new migration:
+```bash
+cd ghostwriter
+alembic revision --autogenerate -m "description of change"
+```
+
+Migrations must be idempotent for SQLite (check before acting with `PRAGMA table_info`).
 
 ### API Endpoints
 

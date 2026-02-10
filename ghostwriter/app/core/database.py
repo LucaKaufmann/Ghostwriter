@@ -30,29 +30,12 @@ engine = create_engine(
 
 
 def init_db() -> None:
-    """Initialize database tables and ensure indexes exist."""
+    """Initialize database tables.
+
+    Creates any missing tables from SQLModel metadata. Schema alterations
+    (new columns, indexes, nullable changes) are handled by Alembic migrations.
+    """
     SQLModel.metadata.create_all(engine)
-
-    # Add indexes that create_all won't apply to existing tables
-    with engine.connect() as conn:
-        conn.execute(
-            __import__("sqlalchemy").text(
-                "CREATE INDEX IF NOT EXISTS ix_digests_status ON digests (status)"
-            )
-        )
-
-        # Add integration enabled columns (safe for existing DBs)
-        for stmt in [
-            "ALTER TABLE wallabag_config ADD COLUMN enabled BOOLEAN DEFAULT 1",
-            "ALTER TABLE client_config ADD COLUMN newsletters_enabled BOOLEAN DEFAULT 1",
-            "ALTER TABLE client_config ADD COLUMN whisper_timeout_minutes INTEGER DEFAULT 30",
-        ]:
-            try:
-                conn.execute(__import__("sqlalchemy").text(stmt))
-            except Exception:
-                pass  # Column already exists
-
-        conn.commit()
 
 
 def get_session() -> Generator[Session, None, None]:

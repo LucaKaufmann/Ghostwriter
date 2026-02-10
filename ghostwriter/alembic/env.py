@@ -5,7 +5,8 @@ import sys
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+import sqlalchemy as sa
+from sqlalchemy import engine_from_config, inspect, pool
 from sqlmodel import SQLModel
 
 # Add the app directory to the path so we can import models
@@ -15,11 +16,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.models.user import User  # noqa: F401, E402
 from app.models.api_token import APIToken  # noqa: F401, E402
 from app.models.feed import Feed  # noqa: F401, E402
-from app.models.digest import Digest  # noqa: F401, E402
+from app.models.digest import Digest, DigestArticle  # noqa: F401, E402
 from app.models.seen_article import SeenArticle  # noqa: F401, E402
 from app.models.schedule import Schedule  # noqa: F401, E402
 from app.models.client_config import ClientConfig  # noqa: F401, E402
 from app.models.client_settings import ClientSettings  # noqa: F401, E402
+from app.models.wallabag_config import WallabagConfig  # noqa: F401, E402
 
 # this is the Alembic Config object
 config = context.config
@@ -80,6 +82,26 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # Fresh database: create all tables from models and stamp as current.
+        # Migrations 001-005 are not fully idempotent (001 uses CREATE TABLE,
+        # 002-005 assume client_config exists), so for a new database we skip
+        # the migration chain entirely — create_all() produces the current schema.
+        insp = inspect(connection)
+        if "alembic_version" not in insp.get_table_names():
+            target_metadata.create_all(connection)
+            # Stamp the current head revision directly (can't use command.stamp
+            # from within env.py — it re-enters run_env and fails).
+            head = context.script.get_current_head()
+            connection.execute(
+                sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+            )
+            connection.execute(
+                sa.text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": head},
+            )
+            connection.commit()
+            return
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
@@ -88,6 +110,11 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
+
+        # SQLAlchemy 2.0 auto-begins transactions. Alembic's non-transactional
+        # DDL mode (SQLite) does not commit, so we must commit explicitly to
+        # persist both DDL changes and the alembic_version update.
+        connection.commit()
 
 
 if context.is_offline_mode():
