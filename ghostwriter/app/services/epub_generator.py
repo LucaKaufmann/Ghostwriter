@@ -111,6 +111,10 @@ class EpubGenerator:
         if newsletter_articles:
             all_articles.extend(newsletter_articles)
 
+        # Split into regular articles and media (podcast/youtube) articles
+        regular_articles = [a for a in all_articles if a.content_type == "article"]
+        media_articles = [a for a in all_articles if a.content_type != "article"]
+
         # Create EPUB book
         book = epub.EpubBook()
         book.set_identifier(str(uuid4()))
@@ -141,10 +145,9 @@ class EpubGenerator:
         # Create one chapter per feed with sub-chapters for each feed article.
         toc_entries: list = [cover]
         spine_entries: list = ["nav", cover]
-        for feed_index, (feed_title, feed_articles) in enumerate(
-            self._group_articles_by_feed(all_articles),
-            start=1,
-        ):
+        feed_index = 0
+        for feed_title, feed_articles in self._group_articles_by_feed(regular_articles):
+            feed_index += 1
             feed_slug = self._slugify(feed_title)
             feed_section = self._create_section_divider(
                 feed_title,
@@ -169,6 +172,44 @@ class EpubGenerator:
                 spine_entries.append(chapter)
 
             toc_entries.append((epub.Section(feed_title), [feed_section] + feed_chapters))
+
+        # Append media articles (podcasts, YouTube) in separate sections at the end
+        media_by_type: dict[str, list[ExtractedArticle]] = {}
+        for a in media_articles:
+            media_by_type.setdefault(a.content_type, []).append(a)
+
+        section_labels = {"podcast": "Podcasts", "youtube": "YouTube"}
+        for content_type, type_articles in media_by_type.items():
+            section_title = section_labels.get(content_type, content_type.capitalize())
+            for feed_title, feed_articles in self._group_articles_by_feed(type_articles):
+                feed_index += 1
+                group_title = f"{section_title}: {feed_title}"
+                feed_slug = self._slugify(group_title)
+                feed_section = self._create_section_divider(
+                    group_title,
+                    css,
+                    file_name=f"feed_{feed_index:03d}_{feed_slug}.xhtml",
+                )
+                book.add_item(feed_section)
+                spine_entries.append(feed_section)
+
+                feed_chapters_media: list[epub.EpubHtml] = []
+                for article_index, article in enumerate(feed_articles, start=1):
+                    chapter = self._create_chapter(
+                        article,
+                        css,
+                        file_name=(
+                            f"feed_{feed_index:03d}_article_"
+                            f"{article_index:03d}_{feed_slug}.xhtml"
+                        ),
+                    )
+                    book.add_item(chapter)
+                    feed_chapters_media.append(chapter)
+                    spine_entries.append(chapter)
+
+                toc_entries.append(
+                    (epub.Section(group_title), [feed_section] + feed_chapters_media)
+                )
 
         # Build table of contents
         book.toc = toc_entries

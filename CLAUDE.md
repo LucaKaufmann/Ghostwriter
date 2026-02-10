@@ -297,6 +297,7 @@ python scripts/migrate_add_article_content.py
 python scripts/migrate_nullable_feed_id.py
 python scripts/migrate_add_digest_indexes.py
 python scripts/migrate_add_integration_enabled.py
+python scripts/migrate_add_content_type.py
 ```
 
 On Docker, exec into the container:
@@ -305,6 +306,7 @@ docker exec -it ghostwriter python scripts/migrate_add_article_content.py
 docker exec -it ghostwriter python scripts/migrate_nullable_feed_id.py
 docker exec -it ghostwriter python scripts/migrate_add_digest_indexes.py
 docker exec -it ghostwriter python scripts/migrate_add_integration_enabled.py
+docker exec -it ghostwriter python scripts/migrate_add_content_type.py
 ```
 
 ### API Endpoints

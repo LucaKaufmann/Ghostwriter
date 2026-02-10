@@ -215,6 +215,7 @@ export interface DigestArticle {
 	feed_title: string;
 	sort_order: number;
 	ai_failed: boolean;
+	content_type?: string;
 }
 
 export interface DigestArticlesResponse {

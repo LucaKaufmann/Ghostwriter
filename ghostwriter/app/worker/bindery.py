@@ -363,6 +363,8 @@ class BinderyPipeline:
                         timeout_seconds=whisper_timeout_seconds,
                     )
 
+                    content_type = "article"
+
                     if media_result.is_media:
                         if media_result.error or not media_result.text:
                             logger.warning(
@@ -378,6 +380,10 @@ class BinderyPipeline:
                             )
                             return
                         content = media_result.text
+                        if media_result.source.startswith("youtube"):
+                            content_type = "youtube"
+                        elif media_result.source == "podcast_audio":
+                            content_type = "podcast"
                     else:
                         # Step 2: Standard article extraction via trafilatura
                         content = await self.content_processor.extract_content(
@@ -433,6 +439,7 @@ class BinderyPipeline:
                         ai_failed=ai_failed,
                         processing_ms=processing_ms,
                         feed_title=feed.title,
+                        content_type=content_type,
                     )
                     async with extracted_lock:
                         extracted_articles.append((feed, extracted))
@@ -705,6 +712,7 @@ class BinderyPipeline:
                     author=article.author,
                     feed_title=article.feed_title or "Wallabag",
                     sort_order=sort_order,
+                    content_type=article.content_type,
                 )
                 session.add(record)
             session.commit()
@@ -728,6 +736,7 @@ class BinderyPipeline:
                     author=article.author,
                     feed_title=article.feed_title or "Newsletter",
                     sort_order=sort_order,
+                    content_type=article.content_type,
                 )
                 session.add(record)
             session.commit()
@@ -752,6 +761,7 @@ class BinderyPipeline:
                     author=article.author,
                     feed_title=article.feed_title or feed.title,
                     sort_order=sort_order,
+                    content_type=article.content_type,
                 )
                 session.add(record)
             session.commit()

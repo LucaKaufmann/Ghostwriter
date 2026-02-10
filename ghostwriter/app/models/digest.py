@@ -119,6 +119,11 @@ class DigestArticleBase(SQLModel):
         description="Title of the source feed",
     )
     sort_order: int = Field(default=0, description="Order within the digest")
+    content_type: str = Field(
+        default="article",
+        sa_column=Column(String, nullable=False, server_default="article"),
+        description="Content type: article, podcast, youtube",
+    )
 
 
 class DigestArticle(DigestArticleBase, table=True):
