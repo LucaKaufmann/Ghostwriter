@@ -368,6 +368,19 @@ async def get_digest_article_source(
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Upstream fetch timed out")
     except httpx.HTTPError as e:
         logger.warning("Upstream fetch failed", extra={"url": article.url, "error": repr(e)})
+        # Fall back to stored content if available (e.g. media articles
+        # with content_type not yet set to podcast/youtube)
+        if article.content:
+            return DigestArticleSourceResponse(
+                digest_id=digest_id,
+                article_id=article_id,
+                url=article.url,
+                final_url=article.url,
+                content_type="text/html; ghostwriter-fallback",
+                fetched_at=datetime.utcnow(),
+                size_bytes=len(article.content.encode("utf-8")),
+                html=article.content,
+            )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Upstream fetch failed")
 
     return DigestArticleSourceResponse(

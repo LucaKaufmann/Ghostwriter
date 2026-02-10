@@ -290,26 +290,60 @@ docker run -d \
 
 ### Database Migrations
 
-All schema migrations use **Alembic** (`ghostwriter/alembic/`). The Docker entrypoint runs `alembic upgrade head` automatically on container start.
+All schema migrations use **Alembic** (`ghostwriter/alembic/`). This is the **only** migration system — do not create standalone migration scripts.
 
-Local development:
+**Running migrations:**
 ```bash
-cd ghostwriter
-alembic upgrade head
+cd ghostwriter && alembic upgrade head          # Local dev
+docker exec -it ghostwriter alembic upgrade head # Docker (manual)
+```
+The Docker entrypoint runs `alembic upgrade head` automatically on container start.
+
+**Creating a new migration — step by step:**
+
+1. **Update the SQLModel** in `app/models/` first (add the column/table to the model).
+2. **Create the Alembic migration:**
+   ```bash
+   cd ghostwriter
+   alembic revision --autogenerate -m "add foo_column to bar_table"
+   ```
+3. **Edit the generated migration** — autogenerate often needs manual fixes for SQLite. See the pattern below.
+4. **Test** with `alembic upgrade head` against both a fresh DB and an existing DB.
+
+**Required migration pattern for SQLite:**
+
+Every migration MUST be idempotent. SQLite does not support `ALTER COLUMN` or `DROP COLUMN`, so always check before acting:
+
+```python
+def upgrade() -> None:
+    if context.get_context().dialect.name != "sqlite":
+        return  # Only SQLite is used in this project
+
+    # Check existing columns before adding
+    conn = op.get_bind()
+    result = conn.execute(sa.text("PRAGMA table_info(my_table)"))
+    existing = {row[1] for row in result}
+
+    if "new_column" not in existing:
+        op.execute(
+            "ALTER TABLE my_table ADD COLUMN new_column TEXT NOT NULL DEFAULT ''"
+        )
 ```
 
-On Docker (manual):
-```bash
-docker exec -it ghostwriter alembic upgrade head
+For making columns nullable, use `op.batch_alter_table()` (handles the SQLite table-rebuild pattern):
+```python
+with op.batch_alter_table("my_table") as batch_op:
+    batch_op.alter_column("col", existing_type=sa.String(32), nullable=True)
 ```
 
-Creating a new migration:
-```bash
-cd ghostwriter
-alembic revision --autogenerate -m "description of change"
-```
+**Revision numbering:** Use sequential integers as revision IDs (`007`, `008`, etc.). Set `down_revision` to the previous number.
 
-Migrations must be idempotent for SQLite (check before acting with `PRAGMA table_info`).
+**Important:** The `downgrade()` function should be a no-op (`pass`) for SQLite — we never drop columns to avoid destructive migrations in production.
+
+**Architecture notes:**
+- `alembic/env.py` handles fresh databases automatically: detects missing `alembic_version` table, runs `create_all()` from SQLModel metadata, and stamps as head. No migration chain runs on fresh DBs.
+- `init_db()` in `database.py` only calls `create_all()` — all schema evolution is in Alembic.
+- All models must be imported in `alembic/env.py` for autogenerate to work.
 
 ### API Endpoints
 

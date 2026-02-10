@@ -87,6 +87,84 @@
 - Keep commits scoped and descriptive; include a short summary of behavior changes.
 - PRs should include: summary, testing performed, and screenshots for UI changes (Android, iOS, or Ghostwriter web).
 
+## Ghostwriter Database Migrations
+
+**Alembic is the only migration system.** Do not create standalone scripts in `scripts/`.
+
+### When You Change a Database Schema
+
+If you add, remove, or modify a column/table/index in any SQLModel under `ghostwriter/app/models/`, you MUST also create an Alembic migration. Two things to update:
+
+1. **The model** (`app/models/*.py`) — source of truth for the schema.
+2. **An Alembic migration** (`alembic/versions/NNN_description.py`) — applies the change to existing databases.
+
+Forgetting the migration means existing deployments won't get the new column and will break at runtime. `create_all()` only creates missing **tables**, it does NOT add columns to existing tables.
+
+### How to Write a Migration
+
+Create `ghostwriter/alembic/versions/NNN_description.py` where `NNN` is the next sequential number. Template:
+
+```python
+"""Short description.
+
+Revision ID: NNN
+Revises: (N-1)
+Create Date: YYYY-MM-DD
+"""
+from typing import Sequence, Union
+from alembic import context, op
+import sqlalchemy as sa
+
+revision: str = "NNN"
+down_revision: Union[str, None] = "(N-1)"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+def upgrade() -> None:
+    if context.get_context().dialect.name != "sqlite":
+        return
+
+    conn = op.get_bind()
+    result = conn.execute(sa.text("PRAGMA table_info(table_name)"))
+    existing = {row[1] for row in result}
+
+    if "new_column" not in existing:
+        op.execute(
+            "ALTER TABLE table_name ADD COLUMN new_column TYPE DEFAULT value"
+        )
+
+def downgrade() -> None:
+    pass  # No-op for SQLite — never drop columns in production
+```
+
+### Rules
+
+- **Idempotent**: Always check if column/index exists before creating. Use `PRAGMA table_info()` for columns, query `sqlite_master` for indexes.
+- **No DROP COLUMN**: `downgrade()` should be `pass`.
+- **Making columns nullable**: Use `op.batch_alter_table()`:
+  ```python
+  with op.batch_alter_table("table") as batch_op:
+      batch_op.alter_column("col", existing_type=sa.String(32), nullable=True)
+  ```
+- **Sequential revision IDs**: `"007"`, `"008"`, etc. Check `ghostwriter/alembic/versions/` for current head.
+- **New model files**: Add import to `ghostwriter/alembic/env.py`.
+- **Test both paths**: fresh DB (no tables) and existing DB at previous revision.
+
+### What NOT to Do
+
+- Do NOT create standalone migration scripts in `scripts/`.
+- Do NOT add hardcoded `ALTER TABLE` to `init_db()` in `database.py`.
+- Do NOT use `--autogenerate` without reviewing the output — it produces incorrect migrations for SQLite.
+- Do NOT skip the migration when adding a model column.
+
+### Deployment
+
+Migrations run automatically on container start (`entrypoint.sh` → `alembic upgrade head`).
+
+- Deploy to Pi: `./ghostwriter/deploy.sh pi`
+- Deploy to Synology: `./ghostwriter/deploy.sh synology`
+- Deploy to Mac (dev): `./ghostwriter/deploy.sh mac`
+
 ## Security & Configuration Tips
 - Do not commit secrets. Use `ghostwriter/.env` from `.env.example` and keep credentials local.
 - Android uses `local.properties` for SDK paths; iOS secrets are stored in Keychain at runtime.
