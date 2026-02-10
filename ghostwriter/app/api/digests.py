@@ -83,6 +83,7 @@ class DigestArticleRead(BaseModel):
     feed_title: str
     sort_order: int
     ai_failed: bool
+    content_type: str = "article"
 
 
 class DigestArticlesResponse(BaseModel):
@@ -312,6 +313,7 @@ async def get_digest_articles(
                 feed_title=article.feed_title,
                 sort_order=article.sort_order,
                 ai_failed=article.ai_failed,
+                content_type=article.content_type,
             )
             for article in articles
         ],
@@ -338,6 +340,20 @@ async def get_digest_article_source(
     article = session.exec(statement).first()
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+    # For media content (podcasts, YouTube), return the stored digest content
+    # directly instead of fetching upstream HTML which will fail for these URLs.
+    if article.content_type in ("podcast", "youtube"):
+        return DigestArticleSourceResponse(
+            digest_id=digest_id,
+            article_id=article_id,
+            url=article.url,
+            final_url=article.url,
+            content_type=f"text/html; ghostwriter-{article.content_type}",
+            fetched_at=datetime.utcnow(),
+            size_bytes=len(article.content.encode("utf-8")),
+            html=article.content,
+        )
 
     try:
         doc = await fetch_html_document(article.url, settings=settings)

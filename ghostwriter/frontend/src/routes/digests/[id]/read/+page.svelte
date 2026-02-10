@@ -67,10 +67,14 @@
 		selectedArticleId = sortedArticles[selectedIndex + 1].id;
 	}
 
+	const isMediaContent = $derived(
+		selectedArticle?.content_type === 'podcast' || selectedArticle?.content_type === 'youtube'
+	);
+
 	const sourceQuery = createQuery(() => ({
 		queryKey: ['digest-article-source', digestId, selectedArticleId],
 		queryFn: () => api.getDigestArticleSource(digestId, selectedArticleId!),
-		enabled: browser && digestId.length > 0 && !!selectedArticleId,
+		enabled: browser && digestId.length > 0 && !!selectedArticleId && !isMediaContent,
 		retry: 0
 	}));
 
@@ -402,7 +406,27 @@
 
 				<Card.Root>
 					<Card.Content class="p-6">
-						{#if sourceQuery.isPending}
+						{#if isMediaContent}
+							{#if fallbackHtml}
+								<div>
+									<p class="mb-2 text-xs font-semibold tracking-wide uppercase text-muted-foreground">
+										{selectedArticle?.content_type === 'podcast' ? 'Transcript' : 'Transcript'}
+									</p>
+									<article class="prose prose-slate max-w-none">
+										{@html fallbackHtml}
+									</article>
+								</div>
+							{:else}
+								<div class="space-y-3">
+									<div class="flex items-center gap-2 text-sm text-muted-foreground">
+										<Loader2 class="h-4 w-4 animate-spin" />
+										Loading transcript...
+									</div>
+									<Skeleton class="h-5 w-3/4" />
+									<Skeleton class="h-40 w-full" />
+								</div>
+							{/if}
+						{:else if sourceQuery.isPending}
 							<div class="space-y-3">
 								<div class="flex items-center gap-2 text-sm text-muted-foreground">
 									<Loader2 class="h-4 w-4 animate-spin" />

@@ -46,6 +46,7 @@ class ExtractedArticle:
     ai_failed: bool = False
     processing_ms: int = 0
     feed_title: str = ""
+    content_type: str = "article"  # "article" | "podcast" | "youtube"
 
 
 class ContentProcessor:

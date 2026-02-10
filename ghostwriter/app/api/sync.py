@@ -40,6 +40,7 @@ class SyncDigestArticle(BaseModel):
     feed_title: str
     sort_order: int
     ai_failed: bool
+    content_type: str = "article"
 
 
 class SyncDigest(BaseModel):
@@ -174,6 +175,7 @@ async def combined_sync(
                 "feed_title": a.feed_title,
                 "sort_order": a.sort_order,
                 "ai_failed": a.ai_failed,
+                "content_type": a.content_type,
             })
 
         for digest in new_completed:
