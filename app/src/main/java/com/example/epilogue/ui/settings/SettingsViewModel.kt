@@ -63,7 +63,8 @@ class SettingsViewModel @Inject constructor(
                 // Ghostwriter settings
                 ghostwriterEnabled = settingsRepository.isGhostwriterEnabled(),
                 ghostwriterUrl = settingsRepository.getGhostwriterUrl() ?: "",
-                ghostwriterApiKey = settingsRepository.getGhostwriterApiKey() ?: ""
+                ghostwriterApiKey = settingsRepository.getGhostwriterApiKey() ?: "",
+                ghostwriterDownloadEpubsOnSync = settingsRepository.shouldDownloadGhostwriterEpubsOnSync()
             )
         }
     }
@@ -460,6 +461,13 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(ghostwriterApiKey = apiKey) }
     }
 
+    fun updateGhostwriterDownloadEpubsOnSync(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setGhostwriterDownloadEpubsOnSync(enabled)
+            _uiState.update { it.copy(ghostwriterDownloadEpubsOnSync = enabled) }
+        }
+    }
+
     fun saveGhostwriterApiKey() {
         viewModelScope.launch {
             val apiKey = _uiState.value.ghostwriterApiKey.trim()
@@ -691,6 +699,7 @@ data class SettingsUiState(
     val customExportDisplayPath: String? = null,
     // Ghostwriter settings
     val ghostwriterEnabled: Boolean = false,
+    val ghostwriterDownloadEpubsOnSync: Boolean = true,
     val ghostwriterUrl: String = "",
     val ghostwriterUrlSaved: Boolean = false,
     val ghostwriterApiKey: String = "",

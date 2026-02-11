@@ -62,7 +62,12 @@ class DigestDetailViewModel @Inject constructor(
         val digest = _uiState.value.digest ?: return
         val file = File(digest.epubFilePath)
         if (!file.exists()) {
-            _uiState.update { it.copy(error = "EPUB file not found") }
+            val message = if (digest.isFromGhostwriter) {
+                "EPUB not downloaded yet. Download it from Digest History first."
+            } else {
+                "EPUB file not found"
+            }
+            _uiState.update { it.copy(error = message) }
             return
         }
 
