@@ -49,6 +49,10 @@ class ConfigResponse(BaseModel):
     whisper_provider: str
     whisper_model: str
     whisper_timeout_minutes: int
+    # Media processing
+    media_processing_interval_hours: int
+    include_podcasts_in_digest: bool
+    include_youtube_in_digest: bool
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -74,6 +78,15 @@ class ConfigUpdateRequest(BaseModel):
     )
     whisper_timeout_minutes: int | None = Field(
         default=None, ge=1, le=120, description="Transcription timeout in minutes"
+    )
+    media_processing_interval_hours: int | None = Field(
+        default=None, ge=1, le=24, description="Hours between media processing runs"
+    )
+    include_podcasts_in_digest: bool | None = Field(
+        default=None, description="Include completed podcast transcripts in digests"
+    )
+    include_youtube_in_digest: bool | None = Field(
+        default=None, description="Include completed YouTube transcripts in digests"
     )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
@@ -147,6 +160,9 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         whisper_provider=config.whisper_provider,
         whisper_model=config.whisper_model,
         whisper_timeout_minutes=config.whisper_timeout_minutes,
+        media_processing_interval_hours=config.media_processing_interval_hours,
+        include_podcasts_in_digest=config.include_podcasts_in_digest,
+        include_youtube_in_digest=config.include_youtube_in_digest,
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -236,6 +252,15 @@ async def update_config(
     if request.whisper_timeout_minutes is not None:
         config.whisper_timeout_minutes = request.whisper_timeout_minutes
 
+    if request.include_podcasts_in_digest is not None:
+        config.include_podcasts_in_digest = request.include_podcasts_in_digest
+
+    if request.include_youtube_in_digest is not None:
+        config.include_youtube_in_digest = request.include_youtube_in_digest
+
+    if request.media_processing_interval_hours is not None:
+        config.media_processing_interval_hours = request.media_processing_interval_hours
+
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour
         schedule_updates.setdefault("morning", {})["hour"] = request.morning_hour
@@ -279,6 +304,12 @@ async def update_config(
             timezone=updates.get("timezone"),
         )
         logger.info(f"Updated schedule {period} from config sync: {updates}")
+
+    # Update media processing interval if changed
+    if request.media_processing_interval_hours is not None:
+        scheduler_module.update_media_processing_interval(
+            request.media_processing_interval_hours
+        )
 
     logger.info(f"Updated client configuration: {request.model_dump(exclude_none=True)}")
     return _config_to_response(config, session)

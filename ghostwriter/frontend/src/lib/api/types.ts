@@ -102,6 +102,9 @@ export interface ClientConfigResponse {
 	whisper_provider: string;
 	whisper_model: string;
 	whisper_timeout_minutes: number;
+	media_processing_interval_hours: number;
+	include_podcasts_in_digest: boolean;
+	include_youtube_in_digest: boolean;
 	updated_at: string;
 	wallabag?: IntegrationStatus | null;
 	newsletters?: IntegrationStatus | null;
@@ -120,6 +123,9 @@ export interface ClientConfigUpdate {
 	whisper_provider?: string;
 	whisper_model?: string;
 	whisper_timeout_minutes?: number;
+	media_processing_interval_hours?: number;
+	include_podcasts_in_digest?: boolean;
+	include_youtube_in_digest?: boolean;
 	client_updated_at?: string;
 }
 
@@ -347,6 +353,102 @@ export interface PreviewResponse {
 	detail?: string;
 	count: number;
 	articles: PreviewArticle[];
+}
+
+// ============ Media Feeds & Items ============
+
+export type MediaFeedType = 'podcast' | 'youtube';
+
+export interface MediaFeed {
+	id: string;
+	feed_type: MediaFeedType;
+	url: string;
+	resolved_feed_url: string | null;
+	title: string;
+	is_active: boolean;
+	mode: FeedMode;
+	max_items: number;
+	created_at: string;
+	updated_at: string;
+	deleted_at: string | null;
+}
+
+export interface MediaFeedCreate {
+	feed_type: MediaFeedType;
+	url: string;
+	resolved_feed_url?: string | null;
+	title: string;
+	is_active?: boolean;
+	mode?: FeedMode;
+	max_items?: number;
+}
+
+export interface MediaFeedUpdate {
+	title?: string;
+	is_active?: boolean;
+	mode?: FeedMode;
+	max_items?: number;
+}
+
+export type MediaItemStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface MediaItem {
+	id: string;
+	media_feed_id: string;
+	guid: string;
+	url: string;
+	content_url: string | null;
+	title: string;
+	author: string | null;
+	content: string;
+	content_type: string;
+	mode: string;
+	word_count: number;
+	is_summary: boolean;
+	ai_failed: boolean;
+	processing_ms: number;
+	status: MediaItemStatus;
+	error_message: string | null;
+	consumed_at: string | null;
+	consumed_digest_id: string | null;
+	created_at: string;
+	completed_at: string | null;
+}
+
+export interface MediaItemSummary {
+	id: string;
+	media_feed_id: string;
+	title: string;
+	author: string | null;
+	content_type: string;
+	mode: string;
+	word_count: number;
+	is_summary: boolean;
+	ai_failed: boolean;
+	status: MediaItemStatus;
+	error_message: string | null;
+	consumed_at: string | null;
+	created_at: string;
+	completed_at: string | null;
+}
+
+export interface MediaProcessingStatus {
+	is_running: boolean;
+	pending_count: number;
+	processing_count: number;
+	completed_count: number;
+	failed_count: number;
+}
+
+export interface YouTubeResolveResponse {
+	rss_feed_url: string;
+	channel_id: string;
+	channel_title: string | null;
+}
+
+export interface MediaTriggerResponse {
+	status: string;
+	detail: string | null;
 }
 
 // ============ API Error ============

@@ -90,6 +90,7 @@ class EpubGenerator:
         date: datetime | None = None,
         saved_articles: list[ExtractedArticle] | None = None,
         newsletter_articles: list[ExtractedArticle] | None = None,
+        media_articles: list[ExtractedArticle] | None = None,
     ) -> str:
         """
         Generate an EPUB file from extracted articles.
@@ -98,6 +99,9 @@ class EpubGenerator:
             articles: List of ExtractedArticle objects.
             period: Time period (morning, noon, evening, manual).
             date: Date for the digest (defaults to now).
+            saved_articles: Wallabag articles.
+            newsletter_articles: Newsletter articles.
+            media_articles: Completed media items (podcast/YouTube transcripts).
 
         Returns:
             Path to the generated EPUB file.
@@ -110,6 +114,8 @@ class EpubGenerator:
             all_articles.extend(saved_articles)
         if newsletter_articles:
             all_articles.extend(newsletter_articles)
+        if media_articles:
+            all_articles.extend(media_articles)
 
         # Split into regular articles and media (podcast/youtube) articles
         regular_articles = [a for a in all_articles if a.content_type == "article"]
