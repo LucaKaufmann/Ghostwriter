@@ -18,6 +18,7 @@ public final class DigestSyncService {
     private let settingsRepository: SettingsRepositoryProtocol
     private let digestRepository: DigestRepositoryProtocol
     private let logger = Logger(subsystem: "com.epilogue", category: "DigestSync")
+    private static let remoteEpubRetentionDays: TimeInterval = 30
 
     /// Directory where downloaded EPUBs are stored
     private let digestsDirectory: URL
@@ -129,6 +130,7 @@ public final class DigestSyncService {
 
         // Update sync timestamp
         try await settingsRepository.setLastDigestSyncTime(Date())
+        await cleanupStaleRemoteEpubFiles()
 
         logger.info("Digest sync completed: processed \(processedCount) new digests")
     }
@@ -188,6 +190,7 @@ public final class DigestSyncService {
         }
 
         try await settingsRepository.setLastDigestSyncTime(Date())
+        await cleanupStaleRemoteEpubFiles()
         logger.info("Combined sync digest processing completed: processed \(processedCount) digests")
     }
 
@@ -371,6 +374,41 @@ public final class DigestSyncService {
         }
 
         throw GhostwriterError.notFound("digest \(remoteId)")
+    }
+
+    /// Remove stale downloaded EPUB files for remote digests while keeping digest records.
+    private func cleanupStaleRemoteEpubFiles() async {
+        do {
+            let digests = try await digestRepository.getAllDigests()
+            let cutoff = Date().addingTimeInterval(-(Self.remoteEpubRetentionDays * 24 * 60 * 60))
+            var deletedCount = 0
+
+            for digest in digests where digest.remoteId != nil {
+                guard !digest.epubFilePath.isEmpty else { continue }
+
+                let fileURL = URL(fileURLWithPath: digest.epubFilePath)
+                guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+
+                let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+                let modifiedAt = attributes?[.modificationDate] as? Date
+                let referenceDate = modifiedAt ?? digest.generatedAt
+
+                guard referenceDate < cutoff else { continue }
+
+                do {
+                    try FileManager.default.removeItem(at: fileURL)
+                    deletedCount += 1
+                } catch {
+                    logger.warning("Failed to delete stale EPUB at \(fileURL.path): \(error.localizedDescription)")
+                }
+            }
+
+            if deletedCount > 0 {
+                logger.info("Cleaned up \(deletedCount) stale remote EPUB files")
+            }
+        } catch {
+            logger.warning("Failed remote EPUB cleanup: \(error.localizedDescription)")
+        }
     }
 
     private func fetchArticles(client: GhostwriterClient, digestId: String) async throws -> [DigestArticleData] {
