@@ -40,6 +40,26 @@ class MediaProcessor:
         self.transcription_service = TranscriptionService(self.settings)
 
     @staticmethod
+    def quick_check(url: str, content_url: str | None = None) -> bool:
+        """
+        Quickly determine if a URL is a media source (YouTube or podcast audio)
+        without performing any processing.
+
+        Args:
+            url: The article/page URL.
+            content_url: Optional enclosure URL (e.g., podcast audio).
+
+        Returns:
+            True if the URL is a media source that should be handled by
+            the media pipeline instead of inline extraction.
+        """
+        if YouTubeService.is_youtube_url(url):
+            return True
+        if MediaProcessor._is_audio_url(content_url):
+            return True
+        return False
+
+    @staticmethod
     def _is_audio_url(url: str | None) -> bool:
         """Check if a URL points to an audio file."""
         if not url:

@@ -16,6 +16,7 @@ from app.core.logging import digest_logger
 from app.models.digest import Digest, DigestArticle
 from app.models.client_config import ClientConfig
 from app.models.feed import Feed
+from app.models.media_item import MediaItem
 from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
 from app.services.epub_generator import EpubGenerator
@@ -354,48 +355,27 @@ class BinderyPipeline:
                     is_summary = False
                     ai_failed = False
 
-                    # Step 1: Try media processing (YouTube, podcast audio)
-                    media_result = await self.media_processor.process(
-                        parsed_article.url,
-                        content_url=parsed_article.content_url,
-                        whisper_provider=whisper_provider,
-                        whisper_model=whisper_model,
-                        timeout_seconds=whisper_timeout_seconds,
-                    )
+                    # Step 1: Skip media items — they're handled by the decoupled media pipeline
+                    if MediaProcessor.quick_check(parsed_article.url, parsed_article.content_url):
+                        logger.debug(
+                            f"Skipping media item (handled by media pipeline): {parsed_article.url}"
+                        )
+                        await self._mark_seen(feed.id, parsed_article)
+                        return
 
                     content_type = "article"
 
-                    if media_result.is_media:
-                        if media_result.error or not media_result.text:
-                            logger.warning(
-                                "Media processing failed, skipping",
-                                extra={
-                                    "url": parsed_article.url,
-                                    "error": media_result.error,
-                                },
-                            )
-                            digest_logger.article_extraction_failed(
-                                parsed_article.url,
-                                media_result.error or "Media processing returned empty",
-                            )
-                            return
-                        content = media_result.text
-                        if media_result.source.startswith("youtube"):
-                            content_type = "youtube"
-                        elif media_result.source == "podcast_audio":
-                            content_type = "podcast"
-                    else:
-                        # Step 2: Standard article extraction via trafilatura
-                        content = await self.content_processor.extract_content(
-                            parsed_article.url
+                    # Step 2: Standard article extraction via trafilatura
+                    content = await self.content_processor.extract_content(
+                        parsed_article.url
+                    )
+                    if not content:
+                        logger.warning(f"Could not extract: {parsed_article.url}")
+                        digest_logger.article_extraction_failed(
+                            parsed_article.url,
+                            "Content extraction returned empty",
                         )
-                        if not content:
-                            logger.warning(f"Could not extract: {parsed_article.url}")
-                            digest_logger.article_extraction_failed(
-                                parsed_article.url,
-                                "Content extraction returned empty",
-                            )
-                            return
+                        return
 
                     original_word_count = ContentProcessor.count_words(content)
                     word_count = original_word_count
@@ -408,7 +388,7 @@ class BinderyPipeline:
                             url=parsed_article.url,
                             author=parsed_article.author,
                             source=feed.title,
-                            content_type="transcript" if media_result.is_media else "article",
+                            content_type="article",
                         )
                         if not ai_failed:
                             content = summary_content
@@ -540,7 +520,52 @@ class BinderyPipeline:
                 await asyncio.gather(*[_summarize_nl(a) for a in newsletter_articles])
                 newsletter_articles = enriched_newsletters
 
-            if not extracted_articles and not wallabag_articles and not newsletter_articles:
+            # Pull completed media items for inclusion in digest
+            media_articles: list[ExtractedArticle] = []
+            media_item_ids: list[UUID] = []
+            with Session(engine) as session:
+                include_podcasts = True
+                include_youtube = True
+                cc = session.exec(select(ClientConfig)).first()
+                if cc:
+                    include_podcasts = cc.include_podcasts_in_digest
+                    include_youtube = cc.include_youtube_in_digest
+
+                if include_podcasts or include_youtube:
+                    types_to_include = []
+                    if include_podcasts:
+                        types_to_include.append("podcast")
+                    if include_youtube:
+                        types_to_include.append("youtube")
+
+                    completed_items = session.exec(
+                        select(MediaItem)
+                        .where(MediaItem.status == "completed")
+                        .where(MediaItem.consumed_at == None)
+                        .where(MediaItem.content_type.in_(types_to_include))
+                        .order_by(MediaItem.created_at)
+                    ).all()
+
+                    for item in completed_items:
+                        media_articles.append(ExtractedArticle(
+                            guid=item.guid,
+                            url=item.url,
+                            title=item.title,
+                            content=item.content,
+                            author=item.author,
+                            word_count=item.word_count,
+                            is_summary=item.is_summary,
+                            ai_failed=item.ai_failed,
+                            processing_ms=item.processing_ms,
+                            feed_title=item.content_type.capitalize(),
+                            content_type=item.content_type,
+                        ))
+                        media_item_ids.append(item.id)
+
+                    if media_articles:
+                        logger.info(f"Including {len(media_articles)} completed media items in digest")
+
+            if not extracted_articles and not wallabag_articles and not newsletter_articles and not media_articles:
                 logger.warning("No articles extracted successfully")
                 digest_logger.pipeline_no_articles(str(self.digest_id), "All article extractions failed")
                 await self._complete(0)
@@ -548,7 +573,10 @@ class BinderyPipeline:
 
             # Stage 4: Compile EPUB
             await self._update_stage("compiling")
-            total_count = len(extracted_articles) + len(wallabag_articles) + len(newsletter_articles)
+            total_count = (
+                len(extracted_articles) + len(wallabag_articles)
+                + len(newsletter_articles) + len(media_articles)
+            )
             digest_logger.epub_generation_started(str(self.digest_id), total_count)
 
             # Get just the articles for EPUB generation
@@ -559,6 +587,7 @@ class BinderyPipeline:
                 period=period,
                 saved_articles=wallabag_articles if wallabag_articles else None,
                 newsletter_articles=newsletter_articles if newsletter_articles else None,
+                media_articles=media_articles if media_articles else None,
             )
 
             # Log EPUB file size
@@ -581,6 +610,19 @@ class BinderyPipeline:
                     newsletter_articles, len(extracted_articles) + len(wallabag_articles)
                 )
 
+            # Mark consumed media items
+            if media_item_ids:
+                with Session(engine) as session:
+                    now = datetime.utcnow()
+                    for mid in media_item_ids:
+                        item = session.get(MediaItem, mid)
+                        if item:
+                            item.consumed_at = now
+                            item.consumed_digest_id = self.digest_id
+                            session.add(item)
+                    session.commit()
+                logger.info(f"Marked {len(media_item_ids)} media items as consumed")
+
             # Mark newsletter emails as read
             if newsletter_service.is_configured and newsletter_message_ids:
                 try:
@@ -602,7 +644,8 @@ class BinderyPipeline:
                 await asyncio.gather(*[_mark_wb(eid) for eid in wallabag_entry_ids])
 
             await self._complete(
-                len(extracted_articles) + len(wallabag_articles) + len(newsletter_articles),
+                len(extracted_articles) + len(wallabag_articles)
+                + len(newsletter_articles) + len(media_articles),
                 epub_path,
             )
 
