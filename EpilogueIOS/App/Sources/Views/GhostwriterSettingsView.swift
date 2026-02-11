@@ -134,6 +134,12 @@ struct GhostwriterSettingsView: View {
                 }
                 .disabled(!viewModel.isConfigured || viewModel.isTriggering)
 
+                Toggle("Download EPUBs on Sync", isOn: $viewModel.downloadEpubsOnSync)
+                    .disabled(!viewModel.isConfigured)
+                    .onChange(of: viewModel.downloadEpubsOnSync) { _, newValue in
+                        Task { await viewModel.setDownloadEpubsOnSync(newValue) }
+                    }
+
                 if let lastSync = coordinator.lastSyncTime ?? viewModel.lastSyncTime {
                     LabeledContent("Last Sync", value: lastSync.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
@@ -145,6 +151,9 @@ struct GhostwriterSettingsView: View {
                         .font(.caption)
                         .foregroundColor(.red)
                 }
+                Text("When off, digest metadata syncs first and EPUB files can be downloaded manually from History.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             // MARK: - Server Schedule
@@ -269,6 +278,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var isEnabled = false
     @Published var serverURL = ""
     @Published var hasAPIKey = false
+    @Published var downloadEpubsOnSync = true
     @Published var newAPIKey = ""
     @Published var connectionStatus: ConnectionStatus?
     @Published var connectionError: String?
@@ -297,6 +307,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
             isEnabled = try await settingsRepository.isGhostwriterEnabled()
             serverURL = try await settingsRepository.getGhostwriterURL() ?? ""
             hasAPIKey = (try await settingsRepository.getGhostwriterAPIKey()) != nil
+            downloadEpubsOnSync = try await settingsRepository.getGhostwriterDownloadEpubsOnSync()
             lastSyncTime = try await settingsRepository.getLastFeedSyncTime()
             serverSchedule = try await settingsRepository.getGhostwriterSchedule()
 
@@ -341,6 +352,14 @@ class GhostwriterSettingsViewModel: ObservableObject {
             newAPIKey = ""
         } catch {
             // Ignore save errors
+        }
+    }
+
+    func setDownloadEpubsOnSync(_ enabled: Bool) async {
+        do {
+            try await settingsRepository.setGhostwriterDownloadEpubsOnSync(enabled)
+        } catch {
+            downloadEpubsOnSync = !enabled
         }
     }
 
@@ -478,6 +497,8 @@ private final class MockSettingsRepository: SettingsRepositoryProtocol, @uncheck
     func setGhostwriterURL(_ url: String?) async throws {}
     func getGhostwriterAPIKey() async throws -> String? { "test-key" }
     func setGhostwriterAPIKey(_ key: String?) async throws {}
+    func getGhostwriterDownloadEpubsOnSync() async throws -> Bool { true }
+    func setGhostwriterDownloadEpubsOnSync(_ enabled: Bool) async throws {}
     func getLastFeedSyncTime() async throws -> Date? { Date() }
     func setLastFeedSyncTime(_ date: Date?) async throws {}
     func getLastDigestSyncTime() async throws -> Date? { nil }

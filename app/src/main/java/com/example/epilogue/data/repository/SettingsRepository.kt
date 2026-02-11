@@ -40,6 +40,7 @@ class SettingsRepository @Inject constructor(
         // Ghostwriter settings keys
         private const val KEY_GHOSTWRITER_ENABLED = "ghostwriter_enabled"
         private const val KEY_GHOSTWRITER_URL = "ghostwriter_url"
+        private const val KEY_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC = "ghostwriter_download_epubs_on_sync"
 
         // Encrypted settings keys
         private const val KEY_OPENAI_API_KEY = "openai_api_key"
@@ -64,6 +65,7 @@ class SettingsRepository @Inject constructor(
         private const val DEFAULT_EINK_MODE = false
         private const val DEFAULT_CUSTOM_EXPORT_ENABLED = false
         private const val DEFAULT_GHOSTWRITER_ENABLED = false
+        private const val DEFAULT_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC = true
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -335,6 +337,26 @@ class SettingsRepository @Inject constructor(
      */
     fun getGhostwriterUrl(): String? {
         return prefs.getString(KEY_GHOSTWRITER_URL, null)
+    }
+
+    /**
+     * Sets whether synced Ghostwriter digests should automatically download EPUB files.
+     */
+    suspend fun setGhostwriterDownloadEpubsOnSync(enabled: Boolean) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putBoolean(KEY_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC, enabled)
+            .apply()
+    }
+
+    /**
+     * Gets whether synced Ghostwriter digests should automatically download EPUB files.
+     * Defaults to true to preserve existing behavior.
+     */
+    fun shouldDownloadGhostwriterEpubsOnSync(): Boolean {
+        return prefs.getBoolean(
+            KEY_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC,
+            DEFAULT_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC
+        )
     }
 
     /**

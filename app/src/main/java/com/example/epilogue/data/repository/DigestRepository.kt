@@ -192,6 +192,13 @@ class DigestRepository @Inject constructor(
         digestDao.getAllRemoteIds()
 
     /**
+     * Update the local EPUB path for an existing digest.
+     */
+    suspend fun updateDigestEpubPath(digestId: Long, epubFilePath: String) {
+        digestDao.updateEpubFilePath(digestId, epubFilePath)
+    }
+
+    /**
      * Save a digest downloaded from Ghostwriter backend.
      * Now supports syncing individual article records for in-app display.
      *
