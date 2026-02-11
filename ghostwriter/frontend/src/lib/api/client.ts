@@ -33,7 +33,15 @@ import type {
 	APITokenResponse,
 	APITokenCreateRequest,
 	APITokenCreateResponse,
-	LogFileInfo
+	LogFileInfo,
+	MediaFeed,
+	MediaFeedCreate,
+	MediaFeedUpdate,
+	MediaItem,
+	MediaItemSummary,
+	MediaProcessingStatus,
+	YouTubeResolveResponse,
+	MediaTriggerResponse
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -443,6 +451,93 @@ class ApiClient {
 
 	downloadLog(filename: string): Promise<{ blob: Blob; filename: string }> {
 		return this.download(`/logs/${filename}`, filename);
+	}
+
+	// ============ Media: Podcasts ============
+
+	async getPodcastFeeds(): Promise<MediaFeed[]> {
+		return this.request<MediaFeed[]>('/media/podcasts');
+	}
+
+	async createPodcastFeed(data: MediaFeedCreate): Promise<MediaFeed> {
+		return this.request<MediaFeed>('/media/podcasts', {
+			method: 'POST',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async updatePodcastFeed(id: string, data: MediaFeedUpdate): Promise<MediaFeed> {
+		return this.request<MediaFeed>(`/media/podcasts/${id}`, {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async deletePodcastFeed(id: string): Promise<{ status: string }> {
+		return this.request(`/media/podcasts/${id}`, { method: 'DELETE' });
+	}
+
+	async getPodcastFeedItems(feedId: string): Promise<MediaItemSummary[]> {
+		return this.request<MediaItemSummary[]>(`/media/podcasts/${feedId}/items`);
+	}
+
+	async getAllPodcastItems(): Promise<MediaItemSummary[]> {
+		return this.request<MediaItemSummary[]>('/media/podcasts/items/all');
+	}
+
+	// ============ Media: YouTube ============
+
+	async getYouTubeFeeds(): Promise<MediaFeed[]> {
+		return this.request<MediaFeed[]>('/media/youtube');
+	}
+
+	async createYouTubeFeed(data: MediaFeedCreate): Promise<MediaFeed> {
+		return this.request<MediaFeed>('/media/youtube', {
+			method: 'POST',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async updateYouTubeFeed(id: string, data: MediaFeedUpdate): Promise<MediaFeed> {
+		return this.request<MediaFeed>(`/media/youtube/${id}`, {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async deleteYouTubeFeed(id: string): Promise<{ status: string }> {
+		return this.request(`/media/youtube/${id}`, { method: 'DELETE' });
+	}
+
+	async getYouTubeFeedItems(feedId: string): Promise<MediaItemSummary[]> {
+		return this.request<MediaItemSummary[]>(`/media/youtube/${feedId}/items`);
+	}
+
+	async getAllYouTubeItems(): Promise<MediaItemSummary[]> {
+		return this.request<MediaItemSummary[]>('/media/youtube/items/all');
+	}
+
+	async resolveYouTubeChannel(url: string): Promise<YouTubeResolveResponse> {
+		return this.request<YouTubeResolveResponse>('/media/youtube/resolve', {
+			method: 'POST',
+			body: JSON.stringify({ url })
+		});
+	}
+
+	// ============ Media: Shared ============
+
+	async getMediaItem(itemId: string): Promise<MediaItem> {
+		return this.request<MediaItem>(`/media/items/${itemId}`);
+	}
+
+	async triggerMediaProcessing(): Promise<MediaTriggerResponse> {
+		return this.request<MediaTriggerResponse>('/media/trigger', {
+			method: 'POST'
+		});
+	}
+
+	async getMediaProcessingStatus(): Promise<MediaProcessingStatus> {
+		return this.request<MediaProcessingStatus>('/media/status');
 	}
 }
 

@@ -264,6 +264,12 @@
 	let whisperTimeout = $state(30);
 	let whisperProviderInitialized = $state(false);
 
+	// Media processing state
+	let mediaInterval = $state(4);
+	let includePodcasts = $state(true);
+	let includeYoutube = $state(true);
+	let mediaConfigInitialized = $state(false);
+
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
 		if (data && !wbFormInitialized) {
@@ -289,6 +295,12 @@
 			whisperTimeout = data.whisper_timeout_minutes ?? 30;
 			whisperProviderInitialized = true;
 		}
+		if (data && !mediaConfigInitialized) {
+			mediaInterval = data.media_processing_interval_hours ?? 4;
+			includePodcasts = data.include_podcasts_in_digest ?? true;
+			includeYoutube = data.include_youtube_in_digest ?? true;
+			mediaConfigInitialized = true;
+		}
 	});
 
 	function saveWhisperProvider() {
@@ -299,6 +311,30 @@
 		const clamped = Math.max(1, Math.min(120, whisperTimeout));
 		whisperTimeout = clamped;
 		updateClientConfigMutation.mutate({ whisper_timeout_minutes: clamped });
+	}
+
+	function saveMediaInterval() {
+		updateClientConfigMutation.mutate({ media_processing_interval_hours: mediaInterval });
+	}
+
+	function saveIncludePodcasts() {
+		updateClientConfigMutation.mutate({ include_podcasts_in_digest: includePodcasts });
+	}
+
+	function saveIncludeYoutube() {
+		updateClientConfigMutation.mutate({ include_youtube_in_digest: includeYoutube });
+	}
+
+	let triggeringMedia = $state(false);
+	async function triggerMediaProcessing() {
+		triggeringMedia = true;
+		try {
+			await api.triggerMediaProcessing();
+			toast.success('Media processing triggered');
+		} catch (err: any) {
+			toast.error('Failed to trigger media processing', { description: err.message });
+		}
+		triggeringMedia = false;
 	}
 
 	function saveWallabag() {
@@ -1237,6 +1273,103 @@
 					{/if}
 				</div>
 			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	<!-- Media Processing -->
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="flex items-center gap-2">
+				<Settings class="h-5 w-5" />
+				Media Processing
+			</Card.Title>
+			<Card.Description>
+				Configure how podcast and YouTube media content is processed
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="space-y-4">
+			<div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+				<div class="space-y-1">
+					<p class="font-medium">Processing Interval</p>
+					<p class="text-sm text-muted-foreground">
+						How often to check for new media items and process them.
+					</p>
+				</div>
+				<div class="flex items-center gap-3">
+					<select
+						class="flex h-10 w-36 rounded-md border border-input bg-background px-3 py-2 text-sm"
+						bind:value={mediaInterval}
+					>
+						<option value={1}>Every 1 hour</option>
+						<option value={2}>Every 2 hours</option>
+						<option value={4}>Every 4 hours</option>
+						<option value={8}>Every 8 hours</option>
+						<option value={12}>Every 12 hours</option>
+						<option value={24}>Every 24 hours</option>
+					</select>
+					<Button
+						size="sm"
+						onclick={saveMediaInterval}
+						disabled={updateClientConfigMutation.isPending || mediaInterval === (clientConfigQuery.data?.media_processing_interval_hours ?? 4)}
+					>
+						{#if updateClientConfigMutation.isPending}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+						{:else}
+							<Save class="mr-2 h-4 w-4" />
+						{/if}
+						Save
+					</Button>
+				</div>
+			</div>
+
+			<div class="flex items-center justify-between rounded-lg border p-4">
+				<div class="space-y-1">
+					<p class="font-medium">Include Podcasts in Digests</p>
+					<p class="text-sm text-muted-foreground">
+						Completed podcast transcripts will be added to the next digest.
+					</p>
+				</div>
+				<Switch
+					checked={includePodcasts}
+					onCheckedChange={(v) => {
+						includePodcasts = v;
+						saveIncludePodcasts();
+					}}
+				/>
+			</div>
+
+			<div class="flex items-center justify-between rounded-lg border p-4">
+				<div class="space-y-1">
+					<p class="font-medium">Include YouTube in Digests</p>
+					<p class="text-sm text-muted-foreground">
+						Completed YouTube transcripts will be added to the next digest.
+					</p>
+				</div>
+				<Switch
+					checked={includeYoutube}
+					onCheckedChange={(v) => {
+						includeYoutube = v;
+						saveIncludeYoutube();
+					}}
+				/>
+			</div>
+
+			<div class="flex items-center justify-between rounded-lg border p-4">
+				<div class="space-y-1">
+					<p class="font-medium">Process Now</p>
+					<p class="text-sm text-muted-foreground">
+						Manually trigger media processing immediately.
+					</p>
+				</div>
+				<Button size="sm" onclick={triggerMediaProcessing} disabled={triggeringMedia}>
+					{#if triggeringMedia}
+						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+						Processing...
+					{:else}
+						Process Now
+					{/if}
+				</Button>
+			</div>
 		</Card.Content>
 	</Card.Root>
 </div>

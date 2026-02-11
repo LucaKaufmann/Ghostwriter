@@ -8,11 +8,13 @@ from uuid import UUID
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging import digest_logger
+from app.models.client_config import ClientConfig
 from app.models.schedule import Schedule
 from app.worker.bindery import generate_digest
 
@@ -72,6 +74,9 @@ def setup_scheduler() -> None:
         misfire_grace_time=3600,  # 1 hour grace
     )
     logger.info("Scheduled daily maintenance job at 03:00 UTC")
+
+    # Set up media processing interval job
+    _setup_media_processing_job()
 
     scheduler.start()
     logger.info("Scheduler started")
@@ -428,6 +433,72 @@ def trigger_schedule_now(period: str) -> UUID | None:
         return None  # Can't block here, return immediately
     else:
         return loop.run_until_complete(_run())
+
+
+def _setup_media_processing_job() -> None:
+    """Set up the media processing interval job from client config."""
+    with Session(engine) as session:
+        config = session.exec(select(ClientConfig)).first()
+        interval_hours = config.media_processing_interval_hours if config else 4
+
+    scheduler.add_job(
+        _run_media_pipeline,
+        IntervalTrigger(hours=interval_hours),
+        id="media_processing",
+        replace_existing=True,
+        misfire_grace_time=600,  # 10 minute grace
+    )
+    logger.info(f"Scheduled media processing every {interval_hours} hours")
+
+
+async def _run_media_pipeline() -> None:
+    """Execute the media processing pipeline."""
+    from app.worker.media_pipeline import run_media_pipeline
+
+    logger.info("Running scheduled media processing")
+    digest_logger.info(
+        "Scheduled media processing triggered",
+        component="scheduler",
+        event="media_triggered",
+    )
+    try:
+        await run_media_pipeline()
+    except Exception as e:
+        logger.exception(f"Scheduled media processing failed: {e}")
+        digest_logger.error(
+            f"Scheduled media processing failed: {e}",
+            component="scheduler",
+            event="media_failed",
+            context={"error": str(e)},
+        )
+
+
+def update_media_processing_interval(hours: int) -> None:
+    """
+    Update the media processing interval.
+
+    Reschedules the APScheduler job with the new interval.
+
+    Args:
+        hours: New interval in hours (1-24).
+    """
+    if not scheduler.running:
+        return
+
+    scheduler.add_job(
+        _run_media_pipeline,
+        IntervalTrigger(hours=hours),
+        id="media_processing",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+    logger.info(f"Updated media processing interval to {hours} hours")
+    digest_logger.info(
+        f"Media processing interval updated to {hours}h",
+        component="scheduler",
+        event="media_interval_updated",
+        context={"interval_hours": hours},
+    )
 
 
 def shutdown_scheduler() -> None:
