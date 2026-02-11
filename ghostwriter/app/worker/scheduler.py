@@ -8,7 +8,6 @@ from uuid import UUID
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
@@ -443,12 +442,12 @@ def _setup_media_processing_job() -> None:
 
     scheduler.add_job(
         _run_media_pipeline,
-        IntervalTrigger(hours=interval_hours),
+        CronTrigger(hour=f"*/{interval_hours}", minute=0),
         id="media_processing",
         replace_existing=True,
         misfire_grace_time=600,  # 10 minute grace
     )
-    logger.info(f"Scheduled media processing every {interval_hours} hours")
+    logger.info(f"Scheduled media processing every {interval_hours}h (clock-aligned)")
 
 
 async def _run_media_pipeline() -> None:
@@ -487,12 +486,12 @@ def update_media_processing_interval(hours: int) -> None:
 
     scheduler.add_job(
         _run_media_pipeline,
-        IntervalTrigger(hours=hours),
+        CronTrigger(hour=f"*/{hours}", minute=0),
         id="media_processing",
         replace_existing=True,
         misfire_grace_time=600,
     )
-    logger.info(f"Updated media processing interval to {hours} hours")
+    logger.info(f"Updated media processing interval to {hours}h (clock-aligned)")
     digest_logger.info(
         f"Media processing interval updated to {hours}h",
         component="scheduler",
