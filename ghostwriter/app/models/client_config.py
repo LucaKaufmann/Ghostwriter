@@ -39,6 +39,22 @@ class ClientConfigBase(SQLModel):
         description="Transcription timeout in minutes",
     )
 
+    # Media processing
+    media_processing_interval_hours: int = Field(
+        default=4,
+        ge=1,
+        le=24,
+        description="Hours between media processing runs",
+    )
+    include_podcasts_in_digest: bool = Field(
+        default=True,
+        description="Include completed podcast transcripts in digests",
+    )
+    include_youtube_in_digest: bool = Field(
+        default=True,
+        description="Include completed YouTube transcripts in digests",
+    )
+
 
 class ClientConfig(ClientConfigBase, table=True):
     """
@@ -77,6 +93,15 @@ class ClientConfigUpdate(SQLModel):
     whisper_timeout_minutes: int | None = Field(
         default=None, ge=1, le=120, description="Transcription timeout in minutes"
     )
+    media_processing_interval_hours: int | None = Field(
+        default=None, ge=1, le=24, description="Hours between media processing runs"
+    )
+    include_podcasts_in_digest: bool | None = Field(
+        default=None, description="Include completed podcast transcripts in digests"
+    )
+    include_youtube_in_digest: bool | None = Field(
+        default=None, description="Include completed YouTube transcripts in digests"
+    )
 
 
 class ClientConfigRead(SQLModel):
@@ -95,4 +120,7 @@ class ClientConfigRead(SQLModel):
     whisper_provider: str
     whisper_model: str
     whisper_timeout_minutes: int
+    media_processing_interval_hours: int
+    include_podcasts_in_digest: bool
+    include_youtube_in_digest: bool
     updated_at: datetime
