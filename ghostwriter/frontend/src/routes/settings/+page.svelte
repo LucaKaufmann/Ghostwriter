@@ -325,12 +325,19 @@
 		updateClientConfigMutation.mutate({ include_youtube_in_digest: includeYoutube });
 	}
 
+	const mediaStatusQuery = createQuery(() => ({
+		queryKey: ['media-status'],
+		queryFn: () => api.getMediaProcessingStatus(),
+		refetchInterval: (query) => query.state.data?.is_running ? 3000 : false
+	}));
+
 	let triggeringMedia = $state(false);
 	async function triggerMediaProcessing() {
 		triggeringMedia = true;
 		try {
 			await api.triggerMediaProcessing();
 			toast.success('Media processing triggered');
+			queryClient.invalidateQueries({ queryKey: ['media-status'] });
 		} catch (err: any) {
 			toast.error('Failed to trigger media processing', { description: err.message });
 		}
@@ -1354,21 +1361,50 @@
 				/>
 			</div>
 
-			<div class="flex items-center justify-between rounded-lg border p-4">
-				<div class="space-y-1">
-					<p class="font-medium">Process Now</p>
-					<p class="text-sm text-muted-foreground">
-						Manually trigger media processing immediately.
-					</p>
+			<div class="rounded-lg border p-4 space-y-3">
+				<div class="flex items-center justify-between">
+					<div class="space-y-1">
+						<p class="font-medium">Process Now</p>
+						<p class="text-sm text-muted-foreground">
+							Manually trigger media processing immediately.
+						</p>
+					</div>
+					<Button
+						size="sm"
+						onclick={triggerMediaProcessing}
+						disabled={triggeringMedia || !!mediaStatusQuery.data?.is_running}
+					>
+						{#if triggeringMedia || mediaStatusQuery.data?.is_running}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							Processing...
+						{:else}
+							Process Now
+						{/if}
+					</Button>
 				</div>
-				<Button size="sm" onclick={triggerMediaProcessing} disabled={triggeringMedia}>
-					{#if triggeringMedia}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						Processing...
-					{:else}
-						Process Now
-					{/if}
-				</Button>
+				{#if mediaStatusQuery.data?.is_running}
+					<div class="flex items-center gap-2 text-sm text-muted-foreground">
+						<Loader2 class="h-3.5 w-3.5 animate-spin flex-shrink-0" />
+						{#if mediaStatusQuery.data.current_item_title}
+							<span class="truncate">{mediaStatusQuery.data.current_item_title}</span>
+							<span class="flex-shrink-0">• {mediaStatusQuery.data.pending_count + mediaStatusQuery.data.processing_count} remaining</span>
+						{:else}
+							<span>Processing media items...</span>
+						{/if}
+					</div>
+				{:else if mediaStatusQuery.data}
+					<div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+						{#if mediaStatusQuery.data.pending_count > 0}
+							<span>{mediaStatusQuery.data.pending_count} pending</span>
+						{/if}
+						{#if mediaStatusQuery.data.completed_count > 0}
+							<span>{mediaStatusQuery.data.completed_count} completed</span>
+						{/if}
+						{#if mediaStatusQuery.data.failed_count > 0}
+							<span class="text-destructive">{mediaStatusQuery.data.failed_count} failed</span>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		</Card.Content>
 	</Card.Root>

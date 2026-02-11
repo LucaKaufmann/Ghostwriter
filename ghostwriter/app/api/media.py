@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+import sqlalchemy as sa
 from sqlmodel import Session, select
 
 from app.core.database import get_session
@@ -41,6 +42,10 @@ class MediaProcessingStatus(BaseModel):
     processing_count: int
     completed_count: int
     failed_count: int
+    current_item_title: str | None = None
+    current_item_content_type: str | None = None
+    last_completed_at: str | None = None
+    next_run_at: str | None = None
 
 
 class MediaTriggerResponse(BaseModel):
@@ -137,12 +142,15 @@ async def list_podcast_feed_items(
     dependencies=[Depends(verify_api_key)],
 )
 async def list_all_podcast_items(session: Session = Depends(get_session)):
-    """List all completed podcast items."""
+    """List all podcast items, ordered by status priority then date."""
+    status_order = sa.case(
+        {"processing": 0, "pending": 1, "failed": 2, "completed": 3},
+        value=MediaItem.status,
+    )
     items = session.exec(
         select(MediaItem)
         .where(MediaItem.content_type == "podcast")
-        .where(MediaItem.status == "completed")
-        .order_by(MediaItem.completed_at.desc())
+        .order_by(status_order, MediaItem.created_at.desc())
     ).all()
     return items
 
@@ -236,12 +244,15 @@ async def list_youtube_feed_items(
     dependencies=[Depends(verify_api_key)],
 )
 async def list_all_youtube_items(session: Session = Depends(get_session)):
-    """List all completed YouTube items."""
+    """List all YouTube items, ordered by status priority then date."""
+    status_order = sa.case(
+        {"processing": 0, "pending": 1, "failed": 2, "completed": 3},
+        value=MediaItem.status,
+    )
     items = session.exec(
         select(MediaItem)
         .where(MediaItem.content_type == "youtube")
-        .where(MediaItem.status == "completed")
-        .order_by(MediaItem.completed_at.desc())
+        .order_by(status_order, MediaItem.created_at.desc())
     ).all()
     return items
 
@@ -318,9 +329,10 @@ async def get_media_status(session: Session = Depends(get_session)):
     pending = len(session.exec(
         select(MediaItem).where(MediaItem.status == "pending")
     ).all())
-    processing = len(session.exec(
+    processing_items = session.exec(
         select(MediaItem).where(MediaItem.status == "processing")
-    ).all())
+    ).all()
+    processing = len(processing_items)
     completed = len(session.exec(
         select(MediaItem).where(MediaItem.status == "completed")
     ).all())
@@ -328,12 +340,47 @@ async def get_media_status(session: Session = Depends(get_session)):
         select(MediaItem).where(MediaItem.status == "failed")
     ).all())
 
+    # Current processing item details
+    current_title = None
+    current_content_type = None
+    if processing_items:
+        current_title = processing_items[0].title
+        current_content_type = processing_items[0].content_type
+
+    # Most recently completed item
+    last_completed_item = session.exec(
+        select(MediaItem)
+        .where(MediaItem.status == "completed")
+        .where(MediaItem.completed_at != None)
+        .order_by(MediaItem.completed_at.desc())
+        .limit(1)
+    ).first()
+    last_completed_at = (
+        last_completed_item.completed_at.isoformat()
+        if last_completed_item and last_completed_item.completed_at
+        else None
+    )
+
+    # Next scheduled run
+    next_run_at = None
+    try:
+        from app.worker.scheduler import scheduler
+        job = scheduler.get_job("media_processing")
+        if job and job.next_run_time:
+            next_run_at = job.next_run_time.isoformat()
+    except Exception:
+        pass
+
     return MediaProcessingStatus(
         is_running=processing > 0,
         pending_count=pending,
         processing_count=processing,
         completed_count=completed,
         failed_count=failed,
+        current_item_title=current_title,
+        current_item_content_type=current_content_type,
+        last_completed_at=last_completed_at,
+        next_run_at=next_run_at,
     )
 
 
