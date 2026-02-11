@@ -23,7 +23,9 @@
 		ExternalLink,
 		MoreHorizontal,
 		Loader2,
-		FileText
+		FileText,
+		Clock,
+		AlertCircle
 	} from 'lucide-svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 
@@ -35,9 +37,16 @@
 		queryFn: () => api.getPodcastFeeds()
 	}));
 
+	const mediaStatusQuery = createQuery(() => ({
+		queryKey: ['media-status'],
+		queryFn: () => api.getMediaProcessingStatus(),
+		refetchInterval: (query) => query.state.data?.is_running ? 5000 : false
+	}));
+
 	const itemsQuery = createQuery(() => ({
 		queryKey: ['podcast-items'],
-		queryFn: () => api.getAllPodcastItems()
+		queryFn: () => api.getAllPodcastItems(),
+		refetchInterval: mediaStatusQuery.data?.is_running ? 5000 : false
 	}));
 
 	// Mutations
@@ -115,6 +124,11 @@
 	let editMode = $state<'raw' | 'summarize'>('raw');
 	let editMaxItems = $state(5);
 	let editIsActive = $state(true);
+
+	const processingItems = $derived((itemsQuery.data ?? []).filter((i) => i.status === 'processing'));
+	const pendingItems = $derived((itemsQuery.data ?? []).filter((i) => i.status === 'pending'));
+	const failedItems = $derived((itemsQuery.data ?? []).filter((i) => i.status === 'failed'));
+	const completedItems = $derived((itemsQuery.data ?? []).filter((i) => i.status === 'completed'));
 
 	const filteredFeeds = $derived.by(() => {
 		const feeds = feedsQuery.data ?? [];
@@ -229,7 +243,7 @@
 				: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			onclick={() => (activeTab = 'items')}
 		>
-			Transcripts ({itemsQuery.data?.length ?? 0})
+			Transcripts ({completedItems.length})
 		</button>
 	</div>
 
@@ -434,7 +448,55 @@
 					</div>
 				{:else}
 					<div class="divide-y">
-						{#each itemsQuery.data ?? [] as item}
+						{#each processingItems as item}
+							<div class="p-4 bg-muted/30">
+								<div class="flex items-start justify-between gap-2">
+									<div class="min-w-0 flex-1">
+										<div class="flex items-center gap-2">
+											<Loader2 class="h-4 w-4 animate-spin text-muted-foreground flex-shrink-0" />
+											<p class="font-medium truncate">{item.title}</p>
+										</div>
+										{#if item.author}
+											<p class="text-sm text-muted-foreground ml-6">{item.author}</p>
+										{/if}
+									</div>
+									<Badge variant="secondary" class="text-xs flex-shrink-0">Processing</Badge>
+								</div>
+							</div>
+						{/each}
+						{#each pendingItems as item}
+							<div class="p-4 bg-muted/15">
+								<div class="flex items-start justify-between gap-2">
+									<div class="min-w-0 flex-1">
+										<div class="flex items-center gap-2">
+											<Clock class="h-4 w-4 text-muted-foreground flex-shrink-0" />
+											<p class="font-medium truncate">{item.title}</p>
+										</div>
+										{#if item.author}
+											<p class="text-sm text-muted-foreground ml-6">{item.author}</p>
+										{/if}
+									</div>
+									<Badge variant="outline" class="text-xs flex-shrink-0">Queued</Badge>
+								</div>
+							</div>
+						{/each}
+						{#each failedItems as item}
+							<div class="p-4">
+								<div class="flex items-start justify-between gap-2">
+									<div class="min-w-0 flex-1">
+										<div class="flex items-center gap-2">
+											<AlertCircle class="h-4 w-4 text-destructive flex-shrink-0" />
+											<p class="font-medium truncate">{item.title}</p>
+										</div>
+										{#if item.error_message}
+											<p class="text-xs text-destructive ml-6 mt-1">{item.error_message}</p>
+										{/if}
+									</div>
+									<Badge variant="destructive" class="text-xs flex-shrink-0">Failed</Badge>
+								</div>
+							</div>
+						{/each}
+						{#each completedItems as item}
 							<a
 								href="/podcasts/items/{item.id}"
 								class="block p-4 hover:bg-accent/50 transition-colors"

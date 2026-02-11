@@ -438,6 +438,10 @@ export interface MediaProcessingStatus {
 	processing_count: number;
 	completed_count: number;
 	failed_count: number;
+	current_item_title: string | null;
+	current_item_content_type: string | null;
+	last_completed_at: string | null;
+	next_run_at: string | null;
 }
 
 export interface YouTubeResolveResponse {
