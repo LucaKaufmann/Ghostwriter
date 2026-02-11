@@ -174,6 +174,10 @@ export interface SyncResponse {
 	unchanged: number;
 }
 
+export interface FeedCheckResponse {
+	feed_type: 'article' | 'podcast' | 'youtube';
+}
+
 // ============ Digests ============
 
 export type DigestStatus = 'pending' | 'processing' | 'completed' | 'failed';

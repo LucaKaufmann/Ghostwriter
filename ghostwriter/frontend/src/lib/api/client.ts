@@ -41,7 +41,8 @@ import type {
 	MediaItemSummary,
 	MediaProcessingStatus,
 	YouTubeResolveResponse,
-	MediaTriggerResponse
+	MediaTriggerResponse,
+	FeedCheckResponse
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -298,6 +299,13 @@ class ApiClient {
 		return this.request<SyncResponse>('/feeds/sync', {
 			method: 'POST',
 			body: JSON.stringify(feeds)
+		});
+	}
+
+	async checkFeedUrl(url: string): Promise<FeedCheckResponse> {
+		return this.request<FeedCheckResponse>('/feeds/check-url', {
+			method: 'POST',
+			body: JSON.stringify({ url })
 		});
 	}
 
