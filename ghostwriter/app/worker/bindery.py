@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 _SYNTHETIC_FEED_URLS = {
     "wallabag": "synthetic://wallabag",
     "newsletter": "synthetic://newsletter",
+    "podcast": "synthetic://podcast",
+    "youtube": "synthetic://youtube",
 }
 
 
@@ -89,6 +91,8 @@ class BinderyPipeline:
         # Synthetic feed IDs for non-RSS sources (resolved lazily)
         self._wallabag_feed_id: UUID | None = None
         self._newsletter_feed_id: UUID | None = None
+        self._podcast_feed_id: UUID | None = None
+        self._youtube_feed_id: UUID | None = None
 
     def _get_synthetic_feed_id(self, source: str) -> UUID:
         """Get the synthetic feed ID, creating the feed row if needed."""
@@ -610,6 +614,13 @@ class BinderyPipeline:
                     newsletter_articles, len(extracted_articles) + len(wallabag_articles)
                 )
 
+            # Save media article records
+            if media_articles:
+                await self._save_media_article_records(
+                    media_articles,
+                    len(extracted_articles) + len(wallabag_articles) + len(newsletter_articles),
+                )
+
             # Mark consumed media items
             if media_item_ids:
                 with Session(engine) as session:
@@ -778,6 +789,31 @@ class BinderyPipeline:
                     content=article.content,
                     author=article.author,
                     feed_title=article.feed_title or "Newsletter",
+                    sort_order=sort_order,
+                    content_type=article.content_type,
+                )
+                session.add(record)
+            session.commit()
+
+    async def _save_media_article_records(
+        self, articles: list[ExtractedArticle], offset: int
+    ) -> None:
+        """Save DigestArticle records for media (podcast/YouTube) articles."""
+        with Session(engine) as session:
+            for sort_order, article in enumerate(articles, offset):
+                feed_id = self._get_synthetic_feed_id(article.content_type)
+                record = DigestArticle(
+                    digest_id=self.digest_id,
+                    feed_id=feed_id,
+                    title=article.title,
+                    url=article.url,
+                    mode="summarized" if article.is_summary else "raw",
+                    word_count=article.word_count,
+                    ai_failed=article.ai_failed,
+                    processing_ms=article.processing_ms,
+                    content=article.content,
+                    author=article.author,
+                    feed_title=article.feed_title,
                     sort_order=sort_order,
                     content_type=article.content_type,
                 )
