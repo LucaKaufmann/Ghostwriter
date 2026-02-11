@@ -52,6 +52,7 @@ class DigestSyncWorker @AssistedInject constructor(
         const val NOTIFICATION_ID = 1002
 
         const val MAX_RETRY_ATTEMPTS = 3
+        private const val REMOTE_EPUB_RETENTION_MILLIS = 30L * 24L * 60L * 60L * 1000L
     }
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
@@ -118,6 +119,7 @@ class DigestSyncWorker @AssistedInject constructor(
 
                 Log.i(TAG, "Processed $processedCount new digests via combined sync")
                 settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())
+                runRemoteEpubCleanup()
                 Result.success()
             }
             is GhostwriterResult.Error -> {
@@ -349,6 +351,7 @@ class DigestSyncWorker @AssistedInject constructor(
 
                 Log.i(TAG, "Legacy sync processed $processedCount digests")
                 settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())
+                runRemoteEpubCleanup()
                 Result.success()
             }
             is GhostwriterResult.Error -> {
@@ -377,6 +380,16 @@ class DigestSyncWorker @AssistedInject constructor(
             documentsDir.mkdirs()
         }
         return File(documentsDir, filename).absolutePath
+    }
+
+    /**
+     * Remove stale downloaded remote EPUB files while keeping digest metadata.
+     */
+    private suspend fun runRemoteEpubCleanup() {
+        val deletedCount = digestRepository.cleanupStaleRemoteEpubFiles(REMOTE_EPUB_RETENTION_MILLIS)
+        if (deletedCount > 0) {
+            Log.i(TAG, "Cleaned up $deletedCount stale remote EPUB files")
+        }
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
