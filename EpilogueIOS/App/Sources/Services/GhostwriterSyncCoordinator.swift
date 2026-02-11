@@ -281,6 +281,14 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         return try await digestSyncService.getDigestStatus(digestId: digestId)
     }
 
+    /// Download an EPUB for an already-synced digest.
+    public func downloadDigestEpub(remoteId: String, filenameHint: String? = nil) async throws -> URL {
+        return try await digestSyncService.downloadDigestEpub(
+            remoteId: remoteId,
+            filenameHint: filenameHint
+        )
+    }
+
     /// Notify server when a feed is deleted locally
     public func notifyFeedDeleted(url: String) async throws {
         try await feedSyncService.notifyFeedDeleted(url: url)
