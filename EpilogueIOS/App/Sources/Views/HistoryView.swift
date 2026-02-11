@@ -17,6 +17,8 @@ struct HistoryView: View {
     @Query(sort: \Digest.generatedAt, order: .reverse) private var digests: [Digest]
     @State private var digestToDelete: Digest?
     @State private var digestToShare: Digest?
+    @State private var downloadingDigestIDs: Set<UUID> = []
+    @State private var statusMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -35,10 +37,11 @@ struct HistoryView: View {
                 } else {
                     List {
                         ForEach(digests) { digest in
+                            let epubAvailable = hasLocalEPUB(digest)
                             NavigationLink {
                                 DigestDetailView(digest: digest)
                             } label: {
-                                DigestRow(digest: digest)
+                                DigestRow(digest: digest, epubAvailable: epubAvailable)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
@@ -48,19 +51,32 @@ struct HistoryView: View {
                                 }
                             }
                             .swipeActions(edge: .leading) {
-                                Button {
-                                    digestToShare = digest
-                                } label: {
-                                    Label("Share", systemImage: "square.and.arrow.up")
-                                }
-                                .tint(.gray)
+                                if let remoteId = digest.remoteId, !epubAvailable {
+                                    Button {
+                                        downloadDigest(digest, remoteId: remoteId)
+                                    } label: {
+                                        if downloadingDigestIDs.contains(digest.id) {
+                                            Label("Downloading", systemImage: "hourglass")
+                                        } else {
+                                            Label("Download", systemImage: "arrow.down.circle")
+                                        }
+                                    }
+                                    .tint(.green)
+                                } else {
+                                    Button {
+                                        digestToShare = digest
+                                    } label: {
+                                        Label("Share", systemImage: "square.and.arrow.up")
+                                    }
+                                    .tint(.gray)
 
-                                Button {
-                                    openInReader(digest)
-                                } label: {
-                                    Label("Open", systemImage: "book")
+                                    Button {
+                                        openInReader(digest)
+                                    } label: {
+                                        Label("Open", systemImage: "book")
+                                    }
+                                    .tint(.blue)
                                 }
-                                .tint(.blue)
                             }
                         }
                     }
@@ -100,6 +116,16 @@ struct HistoryView: View {
                     ActivityViewController(activityItems: [fileURL])
                 }
             }
+            .alert("Digest History", isPresented: Binding(
+                get: { statusMessage != nil },
+                set: { if !$0 { statusMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {
+                    statusMessage = nil
+                }
+            } message: {
+                Text(statusMessage ?? "")
+            }
         }
     }
 
@@ -116,15 +142,56 @@ struct HistoryView: View {
     private func openInReader(_ digest: Digest) {
         let fileURL = URL(fileURLWithPath: digest.epubFilePath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            if digest.remoteId != nil {
+                statusMessage = "EPUB not downloaded yet. Use Download from digest history first."
+            } else {
+                statusMessage = "EPUB file not found."
+            }
             return
         }
         UIApplication.shared.open(fileURL)
+    }
+
+    private func hasLocalEPUB(_ digest: Digest) -> Bool {
+        guard !digest.epubFilePath.isEmpty else { return false }
+        return FileManager.default.fileExists(atPath: digest.epubFilePath)
+    }
+
+    private func downloadDigest(_ digest: Digest, remoteId: String) {
+        guard !downloadingDigestIDs.contains(digest.id) else { return }
+        downloadingDigestIDs.insert(digest.id)
+
+        Task { @MainActor in
+            defer { downloadingDigestIDs.remove(digest.id) }
+
+            let filenameHint: String? = {
+                guard !digest.epubFilePath.isEmpty else { return nil }
+                let name = URL(fileURLWithPath: digest.epubFilePath).lastPathComponent
+                return name.hasSuffix(".epub") ? name : nil
+            }()
+
+            do {
+                let localURL = try await ghostwriterCoordinator.downloadDigestEpub(
+                    remoteId: remoteId,
+                    filenameHint: filenameHint
+                )
+                digest.epubFilePath = localURL.path
+                if let attributes = try? FileManager.default.attributesOfItem(atPath: localURL.path),
+                   let fileSize = attributes[.size] as? NSNumber {
+                    digest.fileSizeBytes = fileSize.int64Value
+                }
+                try? modelContext.save()
+            } catch {
+                statusMessage = "Download failed: \(error.localizedDescription)"
+            }
+        }
     }
 
 }
 
 struct DigestRow: View {
     let digest: Digest
+    let epubAvailable: Bool
 
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -175,6 +242,12 @@ struct DigestRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                }
+
+                if digest.remoteId != nil, !epubAvailable {
+                    Text("EPUB not downloaded")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
         }
