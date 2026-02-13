@@ -12,6 +12,7 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Select from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch';
+	import { formatUTCDate } from '$lib/utils/date';
 	import { toast } from 'svelte-sonner';
 	import {
 		Plus,
@@ -211,15 +212,8 @@
 		});
 	}
 
-	function parseUTC(dateStr: string): Date {
-		if (!dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
-			return new Date(dateStr + 'Z');
-		}
-		return new Date(dateStr);
-	}
-
 	function formatDate(dateStr: string): string {
-		return parseUTC(dateStr).toLocaleDateString('en-US', {
+		return formatUTCDate(dateStr, {
 			month: 'short',
 			day: 'numeric',
 			year: 'numeric'

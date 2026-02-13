@@ -10,6 +10,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { formatUTCDate, parseUTC } from '$lib/utils/date';
 	import { toast } from 'svelte-sonner';
 	import { currentUser } from '$lib/stores/auth';
 	import {
@@ -451,13 +452,6 @@
 		}
 	}
 
-	function parseUTC(dateStr: string): Date {
-		if (!dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
-			return new Date(dateStr + 'Z');
-		}
-		return new Date(dateStr);
-	}
-
 	function formatNextRun(schedule: Schedule): string {
 		if (!schedule.next_run_at) return 'Not scheduled';
 		return parseUTC(schedule.next_run_at).toLocaleString('en-US', {
@@ -484,7 +478,7 @@
 	}
 
 	function formatDate(dateStr: string): string {
-		return parseUTC(dateStr).toLocaleDateString('en-US', {
+		return formatUTCDate(dateStr, {
 			month: 'short',
 			day: 'numeric',
 			year: 'numeric'
