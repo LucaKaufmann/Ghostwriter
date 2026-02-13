@@ -1,5 +1,10 @@
 <script lang="ts">
-	import ReaderPage from '$lib/components/features/reader/ReaderPage.svelte';
+	const readerPageModule = import('$lib/components/features/reader/ReaderPage.svelte');
 </script>
 
-<ReaderPage />
+{#await readerPageModule}
+	<div class="py-12 text-center text-sm text-muted-foreground">Loading reader…</div>
+{:then module}
+	{@const ReaderPage = module.default}
+	<ReaderPage />
+{/await}

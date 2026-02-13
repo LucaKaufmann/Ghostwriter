@@ -61,7 +61,9 @@
 	const articlesQuery = createQuery(() => ({
 		queryKey: ['digest-articles', digestId],
 		queryFn: () => api.getDigestArticles(digestId),
-		enabled: digestId.length > 0
+		enabled: digestId.length > 0,
+		staleTime: 5 * 60 * 1000,
+		refetchOnWindowFocus: false
 	}));
 
 	const sortedArticles = $derived.by(() => {
@@ -90,7 +92,10 @@
 		queryKey: ['digest-article-source', digestId, selectedArticleId],
 		queryFn: () => api.getDigestArticleSource(digestId, selectedArticleId!),
 		enabled: browser && digestId.length > 0 && !!selectedArticleId && !isMediaContent,
-		retry: 0
+		retry: 0,
+		staleTime: 10 * 60 * 1000,
+		gcTime: 30 * 60 * 1000,
+		refetchOnWindowFocus: false
 	}));
 
 	const fontSizeClass = $derived.by(() => {
@@ -242,12 +247,20 @@
 	}
 
 	let sanitizerPromise: Promise<any> | null = null;
+	let readabilityPromise: Promise<typeof import('@mozilla/readability')> | null = null;
 	async function getSanitizer(): Promise<any> {
 		if (!browser) return null;
 		if (!sanitizerPromise) {
 			sanitizerPromise = import('dompurify').then((module) => module.default);
 		}
 		return sanitizerPromise;
+	}
+
+	async function getReadabilityModule(): Promise<typeof import('@mozilla/readability')> {
+		if (!readabilityPromise) {
+			readabilityPromise = import('@mozilla/readability');
+		}
+		return readabilityPromise;
 	}
 
 	async function sanitizeAndNormalize(rawHtml: string, baseUrl?: string): Promise<string> {
@@ -319,7 +332,7 @@
 		if (!source) return;
 
 		void (async () => {
-			const { Readability } = await import('@mozilla/readability');
+			const { Readability } = await getReadabilityModule();
 			const doc = new DOMParser().parseFromString(source.html, 'text/html');
 			const parsed = new Readability(doc).parse();
 			if (!parsed?.content) {
