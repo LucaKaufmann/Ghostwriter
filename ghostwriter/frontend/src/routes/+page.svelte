@@ -194,7 +194,7 @@
 						<span class="text-lg font-bold">Offline</span>
 					</div>
 				{:else}
-					<div class="flex items-center gap-2 text-green-600">
+					<div class="flex items-center gap-2 text-success">
 						<CheckCircle2 class="h-4 w-4" />
 						<span class="text-lg font-bold">Online</span>
 					</div>

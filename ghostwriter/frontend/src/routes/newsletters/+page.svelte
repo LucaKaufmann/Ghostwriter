@@ -77,15 +77,15 @@
 				</div>
 			{:else if statusQuery.data?.configured}
 				<div class="space-y-4">
-					<div class="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950">
-						<CheckCircle2 class="h-6 w-6 text-green-600" />
-						<div>
-							<p class="font-medium text-green-800 dark:text-green-200">Gmail Connected</p>
-							<p class="text-sm text-green-700 dark:text-green-300">
-								Your newsletters will be included in digests
-							</p>
+						<div class="flex items-center gap-3 rounded-lg border border-success/30 bg-success/10 p-4">
+							<CheckCircle2 class="h-6 w-6 text-success" />
+							<div>
+								<p class="font-medium text-success">Gmail Connected</p>
+								<p class="text-sm text-success/90">
+									Your newsletters will be included in digests
+								</p>
+							</div>
 						</div>
-					</div>
 
 					<div class="rounded-lg border p-4 space-y-2">
 						<div class="flex items-center gap-2 text-sm">
@@ -105,15 +105,15 @@
 				</div>
 			{:else if statusQuery.data?.oauth_ready}
 				<div class="space-y-4">
-					<div class="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
-						<AlertCircle class="h-6 w-6 text-amber-600" />
-						<div>
-							<p class="font-medium text-amber-800 dark:text-amber-200">Gmail Not Connected</p>
-							<p class="text-sm text-amber-700 dark:text-amber-300">
-								Connect your Gmail to include newsletters
-							</p>
+						<div class="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4">
+							<AlertCircle class="h-6 w-6 text-warning" />
+							<div>
+								<p class="font-medium text-warning">Gmail Not Connected</p>
+								<p class="text-sm text-warning/90">
+									Connect your Gmail to include newsletters
+								</p>
+							</div>
 						</div>
-					</div>
 
 					<Button onclick={handleConnect}>
 						<Mail class="mr-2 h-4 w-4" />
