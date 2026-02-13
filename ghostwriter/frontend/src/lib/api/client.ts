@@ -33,7 +33,8 @@ import type {
 	APITokenResponse,
 	APITokenCreateRequest,
 	APITokenCreateResponse,
-	LogFileInfo
+	LogFileInfo,
+	KoreaderPluginDownloadRequest
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -122,6 +123,12 @@ class ApiClient {
 		return { blob, filename };
 	}
 
+	private resolveFilenameFromHeaders(headers: Headers, fallback: string): string {
+		const contentDisposition = headers.get('content-disposition') || '';
+		const match = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);
+		return match ? match[1] : fallback;
+	}
+
 	// ============ Authentication ============
 
 	async getAuthStatus(): Promise<AuthStatus> {
@@ -197,6 +204,39 @@ class ApiClient {
 
 	async revokeAPIToken(tokenId: string): Promise<{ status: string; message: string }> {
 		return this.request(`/auth/tokens/${tokenId}`, { method: 'DELETE' });
+	}
+
+	async downloadKoreaderPlugin(
+		data: KoreaderPluginDownloadRequest
+	): Promise<{ blob: Blob; filename: string }> {
+		const token = this.getToken();
+		const headers: Record<string, string> = {
+			'Content-Type': 'application/json'
+		};
+
+		if (token) {
+			headers['Authorization'] = `Bearer ${token}`;
+		}
+
+		const response = await fetch(`${BASE_URL}/plugins/koreader/download`, {
+			method: 'POST',
+			headers,
+			body: JSON.stringify(data)
+		});
+
+		if (!response.ok) {
+			let error: APIError;
+			try {
+				error = await response.json();
+			} catch {
+				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+			}
+			throw new ApiError(response.status, error);
+		}
+
+		const blob = await response.blob();
+		const filename = this.resolveFilenameFromHeaders(response.headers, 'ghostwriter.koplugin.zip');
+		return { blob, filename };
 	}
 
 	// ============ Health & Config ============
