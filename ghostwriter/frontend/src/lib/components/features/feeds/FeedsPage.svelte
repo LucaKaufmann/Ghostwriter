@@ -117,6 +117,11 @@
 	let feedToEdit = $state<Feed | null>(null);
 	let feedToClearSeen = $state<Feed | null>(null);
 	let updatingFeedId = $state<string | null>(null);
+	let statusFilter = $state<'all' | 'active' | 'paused'>('all');
+	let modeFilter = $state<'all' | 'raw' | 'summarize'>('all');
+	let selectedFeedIds = $state<string[]>([]);
+	let bulkActionPending = $state(false);
+	let bulkDeleteConfirmOpen = $state(false);
 
 	// Form state (for add)
 	let formUrl = $state('');
@@ -133,11 +138,29 @@
 	// Filtered feeds
 	const filteredFeeds = $derived.by(() => {
 		const feeds = (feedsQuery.data ?? []).filter((f) => !f.url.startsWith('synthetic://'));
-		if (!searchQuery.trim()) return feeds;
-		const q = searchQuery.toLowerCase();
-		return feeds.filter(
-			(f) => f.title.toLowerCase().includes(q) || f.url.toLowerCase().includes(q)
-		);
+		const q = searchQuery.trim().toLowerCase();
+
+		return feeds.filter((feed) => {
+			const matchesSearch =
+				q.length === 0 ||
+				feed.title.toLowerCase().includes(q) ||
+				feed.url.toLowerCase().includes(q);
+			const matchesStatus =
+				statusFilter === 'all' ||
+				(statusFilter === 'active' ? feed.is_active : !feed.is_active);
+			const matchesMode = modeFilter === 'all' || feed.mode === modeFilter;
+			return matchesSearch && matchesStatus && matchesMode;
+		});
+	});
+
+	const selectedFeedsCount = $derived(selectedFeedIds.length);
+	const allFilteredSelected = $derived(
+		filteredFeeds.length > 0 && filteredFeeds.every((feed) => selectedFeedIds.includes(feed.id))
+	);
+
+	$effect(() => {
+		const availableIds = new Set(filteredFeeds.map((feed) => feed.id));
+		selectedFeedIds = selectedFeedIds.filter((id) => availableIds.has(id));
 	});
 
 	function resetForm() {
@@ -149,11 +172,19 @@
 
 	function handleAddFeed(e: Event) {
 		e.preventDefault();
+		const normalizedUrl = formUrl.trim();
+		if (!isValidFeedUrl(normalizedUrl)) {
+			toast.error('Invalid feed URL', {
+				description: 'Use a valid http or https URL'
+			});
+			return;
+		}
+		const maxArticles = clampMaxArticles(formMaxArticles);
 		createFeedMutation.mutate({
-			url: formUrl,
-			title: formTitle || formUrl,
+			url: normalizedUrl,
+			title: formTitle.trim() || normalizedUrl,
 			mode: formMode,
-			max_articles: formMaxArticles,
+			max_articles: maxArticles,
 			is_active: true
 		});
 	}
@@ -190,12 +221,18 @@
 	function handleUpdateFeed(e: Event) {
 		e.preventDefault();
 		if (!feedToEdit) return;
+		const title = editTitle.trim();
+		if (!title) {
+			toast.error('Title is required');
+			return;
+		}
+		const maxArticles = clampMaxArticles(editMaxArticles);
 		updateFeedMutation.mutate({
 			id: feedToEdit.id,
 			data: {
-				title: editTitle,
+				title,
 				mode: editMode,
-				max_articles: editMaxArticles,
+				max_articles: maxArticles,
 				is_active: editIsActive
 			}
 		});
@@ -219,6 +256,78 @@
 			year: 'numeric'
 		});
 	}
+
+	function isValidFeedUrl(value: string): boolean {
+		try {
+			const parsed = new URL(value);
+			return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+		} catch {
+			return false;
+		}
+	}
+
+	function clampMaxArticles(value: number): number {
+		const numeric = Number.isFinite(value) ? value : 5;
+		return Math.max(1, Math.min(50, Math.round(numeric)));
+	}
+
+	function toggleFeedSelection(feedId: string, checked: boolean) {
+		if (checked) {
+			selectedFeedIds = [...new Set([...selectedFeedIds, feedId])];
+			return;
+		}
+		selectedFeedIds = selectedFeedIds.filter((id) => id !== feedId);
+	}
+
+	function toggleSelectAllFiltered(checked: boolean) {
+		if (checked) {
+			selectedFeedIds = filteredFeeds.map((feed) => feed.id);
+			return;
+		}
+		selectedFeedIds = [];
+	}
+
+	async function applyBulkStatus(isActive: boolean) {
+		if (selectedFeedIds.length === 0) return;
+		bulkActionPending = true;
+		try {
+			const results = await Promise.allSettled(
+				selectedFeedIds.map((id) => api.updateFeed(id, { is_active: isActive }))
+			);
+			const successCount = results.filter((result) => result.status === 'fulfilled').length;
+			if (successCount > 0) {
+				toast.success(`${successCount} feed${successCount === 1 ? '' : 's'} updated`);
+				queryClient.invalidateQueries({ queryKey: ['feeds'] });
+			}
+			const failureCount = results.length - successCount;
+			if (failureCount > 0) {
+				toast.error(`${failureCount} feed update${failureCount === 1 ? '' : 's'} failed`);
+			}
+		} finally {
+			bulkActionPending = false;
+		}
+	}
+
+	async function confirmBulkDelete() {
+		if (selectedFeedIds.length === 0) return;
+		bulkActionPending = true;
+		try {
+			const results = await Promise.allSettled(selectedFeedIds.map((id) => api.deleteFeed(id)));
+			const successCount = results.filter((result) => result.status === 'fulfilled').length;
+			if (successCount > 0) {
+				toast.success(`${successCount} feed${successCount === 1 ? '' : 's'} deleted`);
+				queryClient.invalidateQueries({ queryKey: ['feeds'] });
+				selectedFeedIds = [];
+			}
+			const failureCount = results.length - successCount;
+			if (failureCount > 0) {
+				toast.error(`${failureCount} feed deletion${failureCount === 1 ? '' : 's'} failed`);
+			}
+		} finally {
+			bulkActionPending = false;
+			bulkDeleteConfirmOpen = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -240,16 +349,96 @@
 	<!-- Search -->
 	<Card.Root>
 		<Card.Content class="pt-6">
-			<div class="relative">
-				<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-				<Input
-					placeholder="Search feeds..."
-					bind:value={searchQuery}
-					class="pl-9"
-				/>
+			<div class="space-y-4">
+				<div class="relative">
+					<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+					<Input
+						placeholder="Search feeds..."
+						bind:value={searchQuery}
+						class="pl-9"
+					/>
+				</div>
+				<div class="flex flex-wrap items-center gap-2">
+					<Select.Root
+						type="single"
+						name="status-filter"
+						value={statusFilter}
+						onValueChange={(value) => (statusFilter = value as 'all' | 'active' | 'paused')}
+					>
+						<Select.Trigger class="w-[140px]">
+							<span class="capitalize">
+								{statusFilter === 'all' ? 'All statuses' : statusFilter}
+							</span>
+						</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="all">All statuses</Select.Item>
+							<Select.Item value="active">Active</Select.Item>
+							<Select.Item value="paused">Paused</Select.Item>
+						</Select.Content>
+					</Select.Root>
+					<Select.Root
+						type="single"
+						name="mode-filter"
+						value={modeFilter}
+						onValueChange={(value) => (modeFilter = value as 'all' | 'raw' | 'summarize')}
+					>
+						<Select.Trigger class="w-[150px]">
+							<span class="capitalize">{modeFilter === 'all' ? 'All modes' : modeFilter}</span>
+						</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="all">All modes</Select.Item>
+							<Select.Item value="raw">Raw</Select.Item>
+							<Select.Item value="summarize">Summarize</Select.Item>
+						</Select.Content>
+					</Select.Root>
+					<p class="ml-auto text-sm text-muted-foreground">
+						{filteredFeeds.length} visible
+						{#if statusFilter !== 'all' || modeFilter !== 'all' || searchQuery.trim()}
+							<span> • filtered</span>
+						{/if}
+					</p>
+				</div>
 			</div>
 		</Card.Content>
 	</Card.Root>
+
+	{#if selectedFeedsCount > 0}
+		<Card.Root>
+			<Card.Content class="flex flex-wrap items-center gap-2 py-4">
+				<p class="mr-2 text-sm font-medium">
+					{selectedFeedsCount} selected
+				</p>
+				<Button
+					size="sm"
+					variant="outline"
+					onclick={() => applyBulkStatus(true)}
+					disabled={bulkActionPending}
+				>
+					Activate
+				</Button>
+				<Button
+					size="sm"
+					variant="outline"
+					onclick={() => applyBulkStatus(false)}
+					disabled={bulkActionPending}
+				>
+					Pause
+				</Button>
+				<Button
+					size="sm"
+					variant="outline"
+					class="text-destructive hover:text-destructive"
+					onclick={() => (bulkDeleteConfirmOpen = true)}
+					disabled={bulkActionPending}
+				>
+					Delete
+				</Button>
+				<Button size="sm" variant="ghost" onclick={() => (selectedFeedIds = [])} disabled={bulkActionPending}>
+					Clear Selection
+				</Button>
+			</Card.Content>
+		</Card.Root>
+	{/if}
 
 	<!-- Feed List -->
 	<Card.Root>
@@ -284,24 +473,42 @@
 					{/if}
 				</div>
 			{:else}
-				<!-- Desktop Table -->
-				<div class="hidden md:block">
-					<Table.Root>
-						<Table.Header>
-							<Table.Row>
-								<Table.Head>Feed</Table.Head>
-								<Table.Head>Mode</Table.Head>
-								<Table.Head>Max Articles</Table.Head>
-								<Table.Head>Status</Table.Head>
+					<!-- Desktop Table -->
+					<div class="hidden md:block">
+						<Table.Root>
+							<Table.Header>
+								<Table.Row>
+									<Table.Head class="w-[44px]">
+										<input
+											type="checkbox"
+											aria-label="Select all visible feeds"
+											checked={allFilteredSelected}
+											onchange={(e) =>
+												toggleSelectAllFiltered((e.target as HTMLInputElement).checked)}
+										/>
+									</Table.Head>
+									<Table.Head>Feed</Table.Head>
+									<Table.Head>Mode</Table.Head>
+									<Table.Head>Max Articles</Table.Head>
+									<Table.Head>Status</Table.Head>
 								<Table.Head class="w-[100px]">Actions</Table.Head>
 							</Table.Row>
 						</Table.Header>
-						<Table.Body>
-							{#each filteredFeeds as feed}
-								<Table.Row>
-									<Table.Cell>
-										<div class="space-y-1">
-											<p class="font-medium">{feed.title}</p>
+							<Table.Body>
+								{#each filteredFeeds as feed}
+									<Table.Row>
+										<Table.Cell>
+											<input
+												type="checkbox"
+												aria-label={`Select ${feed.title}`}
+												checked={selectedFeedIds.includes(feed.id)}
+												onchange={(e) =>
+													toggleFeedSelection(feed.id, (e.target as HTMLInputElement).checked)}
+											/>
+										</Table.Cell>
+										<Table.Cell>
+											<div class="space-y-1">
+												<p class="font-medium">{feed.title}</p>
 											<a
 												href={feed.url}
 												target="_blank"
@@ -371,16 +578,25 @@
 					</Table.Root>
 				</div>
 
-				<!-- Mobile List -->
-				<div class="md:hidden divide-y">
-					{#each filteredFeeds as feed}
-						<div class="p-4 space-y-2 overflow-hidden">
-							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0 flex-1 overflow-hidden">
-									<p class="font-medium truncate">{feed.title}</p>
-									<a
-										href={feed.url}
-										target="_blank"
+					<!-- Mobile List -->
+					<div class="md:hidden divide-y">
+						{#each filteredFeeds as feed}
+							<div class="p-4 space-y-2 overflow-hidden">
+								<div class="flex items-start justify-between gap-2">
+									<div class="min-w-0 flex-1 overflow-hidden">
+										<div class="mb-1 flex items-center gap-2">
+											<input
+												type="checkbox"
+												aria-label={`Select ${feed.title}`}
+												checked={selectedFeedIds.includes(feed.id)}
+												onchange={(e) =>
+													toggleFeedSelection(feed.id, (e.target as HTMLInputElement).checked)}
+											/>
+											<p class="font-medium truncate">{feed.title}</p>
+										</div>
+										<a
+											href={feed.url}
+											target="_blank"
 										rel="noopener noreferrer"
 										class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
 									>
@@ -524,6 +740,33 @@
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 				{/if}
 				Delete
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
+
+<!-- Bulk Delete Confirmation -->
+<AlertDialog.Root bind:open={bulkDeleteConfirmOpen}>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>Delete Selected Feeds</AlertDialog.Title>
+			<AlertDialog.Description>
+				This will permanently delete {selectedFeedsCount} selected feed{selectedFeedsCount === 1
+					? ''
+					: 's'}.
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel disabled={bulkActionPending}>Cancel</AlertDialog.Cancel>
+			<AlertDialog.Action
+				class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+				onclick={confirmBulkDelete}
+				disabled={bulkActionPending}
+			>
+				{#if bulkActionPending}
+					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+				{/if}
+				Delete Selected
 			</AlertDialog.Action>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
