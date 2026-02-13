@@ -14,24 +14,27 @@
 	let isSubmitting = $state(false);
 	let showLegacyTokenInput = $state(false);
 	let legacyToken = $state('');
+	let formError = $state<string | null>(null);
 
 	// Derived: are we in registration mode?
 	const isRegistration = $derived($authStatus?.registration_open ?? false);
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
-		if (!username.trim() || !password.trim()) return;
+		formError = null;
+		if (!username.trim() || !password.trim()) {
+			formError = 'Username and password are required';
+			return;
+		}
 
 		if (isRegistration) {
-			// Validate password match
 			if (password !== confirmPassword) {
-				// Set error via store or local state
+				formError = 'Passwords do not match';
 				return;
 			}
 		}
 
 		isSubmitting = true;
-		console.log('[login] submitting, isRegistration:', isRegistration);
 
 		let success: boolean;
 		if (isRegistration) {
@@ -40,7 +43,6 @@
 			success = await auth.loginWithCredentials(username.trim(), password);
 		}
 
-		console.log('[login] result:', success);
 		isSubmitting = false;
 
 		if (success) {
@@ -53,7 +55,11 @@
 
 	async function handleLegacyToken(e: Event) {
 		e.preventDefault();
-		if (!legacyToken.trim()) return;
+		formError = null;
+		if (!legacyToken.trim()) {
+			formError = 'Token is required';
+			return;
+		}
 
 		isSubmitting = true;
 		const success = await auth.loginWithToken(legacyToken.trim());
@@ -171,12 +177,12 @@
 							</div>
 						{/if}
 
-						{#if $authError}
-							<div class="flex items-center gap-2 text-sm text-destructive">
-								<AlertCircle class="h-4 w-4" />
-								<span>{$authError}</span>
-							</div>
-						{/if}
+							{#if formError || $authError}
+								<div class="flex items-center gap-2 text-sm text-destructive">
+									<AlertCircle class="h-4 w-4" />
+									<span>{formError ?? $authError}</span>
+								</div>
+							{/if}
 
 						<Button
 							type="submit"
@@ -243,12 +249,12 @@
 							/>
 						</div>
 
-						{#if $authError}
-							<div class="flex items-center gap-2 text-sm text-destructive">
-								<AlertCircle class="h-4 w-4" />
-								<span>{$authError}</span>
-							</div>
-						{/if}
+							{#if formError || $authError}
+								<div class="flex items-center gap-2 text-sm text-destructive">
+									<AlertCircle class="h-4 w-4" />
+									<span>{formError ?? $authError}</span>
+								</div>
+							{/if}
 
 						<Button type="submit" class="w-full" disabled={isSubmitting || !legacyToken.trim()}>
 							{#if isSubmitting}
@@ -264,10 +270,11 @@
 					<button
 						type="button"
 						class="text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
-						onclick={() => {
-							showLegacyTokenInput = false;
-							auth.clearError();
-						}}
+							onclick={() => {
+								showLegacyTokenInput = false;
+								formError = null;
+								auth.clearError();
+							}}
 					>
 						← Back to username login
 					</button>
