@@ -21,6 +21,8 @@ The app uses `/api` as the backend base path. In local development, requests are
 - `npm run check` - run Svelte + TypeScript diagnostics
 - `npm run build` - production build (adapter-static)
 - `npm run preview` - preview built app
+- `npm run test:e2e` - run Playwright smoke + theme snapshot checks
+- `npm run test:e2e:update` - update Playwright snapshot baselines
 
 ## Architecture
 - `src/routes/` - route entry files (thin page containers)
@@ -55,9 +57,10 @@ When adding UI:
 Before opening a PR:
 1. Run `npm run check`
 2. Run `npm run build`
-3. Test changed screens in desktop + mobile breakpoints
-4. Validate light and dark mode visuals
-5. Verify keyboard access and focus behavior for changed interactions
+3. Run `npm run test:e2e` for smoke + theme screenshot coverage
+4. Test changed screens in desktop + mobile breakpoints
+5. Validate light and dark mode visuals
+6. Verify keyboard access and focus behavior for changed interactions
 
 ## Build Output
 `npm run build` outputs static assets to `build/` (via `@sveltejs/adapter-static`).

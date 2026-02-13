@@ -2,7 +2,9 @@
 
 Last updated: 2026-02-13
 Owner: Frontend
-Status: Proposed
+Status: Completed
+
+Release validation and rollout notes: `ghostwriter/docs/WEB-UI-RELEASE-CHECKLIST.md`
 
 ## Goals
 - Ship a production-ready dark mode with `light` / `dark` / `system` support and no flash on load.
