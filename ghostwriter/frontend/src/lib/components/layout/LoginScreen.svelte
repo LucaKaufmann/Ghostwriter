@@ -3,6 +3,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';
+	import ThemeToggle from '$lib/components/layout/ThemeToggle.svelte';
 	import { auth, authError, serverStatus, authStatus } from '$lib/stores/auth';
 	import { BookOpen, Loader2, AlertCircle, CheckCircle2, UserPlus, LogIn } from 'lucide-svelte';
 
@@ -76,6 +77,9 @@
 
 <div class="flex min-h-screen items-center justify-center bg-background p-4">
 	<div class="w-full max-w-md">
+		<div class="mb-4 flex justify-end">
+			<ThemeToggle />
+		</div>
 		<div class="mb-8 text-center">
 			<div
 				class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10"
