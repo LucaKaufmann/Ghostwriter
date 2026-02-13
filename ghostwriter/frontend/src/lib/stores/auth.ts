@@ -21,113 +21,99 @@ function createAuthStore() {
 		user: null
 	});
 
-	return {
-		subscribe,
+		return {
+			subscribe,
 
-		// Initialize auth state from localStorage
-		async init() {
-			console.log('[auth] init called');
-			update((state) => ({ ...state, isLoading: true, error: null }));
+			// Initialize auth state from localStorage
+			async init() {
+				update((state) => ({ ...state, isLoading: true, error: null }));
 
 			// Check server health first
-			try {
-				const health = await api.getHealth();
-				console.log('[auth] health check passed');
-				update((state) => ({ ...state, serverStatus: health }));
-			} catch {
-				console.log('[auth] health check failed, bailing');
-				update((state) => ({
-					...state,
-					serverStatus: null,
+				try {
+					const health = await api.getHealth();
+					update((state) => ({ ...state, serverStatus: health }));
+				} catch {
+					update((state) => ({
+						...state,
+						serverStatus: null,
 					isLoading: false,
 					error: 'Cannot connect to server'
 				}));
 				return;
 			}
 
-			// Check auth status (setup complete?)
-			try {
-				const authStatus = await api.getAuthStatus();
-				console.log('[auth] auth status:', authStatus);
-				update((state) => ({ ...state, authStatus }));
-			} catch {
-				console.log('[auth] auth status check failed');
-				update((state) => ({ ...state, authStatus: null }));
-			}
-
-			// Check if we have a stored token
-			const token = api.getToken();
-			console.log('[auth] stored token exists:', !!token);
-
-			if (token) {
-				// Verify token by making an authenticated request
+				// Check auth status (setup complete?)
 				try {
-					const user = await api.getCurrentUser();
-					console.log('[auth] token verified, user:', user?.username);
-					update((state) => ({
-						...state,
-						isAuthenticated: true,
+					const authStatus = await api.getAuthStatus();
+					update((state) => ({ ...state, authStatus }));
+				} catch {
+					update((state) => ({ ...state, authStatus: null }));
+				}
+
+				// Check if we have a stored token
+				const token = api.getToken();
+
+				if (token) {
+					// Verify token by making an authenticated request
+					try {
+						const user = await api.getCurrentUser();
+						update((state) => ({
+							...state,
+							isAuthenticated: true,
 						isLoading: false,
 						user
 					}));
-				} catch (err) {
-					if (err instanceof ApiError && err.isUnauthorized) {
-						// Token is invalid
-						console.log('[auth] token invalid (401/403), clearing');
-						api.setToken(null);
-						update((state) => ({
-							...state,
+					} catch (err) {
+						if (err instanceof ApiError && err.isUnauthorized) {
+							// Token is invalid
+							api.setToken(null);
+							update((state) => ({
+								...state,
 							isAuthenticated: false,
 							isLoading: false,
 							user: null,
 							error: 'Session expired. Please log in again.'
 						}));
-					} else {
-						// Network error or server issue - keep token, try again later
-						console.log('[auth] token verify failed (network?), keeping token');
-						update((state) => ({
-							...state,
-							isAuthenticated: true,
-							isLoading: false,
-							error: 'Could not verify session'
-						}));
+						} else {
+							// Fail closed for unknown auth verification failures.
+							api.setToken(null);
+							update((state) => ({
+								...state,
+								isAuthenticated: false,
+								isLoading: false,
+								user: null,
+								error: 'Could not verify your session. Please log in again.'
+							}));
+						}
 					}
-				}
-			} else {
-				console.log('[auth] no token, showing login');
-				update((state) => ({
-					...state,
-					isAuthenticated: false,
+				} else {
+					update((state) => ({
+						...state,
+						isAuthenticated: false,
 					isLoading: false,
 					user: null
 				}));
 			}
 		},
 
-		// Login with username and password
-		async loginWithCredentials(username: string, password: string) {
-			console.log('[auth] loginWithCredentials called');
-			update((state) => ({ ...state, error: null }));
+			// Login with username and password
+			async loginWithCredentials(username: string, password: string) {
+				update((state) => ({ ...state, error: null }));
 
-			try {
-				console.log('[auth] calling api.login...');
-				const response = await api.login({ username, password });
-				console.log('[auth] api.login returned:', { hasToken: !!response?.access_token, hasUser: !!response?.user });
-				api.setToken(response.access_token);
-				console.log('[auth] token stored, updating state to authenticated');
-				update((state) => ({
-					...state,
-					isAuthenticated: true,
-					error: null,
-					user: response.user
-				}));
-				console.log('[auth] state updated, returning true');
-				return true;
-			} catch (err) {
-				console.error('[auth] loginWithCredentials error:', err);
-				const message =
-					err instanceof ApiError
-						? err.message
+				try {
+					const response = await api.login({ username, password });
+					api.setToken(response.access_token);
+					update((state) => ({
+						...state,
+						isAuthenticated: true,
+						error: null,
+						user: response.user
+					}));
+					return true;
+				} catch (err) {
+					const message =
+						err instanceof ApiError
+							? err.message
 						: 'Could not connect to server';
 				update((state) => ({
 					...state,

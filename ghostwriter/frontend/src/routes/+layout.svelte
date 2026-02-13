@@ -36,13 +36,7 @@
 		}
 	});
 
-	// Debug: log reactive state changes
-	$effect(() => {
-		console.log('[layout] state:', { isLoading: $isLoading, isAuthenticated: $isAuthenticated });
-	});
-
 	onMount(() => {
-		console.log('[layout] onMount, calling auth.init()');
 		auth.init();
 	});
 </script>
