@@ -6,6 +6,8 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Progress } from '$lib/components/ui/progress';
+	import { formatUTCDate, parseUTC } from '$lib/utils/date';
+	import { downloadDigestFile, getDigestStatusBadgeVariant } from '$lib/utils/digest';
 	import { toast } from 'svelte-sonner';
 	import {
 		Activity,
@@ -103,16 +105,8 @@
 		}
 	}
 
-	function parseUTC(dateStr: string): Date {
-		// API returns naive UTC datetimes (no Z suffix) — ensure they're parsed as UTC
-		if (!dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
-			return new Date(dateStr + 'Z');
-		}
-		return new Date(dateStr);
-	}
-
 	function formatDate(dateStr: string): string {
-		return parseUTC(dateStr).toLocaleDateString('en-US', {
+		return formatUTCDate(dateStr, {
 			month: 'short',
 			day: 'numeric',
 			hour: 'numeric',
@@ -138,31 +132,10 @@
 
 	async function downloadDigest(filename: string) {
 		try {
-			const { blob, filename: resolved } = await api.downloadDigest(filename);
-			const url = URL.createObjectURL(blob);
-			const anchor = document.createElement('a');
-			anchor.href = url;
-			anchor.download = resolved;
-			anchor.click();
-			URL.revokeObjectURL(url);
+			await downloadDigestFile(filename);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Unknown error';
 			toast.error('Failed to download digest', { description: message });
-		}
-	}
-
-	function getStatusBadgeVariant(
-		status: string
-	): 'default' | 'secondary' | 'destructive' | 'outline' {
-		switch (status) {
-			case 'completed':
-				return 'default';
-			case 'processing':
-				return 'secondary';
-			case 'failed':
-				return 'destructive';
-			default:
-				return 'outline';
 		}
 	}
 </script>
@@ -411,7 +384,7 @@
 								</p>
 							</div>
 							<div class="flex items-center gap-2">
-								<Badge variant={getStatusBadgeVariant(digest.status)}>
+									<Badge variant={getDigestStatusBadgeVariant(digest.status)}>
 									{digest.status}
 								</Badge>
 								{#if digest.filename && digest.status === 'completed'}
