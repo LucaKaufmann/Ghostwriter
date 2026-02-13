@@ -827,38 +827,45 @@
 		<Card.Content class="space-y-3">
 			<!-- Wallabag -->
 			<div class="rounded-lg border">
-				<button
-					class="flex w-full items-center justify-between p-3 text-left"
-					onclick={() => (wallabagExpanded = !wallabagExpanded)}
-				>
-					<div>
+				<div class="flex items-center justify-between gap-2 p-3">
+					<button
+						type="button"
+						class="min-w-0 flex-1 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						onclick={() => (wallabagExpanded = !wallabagExpanded)}
+						aria-expanded={wallabagExpanded}
+					>
 						<p class="font-medium">Wallabag</p>
 						<p class="text-sm text-muted-foreground">Read-it-later integration</p>
-					</div>
+					</button>
 					<div class="flex items-center gap-2">
 						{#if wallabagConfigQuery.data}
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<div onclick={(e) => e.stopPropagation()}>
-								<Switch
-									checked={wbEnabled}
-									onCheckedChange={(checked) => {
-										wbEnabled = checked;
-										updateWallabagMutation.mutate({ enabled: checked });
-									}}
-								/>
-							</div>
+							<Switch
+								checked={wbEnabled}
+								aria-label="Enable Wallabag integration"
+								onCheckedChange={(checked) => {
+									wbEnabled = checked;
+									updateWallabagMutation.mutate({ enabled: checked });
+								}}
+							/>
 						{/if}
-							{#if clientConfigQuery.data?.wallabag?.enabled}
-								<CheckCircle2 class="h-5 w-5 text-success" />
+						{#if clientConfigQuery.data?.wallabag?.enabled}
+							<CheckCircle2 class="h-5 w-5 text-success" />
+						{/if}
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							onclick={() => (wallabagExpanded = !wallabagExpanded)}
+							aria-label={wallabagExpanded ? 'Collapse Wallabag settings' : 'Expand Wallabag settings'}
+						>
+							{#if wallabagExpanded}
+								<ChevronUp class="h-4 w-4 text-muted-foreground" />
+							{:else}
+								<ChevronDown class="h-4 w-4 text-muted-foreground" />
 							{/if}
-						{#if wallabagExpanded}
-							<ChevronUp class="h-4 w-4 text-muted-foreground" />
-						{:else}
-							<ChevronDown class="h-4 w-4 text-muted-foreground" />
-						{/if}
+						</Button>
 					</div>
-				</button>
+				</div>
 
 				{#if wallabagExpanded}
 					<div class="border-t p-4 space-y-4">
