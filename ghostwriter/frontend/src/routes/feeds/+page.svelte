@@ -1,5 +1,10 @@
 <script lang="ts">
-	import FeedsPage from '$lib/components/features/feeds/FeedsPage.svelte';
+	const feedsPageModule = import('$lib/components/features/feeds/FeedsPage.svelte');
 </script>
 
-<FeedsPage />
+{#await feedsPageModule}
+	<div class="py-12 text-center text-sm text-muted-foreground">Loading feeds…</div>
+{:then module}
+	{@const FeedsPage = module.default}
+	<FeedsPage />
+{/await}

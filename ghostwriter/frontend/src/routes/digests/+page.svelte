@@ -1,5 +1,10 @@
 <script lang="ts">
-	import DigestsPage from '$lib/components/features/digests/DigestsPage.svelte';
+	const digestsPageModule = import('$lib/components/features/digests/DigestsPage.svelte');
 </script>
 
-<DigestsPage />
+{#await digestsPageModule}
+	<div class="py-12 text-center text-sm text-muted-foreground">Loading digests…</div>
+{:then module}
+	{@const DigestsPage = module.default}
+	<DigestsPage />
+{/await}

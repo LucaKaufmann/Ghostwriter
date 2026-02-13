@@ -31,17 +31,23 @@
 
 	const configQuery = createQuery(() => ({
 		queryKey: ['config'],
-		queryFn: () => api.getPublicConfig()
+		queryFn: () => api.getPublicConfig(),
+		staleTime: 5 * 60 * 1000,
+		refetchOnWindowFocus: false
 	}));
 
 	const feedsQuery = createQuery(() => ({
 		queryKey: ['feeds'],
-		queryFn: () => api.getFeeds()
+		queryFn: () => api.getFeeds(),
+		staleTime: 2 * 60 * 1000,
+		refetchOnWindowFocus: false
 	}));
 
 	const digestsQuery = createQuery(() => ({
 		queryKey: ['digests', { limit: 5 }],
-		queryFn: () => api.getDigests({ limit: 5 })
+		queryFn: () => api.getDigests({ limit: 5 }),
+		staleTime: 30 * 1000,
+		refetchOnWindowFocus: false
 	}));
 
 	function getStartOfWeek(): string {
@@ -57,12 +63,16 @@
 	const weeklyDigestsQuery = createQuery(() => ({
 		queryKey: ['digests', { since: getStartOfWeek(), status: 'completed', limit: 100 }],
 		queryFn: () =>
-			api.getDigests({ since: getStartOfWeek(), status: 'completed', limit: 100 })
+			api.getDigests({ since: getStartOfWeek(), status: 'completed', limit: 100 }),
+		staleTime: 2 * 60 * 1000,
+		refetchOnWindowFocus: false
 	}));
 
 	const schedulesQuery = createQuery(() => ({
 		queryKey: ['schedules'],
-		queryFn: () => api.getSchedules()
+		queryFn: () => api.getSchedules(),
+		staleTime: 2 * 60 * 1000,
+		refetchOnWindowFocus: false
 	}));
 
 	// State

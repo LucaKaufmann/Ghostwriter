@@ -48,6 +48,8 @@
 	const digestsQuery = createQuery(() => ({
 		queryKey: ['digests', queryParams.status, queryParams.period, queryParams.limit],
 		queryFn: () => api.getDigests(queryParams),
+		staleTime: 30 * 1000,
+		refetchOnWindowFocus: false,
 		refetchInterval: (query) => {
 			const hasProcessing = query.state.data?.some((digest) => digest.status === 'processing');
 			return hasProcessing ? 5000 : 30000;
