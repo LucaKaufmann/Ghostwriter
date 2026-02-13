@@ -160,7 +160,12 @@
 
 	$effect(() => {
 		const availableIds = new Set(filteredFeeds.map((feed) => feed.id));
-		selectedFeedIds = selectedFeedIds.filter((id) => availableIds.has(id));
+		const nextSelected = selectedFeedIds.filter((id) => availableIds.has(id));
+		const unchanged =
+			nextSelected.length === selectedFeedIds.length &&
+			nextSelected.every((id, index) => id === selectedFeedIds[index]);
+		if (unchanged) return;
+		selectedFeedIds = nextSelected;
 	});
 
 	function resetForm() {
