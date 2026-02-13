@@ -1,42 +1,64 @@
-# sv
+# Ghostwriter Frontend
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+SvelteKit frontend for Ghostwriter's web UI. This app is served as static assets by the FastAPI backend in production.
 
-## Creating a project
+## Requirements
+- Node.js 20+
+- npm 10+
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Local Development
+From this directory:
 
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv create --template minimal --types ts --no-install frontend
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+```bash
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+The app uses `/api` as the backend base path. In local development, requests are proxied by Vite.
 
-To create a production version of your app:
+## Scripts
+- `npm run dev` - start local dev server
+- `npm run check` - run Svelte + TypeScript diagnostics
+- `npm run build` - production build (adapter-static)
+- `npm run preview` - preview built app
 
-```sh
-npm run build
-```
+## Architecture
+- `src/routes/` - route entry files (thin page containers)
+- `src/lib/components/features/` - feature-level page implementations
+- `src/lib/components/ui/` - shared shadcn/bits primitives
+- `src/lib/components/layout/` - app shell, login, loading, theme switch
+- `src/lib/api/` - typed API client
+- `src/lib/stores/` - auth and theme state
+- `src/lib/utils/` - shared helpers (`date`, `digest`, etc.)
 
-You can preview the production build with `npm run preview`.
+## Theming
+Ghostwriter supports `light`, `dark`, and `system` modes.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Implementation details:
+- Global tokens live in `src/routes/layout.css`
+- Runtime mode behavior uses `mode-watcher`
+- Theme preference is managed through `src/lib/stores/theme.ts`
+- Theme selector UI is `src/lib/components/layout/ThemeToggle.svelte`
+
+When adding UI:
+- Use tokenized classes (`bg-background`, `text-muted-foreground`, semantic status tokens)
+- Avoid hardcoded color classes for status states
+- Verify contrast in both light and dark modes
+
+## Working Conventions
+- Keep route `+page.svelte` files small and orchestration-focused
+- Add substantial UI under `src/lib/components/features/<domain>/`
+- Reuse existing utility helpers before creating page-local helpers
+- Prefer existing UI primitives from `src/lib/components/ui/`
+
+## QA Checklist
+Before opening a PR:
+1. Run `npm run check`
+2. Run `npm run build`
+3. Test changed screens in desktop + mobile breakpoints
+4. Validate light and dark mode visuals
+5. Verify keyboard access and focus behavior for changed interactions
+
+## Build Output
+`npm run build` outputs static assets to `build/` (via `@sveltejs/adapter-static`).
+The backend serves these files in containerized deployments.
