@@ -1,67 +1,42 @@
-# Ghostwriter Frontend
+# sv
 
-SvelteKit frontend for Ghostwriter's web UI. This app is served as static assets by the FastAPI backend in production.
+Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
 
-## Requirements
-- Node.js 20+
-- npm 10+
+## Creating a project
 
-## Local Development
-From this directory:
+If you're seeing this, you've probably already done this step. Congrats!
 
-```bash
-npm install
-npm run dev
+```sh
+# create a new project
+npx sv create my-app
 ```
 
-The app uses `/api` as the backend base path. In local development, requests are proxied by Vite.
+To recreate this project with the same configuration:
 
-## Scripts
-- `npm run dev` - start local dev server
-- `npm run check` - run Svelte + TypeScript diagnostics
-- `npm run build` - production build (adapter-static)
-- `npm run preview` - preview built app
-- `npm run test:e2e` - run Playwright smoke + theme snapshot checks
-- `npm run test:e2e:update` - update Playwright snapshot baselines
+```sh
+# recreate this project
+npx sv create --template minimal --types ts --no-install frontend
+```
 
-## Architecture
-- `src/routes/` - route entry files (thin page containers)
-- `src/lib/components/features/` - feature-level page implementations
-- `src/lib/components/ui/` - shared shadcn/bits primitives
-- `src/lib/components/layout/` - app shell, login, loading, theme switch
-- `src/lib/api/` - typed API client
-- `src/lib/stores/` - auth and theme state
-- `src/lib/utils/` - shared helpers (`date`, `digest`, etc.)
+## Developing
 
-## Theming
-Ghostwriter supports `light`, `dark`, and `system` modes.
+Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
 
-Implementation details:
-- Global tokens live in `src/routes/layout.css`
-- Runtime mode behavior uses `mode-watcher`
-- Theme preference is managed through `src/lib/stores/theme.ts`
-- Theme selector UI is `src/lib/components/layout/ThemeToggle.svelte`
+```sh
+npm run dev
 
-When adding UI:
-- Use tokenized classes (`bg-background`, `text-muted-foreground`, semantic status tokens)
-- Avoid hardcoded color classes for status states
-- Verify contrast in both light and dark modes
+# or start the server and open the app in a new browser tab
+npm run dev -- --open
+```
 
-## Working Conventions
-- Keep route `+page.svelte` files small and orchestration-focused
-- Add substantial UI under `src/lib/components/features/<domain>/`
-- Reuse existing utility helpers before creating page-local helpers
-- Prefer existing UI primitives from `src/lib/components/ui/`
+## Building
 
-## QA Checklist
-Before opening a PR:
-1. Run `npm run check`
-2. Run `npm run build`
-3. Run `npm run test:e2e` for smoke + theme screenshot coverage
-4. Test changed screens in desktop + mobile breakpoints
-5. Validate light and dark mode visuals
-6. Verify keyboard access and focus behavior for changed interactions
+To create a production version of your app:
 
-## Build Output
-`npm run build` outputs static assets to `build/` (via `@sveltejs/adapter-static`).
-The backend serves these files in containerized deployments.
+```sh
+npm run build
+```
+
+You can preview the production build with `npm run preview`.
+
+> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
