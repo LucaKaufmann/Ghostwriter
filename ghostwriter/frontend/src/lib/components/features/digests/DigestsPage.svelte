@@ -37,6 +37,7 @@
 	let sortBy = $state<'created_at' | 'total_articles' | 'duration'>('created_at');
 	let sortOrder = $state<'desc' | 'asc'>('desc');
 	let digestToDelete = $state<Digest | null>(null);
+	let lastFilterSignature = $state('all:all');
 
 	const queryParams = $derived.by(() => ({
 		limit,
@@ -81,8 +82,9 @@
 	}));
 
 	$effect(() => {
-		statusFilter;
-		periodFilter;
+		const signature = `${statusFilter}:${periodFilter}`;
+		if (signature === lastFilterSignature) return;
+		lastFilterSignature = signature;
 		limit = PAGE_SIZE;
 	});
 
