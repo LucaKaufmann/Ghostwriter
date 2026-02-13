@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
+	import { ModeWatcher, createInitialModeExpression } from 'mode-watcher';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import { auth, isAuthenticated, isLoading } from '$lib/stores/auth';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
@@ -9,6 +10,15 @@
 	import './layout.css';
 
 	let { children } = $props();
+
+	const themeColors = {
+		light: '#f8fafc',
+		dark: '#0f172a'
+	};
+
+	const initialModeExpression = createInitialModeExpression({
+		themeColors
+	});
 
 	// Create TanStack Query client
 	const queryClient = new QueryClient({
@@ -37,7 +47,12 @@
 	});
 </script>
 
+<svelte:head>
+	{@html `<script>${initialModeExpression}</script>`}
+</svelte:head>
+
 <QueryClientProvider client={queryClient}>
+	<ModeWatcher disableHeadScriptInjection themeColors={themeColors} />
 	{#if $isLoading}
 		<LoadingScreen />
 	{:else if !$isAuthenticated}

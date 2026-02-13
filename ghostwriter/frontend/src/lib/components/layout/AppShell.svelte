@@ -4,6 +4,7 @@
 	import * as Sheet from '$lib/components/ui/sheet';
 	import { Separator } from '$lib/components/ui/separator';
 	import { auth, serverStatus } from '$lib/stores/auth';
+	import ThemeToggle from '$lib/components/layout/ThemeToggle.svelte';
 	import {
 		BookOpen,
 		LayoutDashboard,
@@ -70,6 +71,9 @@
 
 			<!-- Footer -->
 			<div class="border-t p-4">
+				<div class="mb-3">
+					<ThemeToggle showLabel />
+				</div>
 				{#if $serverStatus}
 					<p class="mb-2 text-xs text-muted-foreground">
 						v{$serverStatus.version} • {$serverStatus.ai_provider}
@@ -92,57 +96,63 @@
 				<span class="font-semibold">Ghostwriter</span>
 			</div>
 
-			<Sheet.Root bind:open={mobileMenuOpen}>
-				<Sheet.Trigger>
-					{#snippet child({ props })}
-						<Button {...props} variant="ghost" size="icon">
-							<Menu class="h-5 w-5" />
-							<span class="sr-only">Open menu</span>
-						</Button>
-					{/snippet}
-				</Sheet.Trigger>
-				<Sheet.Content side="right" class="w-64 p-0">
-					<Sheet.Header class="border-b px-6 py-4">
-						<Sheet.Title class="flex items-center gap-2">
-							<BookOpen class="h-5 w-5 text-primary" />
-							Ghostwriter
-						</Sheet.Title>
-					</Sheet.Header>
+			<div class="flex items-center gap-2">
+				<ThemeToggle size="sm" />
+					<Sheet.Root bind:open={mobileMenuOpen}>
+						<Sheet.Trigger>
+							{#snippet child({ props })}
+								<Button {...props} variant="ghost" size="icon">
+									<Menu class="h-5 w-5" />
+									<span class="sr-only">Open menu</span>
+								</Button>
+							{/snippet}
+						</Sheet.Trigger>
+						<Sheet.Content side="right" class="w-64 p-0">
+							<Sheet.Header class="border-b px-6 py-4">
+								<Sheet.Title class="flex items-center gap-2">
+									<BookOpen class="h-5 w-5 text-primary" />
+									Ghostwriter
+								</Sheet.Title>
+							</Sheet.Header>
 
-					<nav class="flex-1 space-y-1 p-4">
-						{#each navItems as item}
-							<a
-								href={item.href}
-								onclick={closeMobileMenu}
-								class="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors {isActive(
-									item.href
-								)
-									? 'bg-primary text-primary-foreground'
-									: 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}"
-							>
-								<item.icon class="h-4 w-4" />
-								{item.label}
-								<ChevronRight class="ml-auto h-4 w-4" />
-							</a>
-						{/each}
-					</nav>
+							<nav class="flex-1 space-y-1 p-4">
+								{#each navItems as item}
+									<a
+										href={item.href}
+										onclick={closeMobileMenu}
+										class="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors {isActive(
+											item.href
+										)
+											? 'bg-primary text-primary-foreground'
+											: 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}"
+									>
+										<item.icon class="h-4 w-4" />
+										{item.label}
+										<ChevronRight class="ml-auto h-4 w-4" />
+									</a>
+								{/each}
+							</nav>
 
-					<Separator />
+							<Separator />
 
-					<div class="p-4">
-						{#if $serverStatus}
-							<p class="mb-2 text-xs text-muted-foreground">
-								v{$serverStatus.version} • {$serverStatus.ai_provider}
-							</p>
-						{/if}
-						<Button variant="ghost" class="w-full justify-start" onclick={handleLogout}>
-							<LogOut class="mr-2 h-4 w-4" />
-							Logout
-						</Button>
-					</div>
-				</Sheet.Content>
-			</Sheet.Root>
-		</header>
+							<div class="p-4">
+								<div class="mb-3">
+									<ThemeToggle showLabel />
+								</div>
+								{#if $serverStatus}
+									<p class="mb-2 text-xs text-muted-foreground">
+										v{$serverStatus.version} • {$serverStatus.ai_provider}
+									</p>
+								{/if}
+								<Button variant="ghost" class="w-full justify-start" onclick={handleLogout}>
+									<LogOut class="mr-2 h-4 w-4" />
+									Logout
+								</Button>
+							</div>
+						</Sheet.Content>
+					</Sheet.Root>
+				</div>
+			</header>
 
 		<!-- Main Content -->
 		<main class="flex-1 min-w-0 overflow-y-auto">
