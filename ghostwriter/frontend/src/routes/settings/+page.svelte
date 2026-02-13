@@ -780,11 +780,11 @@
 							onclick={copyToken}
 							class="h-7 w-7"
 						>
-							{#if copiedToken}
-								<CheckCircle2 class="h-4 w-4 text-green-500" />
-							{:else}
-								<Copy class="h-4 w-4" />
-							{/if}
+								{#if copiedToken}
+									<CheckCircle2 class="h-4 w-4 text-success" />
+								{:else}
+									<Copy class="h-4 w-4" />
+								{/if}
 						</Button>
 					</div>
 				</div>
@@ -831,9 +831,9 @@
 								/>
 							</div>
 						{/if}
-						{#if clientConfigQuery.data?.wallabag?.enabled}
-							<CheckCircle2 class="h-5 w-5 text-green-500" />
-						{/if}
+							{#if clientConfigQuery.data?.wallabag?.enabled}
+								<CheckCircle2 class="h-5 w-5 text-success" />
+							{/if}
 						{#if wallabagExpanded}
 							<ChevronUp class="h-4 w-4 text-muted-foreground" />
 						{:else}
@@ -1000,8 +1000,8 @@
 								updateClientConfigMutation.mutate({ newsletters_enabled: checked });
 							}}
 						/>
-						{#if clientConfigQuery.data?.newsletters?.enabled}
-							<CheckCircle2 class="h-5 w-5 text-green-500" />
+							{#if clientConfigQuery.data?.newsletters?.enabled}
+								<CheckCircle2 class="h-5 w-5 text-success" />
 							<Button
 								variant="outline"
 								size="sm"
@@ -1142,12 +1142,12 @@
 							Uses the OPENAI_API_KEY environment variable configured on the server.
 						</p>
 					</div>
-					{#if configQuery.data?.ai_provider === 'openai'}
-						<CheckCircle2 class="h-5 w-5 text-green-500" />
-					{:else}
-						<AlertTriangle class="h-5 w-5 text-amber-500" />
-						<span class="text-sm text-muted-foreground">Key not configured</span>
-					{/if}
+						{#if configQuery.data?.ai_provider === 'openai'}
+							<CheckCircle2 class="h-5 w-5 text-success" />
+						{:else}
+							<AlertTriangle class="h-5 w-5 text-warning" />
+							<span class="text-sm text-muted-foreground">Key not configured</span>
+						{/if}
 				</div>
 			{/if}
 
@@ -1287,23 +1287,23 @@
 <Dialog.Root bind:open={showNewTokenDialog}>
 	<Dialog.Content class="sm:max-w-lg">
 		<Dialog.Header>
-			<Dialog.Title class="flex items-center gap-2">
-				<CheckCircle2 class="h-5 w-5 text-green-500" />
-				Token Created
-			</Dialog.Title>
+				<Dialog.Title class="flex items-center gap-2">
+					<CheckCircle2 class="h-5 w-5 text-success" />
+					Token Created
+				</Dialog.Title>
 			<Dialog.Description>
 				Copy this token now — you won't be able to see it again!
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="space-y-4">
-			<div class="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
-				<div class="flex items-start gap-2">
-					<AlertTriangle class="h-5 w-5 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
-					<p class="text-sm text-amber-800 dark:text-amber-200">
-						This is the only time you'll see this token. Store it somewhere safe!
-					</p>
+				<div class="rounded-lg border border-warning/30 bg-warning/10 p-4">
+					<div class="flex items-start gap-2">
+						<AlertTriangle class="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+						<p class="text-sm text-warning/90">
+							This is the only time you'll see this token. Store it somewhere safe!
+						</p>
+					</div>
 				</div>
-			</div>
 			<div class="flex items-center gap-2">
 				<Input
 					type="text"
@@ -1312,11 +1312,11 @@
 					class="font-mono text-sm"
 				/>
 				<Button variant="outline" size="icon" onclick={copyNewToken}>
-					{#if copiedNewToken}
-						<CheckCircle2 class="h-4 w-4 text-green-500" />
-					{:else}
-						<Copy class="h-4 w-4" />
-					{/if}
+						{#if copiedNewToken}
+							<CheckCircle2 class="h-4 w-4 text-success" />
+						{:else}
+							<Copy class="h-4 w-4" />
+						{/if}
 				</Button>
 			</div>
 		</div>
