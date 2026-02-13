@@ -5,6 +5,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import * as Select from '$lib/components/ui/select';
+	import * as Tabs from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -206,6 +207,9 @@
 	// Preview state
 	let wallabagPreview = $state<PreviewResponse | null>(null);
 	let newsletterPreview = $state<PreviewResponse | null>(null);
+	let settingsSection = $state<'general' | 'schedule' | 'integrations' | 'security' | 'logs'>(
+		'general'
+	);
 
 	const previewWallabagMutation = createMutation(() => ({
 		mutationFn: () => api.previewWallabag(),
@@ -527,6 +531,17 @@
 		<p class="text-muted-foreground">Configure your Ghostwriter instance</p>
 	</div>
 
+	<Tabs.Root bind:value={settingsSection}>
+		<Tabs.List class="grid h-auto w-full grid-cols-2 gap-2 bg-transparent p-0 md:grid-cols-5">
+			<Tabs.Trigger value="general">General</Tabs.Trigger>
+			<Tabs.Trigger value="schedule">Schedule</Tabs.Trigger>
+			<Tabs.Trigger value="integrations">Integrations</Tabs.Trigger>
+			<Tabs.Trigger value="security">Security</Tabs.Trigger>
+			<Tabs.Trigger value="logs">Logs</Tabs.Trigger>
+		</Tabs.List>
+
+		<Tabs.Content value="general" class="mt-4 space-y-6">
+
 	<!-- AI Configuration (Read-only) -->
 	<Card.Root>
 		<Card.Header>
@@ -558,6 +573,9 @@
 			{/if}
 		</Card.Content>
 	</Card.Root>
+
+		</Tabs.Content>
+		<Tabs.Content value="schedule" class="mt-4 space-y-6">
 
 	<!-- Schedule Configuration -->
 	<Card.Root>
@@ -666,6 +684,9 @@
 			{/if}
 		</Card.Content>
 	</Card.Root>
+
+		</Tabs.Content>
+		<Tabs.Content value="security" class="mt-4 space-y-6">
 
 	<!-- API Tokens -->
 	<Card.Root>
@@ -788,6 +809,9 @@
 			</p>
 		</Card.Content>
 	</Card.Root>
+
+		</Tabs.Content>
+		<Tabs.Content value="integrations" class="mt-4 space-y-6">
 
 	<!-- Integrations -->
 	<Card.Root>
@@ -1233,6 +1257,53 @@
 			{/if}
 		</Card.Content>
 	</Card.Root>
+
+		</Tabs.Content>
+		<Tabs.Content value="logs" class="mt-4 space-y-6">
+			<!-- Activity Logs -->
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2">
+						<FileText class="h-5 w-5" />
+						Activity Logs
+					</Card.Title>
+					<Card.Description>Download server log files for debugging</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					{#if logFilesQuery.isPending}
+						<div class="space-y-2">
+							<Skeleton class="h-10 w-full" />
+							<Skeleton class="h-10 w-full" />
+						</div>
+					{:else if logFilesQuery.data && logFilesQuery.data.length > 0}
+						<div class="space-y-2">
+							{#each logFilesQuery.data as logFile}
+								<div class="flex items-center justify-between rounded-lg border p-3">
+									<div>
+										<p class="text-sm font-medium">{logFile.filename}</p>
+										<p class="text-xs text-muted-foreground">{formatFileSize(logFile.size_bytes)}</p>
+									</div>
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => downloadLog(logFile.filename)}
+									>
+										<Download class="mr-2 h-4 w-4" />
+										Download
+									</Button>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<div class="py-8 text-center text-muted-foreground">
+							<FileText class="mx-auto mb-2 h-8 w-8 opacity-50" />
+							<p>No log files available</p>
+						</div>
+					{/if}
+				</Card.Content>
+			</Card.Root>
+		</Tabs.Content>
+	</Tabs.Root>
 </div>
 
 <!-- Create Token Dialog -->
@@ -1326,49 +1397,6 @@
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
-
-<!-- Activity Logs -->
-	<Card.Root>
-		<Card.Header>
-			<Card.Title class="flex items-center gap-2">
-				<FileText class="h-5 w-5" />
-				Activity Logs
-			</Card.Title>
-			<Card.Description>Download server log files for debugging</Card.Description>
-		</Card.Header>
-		<Card.Content>
-			{#if logFilesQuery.isPending}
-				<div class="space-y-2">
-					<Skeleton class="h-10 w-full" />
-					<Skeleton class="h-10 w-full" />
-				</div>
-			{:else if logFilesQuery.data && logFilesQuery.data.length > 0}
-				<div class="space-y-2">
-					{#each logFilesQuery.data as logFile}
-						<div class="flex items-center justify-between rounded-lg border p-3">
-							<div>
-								<p class="text-sm font-medium">{logFile.filename}</p>
-								<p class="text-xs text-muted-foreground">{formatFileSize(logFile.size_bytes)}</p>
-							</div>
-							<Button
-								variant="outline"
-								size="sm"
-								onclick={() => downloadLog(logFile.filename)}
-							>
-								<Download class="mr-2 h-4 w-4" />
-								Download
-							</Button>
-						</div>
-					{/each}
-				</div>
-			{:else}
-				<div class="text-center py-8 text-muted-foreground">
-					<FileText class="h-8 w-8 mx-auto mb-2 opacity-50" />
-					<p>No log files available</p>
-				</div>
-			{/if}
-		</Card.Content>
-	</Card.Root>
 
 <!-- Revoke Token Confirmation -->
 <AlertDialog.Root open={tokenToRevoke !== null}>
