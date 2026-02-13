@@ -5,6 +5,7 @@ RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts artic
 ## Features
 
 - **Web UI** - Modern, responsive dashboard for configuration and monitoring
+- **Theme Support** - Light, dark, and system theme support across web UI
 - **Wallabag Integration** - Include saved articles from a Wallabag instance
 - **RSS/Atom Feed Aggregation** - Parse and deduplicate articles from multiple feeds
 - **Content Extraction** - Clean article extraction via Trafilatura
@@ -197,10 +198,12 @@ After starting Ghostwriter, open `http://localhost:8080` in your browser. You'll
 ### Features
 
 - **Dashboard** - Server status, active jobs, quick actions, recent digests
-- **Feeds** - Add, search, and manage RSS/Atom feed subscriptions
-- **Digests** - View history, download EPUBs, see article contents
+- **Feeds** - Add, search, filter, and bulk-manage RSS/Atom feed subscriptions
+- **Digests** - Filter/sort history, download EPUBs, and open reader mode
 - **Newsletters** - Connect Gmail to include newsletter emails
-- **Settings** - Configure digest schedules, view AI settings
+- **Settings** - Tabbed configuration for schedules, integrations, security, and logs
+- **Reader Mode** - Adjustable reading width, text size, line height, and keyboard navigation
+- **Theme Controls** - Light / dark / system theme toggle in app shell and auth screen
 
 ### Development
 
@@ -210,6 +213,8 @@ To run the frontend in development mode:
 cd frontend
 npm install
 npm run dev
+npm run check
+npm run test:e2e
 ```
 
 The development server proxies API requests to `http://localhost:8080`. Make sure the FastAPI backend is running.
