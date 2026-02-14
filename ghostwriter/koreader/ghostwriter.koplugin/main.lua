@@ -7,9 +7,9 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
 
-local const = require("const")
-local GhostwriterSettings = require("settings")
-local GhostwriterSync = require("sync")
+local const = require("ghostwriter_const")
+local GhostwriterSettings = require("ghostwriter_settings")
+local GhostwriterSync = require("ghostwriter_sync")
 
 local ghostwriter = WidgetContainer:extend({
   name = "ghostwriter",
