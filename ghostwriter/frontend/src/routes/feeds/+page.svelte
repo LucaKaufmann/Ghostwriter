@@ -22,7 +22,8 @@
 		ExternalLink,
 		MoreHorizontal,
 		Loader2,
-		RotateCcw
+		RotateCcw,
+		TriangleAlert
 	} from 'lucide-svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 
@@ -123,6 +124,42 @@
 	let formMode = $state<'raw' | 'summarize'>('raw');
 	let formMaxArticles = $state(5);
 
+	// URL check state
+	let urlCheckResult = $state<'article' | 'podcast' | 'youtube' | null>(null);
+	let urlCheckLoading = $state(false);
+	let urlCheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const YOUTUBE_RE = /(?:https?:\/\/)?(?:www\.)?youtube\.com\/(?:@[\w.-]+|channel\/[\w-]+|c\/[\w-]+|user\/[\w-]+|feeds\/videos\.xml|watch\?v=|shorts\/|embed\/|live\/)|(?:https?:\/\/)?youtu\.be\//i;
+
+	function checkUrl(url: string) {
+		// Clear previous
+		clearTimeout(urlCheckTimer);
+		urlCheckResult = null;
+		urlCheckLoading = false;
+
+		const trimmed = url.trim();
+		if (!trimmed || !trimmed.startsWith('http')) return;
+
+		// Instant YouTube detection (no network)
+		if (YOUTUBE_RE.test(trimmed)) {
+			urlCheckResult = 'youtube';
+			return;
+		}
+
+		// Debounce network check
+		urlCheckLoading = true;
+		urlCheckTimer = setTimeout(async () => {
+			try {
+				const resp = await api.checkFeedUrl(trimmed);
+				urlCheckResult = resp.feed_type;
+			} catch {
+				urlCheckResult = null;
+			} finally {
+				urlCheckLoading = false;
+			}
+		}, 600);
+	}
+
 	// Edit form state
 	let editTitle = $state('');
 	let editMode = $state<'raw' | 'summarize'>('raw');
@@ -144,6 +181,9 @@
 		formTitle = '';
 		formMode = 'raw';
 		formMaxArticles = 5;
+		clearTimeout(urlCheckTimer);
+		urlCheckResult = null;
+		urlCheckLoading = false;
 	}
 
 	function handleAddFeed(e: Event) {
@@ -466,8 +506,31 @@
 					type="url"
 					placeholder="https://example.com/feed.xml"
 					bind:value={formUrl}
+					oninput={() => checkUrl(formUrl)}
 					required
 				/>
+				{#if urlCheckLoading}
+					<div class="flex items-center gap-2 text-xs text-muted-foreground">
+						<Loader2 class="h-3 w-3 animate-spin" />
+						Checking feed type...
+					</div>
+				{:else if urlCheckResult === 'youtube'}
+					<div class="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+						<TriangleAlert class="mt-0.5 h-4 w-4 flex-shrink-0" />
+						<span>
+							This looks like a YouTube URL. You can still add it, but it may work better as a
+							<a href="/youtube" class="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100">YouTube feed</a>.
+						</span>
+					</div>
+				{:else if urlCheckResult === 'podcast'}
+					<div class="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+						<TriangleAlert class="mt-0.5 h-4 w-4 flex-shrink-0" />
+						<span>
+							This looks like a podcast feed. You can still add it, but it may work better as a
+							<a href="/podcasts" class="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100">Podcast feed</a>.
+						</span>
+					</div>
+				{/if}
 			</div>
 			<div class="space-y-2">
 				<Label for="title">Title (optional)</Label>

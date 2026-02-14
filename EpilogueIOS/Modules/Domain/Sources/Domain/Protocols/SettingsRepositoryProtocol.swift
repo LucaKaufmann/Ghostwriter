@@ -122,6 +122,12 @@ public protocol SettingsRepositoryProtocol: Sendable {
     /// Stores the Ghostwriter API key in Keychain
     func setGhostwriterAPIKey(_ key: String?) async throws
 
+    /// Gets whether synced digests should automatically download EPUB files
+    func getGhostwriterDownloadEpubsOnSync() async throws -> Bool
+
+    /// Sets whether synced digests should automatically download EPUB files
+    func setGhostwriterDownloadEpubsOnSync(_ enabled: Bool) async throws
+
     /// Gets the timestamp of the last feed sync with Ghostwriter
     func getLastFeedSyncTime() async throws -> Date?
 

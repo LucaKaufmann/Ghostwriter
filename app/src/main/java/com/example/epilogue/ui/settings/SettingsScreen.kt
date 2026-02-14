@@ -226,6 +226,7 @@ fun SettingsScreen(
             SettingsSection(title = "Ghostwriter Backend") {
                 GhostwriterInput(
                     enabled = uiState.ghostwriterEnabled,
+                    downloadEpubsOnSync = uiState.ghostwriterDownloadEpubsOnSync,
                     url = uiState.ghostwriterUrl,
                     apiKey = uiState.ghostwriterApiKey,
                     isTesting = uiState.ghostwriterTesting,
@@ -237,6 +238,7 @@ fun SettingsScreen(
                     onSaveUrl = viewModel::saveGhostwriterUrl,
                     onApiKeyChange = viewModel::updateGhostwriterApiKey,
                     onSaveApiKey = viewModel::saveGhostwriterApiKey,
+                    onDownloadEpubsOnSyncChange = viewModel::updateGhostwriterDownloadEpubsOnSync,
                     onTestConnection = viewModel::testGhostwriterConnection
                 )
             }
@@ -594,6 +596,7 @@ fun CustomExportInput(
 @Composable
 fun GhostwriterInput(
     enabled: Boolean,
+    downloadEpubsOnSync: Boolean,
     url: String,
     apiKey: String,
     isTesting: Boolean,
@@ -605,6 +608,7 @@ fun GhostwriterInput(
     onSaveUrl: () -> Unit,
     onApiKeyChange: (String) -> Unit,
     onSaveApiKey: () -> Unit,
+    onDownloadEpubsOnSyncChange: (Boolean) -> Unit,
     onTestConnection: () -> Unit
 ) {
     var showApiKey by remember { mutableStateOf(false) }
@@ -730,6 +734,32 @@ fun GhostwriterInput(
                     text = "Run Ghostwriter on your home server or NAS. Supports local AI (Ollama) or cloud providers.",
                     style = MaterialTheme.typography.bodySmall
                 )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Download EPUBs on sync",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = "When off, digest entries sync first and EPUB files can be downloaded manually from History.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = downloadEpubsOnSync,
+                        onCheckedChange = onDownloadEpubsOnSyncChange
+                    )
+                }
 
                 // Server health summary (shown after successful test)
                 if (health != null) {

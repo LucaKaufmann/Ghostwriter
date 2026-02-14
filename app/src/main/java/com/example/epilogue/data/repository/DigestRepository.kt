@@ -192,6 +192,40 @@ class DigestRepository @Inject constructor(
         digestDao.getAllRemoteIds()
 
     /**
+     * Update the local EPUB path for an existing digest.
+     */
+    suspend fun updateDigestEpubPath(digestId: Long, epubFilePath: String) {
+        digestDao.updateEpubFilePath(digestId, epubFilePath)
+    }
+
+    /**
+     * Delete stale local EPUB files for Ghostwriter-synced digests while keeping digest metadata.
+     *
+     * @param retentionMillis Keep files modified within this retention window.
+     * @return Number of files deleted.
+     */
+    suspend fun cleanupStaleRemoteEpubFiles(retentionMillis: Long): Int {
+        val cutoff = System.currentTimeMillis() - retentionMillis
+        var deletedCount = 0
+
+        digestDao.getRemoteDigests().forEach { digest ->
+            val path = digest.epubFilePath
+            if (path.isBlank()) return@forEach
+
+            val file = File(path)
+            if (!file.exists()) return@forEach
+
+            if (file.lastModified() < cutoff) {
+                if (file.delete()) {
+                    deletedCount++
+                }
+            }
+        }
+
+        return deletedCount
+    }
+
+    /**
      * Save a digest downloaded from Ghostwriter backend.
      * Now supports syncing individual article records for in-app display.
      *
