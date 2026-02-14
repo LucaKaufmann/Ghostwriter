@@ -114,6 +114,7 @@ export interface ClientConfigResponse {
 	cover_provider: 'gpt-image-1' | 'nano-banana';
 	cover_quality: 'low' | 'medium' | 'high';
 	cover_prompt: string;
+	cover_overlay_enabled: boolean;
 	cover_openai_api_key: string;
 	cover_gemini_api_key: string;
 	updated_at: string;
@@ -141,6 +142,7 @@ export interface ClientConfigUpdate {
 	cover_provider?: 'gpt-image-1' | 'nano-banana';
 	cover_quality?: 'low' | 'medium' | 'high';
 	cover_prompt?: string;
+	cover_overlay_enabled?: boolean;
 	cover_openai_api_key?: string;
 	cover_gemini_api_key?: string;
 	client_updated_at?: string;

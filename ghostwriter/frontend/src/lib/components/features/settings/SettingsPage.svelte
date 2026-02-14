@@ -197,6 +197,7 @@
 				'cover_provider',
 				'cover_quality',
 				'cover_prompt',
+				'cover_overlay_enabled',
 				'cover_openai_api_key',
 				'cover_gemini_api_key'
 			];
@@ -205,6 +206,7 @@
 				coverProvider = (data.cover_provider as 'gpt-image-1' | 'nano-banana') ?? 'gpt-image-1';
 				coverQuality = (data.cover_quality as 'low' | 'medium' | 'high') ?? 'low';
 				coverPrompt = data.cover_prompt ?? '';
+				coverOverlayEnabled = data.cover_overlay_enabled ?? true;
 				coverOpenAIKey = data.cover_openai_api_key ?? '';
 				coverGeminiKey = data.cover_gemini_api_key ?? '';
 			}
@@ -349,6 +351,7 @@
 	let coverProvider = $state<'gpt-image-1' | 'nano-banana'>('gpt-image-1');
 	let coverQuality = $state<'low' | 'medium' | 'high'>('low');
 	let coverPrompt = $state('');
+	let coverOverlayEnabled = $state(true);
 	let coverOpenAIKey = $state('');
 	let coverGeminiKey = $state('');
 	let coverSettingsInitialized = $state(false);
@@ -388,6 +391,7 @@
 			coverProvider = (data.cover_provider as 'gpt-image-1' | 'nano-banana') ?? 'gpt-image-1';
 			coverQuality = (data.cover_quality as 'low' | 'medium' | 'high') ?? 'low';
 			coverPrompt = data.cover_prompt ?? '';
+			coverOverlayEnabled = data.cover_overlay_enabled ?? true;
 			coverOpenAIKey = data.cover_openai_api_key ?? '';
 			coverGeminiKey = data.cover_gemini_api_key ?? '';
 			coverSettingsInitialized = true;
@@ -410,6 +414,7 @@
 			cover_provider: coverProvider,
 			cover_quality: coverQuality,
 			cover_prompt: coverPrompt.trim(),
+			cover_overlay_enabled: coverOverlayEnabled,
 			cover_openai_api_key: coverOpenAIKey.trim(),
 			cover_gemini_api_key: coverGeminiKey.trim()
 		});
@@ -423,6 +428,7 @@
 			coverProvider !== (data.cover_provider ?? 'gpt-image-1') ||
 			coverQuality !== (data.cover_quality ?? 'low') ||
 			coverPrompt.trim() !== (data.cover_prompt ?? '') ||
+			coverOverlayEnabled !== (data.cover_overlay_enabled ?? true) ||
 			coverOpenAIKey.trim() !== (data.cover_openai_api_key ?? '') ||
 			coverGeminiKey.trim() !== (data.cover_gemini_api_key ?? '')
 		);
@@ -760,6 +766,14 @@
 							<p class="text-sm text-muted-foreground">Create a fresh image for every digest</p>
 						</div>
 						<Switch checked={coverEnabled} onCheckedChange={(checked) => (coverEnabled = checked)} />
+					</div>
+
+					<div class="flex items-center justify-between rounded-lg border p-3">
+						<div>
+							<p class="font-medium">Cover metadata overlay</p>
+							<p class="text-sm text-muted-foreground">Add title, date, and sources to AI-generated covers</p>
+						</div>
+						<Switch checked={coverOverlayEnabled} onCheckedChange={(checked) => (coverOverlayEnabled = checked)} />
 					</div>
 
 					<div class="grid gap-4 sm:grid-cols-2">
