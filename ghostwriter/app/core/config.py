@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # AI Behavior
     ai_timeout_seconds: int = Field(default=60, description="Per-article AI timeout")
     ai_max_retries: int = Field(default=2, description="Retries before fallback")
+    cover_generation_timeout_seconds: int = Field(
+        default=60,
+        description="Timeout for digest cover image generation",
+    )
 
     # Transcription (whisper.cpp / OpenAI Whisper API)
     whisper_cpp_binary: str = Field(

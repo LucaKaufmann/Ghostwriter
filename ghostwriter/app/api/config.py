@@ -53,6 +53,11 @@ class ConfigResponse(BaseModel):
     media_processing_interval_hours: int
     include_podcasts_in_digest: bool
     include_youtube_in_digest: bool
+    # Cover generation
+    cover_enabled: bool
+    cover_provider: str
+    cover_quality: str
+    cover_prompt: str
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -87,6 +92,22 @@ class ConfigUpdateRequest(BaseModel):
     )
     include_youtube_in_digest: bool | None = Field(
         default=None, description="Include completed YouTube transcripts in digests"
+    )
+    cover_enabled: bool | None = Field(
+        default=None,
+        description="Generate an AI cover image for each digest",
+    )
+    cover_provider: str | None = Field(
+        default=None,
+        description="Cover provider: gpt-image-1 or nano-banana",
+    )
+    cover_quality: str | None = Field(
+        default=None,
+        description="Cover quality tier for gpt-image-1: low, medium, high",
+    )
+    cover_prompt: str | None = Field(
+        default=None,
+        description="Optional additional prompt text for cover generation",
     )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
@@ -163,6 +184,10 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         media_processing_interval_hours=config.media_processing_interval_hours,
         include_podcasts_in_digest=config.include_podcasts_in_digest,
         include_youtube_in_digest=config.include_youtube_in_digest,
+        cover_enabled=config.cover_enabled,
+        cover_provider=config.cover_provider,
+        cover_quality=config.cover_quality,
+        cover_prompt=config.cover_prompt,
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -260,6 +285,28 @@ async def update_config(
 
     if request.media_processing_interval_hours is not None:
         config.media_processing_interval_hours = request.media_processing_interval_hours
+
+    if request.cover_enabled is not None:
+        config.cover_enabled = request.cover_enabled
+
+    if request.cover_provider is not None:
+        if request.cover_provider not in ("gpt-image-1", "nano-banana"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="cover_provider must be 'gpt-image-1' or 'nano-banana'",
+            )
+        config.cover_provider = request.cover_provider
+
+    if request.cover_quality is not None:
+        if request.cover_quality not in ("low", "medium", "high"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="cover_quality must be 'low', 'medium', or 'high'",
+            )
+        config.cover_quality = request.cover_quality
+
+    if request.cover_prompt is not None:
+        config.cover_prompt = request.cover_prompt.strip()
 
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour
