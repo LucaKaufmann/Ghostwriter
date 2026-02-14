@@ -355,6 +355,32 @@
 		return mode === 'summarize' ? 'default' : 'secondary';
 	}
 
+	function getYouTubeChannelName(article: DigestArticle): string | null {
+		if (article.content_type !== 'youtube') return null;
+
+		const authorName = article.author?.trim();
+		if (authorName) return authorName;
+
+		const feedTitle = article.feed_title?.trim();
+		if (!feedTitle) return null;
+		if (feedTitle.toLowerCase() === 'youtube') return null;
+		return feedTitle;
+	}
+
+	function getTocSourceLabel(article: DigestArticle): string {
+		if (article.content_type !== 'youtube') {
+			return article.feed_title;
+		}
+
+		const channelName = getYouTubeChannelName(article);
+		return channelName ? `YouTube · ${channelName}` : 'YouTube';
+	}
+
+	function getArticleSourceLabel(article: DigestArticle): string {
+		if (article.content_type === 'youtube') return 'YouTube';
+		return article.feed_title;
+	}
+
 	function tocItemClasses(article: DigestArticle): string {
 		const isSelected = article.id === selectedArticleId;
 		return [
@@ -440,7 +466,7 @@
 										onclick={() => selectArticle(article.id)}
 									>
 										<p class="line-clamp-2 text-sm font-medium">{article.title}</p>
-										<p class="truncate text-xs text-muted-foreground">{article.feed_title}</p>
+										<p class="truncate text-xs text-muted-foreground">{getTocSourceLabel(article)}</p>
 									</button>
 								{/each}
 							</div>
@@ -531,7 +557,7 @@
 									onclick={() => selectArticle(article.id)}
 								>
 									<p class="line-clamp-2 text-sm font-medium">{article.title}</p>
-									<p class="truncate text-xs text-muted-foreground">{article.feed_title}</p>
+									<p class="truncate text-xs text-muted-foreground">{getTocSourceLabel(article)}</p>
 								</button>
 							{/each}
 						</div>
@@ -571,7 +597,10 @@
 					<div class="min-w-0">
 						<h2 class="text-2xl font-bold leading-tight">{reader?.title ?? selectedArticle.title}</h2>
 						<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-							<span class="font-medium text-foreground/80">{selectedArticle.feed_title}</span>
+							<span class="font-medium text-foreground/80">{getArticleSourceLabel(selectedArticle)}</span>
+							{#if getYouTubeChannelName(selectedArticle)}
+								<span>Channel: {getYouTubeChannelName(selectedArticle)}</span>
+							{/if}
 							<Badge variant={getModeVariant(selectedArticle.mode)} class="text-xs">{selectedArticle.mode}</Badge>
 							<span>{selectedArticle.word_count} words</span>
 							{#if selectedArticle.ai_failed}
