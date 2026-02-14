@@ -134,4 +134,15 @@ struct SettingsRepositoryTests {
         try await repository.deleteOpenAIKey()
         #expect(try await repository.getOpenAIKey() == nil)
     }
+
+    @Test("Ghostwriter download EPUB on sync defaults to true and can be updated")
+    func testGhostwriterDownloadEpubsOnSync() async throws {
+        #expect(try await repository.getGhostwriterDownloadEpubsOnSync() == true)
+
+        try await repository.setGhostwriterDownloadEpubsOnSync(false)
+        #expect(try await repository.getGhostwriterDownloadEpubsOnSync() == false)
+
+        try await repository.setGhostwriterDownloadEpubsOnSync(true)
+        #expect(try await repository.getGhostwriterDownloadEpubsOnSync() == true)
+    }
 }

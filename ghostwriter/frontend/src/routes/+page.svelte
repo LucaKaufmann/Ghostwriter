@@ -19,7 +19,9 @@
 		Loader2,
 		AlertCircle,
 		CheckCircle2,
-		Calendar
+		Calendar,
+		Headphones,
+		Youtube
 	} from 'lucide-svelte';
 
 	// Queries
@@ -75,6 +77,12 @@
 		refetchOnWindowFocus: false
 	}));
 
+	const mediaStatusQuery = createQuery(() => ({
+		queryKey: ['media-status'],
+		queryFn: () => api.getMediaProcessingStatus(),
+		refetchInterval: (query) => query.state.data?.is_running ? 5000 : 30000
+	}));
+
 	// State
 	let triggering = $state(false);
 
@@ -84,6 +92,13 @@
 	const processingDigest = $derived(digestsQuery.data?.find((d) => d.status === 'processing'));
 
 	// Get next scheduled run
+	const showMediaCard = $derived(
+		mediaStatusQuery.data &&
+			(mediaStatusQuery.data.is_running ||
+				mediaStatusQuery.data.pending_count > 0 ||
+				mediaStatusQuery.data.failed_count > 0)
+	);
+
 	const nextScheduledRun = $derived.by(() => {
 		const schedules = schedulesQuery.data;
 		if (!schedules) return null;
@@ -359,6 +374,54 @@
 		</Card.Root>
 	</div>
 
+	<!-- Media Processing Status -->
+	{#if showMediaCard && mediaStatusQuery.data}
+		{@const ms = mediaStatusQuery.data}
+		<Card.Root>
+			<Card.Header>
+				<Card.Title class="flex items-center gap-2">
+					{#if ms.is_running}
+						<Loader2 class="h-4 w-4 animate-spin" />
+					{:else if ms.failed_count > 0}
+						<AlertCircle class="h-4 w-4 text-destructive" />
+					{:else}
+						<CheckCircle2 class="h-4 w-4 text-muted-foreground" />
+					{/if}
+					Media Processing
+				</Card.Title>
+				{#if ms.is_running && ms.current_item_title}
+					<Card.Description class="flex items-center gap-2">
+						{#if ms.current_item_content_type === 'podcast'}
+							<Headphones class="h-3.5 w-3.5" />
+						{:else}
+							<Youtube class="h-3.5 w-3.5" />
+						{/if}
+						<span class="truncate">{ms.current_item_title}</span>
+					</Card.Description>
+				{/if}
+			</Card.Header>
+			<Card.Content>
+				<div class="flex flex-wrap items-center gap-3 text-sm">
+					{#if ms.is_running}
+						<Badge variant="secondary">
+							{ms.pending_count + ms.processing_count} remaining
+						</Badge>
+					{/if}
+					{#if ms.completed_count > 0}
+						<span class="text-muted-foreground">{ms.completed_count} completed</span>
+					{/if}
+					{#if ms.failed_count > 0}
+						<Badge variant="destructive">{ms.failed_count} failed</Badge>
+					{/if}
+					{#if !ms.is_running && ms.next_run_at}
+						<span class="text-muted-foreground">Next run: {formatRelativeTime(ms.next_run_at)}</span>
+					{/if}
+				</div>
+			</Card.Content>
+		</Card.Root>
+	{/if}
+
+	<!-- Recent Digests -->
 	<Card.Root>
 		<Card.Header>
 			<Card.Title>Recent Digests</Card.Title>

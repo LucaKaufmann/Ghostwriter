@@ -33,7 +33,17 @@ import type {
 	APITokenResponse,
 	APITokenCreateRequest,
 	APITokenCreateResponse,
-	LogFileInfo
+	LogFileInfo,
+	KoreaderPluginDownloadRequest,
+	MediaFeed,
+	MediaFeedCreate,
+	MediaFeedUpdate,
+	MediaItem,
+	MediaItemSummary,
+	MediaProcessingStatus,
+	YouTubeResolveResponse,
+	MediaTriggerResponse,
+	FeedCheckResponse
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -122,6 +132,12 @@ class ApiClient {
 		return { blob, filename };
 	}
 
+	private resolveFilenameFromHeaders(headers: Headers, fallback: string): string {
+		const contentDisposition = headers.get('content-disposition') || '';
+		const match = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);
+		return match ? match[1] : fallback;
+	}
+
 	// ============ Authentication ============
 
 	async getAuthStatus(): Promise<AuthStatus> {
@@ -197,6 +213,39 @@ class ApiClient {
 
 	async revokeAPIToken(tokenId: string): Promise<{ status: string; message: string }> {
 		return this.request(`/auth/tokens/${tokenId}`, { method: 'DELETE' });
+	}
+
+	async downloadKoreaderPlugin(
+		data: KoreaderPluginDownloadRequest
+	): Promise<{ blob: Blob; filename: string }> {
+		const token = this.getToken();
+		const headers: Record<string, string> = {
+			'Content-Type': 'application/json'
+		};
+
+		if (token) {
+			headers['Authorization'] = `Bearer ${token}`;
+		}
+
+		const response = await fetch(`${BASE_URL}/plugins/koreader/download`, {
+			method: 'POST',
+			headers,
+			body: JSON.stringify(data)
+		});
+
+		if (!response.ok) {
+			let error: APIError;
+			try {
+				error = await response.json();
+			} catch {
+				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+			}
+			throw new ApiError(response.status, error);
+		}
+
+		const blob = await response.blob();
+		const filename = this.resolveFilenameFromHeaders(response.headers, 'ghostwriter.koplugin.zip');
+		return { blob, filename };
 	}
 
 	// ============ Health & Config ============
@@ -290,6 +339,13 @@ class ApiClient {
 		return this.request<SyncResponse>('/feeds/sync', {
 			method: 'POST',
 			body: JSON.stringify(feeds)
+		});
+	}
+
+	async checkFeedUrl(url: string): Promise<FeedCheckResponse> {
+		return this.request<FeedCheckResponse>('/feeds/check-url', {
+			method: 'POST',
+			body: JSON.stringify({ url })
 		});
 	}
 
@@ -443,6 +499,93 @@ class ApiClient {
 
 	downloadLog(filename: string): Promise<{ blob: Blob; filename: string }> {
 		return this.download(`/logs/${filename}`, filename);
+	}
+
+	// ============ Media: Podcasts ============
+
+	async getPodcastFeeds(): Promise<MediaFeed[]> {
+		return this.request<MediaFeed[]>('/media/podcasts');
+	}
+
+	async createPodcastFeed(data: MediaFeedCreate): Promise<MediaFeed> {
+		return this.request<MediaFeed>('/media/podcasts', {
+			method: 'POST',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async updatePodcastFeed(id: string, data: MediaFeedUpdate): Promise<MediaFeed> {
+		return this.request<MediaFeed>(`/media/podcasts/${id}`, {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async deletePodcastFeed(id: string): Promise<{ status: string }> {
+		return this.request(`/media/podcasts/${id}`, { method: 'DELETE' });
+	}
+
+	async getPodcastFeedItems(feedId: string): Promise<MediaItemSummary[]> {
+		return this.request<MediaItemSummary[]>(`/media/podcasts/${feedId}/items`);
+	}
+
+	async getAllPodcastItems(): Promise<MediaItemSummary[]> {
+		return this.request<MediaItemSummary[]>('/media/podcasts/items/all');
+	}
+
+	// ============ Media: YouTube ============
+
+	async getYouTubeFeeds(): Promise<MediaFeed[]> {
+		return this.request<MediaFeed[]>('/media/youtube');
+	}
+
+	async createYouTubeFeed(data: MediaFeedCreate): Promise<MediaFeed> {
+		return this.request<MediaFeed>('/media/youtube', {
+			method: 'POST',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async updateYouTubeFeed(id: string, data: MediaFeedUpdate): Promise<MediaFeed> {
+		return this.request<MediaFeed>(`/media/youtube/${id}`, {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async deleteYouTubeFeed(id: string): Promise<{ status: string }> {
+		return this.request(`/media/youtube/${id}`, { method: 'DELETE' });
+	}
+
+	async getYouTubeFeedItems(feedId: string): Promise<MediaItemSummary[]> {
+		return this.request<MediaItemSummary[]>(`/media/youtube/${feedId}/items`);
+	}
+
+	async getAllYouTubeItems(): Promise<MediaItemSummary[]> {
+		return this.request<MediaItemSummary[]>('/media/youtube/items/all');
+	}
+
+	async resolveYouTubeChannel(url: string): Promise<YouTubeResolveResponse> {
+		return this.request<YouTubeResolveResponse>('/media/youtube/resolve', {
+			method: 'POST',
+			body: JSON.stringify({ url })
+		});
+	}
+
+	// ============ Media: Shared ============
+
+	async getMediaItem(itemId: string): Promise<MediaItem> {
+		return this.request<MediaItem>(`/media/items/${itemId}`);
+	}
+
+	async triggerMediaProcessing(): Promise<MediaTriggerResponse> {
+		return this.request<MediaTriggerResponse>('/media/trigger', {
+			method: 'POST'
+		});
+	}
+
+	async getMediaProcessingStatus(): Promise<MediaProcessingStatus> {
+		return this.request<MediaProcessingStatus>('/media/status');
 	}
 }
 

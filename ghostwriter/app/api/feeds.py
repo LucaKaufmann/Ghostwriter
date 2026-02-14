@@ -1,5 +1,8 @@
 """Feed management endpoints."""
 
+import logging
+import os
+import re
 import time
 from datetime import datetime
 from typing import Optional
@@ -15,6 +18,18 @@ from app.core.logging import digest_logger
 from app.core.security import verify_api_key
 from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync, FeedUpdate
 from app.models.seen_article import SeenArticle
+
+logger = logging.getLogger(__name__)
+
+_YOUTUBE_CHANNEL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?youtube\.com/"
+    r"(?:@[\w.-]+|channel/[\w-]+|c/[\w-]+|user/[\w-]+|feeds/videos\.xml)",
+    re.IGNORECASE,
+)
+
+_AUDIO_EXTENSIONS = frozenset({
+    ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".flac", ".aac", ".wma",
+})
 
 router = APIRouter()
 
@@ -202,6 +217,63 @@ async def sync_feeds(
     )
 
 
+class FeedCheckRequest(BaseModel):
+    """Request to check a feed URL type."""
+    url: str
+
+
+class FeedCheckResponse(BaseModel):
+    """Response indicating the type of feed a URL points to."""
+    feed_type: str  # "article", "podcast", or "youtube"
+
+
+def _is_audio_url(url: str | None) -> bool:
+    """Check if a URL points to an audio file."""
+    if not url:
+        return False
+    path = url.split("?")[0].split("#")[0]
+    _, ext = os.path.splitext(path)
+    return ext.lower() in _AUDIO_EXTENSIONS
+
+
+def _is_youtube_url(url: str) -> bool:
+    """Check if a URL is any kind of YouTube URL (video or channel)."""
+    from app.services.youtube_service import YouTubeService
+    return YouTubeService.is_youtube_url(url) or bool(_YOUTUBE_CHANNEL_RE.search(url))
+
+
+@router.post("/check-url", response_model=FeedCheckResponse, dependencies=[Depends(verify_api_key)])
+async def check_feed_url(req: FeedCheckRequest) -> FeedCheckResponse:
+    """
+    Classify a URL as article, podcast, or youtube feed.
+
+    YouTube URLs are detected instantly via regex. For other URLs, the feed
+    is fetched and entries are checked for audio enclosures.
+    """
+    url = req.url.strip()
+    if not url:
+        return FeedCheckResponse(feed_type="article")
+
+    # YouTube: instant, no network needed
+    if _is_youtube_url(url):
+        return FeedCheckResponse(feed_type="youtube")
+
+    # Fetch the feed and check entries for audio enclosures
+    try:
+        from app.services.content_processor import ContentProcessor
+        processor = ContentProcessor()
+        entries = await processor.parse_feed(url, max_entries=5)
+
+        if entries:
+            audio_count = sum(1 for e in entries if _is_audio_url(e.content_url))
+            if audio_count >= len(entries) / 2:
+                return FeedCheckResponse(feed_type="podcast")
+    except Exception:
+        logger.debug("Feed check failed for %s, defaulting to article", url, exc_info=True)
+
+    return FeedCheckResponse(feed_type="article")
+
+
 @router.post("", response_model=FeedRead, dependencies=[Depends(verify_api_key)])
 async def create_feed(
     feed_data: FeedCreate,
@@ -210,13 +282,27 @@ async def create_feed(
     """
     Create a new feed.
 
-    Returns 409 Conflict if a feed with the same URL already exists.
+    If a soft-deleted feed with the same URL exists, it is restored with
+    the new settings. Returns 409 Conflict if an active feed already exists.
     """
     # Check for existing
     statement = select(Feed).where(Feed.url == feed_data.url)
     existing = session.exec(statement).first()
 
     if existing:
+        if existing.deleted_at is not None:
+            # Restore the soft-deleted feed with new settings
+            existing.title = feed_data.title
+            existing.is_active = feed_data.is_active
+            existing.mode = feed_data.mode
+            existing.max_articles = feed_data.max_articles
+            existing.deleted_at = None
+            existing.updated_at = datetime.utcnow()
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+            return existing
+
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Feed with URL already exists: {feed_data.url}",

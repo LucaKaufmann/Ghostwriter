@@ -66,6 +66,12 @@ interface DigestDao {
     @Query("SELECT remoteId FROM digests WHERE remoteId IS NOT NULL")
     suspend fun getAllRemoteIds(): List<String>
 
+    @Query("SELECT * FROM digests WHERE remoteId IS NOT NULL")
+    suspend fun getRemoteDigests(): List<DigestEntity>
+
+    @Query("UPDATE digests SET epubFilePath = :epubFilePath WHERE id = :id")
+    suspend fun updateEpubFilePath(id: Long, epubFilePath: String)
+
     /**
      * Check if a digest with similar content was created recently.
      * Used to prevent duplicate saves from race conditions.

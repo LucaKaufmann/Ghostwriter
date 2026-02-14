@@ -86,6 +86,7 @@ RUN ldconfig
 
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
+COPY --chown=ghostwriter:ghostwriter koreader/ ./koreader/
 COPY --chown=ghostwriter:ghostwriter scripts/ ./scripts/
 COPY --chown=ghostwriter:ghostwriter alembic/ ./alembic/
 COPY --chown=ghostwriter:ghostwriter alembic.ini ./alembic.ini
