@@ -114,3 +114,24 @@ def test_download_koreader_plugin_uses_request_origin_when_server_url_missing(
         )
 
     assert 'server_url = "http://testserver"' in settings_lua
+
+
+def test_download_koreader_plugin_uses_koreader_lfs_module(client):
+    """Packaged plugin should use KOReader's bundled lfs shim."""
+    _, jwt_token = _create_user_and_jwt()
+    response = client.post(
+        "/api/plugins/koreader/download",
+        json={"token_name": "KOReader LFS Check"},
+        headers={"Authorization": f"Bearer {jwt_token}"},
+    )
+    assert response.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        sync_lua = archive.read(
+            "ghostwriter.koplugin/ghostwriter_sync.lua"
+        ).decode(
+            "utf-8"
+        )
+
+    assert 'require("libs/libkoreader-lfs")' in sync_lua
+    assert 'require("lfs")' not in sync_lua
