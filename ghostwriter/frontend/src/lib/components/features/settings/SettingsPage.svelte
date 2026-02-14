@@ -291,6 +291,11 @@
 	let whisperProvider = $state<'local' | 'openai' | 'auto'>('local');
 	let whisperTimeout = $state(30);
 	let whisperProviderInitialized = $state(false);
+	let coverEnabled = $state(false);
+	let coverProvider = $state<'gpt-image-1' | 'nano-banana'>('gpt-image-1');
+	let coverQuality = $state<'low' | 'medium' | 'high'>('low');
+	let coverPrompt = $state('');
+	let coverSettingsInitialized = $state(false);
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -319,6 +324,17 @@
 		}
 	});
 
+	$effect(() => {
+		const data = clientConfigQuery.data;
+		if (data && !coverSettingsInitialized) {
+			coverEnabled = data.cover_enabled ?? false;
+			coverProvider = (data.cover_provider as 'gpt-image-1' | 'nano-banana') ?? 'gpt-image-1';
+			coverQuality = (data.cover_quality as 'low' | 'medium' | 'high') ?? 'low';
+			coverPrompt = data.cover_prompt ?? '';
+			coverSettingsInitialized = true;
+		}
+	});
+
 	function saveWhisperProvider() {
 		updateClientConfigMutation.mutate({ whisper_provider: whisperProvider });
 	}
@@ -327,6 +343,26 @@
 		const clamped = Math.max(1, Math.min(120, whisperTimeout));
 		whisperTimeout = clamped;
 		updateClientConfigMutation.mutate({ whisper_timeout_minutes: clamped });
+	}
+
+	function saveCoverSettings() {
+		updateClientConfigMutation.mutate({
+			cover_enabled: coverEnabled,
+			cover_provider: coverProvider,
+			cover_quality: coverQuality,
+			cover_prompt: coverPrompt.trim()
+		});
+	}
+
+	function hasCoverSettingsChanged(): boolean {
+		const data = clientConfigQuery.data;
+		if (!data) return false;
+		return (
+			coverEnabled !== (data.cover_enabled ?? false) ||
+			coverProvider !== (data.cover_provider ?? 'gpt-image-1') ||
+			coverQuality !== (data.cover_quality ?? 'low') ||
+			coverPrompt.trim() !== (data.cover_prompt ?? '')
+		);
 	}
 
 	function saveWallabag() {
@@ -587,40 +623,125 @@
 
 		<Tabs.Content value="general" class="mt-4 space-y-6">
 
-	<!-- AI Configuration (Read-only) -->
-	<Card.Root>
-		<Card.Header>
-			<Card.Title class="flex items-center gap-2">
-				<Brain class="h-5 w-5" />
-				AI Configuration
-			</Card.Title>
-			<Card.Description>
-				AI settings are configured via environment variables on the server
-			</Card.Description>
-		</Card.Header>
-		<Card.Content>
-			{#if configQuery.isPending}
-				<div class="space-y-3">
-					<Skeleton class="h-4 w-48" />
-					<Skeleton class="h-4 w-64" />
-				</div>
-			{:else if configQuery.data}
-				<div class="grid gap-4 sm:grid-cols-2">
-					<div class="space-y-1">
-						<Label class="text-muted-foreground">Provider</Label>
-						<p class="font-medium">{configQuery.data.ai_provider}</p>
-					</div>
-					<div class="space-y-1">
-						<Label class="text-muted-foreground">Model</Label>
-						<p class="font-medium">{configQuery.data.ai_model}</p>
-					</div>
-				</div>
-			{/if}
-		</Card.Content>
-	</Card.Root>
+			<!-- AI Configuration (Read-only) -->
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2">
+						<Brain class="h-5 w-5" />
+						AI Configuration
+					</Card.Title>
+					<Card.Description>
+						AI settings are configured via environment variables on the server
+					</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					{#if configQuery.isPending}
+						<div class="space-y-3">
+							<Skeleton class="h-4 w-48" />
+							<Skeleton class="h-4 w-64" />
+						</div>
+					{:else if configQuery.data}
+						<div class="grid gap-4 sm:grid-cols-2">
+							<div class="space-y-1">
+								<Label class="text-muted-foreground">Provider</Label>
+								<p class="font-medium">{configQuery.data.ai_provider}</p>
+							</div>
+							<div class="space-y-1">
+								<Label class="text-muted-foreground">Model</Label>
+								<p class="font-medium">{configQuery.data.ai_model}</p>
+							</div>
+						</div>
+					{/if}
+				</Card.Content>
+			</Card.Root>
 
-		</Tabs.Content>
-		<Tabs.Content value="schedule" class="mt-4 space-y-6">
+		<Card.Root>
+			<Card.Header>
+				<Card.Title class="flex items-center gap-2">
+					<FileText class="h-5 w-5" />
+					Digest Covers
+				</Card.Title>
+				<Card.Description>
+					Generate an AI cover for each Ghostwriter digest
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="space-y-4">
+				{#if clientConfigQuery.isPending}
+					<div class="space-y-3">
+						<Skeleton class="h-10 w-full" />
+						<Skeleton class="h-10 w-full" />
+						<Skeleton class="h-10 w-full" />
+					</div>
+				{:else if clientConfigQuery.data}
+					<div class="flex items-center justify-between rounded-lg border p-3">
+						<div>
+							<p class="font-medium">AI cover generation</p>
+							<p class="text-sm text-muted-foreground">Create a fresh image for every digest</p>
+						</div>
+						<Switch checked={coverEnabled} onCheckedChange={(checked) => (coverEnabled = checked)} />
+					</div>
+
+					<div class="grid gap-4 sm:grid-cols-2">
+						<div class="space-y-2">
+							<Label for="cover-provider">Provider</Label>
+							<select
+								id="cover-provider"
+								class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+								bind:value={coverProvider}
+							>
+								<option value="gpt-image-1">OpenAI (gpt-image-1)</option>
+								<option value="nano-banana">Gemini (Nano Banana)</option>
+							</select>
+						</div>
+
+						<div class="space-y-2">
+							<Label for="cover-quality">Quality</Label>
+							<select
+								id="cover-quality"
+								class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+								bind:value={coverQuality}
+								disabled={coverProvider !== 'gpt-image-1'}
+							>
+								<option value="low">Low</option>
+								<option value="medium">Medium</option>
+								<option value="high">High</option>
+							</select>
+							<p class="text-xs text-muted-foreground">
+								Quality tiers apply to gpt-image-1 only.
+							</p>
+						</div>
+					</div>
+
+					<div class="space-y-2">
+						<Label for="cover-prompt">Prompt Add-on (optional)</Label>
+						<Input
+							id="cover-prompt"
+							placeholder="e.g., geometric, high contrast, printmaking style"
+							bind:value={coverPrompt}
+						/>
+					</div>
+
+					<div class="flex items-center justify-between gap-3">
+						<p class="text-sm text-muted-foreground">Applies to future digests only.</p>
+						<Button
+							size="sm"
+							onclick={saveCoverSettings}
+							disabled={!hasCoverSettingsChanged() || updateClientConfigMutation.isPending}
+						>
+							{#if updateClientConfigMutation.isPending}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							{:else}
+								<Save class="mr-2 h-4 w-4" />
+							{/if}
+							Save
+						</Button>
+					</div>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+
+			</Tabs.Content>
+			<Tabs.Content value="schedule" class="mt-4 space-y-6">
 
 	<!-- Schedule Configuration -->
 	<Card.Root>

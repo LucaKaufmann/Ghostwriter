@@ -32,3 +32,14 @@ def test_config(client):
     assert "timezone" in data
     assert "ai_provider" in data
     assert "schedule_enabled" in data
+
+
+def test_client_config_includes_cover_settings(client):
+    """Client config endpoint should include digest cover settings."""
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["cover_enabled"] is False
+    assert data["cover_provider"] == "gpt-image-1"
+    assert data["cover_quality"] == "low"
+    assert "cover_prompt" in data

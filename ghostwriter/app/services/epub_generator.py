@@ -10,6 +10,7 @@ from ebooklib import epub
 
 from app.core.config import Settings, get_settings
 from app.services.content_processor import ExtractedArticle
+from app.services.cover_image_service import CoverImage
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,13 @@ class EpubGenerator:
         font-size: 1.5em;
         color: #666;
     }
+    .cover-art {
+        width: 100%;
+        max-width: 900px;
+        height: auto;
+        margin: 0 auto 1.5em;
+        display: block;
+    }
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -91,6 +99,7 @@ class EpubGenerator:
         saved_articles: list[ExtractedArticle] | None = None,
         newsletter_articles: list[ExtractedArticle] | None = None,
         media_articles: list[ExtractedArticle] | None = None,
+        cover_image: CoverImage | None = None,
     ) -> str:
         """
         Generate an EPUB file from extracted articles.
@@ -102,6 +111,7 @@ class EpubGenerator:
             saved_articles: Wallabag articles.
             newsletter_articles: Newsletter articles.
             media_articles: Completed media items (podcast/YouTube transcripts).
+            cover_image: Optional generated cover image to embed.
 
         Returns:
             Path to the generated EPUB file.
@@ -137,8 +147,24 @@ class EpubGenerator:
         )
         book.add_item(css)
 
+        cover_image_href: str | None = None
+        if cover_image:
+            cover_image_href = self._cover_image_file_name(cover_image.media_type)
+            image_item = epub.EpubItem(
+                uid="cover-image",
+                file_name=cover_image_href,
+                media_type=cover_image.media_type,
+                content=cover_image.data,
+            )
+            book.add_item(image_item)
+
         # Create cover page
-        cover_content = self._create_cover(date, period, len(all_articles))
+        cover_content = self._create_cover(
+            date,
+            period,
+            len(all_articles),
+            cover_image_href=cover_image_href,
+        )
         cover = epub.EpubHtml(
             title="Cover",
             file_name="cover.xhtml",
@@ -256,7 +282,25 @@ class EpubGenerator:
             grouped[title].append(article)
         return list(grouped.items())
 
-    def _create_cover(self, date: datetime, period: str, article_count: int) -> str:
+    @staticmethod
+    def _cover_image_file_name(media_type: str) -> str:
+        if media_type == "image/jpeg":
+            ext = "jpg"
+        elif media_type == "image/webp":
+            ext = "webp"
+        elif media_type == "image/gif":
+            ext = "gif"
+        else:
+            ext = "png"
+        return f"images/cover.{ext}"
+
+    def _create_cover(
+        self,
+        date: datetime,
+        period: str,
+        article_count: int,
+        cover_image_href: str | None = None,
+    ) -> str:
         """
         Create the cover page HTML.
 
@@ -264,10 +308,17 @@ class EpubGenerator:
             date: Digest date.
             period: Time period.
             article_count: Number of articles.
+            cover_image_href: Optional path to an embedded cover image.
 
         Returns:
             HTML content for the cover.
         """
+        cover_image_html = ""
+        if cover_image_href:
+            cover_image_html = (
+                f'<img class="cover-art" src="{cover_image_href}" alt="Digest cover image"/>'
+            )
+
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -277,6 +328,7 @@ class EpubGenerator:
 </head>
 <body>
     <div class="cover">
+        {cover_image_html}
         <h1>Epilogue</h1>
         <p class="date">{date.strftime('%A, %B %d, %Y')}</p>
         <p>{period.capitalize()} Edition</p>

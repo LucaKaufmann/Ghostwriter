@@ -110,6 +110,10 @@ export interface ClientConfigResponse {
 	media_processing_interval_hours: number;
 	include_podcasts_in_digest: boolean;
 	include_youtube_in_digest: boolean;
+	cover_enabled: boolean;
+	cover_provider: 'gpt-image-1' | 'nano-banana';
+	cover_quality: 'low' | 'medium' | 'high';
+	cover_prompt: string;
 	updated_at: string;
 	wallabag?: IntegrationStatus | null;
 	newsletters?: IntegrationStatus | null;
@@ -131,6 +135,10 @@ export interface ClientConfigUpdate {
 	media_processing_interval_hours?: number;
 	include_podcasts_in_digest?: boolean;
 	include_youtube_in_digest?: boolean;
+	cover_enabled?: boolean;
+	cover_provider?: 'gpt-image-1' | 'nano-banana';
+	cover_quality?: 'low' | 'medium' | 'high';
+	cover_prompt?: string;
 	client_updated_at?: string;
 }
 

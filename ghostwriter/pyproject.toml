@@ -28,6 +28,7 @@ dependencies = [
     "trafilatura>=1.8.0,<2.0.0",
     "feedparser>=6.0.10,<7.0.0",
     "ebooklib>=0.18,<1.0.0",
+    "Pillow>=10.0.0,<12.0.0",
     "apscheduler>=3.10.0,<4.0.0",
     "httpx>=0.26.0,<1.0.0",
     "aiohttp>=3.9.0,<4.0.0",
