@@ -12,7 +12,7 @@
 
 	const itemQuery = createQuery(() => ({
 		queryKey: ['media-item', itemId],
-		queryFn: () => api.getMediaItem(itemId),
+		queryFn: () => api.getMediaItem(itemId!),
 		enabled: !!itemId
 	}));
 

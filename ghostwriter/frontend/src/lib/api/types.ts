@@ -59,6 +59,11 @@ export interface APITokenCreateResponse {
 	created_at: string;
 }
 
+export interface KoreaderPluginDownloadRequest {
+	token_name: string;
+	server_url?: string;
+}
+
 // ============ Health & Config ============
 
 export interface HealthResponse {
