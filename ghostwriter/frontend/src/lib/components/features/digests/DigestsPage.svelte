@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { onDestroy } from 'svelte';
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { api, type Digest, type DigestPeriod, type DigestStatus } from '$lib/api';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -20,6 +21,8 @@
 		Download,
 		Eye,
 		Loader2,
+		LayoutGrid,
+		List,
 		Play,
 		RefreshCw,
 		Trash2
@@ -36,8 +39,12 @@
 	let toDate = $state('');
 	let sortBy = $state<'created_at' | 'total_articles' | 'duration'>('created_at');
 	let sortOrder = $state<'desc' | 'asc'>('desc');
+	let viewMode = $state<'list' | 'covers'>('list');
 	let digestToDelete = $state<Digest | null>(null);
 	let lastFilterSignature = $state('all:all');
+	let digestCoverUrls = $state<Record<string, string>>({});
+	let digestCoverErrors = $state<Record<string, boolean>>({});
+	let coverLoadToken = 0;
 
 	const queryParams = $derived.by(() => ({
 		limit,
@@ -119,6 +126,53 @@
 			const rightDuration = getDurationSeconds(right) ?? -1;
 			return (leftDuration - rightDuration) * multiplier;
 		});
+	});
+
+	$effect(() => {
+		const nextIds = new Set(visibleDigests.map((digest) => digest.id));
+		for (const [id, url] of Object.entries(digestCoverUrls)) {
+			if (!nextIds.has(id)) {
+				URL.revokeObjectURL(url);
+				const next = { ...digestCoverUrls };
+				delete next[id];
+				digestCoverUrls = next;
+			}
+		}
+	});
+
+	$effect(() => {
+		const localToken = coverLoadToken + 1;
+		coverLoadToken = localToken;
+
+		async function loadCovers() {
+			for (const digest of visibleDigests) {
+				if (digestCoverUrls[digest.id] || digestCoverErrors[digest.id]) continue;
+				if (digest.status !== 'completed' || !digest.filename) continue;
+				try {
+					const { blob } = await api.downloadDigestCover(digest.id);
+					if (coverLoadToken !== localToken) return;
+					const objectUrl = URL.createObjectURL(blob);
+					digestCoverUrls = {
+						...digestCoverUrls,
+						[digest.id]: objectUrl
+					};
+				} catch {
+					if (coverLoadToken !== localToken) return;
+					digestCoverErrors = {
+						...digestCoverErrors,
+						[digest.id]: true
+					};
+				}
+			}
+		}
+
+		void loadCovers();
+	});
+
+	onDestroy(() => {
+		for (const url of Object.values(digestCoverUrls)) {
+			URL.revokeObjectURL(url);
+		}
 	});
 
 	function openReader(digest: Digest) {
@@ -205,6 +259,10 @@
 
 	function loadMore() {
 		limit += PAGE_SIZE;
+	}
+
+	function getCoverUrl(digest: Digest): string | null {
+		return digestCoverUrls[digest.id] ?? null;
 	}
 
 	async function downloadDigest(filename: string) {
@@ -382,6 +440,25 @@
 			<div class="text-sm text-muted-foreground">
 				Showing {visibleDigests.length} digests • {loadedDigests.length} loaded
 			</div>
+			<div class="flex items-center gap-2">
+				<Label class="text-sm text-muted-foreground">View</Label>
+				<Button
+					size="sm"
+					variant={viewMode === 'list' ? 'default' : 'outline'}
+					onclick={() => (viewMode = 'list')}
+				>
+					<List class="mr-2 h-4 w-4" />
+					List
+				</Button>
+				<Button
+					size="sm"
+					variant={viewMode === 'covers' ? 'default' : 'outline'}
+					onclick={() => (viewMode = 'covers')}
+				>
+					<LayoutGrid class="mr-2 h-4 w-4" />
+					Covers
+				</Button>
+			</div>
 		</Card.Header>
 	</Card.Root>
 
@@ -417,11 +494,12 @@
 					<p class="text-sm text-muted-foreground">Try widening the date range or resetting filters.</p>
 					<Button variant="outline" onclick={clearFilters}>Reset filters</Button>
 				</div>
-			{:else}
+			{:else if viewMode === 'list'}
 				<div class="hidden md:block">
 					<Table.Root>
 						<Table.Header>
 							<Table.Row>
+								<Table.Head class="w-[84px]">Cover</Table.Head>
 								<Table.Head>Date</Table.Head>
 								<Table.Head>Period</Table.Head>
 								<Table.Head>Status</Table.Head>
@@ -433,6 +511,17 @@
 						<Table.Body>
 							{#each visibleDigests as digest}
 								<Table.Row>
+									<Table.Cell>
+										<div class="h-16 w-12 overflow-hidden rounded border bg-muted">
+											{#if getCoverUrl(digest)}
+												<img src={getCoverUrl(digest)!} alt="Digest cover" class="h-full w-full object-cover" />
+											{:else}
+												<div class="flex h-full items-center justify-center text-[10px] text-muted-foreground">
+													No cover
+												</div>
+											{/if}
+										</div>
+									</Table.Cell>
 									<Table.Cell>
 										<div class="flex items-center gap-2">
 											<Calendar class="h-4 w-4 text-muted-foreground" />
@@ -491,12 +580,23 @@
 				<div class="divide-y md:hidden">
 					{#each visibleDigests as digest}
 						<div class="space-y-3 p-4">
-							<div class="flex items-start justify-between gap-2">
+							<div class="flex items-start gap-3">
+								<div class="h-20 w-14 shrink-0 overflow-hidden rounded border bg-muted">
+									{#if getCoverUrl(digest)}
+										<img src={getCoverUrl(digest)!} alt="Digest cover" class="h-full w-full object-cover" />
+									{:else}
+										<div class="flex h-full items-center justify-center text-[10px] text-muted-foreground">
+											No cover
+										</div>
+									{/if}
+								</div>
+								<div class="flex min-w-0 flex-1 items-start justify-between gap-2">
 								<div class="min-w-0 flex-1">
 									<p class="font-medium capitalize">{digest.period} digest</p>
 									<p class="text-sm text-muted-foreground">{formatDate(digest.created_at)}</p>
 								</div>
 								<Badge variant={getDigestStatusBadgeVariant(digest.status)}>{digest.status}</Badge>
+								</div>
 							</div>
 							<div class="text-xs text-muted-foreground">
 								{#if digest.total_articles > 0}
@@ -534,24 +634,74 @@
 						</div>
 					{/each}
 				</div>
+			{:else}
+				<div class="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+					{#each visibleDigests as digest}
+						<div class="rounded-lg border p-3">
+							<div class="relative mb-3 aspect-[5/8] overflow-hidden rounded-md border bg-muted">
+								{#if getCoverUrl(digest)}
+									<img src={getCoverUrl(digest)!} alt="Digest cover" class="h-full w-full object-cover" />
+								{:else}
+									<div class="flex h-full items-center justify-center text-xs text-muted-foreground">
+										No cover
+									</div>
+								{/if}
+								<div class="absolute left-2 top-2">
+									<Badge variant={getDigestStatusBadgeVariant(digest.status)}>{digest.status}</Badge>
+								</div>
+							</div>
+							<p class="truncate font-medium capitalize">{digest.period} digest</p>
+							<p class="text-xs text-muted-foreground">{formatDate(digest.created_at)}</p>
+							<p class="mt-1 text-xs text-muted-foreground">
+								{digest.total_articles > 0 ? `${digest.total_articles} articles` : 'No articles'}
+								{#if getDurationLabel(digest)}
+									{' • '}{getDurationLabel(digest)}
+								{/if}
+							</p>
+							<div class="mt-3 flex flex-wrap gap-2">
+								{#if digest.status === 'completed'}
+									<Button size="sm" variant="outline" onclick={() => openReader(digest)}>
+										<Eye class="mr-2 h-4 w-4" />
+										Read
+									</Button>
+								{/if}
+								{#if digest.filename}
+									<Button size="sm" variant="outline" onclick={() => downloadDigest(digest.filename!)}>
+										<Download class="mr-2 h-4 w-4" />
+										Download
+									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										class="text-destructive hover:text-destructive"
+										onclick={() => (digestToDelete = digest)}
+									>
+										<Trash2 class="mr-2 h-4 w-4" />
+										Delete
+									</Button>
+								{/if}
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
 
-				{#if hasMore}
-					<div class="border-t p-4">
-						<Button
-							variant="outline"
-							class="w-full"
-							onclick={loadMore}
-							disabled={digestsQuery.isFetching}
-						>
-							{#if digestsQuery.isFetching}
-								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-								Loading more...
-							{:else}
-								Load 20 more
-							{/if}
-						</Button>
-					</div>
-				{/if}
+			{#if hasMore}
+				<div class="border-t p-4">
+					<Button
+						variant="outline"
+						class="w-full"
+						onclick={loadMore}
+						disabled={digestsQuery.isFetching}
+					>
+						{#if digestsQuery.isFetching}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							Loading more...
+						{:else}
+							Load 20 more
+						{/if}
+					</Button>
+				</div>
 			{/if}
 		</Card.Content>
 	</Card.Root>

@@ -3,6 +3,7 @@
 # Web Framework
 fastapi>=0.109.0,<1.0.0
 uvicorn[standard]>=0.27.0,<1.0.0
+python-multipart>=0.0.9,<1.0.0
 
 # Database
 sqlmodel>=0.0.14,<1.0.0
@@ -25,6 +26,7 @@ youtube-transcript-api>=0.6.0,<1.0.0
 
 # EPUB Generation
 ebooklib>=0.18,<1.0.0
+Pillow>=10.0.0,<12.0.0
 
 # Scheduling
 apscheduler>=3.10.0,<4.0.0

@@ -1,11 +1,15 @@
 """Tests for feed-grouped digest ordering and EPUB chapters."""
 
+import base64
 from dataclasses import dataclass
 from datetime import datetime
+import io
 import os
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import zipfile
+
+from PIL import Image
 
 os.environ.setdefault("DATA_DIR", "/tmp/ghostwriter_test")
 os.environ.setdefault("OUTPUT_DIR", "/tmp/ghostwriter_test_output")
@@ -14,6 +18,7 @@ os.environ.setdefault("API_KEY", "")
 from app.core.config import Settings
 from app.models.feed import Feed
 from app.services.content_processor import ExtractedArticle
+from app.services.cover_image_service import CoverImage, CoverImageService
 from app.services.epub_generator import EpubGenerator
 from app.worker.bindery import BinderyPipeline
 
@@ -148,3 +153,67 @@ def test_epub_generator_creates_feed_chapters_with_article_subchapters(tmp_path:
     feed_a_index = labels.index("Feed A")
     feed_b_index = labels.index("Feed B")
     assert feed_a_index < feed_b_index
+
+
+def test_epub_generator_embeds_generated_cover_image(tmp_path: Path) -> None:
+    """Generated cover image should be embedded and referenced by the cover page."""
+    settings = Settings(output_dir=str(tmp_path))
+    generator = EpubGenerator(settings)
+
+    articles = [
+        ExtractedArticle(
+            guid="a-1",
+            url="https://a.example/1",
+            title="Article A1",
+            content="<p>A1 content</p>",
+            feed_title="Feed A",
+        ),
+    ]
+
+    # 1x1 transparent PNG.
+    png_data = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4"
+        "//8/AwAI/AL+X4xL9QAAAABJRU5ErkJggg=="
+    )
+    cover_image = CoverImage(
+        data=png_data,
+        media_type="image/png",
+        provider="gpt-image-1",
+    )
+
+    epub_path = generator.generate(
+        articles=articles,
+        period="manual",
+        date=datetime(2026, 2, 1),
+        cover_image=cover_image,
+    )
+
+    with zipfile.ZipFile(epub_path, "r") as zf:
+        names = zf.namelist()
+        assert any(name.endswith("images/cover.png") for name in names)
+
+        cover_name = next(name for name in names if name.endswith("cover.xhtml"))
+        cover_html = zf.read(cover_name).decode("utf-8")
+        assert 'src="images/cover.png"' in cover_html
+
+
+def test_cover_image_service_normalizes_cover_to_5_8_jpeg() -> None:
+    """Generated cover images should be normalized to compact 5:8 JPEG output."""
+    service = CoverImageService()
+
+    source_image = Image.new("RGB", (1200, 1200), color=(30, 30, 30))
+    with io.BytesIO() as source_bytes:
+        source_image.save(source_bytes, format="PNG")
+        original = CoverImage(
+            data=source_bytes.getvalue(),
+            media_type="image/png",
+            provider="nano-banana",
+        )
+
+    normalized = service._normalize_cover_image(original)
+    assert normalized is not None
+    assert normalized.media_type == "image/jpeg"
+    assert len(normalized.data) <= 500 * 1024
+
+    with Image.open(io.BytesIO(normalized.data)) as normalized_img:
+        assert normalized_img.size == (960, 1536)

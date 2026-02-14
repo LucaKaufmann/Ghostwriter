@@ -55,6 +55,32 @@ class ClientConfigBase(SQLModel):
         description="Include completed YouTube transcripts in digests",
     )
 
+    # Cover generation
+    cover_enabled: bool = Field(
+        default=False,
+        description="Generate an AI cover image for each digest",
+    )
+    cover_provider: str = Field(
+        default="gpt-image-1",
+        description="Cover provider: gpt-image-1 or nano-banana",
+    )
+    cover_quality: str = Field(
+        default="low",
+        description="Cover quality tier for gpt-image-1: low, medium, high",
+    )
+    cover_prompt: str = Field(
+        default="",
+        description="Optional additional prompt text for cover generation",
+    )
+    cover_openai_api_key: str = Field(
+        default="",
+        description="Optional dedicated OpenAI API key for cover generation",
+    )
+    cover_gemini_api_key: str = Field(
+        default="",
+        description="Optional dedicated Gemini API key for cover generation",
+    )
+
 
 class ClientConfig(ClientConfigBase, table=True):
     """
@@ -102,6 +128,30 @@ class ClientConfigUpdate(SQLModel):
     include_youtube_in_digest: bool | None = Field(
         default=None, description="Include completed YouTube transcripts in digests"
     )
+    cover_enabled: bool | None = Field(
+        default=None,
+        description="Generate an AI cover image for each digest",
+    )
+    cover_provider: str | None = Field(
+        default=None,
+        description="Cover provider: gpt-image-1 or nano-banana",
+    )
+    cover_quality: str | None = Field(
+        default=None,
+        description="Cover quality tier for gpt-image-1: low, medium, high",
+    )
+    cover_prompt: str | None = Field(
+        default=None,
+        description="Optional additional prompt text for cover generation",
+    )
+    cover_openai_api_key: str | None = Field(
+        default=None,
+        description="Optional dedicated OpenAI API key for cover generation",
+    )
+    cover_gemini_api_key: str | None = Field(
+        default=None,
+        description="Optional dedicated Gemini API key for cover generation",
+    )
 
 
 class ClientConfigRead(SQLModel):
@@ -123,4 +173,10 @@ class ClientConfigRead(SQLModel):
     media_processing_interval_hours: int
     include_podcasts_in_digest: bool
     include_youtube_in_digest: bool
+    cover_enabled: bool
+    cover_provider: str
+    cover_quality: str
+    cover_prompt: str
+    cover_openai_api_key: str
+    cover_gemini_api_key: str
     updated_at: datetime
