@@ -16,9 +16,11 @@ from app.core.logging import digest_logger
 from app.models.digest import Digest, DigestArticle
 from app.models.client_config import ClientConfig
 from app.models.feed import Feed
+from app.models.manual_cover import ManualCover
 from app.models.media_item import MediaItem
 from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
+from app.services.cover_image_service import CoverImage, CoverImageService
 from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
 from app.services.media_processor import MediaProcessor
@@ -79,6 +81,7 @@ class BinderyPipeline:
         self.settings = get_settings()
         self.content_processor = ContentProcessor(self.settings)
         self.llm_service = LLMService(self.settings)
+        self.cover_image_service = CoverImageService(self.settings)
         self.media_processor = MediaProcessor(self.settings)
         self.epub_generator = EpubGenerator(self.settings)
         self.start_time: float | None = None
@@ -585,6 +588,16 @@ class BinderyPipeline:
 
             # Get just the articles for EPUB generation
             articles_for_epub = [a for _, a in extracted_articles]
+            all_articles_for_cover = (
+                articles_for_epub
+                + wallabag_articles
+                + newsletter_articles
+                + media_articles
+            )
+            cover_image = await self._generate_cover_image(
+                period=period,
+                articles=all_articles_for_cover,
+            )
 
             epub_path = self.epub_generator.generate(
                 articles_for_epub,
@@ -592,6 +605,7 @@ class BinderyPipeline:
                 saved_articles=wallabag_articles if wallabag_articles else None,
                 newsletter_articles=newsletter_articles if newsletter_articles else None,
                 media_articles=media_articles if media_articles else None,
+                cover_image=cover_image,
             )
 
             # Log EPUB file size
@@ -671,6 +685,88 @@ class BinderyPipeline:
             digest_logger.pipeline_failed(str(self.digest_id), str(e), stage=current_stage)
             await self._fail(str(e))
             raise
+
+    async def _generate_cover_image(
+        self,
+        *,
+        period: str,
+        articles: list[ExtractedArticle],
+    ) -> CoverImage | None:
+        """Resolve a cover image: AI first when enabled, otherwise active manual cover."""
+        with Session(engine) as session:
+            config = session.exec(select(ClientConfig)).first()
+            if not config:
+                return None
+
+            provider = config.cover_provider
+            quality = config.cover_quality
+            prompt = config.cover_prompt
+            cover_openai_api_key = config.cover_openai_api_key
+            cover_gemini_api_key = config.cover_gemini_api_key
+            ai_enabled = config.cover_enabled
+
+            active_manual_cover: ManualCover | None = None
+            if not ai_enabled:
+                active_manual_cover = session.exec(
+                    select(ManualCover).where(ManualCover.is_active == True)
+                ).first()
+
+        if not ai_enabled:
+            if active_manual_cover:
+                manual_path = os.path.join(self.settings.data_dir, "manual_covers", active_manual_cover.file_name)
+                try:
+                    with open(manual_path, "rb") as fp:
+                        data = fp.read()
+                    return CoverImage(
+                        data=data,
+                        media_type=active_manual_cover.media_type,
+                        provider="manual",
+                    )
+                except Exception:
+                    logger.exception("Failed to load active manual cover; falling back to text cover")
+                    return None
+            return None
+
+        try:
+            cover = await self.cover_image_service.generate_cover(
+                period=period,
+                date=datetime.utcnow(),
+                articles=articles,
+                provider=provider,
+                quality=quality,
+                prompt_suffix=prompt,
+                cover_openai_api_key=cover_openai_api_key,
+                cover_gemini_api_key=cover_gemini_api_key,
+            )
+        except Exception:
+            logger.exception("Cover generation failed unexpectedly; falling back to text cover")
+            return None
+
+        if cover:
+            digest_logger.info(
+                f"Generated AI cover image via {provider}",
+                component="epub",
+                event="cover_generated",
+                context={
+                    "digest_id": str(self.digest_id),
+                    "provider": provider,
+                    "quality": quality,
+                    "media_type": cover.media_type,
+                    "bytes": len(cover.data),
+                },
+            )
+        else:
+            digest_logger.warning(
+                "Cover generation unavailable; falling back to text cover",
+                component="epub",
+                event="cover_fallback",
+                context={
+                    "digest_id": str(self.digest_id),
+                    "provider": provider,
+                    "quality": quality,
+                },
+            )
+        return cover
 
     async def _get_active_feeds(self) -> list[Feed]:
         """Get all active feeds."""
