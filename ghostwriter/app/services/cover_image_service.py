@@ -186,7 +186,6 @@ class CoverImageService:
             "prompt": prompt,
             "size": "1024x1536",
             "quality": quality,
-            "response_format": "b64_json",
         }
 
         try:
@@ -222,6 +221,19 @@ class CoverImageService:
                         media_type=media_type,
                         provider="gpt-image-1",
                     )
+        except httpx.HTTPStatusError as exc:
+            response_excerpt = exc.response.text.strip().replace("\n", " ")
+            if len(response_excerpt) > 500:
+                response_excerpt = f"{response_excerpt[:500]}..."
+            logger.warning(
+                "OpenAI cover generation failed with status %s: %s",
+                exc.response.status_code,
+                response_excerpt or "<empty body>",
+            )
+            return None
+        except httpx.RequestError:
+            logger.exception("OpenAI cover generation request error")
+            return None
         except Exception:
             logger.exception("OpenAI cover generation failed")
             return None
