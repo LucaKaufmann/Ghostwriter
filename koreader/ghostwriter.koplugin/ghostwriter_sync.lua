@@ -1,4 +1,4 @@
-local api = require("api")
+local api = require("ghostwriter_api")
 local lfs = require("lfs")
 local logger = require("logger")
 

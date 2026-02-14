@@ -119,7 +119,7 @@ def _build_plugin_zip(server_url: str, api_token: str) -> bytes:
             rel_path = file_path.relative_to(PLUGIN_TEMPLATE_DIR)
             arcname = Path("ghostwriter.koplugin") / rel_path
 
-            if rel_path.as_posix() == "settings.lua":
+            if rel_path.as_posix() == "ghostwriter_settings.lua":
                 raw_text = file_path.read_text(encoding="utf-8")
                 try:
                     configured_text = _inject_plugin_settings(
