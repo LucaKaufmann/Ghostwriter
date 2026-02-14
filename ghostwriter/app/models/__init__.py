@@ -7,6 +7,7 @@ from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
 from app.models.media_feed import MediaFeed
 from app.models.media_item import MediaItem
+from app.models.manual_cover import ManualCover
 from app.models.schedule import Schedule
 from app.models.seen_article import SeenArticle
 from app.models.user import User
@@ -20,6 +21,7 @@ __all__ = [
     "Feed",
     "MediaFeed",
     "MediaItem",
+    "ManualCover",
     "Schedule",
     "SeenArticle",
     "User",

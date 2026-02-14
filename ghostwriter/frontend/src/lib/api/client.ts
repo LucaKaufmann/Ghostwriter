@@ -21,6 +21,7 @@ import type {
 	WallabagTestResult,
 	WhisperModelsResponse,
 	WhisperModelRequest,
+	ManualCoversResponse,
 	PreviewResponse,
 	APIError,
 	DigestPeriod,
@@ -297,6 +298,41 @@ class ApiClient {
 			method: 'PUT',
 			body: JSON.stringify(data)
 		});
+	}
+
+	async listManualCovers(): Promise<ManualCoversResponse> {
+		return this.request<ManualCoversResponse>('/config/covers');
+	}
+
+	async uploadManualCover(file: File): Promise<void> {
+		const token = this.getToken();
+		const formData = new FormData();
+		formData.append('file', file);
+		const headers: Record<string, string> = {};
+		if (token) headers['Authorization'] = `Bearer ${token}`;
+
+		const response = await fetch(`${BASE_URL}/config/covers/upload`, {
+			method: 'POST',
+			headers,
+			body: formData
+		});
+		if (!response.ok) {
+			let error: APIError;
+			try {
+				error = await response.json();
+			} catch {
+				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+			}
+			throw new ApiError(response.status, error);
+		}
+	}
+
+	async activateManualCover(id: string): Promise<void> {
+		await this.request(`/config/covers/${id}/activate`, { method: 'POST' });
+	}
+
+	async deleteManualCover(id: string): Promise<void> {
+		await this.request(`/config/covers/${id}`, { method: 'DELETE' });
 	}
 
 	// ============ Feeds ============

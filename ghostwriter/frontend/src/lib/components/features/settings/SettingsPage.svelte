@@ -55,6 +55,11 @@
 		queryFn: () => api.getSchedules()
 	}));
 
+	const manualCoversQuery = createQuery(() => ({
+		queryKey: ['manual-covers'],
+		queryFn: () => api.listManualCovers()
+	}));
+
 	const tokensQuery = createQuery(() => ({
 		queryKey: ['api-tokens'],
 		queryFn: () => api.getAPITokens()
@@ -186,7 +191,23 @@
 
 	const updateClientConfigMutation = createMutation(() => ({
 		mutationFn: (data: ClientConfigUpdate) => api.updateClientConfig(data),
-		onSuccess: () => {
+		onSuccess: (data, variables) => {
+			const coverFields: (keyof ClientConfigUpdate)[] = [
+				'cover_enabled',
+				'cover_provider',
+				'cover_quality',
+				'cover_prompt',
+				'cover_openai_api_key',
+				'cover_gemini_api_key'
+			];
+			if (coverFields.some((field) => field in variables)) {
+				coverEnabled = data.cover_enabled ?? false;
+				coverProvider = (data.cover_provider as 'gpt-image-1' | 'nano-banana') ?? 'gpt-image-1';
+				coverQuality = (data.cover_quality as 'low' | 'medium' | 'high') ?? 'low';
+				coverPrompt = data.cover_prompt ?? '';
+				coverOpenAIKey = data.cover_openai_api_key ?? '';
+				coverGeminiKey = data.cover_gemini_api_key ?? '';
+			}
 			queryClient.invalidateQueries({ queryKey: ['client-config'] });
 		},
 		onError: (err: Error) => {
@@ -224,6 +245,39 @@
 		},
 		onError: (err: Error) => {
 			toast.error('Failed to update active model', { description: err.message });
+		}
+	}));
+
+	const uploadManualCoverMutation = createMutation(() => ({
+		mutationFn: (file: File) => api.uploadManualCover(file),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['manual-covers'] });
+			toast.success('Manual cover uploaded');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to upload cover', { description: err.message });
+		}
+	}));
+
+	const activateManualCoverMutation = createMutation(() => ({
+		mutationFn: (coverId: string) => api.activateManualCover(coverId),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['manual-covers'] });
+			toast.success('Active cover updated');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to activate cover', { description: err.message });
+		}
+	}));
+
+	const deleteManualCoverMutation = createMutation(() => ({
+		mutationFn: (coverId: string) => api.deleteManualCover(coverId),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['manual-covers'] });
+			toast.success('Cover deleted');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to delete cover', { description: err.message });
 		}
 	}));
 
@@ -295,7 +349,10 @@
 	let coverProvider = $state<'gpt-image-1' | 'nano-banana'>('gpt-image-1');
 	let coverQuality = $state<'low' | 'medium' | 'high'>('low');
 	let coverPrompt = $state('');
+	let coverOpenAIKey = $state('');
+	let coverGeminiKey = $state('');
 	let coverSettingsInitialized = $state(false);
+	let manualCoverInput: HTMLInputElement | null = $state(null);
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -331,6 +388,8 @@
 			coverProvider = (data.cover_provider as 'gpt-image-1' | 'nano-banana') ?? 'gpt-image-1';
 			coverQuality = (data.cover_quality as 'low' | 'medium' | 'high') ?? 'low';
 			coverPrompt = data.cover_prompt ?? '';
+			coverOpenAIKey = data.cover_openai_api_key ?? '';
+			coverGeminiKey = data.cover_gemini_api_key ?? '';
 			coverSettingsInitialized = true;
 		}
 	});
@@ -350,7 +409,9 @@
 			cover_enabled: coverEnabled,
 			cover_provider: coverProvider,
 			cover_quality: coverQuality,
-			cover_prompt: coverPrompt.trim()
+			cover_prompt: coverPrompt.trim(),
+			cover_openai_api_key: coverOpenAIKey.trim(),
+			cover_gemini_api_key: coverGeminiKey.trim()
 		});
 	}
 
@@ -361,12 +422,32 @@
 			coverEnabled !== (data.cover_enabled ?? false) ||
 			coverProvider !== (data.cover_provider ?? 'gpt-image-1') ||
 			coverQuality !== (data.cover_quality ?? 'low') ||
-			coverPrompt.trim() !== (data.cover_prompt ?? '')
+			coverPrompt.trim() !== (data.cover_prompt ?? '') ||
+			coverOpenAIKey.trim() !== (data.cover_openai_api_key ?? '') ||
+			coverGeminiKey.trim() !== (data.cover_gemini_api_key ?? '')
 		);
 	}
 
 	function saveWallabag() {
 		updateWallabagMutation.mutate(wbForm);
+	}
+
+	function triggerManualCoverUpload() {
+		manualCoverInput?.click();
+	}
+
+	function handleManualCoverFileChange(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) return;
+		uploadManualCoverMutation.mutate(file);
+		target.value = '';
+	}
+
+	function formatBytes(value: number): string {
+		if (value < 1024) return `${value} B`;
+		if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+		return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
 	function hasWallabagChanged(): boolean {
@@ -719,6 +800,129 @@
 							placeholder="e.g., geometric, high contrast, printmaking style"
 							bind:value={coverPrompt}
 						/>
+					</div>
+
+					<div class="grid gap-4 sm:grid-cols-2">
+						<div class="space-y-2">
+							<Label for="cover-openai-key">OpenAI Cover API Key</Label>
+							<Input
+								id="cover-openai-key"
+								type="password"
+								placeholder="sk-..."
+								bind:value={coverOpenAIKey}
+							/>
+							<p class="text-xs text-muted-foreground">
+								Optional override for cover images only.
+							</p>
+						</div>
+						<div class="space-y-2">
+							<Label for="cover-gemini-key">Gemini Cover API Key</Label>
+							<Input
+								id="cover-gemini-key"
+								type="password"
+								placeholder="AIza..."
+								bind:value={coverGeminiKey}
+							/>
+							<p class="text-xs text-muted-foreground">
+								Optional override for cover images only.
+							</p>
+						</div>
+					</div>
+
+					<p class="text-xs text-muted-foreground">
+						Saved keys are masked on reload. Clear a field and save to remove it.
+					</p>
+
+					<div class={`space-y-3 rounded-lg border p-3 ${coverEnabled ? 'opacity-60' : ''}`}>
+						<div class="flex items-center justify-between gap-2">
+							<div>
+								<p class="font-medium">Manual Cover Library</p>
+								<p class="text-xs text-muted-foreground">
+									Upload covers, preview them, and choose the active manual cover.
+								</p>
+							</div>
+							<Button
+								size="sm"
+								variant="outline"
+								onclick={triggerManualCoverUpload}
+								disabled={uploadManualCoverMutation.isPending}
+							>
+								{#if uploadManualCoverMutation.isPending}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								{/if}
+								Upload Cover
+							</Button>
+							<input
+								class="hidden"
+								type="file"
+								accept="image/*"
+								bind:this={manualCoverInput}
+								onchange={handleManualCoverFileChange}
+							/>
+						</div>
+
+						{#if coverEnabled}
+							<p class="text-xs text-amber-700">
+								AI cover generation is enabled. Manual covers are currently inactive.
+							</p>
+						{/if}
+
+						{#if manualCoversQuery.isPending}
+							<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+								{#each Array(4) as _}
+									<div class="space-y-2 rounded-md border p-2">
+										<Skeleton class="aspect-[5/8] w-full rounded-md" />
+										<Skeleton class="h-4 w-3/4" />
+									</div>
+								{/each}
+							</div>
+						{:else if (manualCoversQuery.data?.covers?.length ?? 0) === 0}
+							<p class="text-sm text-muted-foreground">
+								No manual covers uploaded yet.
+							</p>
+						{:else}
+							<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+								{#each manualCoversQuery.data?.covers ?? [] as cover}
+									<div class="rounded-md border p-2">
+										<div class="relative aspect-[5/8] overflow-hidden rounded-md border bg-muted">
+											{#if cover.preview_data_url}
+												<img src={cover.preview_data_url} alt={cover.name} class="h-full w-full object-cover" />
+											{:else}
+												<div class="flex h-full items-center justify-center text-xs text-muted-foreground">
+													Preview unavailable
+												</div>
+											{/if}
+											{#if cover.is_active}
+												<span class="absolute right-2 top-2 rounded bg-primary px-2 py-1 text-xs text-primary-foreground">
+													Active
+												</span>
+											{/if}
+										</div>
+										<p class="mt-2 truncate text-xs font-medium" title={cover.name}>{cover.name}</p>
+										<p class="text-xs text-muted-foreground">{formatBytes(cover.size_bytes)}</p>
+										<div class="mt-2 flex gap-2">
+											<Button
+												size="sm"
+												variant="outline"
+												class="flex-1"
+												onclick={() => activateManualCoverMutation.mutate(cover.id)}
+												disabled={cover.is_active || activateManualCoverMutation.isPending}
+											>
+												Set Active
+											</Button>
+											<Button
+												size="sm"
+												variant="outline"
+												onclick={() => deleteManualCoverMutation.mutate(cover.id)}
+												disabled={deleteManualCoverMutation.isPending}
+											>
+												<Trash2 class="h-4 w-4" />
+											</Button>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
 					</div>
 
 					<div class="flex items-center justify-between gap-3">

@@ -52,6 +52,8 @@ class CoverImageService:
         provider: str,
         quality: str,
         prompt_suffix: str = "",
+        cover_openai_api_key: str | None = None,
+        cover_gemini_api_key: str | None = None,
     ) -> CoverImage | None:
         """Generate a cover image for a digest."""
         prompt = self._build_prompt(
@@ -64,9 +66,16 @@ class CoverImageService:
         raw_cover: CoverImage | None = None
         if provider == "gpt-image-1":
             normalized_quality = quality if quality in self._OPENAI_QUALITY_VALUES else "low"
-            raw_cover = await self._generate_openai(prompt=prompt, quality=normalized_quality)
+            raw_cover = await self._generate_openai(
+                prompt=prompt,
+                quality=normalized_quality,
+                api_key_override=cover_openai_api_key,
+            )
         elif provider == "nano-banana":
-            raw_cover = await self._generate_nano_banana(prompt=prompt)
+            raw_cover = await self._generate_nano_banana(
+                prompt=prompt,
+                api_key_override=cover_gemini_api_key,
+            )
         else:
             logger.warning("Unsupported cover provider: %s", provider)
             return None
@@ -81,6 +90,29 @@ class CoverImageService:
             )
             return None
         return normalized_cover
+
+    def normalize_for_epub(
+        self,
+        *,
+        data: bytes,
+        media_type: str,
+        provider: str = "manual",
+    ) -> CoverImage | None:
+        """Normalize arbitrary image bytes to EPUB-safe 5:8 JPEG."""
+        return self._normalize_cover_image(
+            CoverImage(data=data, media_type=media_type, provider=provider)
+        )
+
+    @staticmethod
+    def extension_for_media_type(media_type: str) -> str:
+        """Map media type to conventional file extension."""
+        if media_type == "image/jpeg":
+            return "jpg"
+        if media_type == "image/webp":
+            return "webp"
+        if media_type == "image/gif":
+            return "gif"
+        return "png"
 
     def _build_prompt(
         self,
@@ -129,10 +161,19 @@ class CoverImageService:
             base_prompt = f"{base_prompt} Additional direction: {prompt_suffix.strip()}."
         return base_prompt
 
-    async def _generate_openai(self, *, prompt: str, quality: str) -> CoverImage | None:
-        api_key = self.settings.openai_api_key.strip()
+    async def _generate_openai(
+        self,
+        *,
+        prompt: str,
+        quality: str,
+        api_key_override: str | None = None,
+    ) -> CoverImage | None:
+        api_key = (api_key_override or self.settings.openai_api_key).strip()
         if not api_key:
-            logger.warning("Cover generation skipped: OPENAI_API_KEY is not configured")
+            logger.warning(
+                "Cover generation skipped: no cover OpenAI key configured "
+                "(Covers setting or OPENAI_API_KEY)",
+            )
             return None
 
         timeout = httpx.Timeout(self.settings.cover_generation_timeout_seconds)
@@ -188,10 +229,18 @@ class CoverImageService:
         logger.warning("OpenAI image response did not include image bytes")
         return None
 
-    async def _generate_nano_banana(self, *, prompt: str) -> CoverImage | None:
-        api_key = self.settings.gemini_api_key.strip()
+    async def _generate_nano_banana(
+        self,
+        *,
+        prompt: str,
+        api_key_override: str | None = None,
+    ) -> CoverImage | None:
+        api_key = (api_key_override or self.settings.gemini_api_key).strip()
         if not api_key:
-            logger.warning("Cover generation skipped: GEMINI_API_KEY is not configured")
+            logger.warning(
+                "Cover generation skipped: no cover Gemini key configured "
+                "(Covers setting or GEMINI_API_KEY)",
+            )
             return None
 
         timeout = httpx.Timeout(self.settings.cover_generation_timeout_seconds)

@@ -16,6 +16,7 @@ from app.core.logging import digest_logger
 from app.models.digest import Digest, DigestArticle
 from app.models.client_config import ClientConfig
 from app.models.feed import Feed
+from app.models.manual_cover import ManualCover
 from app.models.media_item import MediaItem
 from app.models.seen_article import SeenArticle
 from app.services.content_processor import ContentProcessor, ExtractedArticle
@@ -691,15 +692,40 @@ class BinderyPipeline:
         period: str,
         articles: list[ExtractedArticle],
     ) -> CoverImage | None:
-        """Generate an AI cover image when the feature is enabled."""
+        """Resolve a cover image: AI first when enabled, otherwise active manual cover."""
         with Session(engine) as session:
             config = session.exec(select(ClientConfig)).first()
-            if not config or not config.cover_enabled:
+            if not config:
                 return None
 
             provider = config.cover_provider
             quality = config.cover_quality
             prompt = config.cover_prompt
+            cover_openai_api_key = config.cover_openai_api_key
+            cover_gemini_api_key = config.cover_gemini_api_key
+            ai_enabled = config.cover_enabled
+
+            active_manual_cover: ManualCover | None = None
+            if not ai_enabled:
+                active_manual_cover = session.exec(
+                    select(ManualCover).where(ManualCover.is_active == True)
+                ).first()
+
+        if not ai_enabled:
+            if active_manual_cover:
+                manual_path = os.path.join(self.settings.data_dir, "manual_covers", active_manual_cover.file_name)
+                try:
+                    with open(manual_path, "rb") as fp:
+                        data = fp.read()
+                    return CoverImage(
+                        data=data,
+                        media_type=active_manual_cover.media_type,
+                        provider="manual",
+                    )
+                except Exception:
+                    logger.exception("Failed to load active manual cover; falling back to text cover")
+                    return None
+            return None
 
         try:
             cover = await self.cover_image_service.generate_cover(
@@ -709,6 +735,8 @@ class BinderyPipeline:
                 provider=provider,
                 quality=quality,
                 prompt_suffix=prompt,
+                cover_openai_api_key=cover_openai_api_key,
+                cover_gemini_api_key=cover_gemini_api_key,
             )
         except Exception:
             logger.exception("Cover generation failed unexpectedly; falling back to text cover")

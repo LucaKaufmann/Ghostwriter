@@ -72,6 +72,14 @@ class ClientConfigBase(SQLModel):
         default="",
         description="Optional additional prompt text for cover generation",
     )
+    cover_openai_api_key: str = Field(
+        default="",
+        description="Optional dedicated OpenAI API key for cover generation",
+    )
+    cover_gemini_api_key: str = Field(
+        default="",
+        description="Optional dedicated Gemini API key for cover generation",
+    )
 
 
 class ClientConfig(ClientConfigBase, table=True):
@@ -136,6 +144,14 @@ class ClientConfigUpdate(SQLModel):
         default=None,
         description="Optional additional prompt text for cover generation",
     )
+    cover_openai_api_key: str | None = Field(
+        default=None,
+        description="Optional dedicated OpenAI API key for cover generation",
+    )
+    cover_gemini_api_key: str | None = Field(
+        default=None,
+        description="Optional dedicated Gemini API key for cover generation",
+    )
 
 
 class ClientConfigRead(SQLModel):
@@ -161,4 +177,6 @@ class ClientConfigRead(SQLModel):
     cover_provider: str
     cover_quality: str
     cover_prompt: str
+    cover_openai_api_key: str
+    cover_gemini_api_key: str
     updated_at: datetime

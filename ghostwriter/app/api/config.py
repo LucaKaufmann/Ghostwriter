@@ -1,10 +1,13 @@
 """Client configuration endpoints for settings sync."""
 
+import base64
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -14,8 +17,10 @@ from app.core.database import get_session
 from app.core.security import verify_api_key
 from app.models.client_config import ClientConfig, ClientConfigRead, ClientConfigUpdate
 from app.models.feed import Feed
+from app.models.manual_cover import ManualCover
 from app.models.seen_article import SeenArticle
 from app.models.wallabag_config import WallabagConfig, WallabagConfigRead, WallabagConfigUpdate
+from app.services.cover_image_service import CoverImageService
 from app.services.newsletter_service import NewsletterService
 from app.services.whisper_model_service import WhisperModelService
 from app.services.whisper_models import WHISPER_MODELS
@@ -25,6 +30,7 @@ from app.core.config import Settings, get_settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+SECRET_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022"
 
 
 class IntegrationStatus(BaseModel):
@@ -58,6 +64,8 @@ class ConfigResponse(BaseModel):
     cover_provider: str
     cover_quality: str
     cover_prompt: str
+    cover_openai_api_key: str
+    cover_gemini_api_key: str
     # Integration status
     wallabag: IntegrationStatus | None = None
     newsletters: IntegrationStatus | None = None
@@ -109,6 +117,14 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Optional additional prompt text for cover generation",
     )
+    cover_openai_api_key: str | None = Field(
+        default=None,
+        description="Dedicated OpenAI API key for cover generation. Empty string clears value.",
+    )
+    cover_gemini_api_key: str | None = Field(
+        default=None,
+        description="Dedicated Gemini API key for cover generation. Empty string clears value.",
+    )
     # Client's updated_at for conflict detection
     client_updated_at: datetime | None = Field(default=None, description="Client's last known updated_at")
 
@@ -137,6 +153,51 @@ class WhisperModelRequest(BaseModel):
     """Request for whisper.cpp model actions."""
 
     model: str
+
+
+class ManualCoverRead(BaseModel):
+    """A single manual cover item for settings UI."""
+
+    id: str
+    name: str
+    media_type: str
+    size_bytes: int
+    is_active: bool
+    created_at: datetime
+    preview_data_url: str
+
+
+class ManualCoversResponse(BaseModel):
+    """Response model for manual cover list."""
+
+    covers: list[ManualCoverRead]
+
+
+def _manual_cover_dir(settings: Settings) -> Path:
+    path = Path(settings.data_dir) / "manual_covers"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _manual_cover_to_read(cover: ManualCover, settings: Settings) -> ManualCoverRead:
+    file_path = _manual_cover_dir(settings) / cover.file_name
+    preview_data_url = ""
+    try:
+        if file_path.exists():
+            encoded = base64.b64encode(file_path.read_bytes()).decode("utf-8")
+            preview_data_url = f"data:{cover.media_type};base64,{encoded}"
+    except Exception:
+        logger.exception("Failed reading manual cover preview for %s", cover.id)
+
+    return ManualCoverRead(
+        id=str(cover.id),
+        name=cover.name,
+        media_type=cover.media_type,
+        size_bytes=cover.size_bytes,
+        is_active=cover.is_active,
+        created_at=cover.created_at,
+        preview_data_url=preview_data_url,
+    )
 
 
 def get_or_create_config(session: Session) -> ClientConfig:
@@ -188,6 +249,8 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         cover_provider=config.cover_provider,
         cover_quality=config.cover_quality,
         cover_prompt=config.cover_prompt,
+        cover_openai_api_key=SECRET_MASK if config.cover_openai_api_key else "",
+        cover_gemini_api_key=SECRET_MASK if config.cover_gemini_api_key else "",
         wallabag=IntegrationStatus(
             enabled=wallabag_service.is_configured and _get_wallabag_enabled(session),
         ),
@@ -195,6 +258,148 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
             enabled=newsletter_service.is_configured and config.newsletters_enabled,
             label=settings.gmail_label if newsletter_service.is_configured else None,
         ),
+    )
+
+
+@router.get("/covers", response_model=ManualCoversResponse, dependencies=[Depends(verify_api_key)])
+async def list_manual_covers(
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ManualCoversResponse:
+    """List uploaded manual digest covers."""
+    covers = session.exec(
+        select(ManualCover).order_by(ManualCover.created_at.desc())
+    ).all()
+    return ManualCoversResponse(
+        covers=[_manual_cover_to_read(cover, settings) for cover in covers]
+    )
+
+
+@router.post("/covers/upload", response_model=ManualCoverRead, dependencies=[Depends(verify_api_key)])
+async def upload_manual_cover(
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ManualCoverRead:
+    """Upload and normalize a manual digest cover image."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only image uploads are supported",
+        )
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty",
+        )
+    if len(raw_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Uploaded file is too large (max 10MB)",
+        )
+
+    cover_service = CoverImageService(settings)
+    normalized = cover_service.normalize_for_epub(
+        data=raw_bytes,
+        media_type=file.content_type,
+        provider="manual-upload",
+    )
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not process uploaded image",
+        )
+
+    cover_id = uuid4()
+    ext = cover_service.extension_for_media_type(normalized.media_type)
+    stored_file_name = f"{cover_id}.{ext}"
+    target_path = _manual_cover_dir(settings) / stored_file_name
+    target_path.write_bytes(normalized.data)
+
+    has_active = session.exec(
+        select(ManualCover).where(ManualCover.is_active == True)
+    ).first()
+    cover = ManualCover(
+        id=cover_id,
+        name=(file.filename or "Manual Cover").strip() or "Manual Cover",
+        file_name=stored_file_name,
+        media_type=normalized.media_type,
+        size_bytes=len(normalized.data),
+        is_active=has_active is None,
+    )
+    session.add(cover)
+    session.commit()
+    session.refresh(cover)
+    return _manual_cover_to_read(cover, settings)
+
+
+@router.post("/covers/{cover_id}/activate", response_model=ManualCoverRead, dependencies=[Depends(verify_api_key)])
+async def activate_manual_cover(
+    cover_id: UUID,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ManualCoverRead:
+    """Set a manual cover as the active one."""
+    cover = session.get(ManualCover, cover_id)
+    if not cover:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover not found")
+
+    current_active = session.exec(
+        select(ManualCover).where(ManualCover.is_active == True)
+    ).all()
+    for row in current_active:
+        if row.id != cover.id:
+            row.is_active = False
+            row.updated_at = datetime.now(timezone.utc)
+            session.add(row)
+
+    cover.is_active = True
+    cover.updated_at = datetime.now(timezone.utc)
+    session.add(cover)
+    session.commit()
+    session.refresh(cover)
+    return _manual_cover_to_read(cover, settings)
+
+
+@router.delete("/covers/{cover_id}", response_model=ManualCoversResponse, dependencies=[Depends(verify_api_key)])
+async def delete_manual_cover(
+    cover_id: UUID,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ManualCoversResponse:
+    """Delete a manual cover and return remaining covers."""
+    cover = session.get(ManualCover, cover_id)
+    if not cover:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover not found")
+
+    was_active = cover.is_active
+    file_path = _manual_cover_dir(settings) / cover.file_name
+    session.delete(cover)
+    session.commit()
+
+    if file_path.exists():
+        try:
+            file_path.unlink()
+        except Exception:
+            logger.exception("Failed to remove manual cover file: %s", file_path)
+
+    if was_active:
+        next_cover = session.exec(
+            select(ManualCover).order_by(ManualCover.created_at.desc())
+        ).first()
+        if next_cover:
+            next_cover.is_active = True
+            next_cover.updated_at = datetime.now(timezone.utc)
+            session.add(next_cover)
+            session.commit()
+
+    covers = session.exec(
+        select(ManualCover).order_by(ManualCover.created_at.desc())
+    ).all()
+    return ManualCoversResponse(
+        covers=[_manual_cover_to_read(row, settings) for row in covers]
     )
 
 
@@ -308,6 +513,12 @@ async def update_config(
     if request.cover_prompt is not None:
         config.cover_prompt = request.cover_prompt.strip()
 
+    if request.cover_openai_api_key is not None and request.cover_openai_api_key != SECRET_MASK:
+        config.cover_openai_api_key = request.cover_openai_api_key.strip()
+
+    if request.cover_gemini_api_key is not None and request.cover_gemini_api_key != SECRET_MASK:
+        config.cover_gemini_api_key = request.cover_gemini_api_key.strip()
+
     if request.morning_hour is not None:
         config.morning_hour = request.morning_hour
         schedule_updates.setdefault("morning", {})["hour"] = request.morning_hour
@@ -358,7 +569,17 @@ async def update_config(
             request.media_processing_interval_hours
         )
 
-    logger.info(f"Updated client configuration: {request.model_dump(exclude_none=True)}")
+    changed_fields = request.model_dump(exclude_none=True)
+    for secret_field in ("cover_openai_api_key", "cover_gemini_api_key"):
+        if secret_field in changed_fields:
+            raw_value = str(changed_fields[secret_field])
+            if raw_value == SECRET_MASK:
+                changed_fields[secret_field] = "<unchanged>"
+            elif raw_value == "":
+                changed_fields[secret_field] = "<cleared>"
+            else:
+                changed_fields[secret_field] = "<redacted>"
+    logger.info(f"Updated client configuration: {changed_fields}")
     return _config_to_response(config, session)
 
 
@@ -476,7 +697,7 @@ async def set_active_whisper_model(
 
 # ============ Wallabag Configuration ============
 
-PASSWORD_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022"
+PASSWORD_MASK = SECRET_MASK
 
 
 def _get_or_create_wallabag_config(session: Session) -> WallabagConfig:
