@@ -154,7 +154,6 @@ def test_epub_generator_creates_feed_chapters_with_article_subchapters(tmp_path:
     feed_b_index = labels.index("Feed B")
     assert feed_a_index < feed_b_index
 
-
 def test_epub_generator_embeds_generated_cover_image(tmp_path: Path) -> None:
     """Generated cover image should be embedded and referenced by the cover page."""
     settings = Settings(output_dir=str(tmp_path))
@@ -217,3 +216,37 @@ def test_cover_image_service_normalizes_cover_to_5_8_jpeg() -> None:
 
     with Image.open(io.BytesIO(normalized.data)) as normalized_img:
         assert normalized_img.size == (960, 1536)
+
+
+def test_epub_generator_formats_plain_text_content(tmp_path: Path) -> None:
+    """Plain text chapter content should be expanded into structured HTML."""
+    settings = Settings(output_dir=str(tmp_path))
+    generator = EpubGenerator(settings)
+
+    article = ExtractedArticle(
+        guid="a-1",
+        url="https://a.example/1",
+        title="Structured Output",
+        content=(
+            "Section Highlights:\n"
+            "This is a dense paragraph that should be broken into readable chunks. "
+            "It contains several sentences to trigger paragraph splitting for EPUB output. "
+            "Another sentence keeps the block long enough for formatting heuristics."
+        ),
+        feed_title="Feed A",
+    )
+
+    epub_path = generator.generate(
+        articles=[article],
+        period="manual",
+        date=datetime(2026, 2, 1),
+    )
+
+    with zipfile.ZipFile(epub_path, "r") as zf:
+        chapter_name = next(
+            name for name in zf.namelist() if name.endswith("feed_001_article_001_feed-a.xhtml")
+        )
+        chapter_html = zf.read(chapter_name).decode("utf-8")
+
+    assert "<h3>Section Highlights</h3>" in chapter_html
+    assert chapter_html.count("<p>") >= 2
