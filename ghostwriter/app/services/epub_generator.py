@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from html import escape as html_escape
 from uuid import uuid4
 
 from ebooklib import epub
@@ -11,6 +12,7 @@ from ebooklib import epub
 from app.core.config import Settings, get_settings
 from app.services.content_processor import ExtractedArticle
 from app.services.cover_image_service import CoverImage
+from app.services.digest_content_formatter import format_digest_content_to_html
 
 logger = logging.getLogger(__name__)
 
@@ -381,22 +383,9 @@ class EpubGenerator:
         Returns:
             EpubHtml chapter.
         """
-        # Escape HTML special chars in content and title
-        def escape_html(text: str) -> str:
-            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-        def looks_like_html(text: str) -> bool:
-            return bool(re.search(r"<[a-zA-Z][^>]*>", text))
-
-        title = escape_html(article.title)
-
-        if looks_like_html(article.content):
-            content_html = article.content
-        else:
-            content = escape_html(article.content)
-            # Convert newlines to paragraphs
-            paragraphs = content.split("\n\n")
-            content_html = "".join(f"<p>{p.strip()}</p>" for p in paragraphs if p.strip())
+        title = html_escape(article.title, quote=False)
+        content_html = format_digest_content_to_html(article.content)
+        article_url = html_escape(article.url, quote=True)
 
         # Badge for summarized articles
         badge = ""
@@ -421,7 +410,7 @@ class EpubGenerator:
         <div class="article-content">
             {content_html}
         </div>
-        <p><a href="{article.url}">Read original</a></p>
+        <p><a href="{article_url}">Read original</a></p>
     </div>
 </body>
 </html>"""
