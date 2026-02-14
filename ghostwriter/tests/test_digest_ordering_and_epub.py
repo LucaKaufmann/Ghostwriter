@@ -4,12 +4,15 @@ import base64
 from dataclasses import dataclass
 from datetime import datetime
 import io
+import logging
 import os
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import zipfile
 
+import httpx
 from PIL import Image
+import pytest
 
 os.environ.setdefault("DATA_DIR", "/tmp/ghostwriter_test")
 os.environ.setdefault("OUTPUT_DIR", "/tmp/ghostwriter_test_output")
@@ -216,6 +219,94 @@ def test_cover_image_service_normalizes_cover_to_5_8_jpeg() -> None:
 
     with Image.open(io.BytesIO(normalized.data)) as normalized_img:
         assert normalized_img.size == (960, 1536)
+
+
+@pytest.mark.asyncio
+async def test_cover_image_service_openai_payload_for_gpt_image(monkeypatch) -> None:
+    """OpenAI cover request should match gpt-image-1 supported payload fields."""
+    settings = Settings(openai_api_key="sk-test")
+    service = CoverImageService(settings)
+    captured_payload: dict = {}
+    encoded = base64.b64encode(b"image-bytes").decode("utf-8")
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return
+
+        def json(self) -> dict:
+            return {"data": [{"b64_json": encoded}]}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, _url: str, headers=None, json=None) -> _FakeResponse:
+            captured_payload["headers"] = headers
+            captured_payload["json"] = json
+            return _FakeResponse()
+
+        async def get(self, _url: str):
+            raise AssertionError("URL fetch path should not be used for gpt-image-1 responses")
+
+    monkeypatch.setattr(
+        "app.services.cover_image_service.httpx.AsyncClient",
+        _FakeAsyncClient,
+    )
+
+    cover = await service._generate_openai(prompt="test prompt", quality="medium")
+
+    assert cover is not None
+    assert cover.data == b"image-bytes"
+    assert cover.media_type == "image/png"
+    assert captured_payload["json"]["model"] == "gpt-image-1"
+    assert captured_payload["json"]["quality"] == "medium"
+    assert "response_format" not in captured_payload["json"]
+
+
+@pytest.mark.asyncio
+async def test_cover_image_service_openai_http_error_logs_details(
+    monkeypatch,
+    caplog,
+) -> None:
+    """HTTP failures should log OpenAI status and response snippet for debugging."""
+    settings = Settings(openai_api_key="sk-test")
+    service = CoverImageService(settings)
+    response = httpx.Response(
+        status_code=400,
+        request=httpx.Request("POST", "https://api.openai.com/v1/images/generations"),
+        json={"error": {"message": "Unsupported parameter: response_format"}},
+    )
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, _url: str, headers=None, json=None):
+            return response
+
+    monkeypatch.setattr(
+        "app.services.cover_image_service.httpx.AsyncClient",
+        _FakeAsyncClient,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        cover = await service._generate_openai(prompt="test prompt", quality="low")
+
+    assert cover is None
+    assert "OpenAI cover generation failed with status 400" in caplog.text
+    assert "Unsupported parameter: response_format" in caplog.text
 
 
 def test_epub_generator_formats_plain_text_content(tmp_path: Path) -> None:
