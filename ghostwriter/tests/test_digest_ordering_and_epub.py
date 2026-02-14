@@ -21,7 +21,7 @@ os.environ.setdefault("API_KEY", "")
 from app.core.config import Settings
 from app.models.feed import Feed
 from app.services.content_processor import ExtractedArticle
-from app.services.cover_image_service import CoverImage, CoverImageService
+from app.services.cover_image_service import CoverImage, CoverImageService, CoverOverlayMetadata
 from app.services.epub_generator import EpubGenerator
 from app.worker.bindery import BinderyPipeline
 
@@ -219,6 +219,118 @@ def test_cover_image_service_normalizes_cover_to_5_8_jpeg() -> None:
 
     with Image.open(io.BytesIO(normalized.data)) as normalized_img:
         assert normalized_img.size == (960, 1536)
+
+
+def test_cover_image_service_extract_source_labels_mixed_sources() -> None:
+    """Source label extraction should deterministically reflect the digest content mix."""
+    service = CoverImageService()
+    articles = [
+        ExtractedArticle(
+            guid="n-1",
+            url="https://news.example/1",
+            title="News item",
+            content="Body",
+            feed_title="Tech Feed",
+            content_type="article",
+        ),
+        ExtractedArticle(
+            guid="w-1",
+            url="https://wallabag.example/1",
+            title="Wallabag item",
+            content="Body",
+            feed_title="Wallabag",
+            content_type="article",
+        ),
+        ExtractedArticle(
+            guid="nl-1",
+            url="https://mail.google.com/1",
+            title="Newsletter item",
+            content="Body",
+            feed_title="Newsletter",
+            content_type="article",
+        ),
+        ExtractedArticle(
+            guid="p-1",
+            url="https://pod.example/1",
+            title="Podcast item",
+            content="Body",
+            feed_title="Podcast",
+            content_type="podcast",
+        ),
+        ExtractedArticle(
+            guid="y-1",
+            url="https://youtube.com/watch?v=1",
+            title="YouTube item",
+            content="Body",
+            feed_title="Youtube",
+            content_type="youtube",
+        ),
+    ]
+
+    labels = service._extract_source_labels(articles)
+
+    assert labels == ["News", "Wallabag", "Newsletter", "Podcast", "YouTube"]
+
+
+def test_cover_image_service_prompt_requests_overlay_safe_space() -> None:
+    """Prompt should reserve clean layout areas for deterministic metadata overlays."""
+    service = CoverImageService()
+    articles = [
+        ExtractedArticle(
+            guid="a-1",
+            url="https://news.example/1",
+            title="Headline one",
+            content="Body",
+            feed_title="Tech Feed",
+            content_type="article",
+        ),
+        ExtractedArticle(
+            guid="w-1",
+            url="https://wallabag.example/1",
+            title="Read-later item",
+            content="Body",
+            feed_title="Wallabag",
+            content_type="article",
+        ),
+    ]
+
+    prompt = service._build_prompt(
+        period="morning",
+        date=datetime(2026, 2, 14),
+        articles=articles,
+        prompt_suffix="",
+    )
+
+    assert "Do not render any readable text or letters" in prompt
+    assert "negative space near the top and bottom" in prompt
+    assert "Included source types: News, Wallabag." in prompt
+
+
+def test_cover_image_service_overlay_metadata_changes_output_bytes() -> None:
+    """Applying deterministic overlay metadata should alter encoded cover output."""
+    service = CoverImageService()
+    source_image = Image.new("RGB", (1200, 1200), color=(40, 40, 40))
+    with io.BytesIO() as source_bytes:
+        source_image.save(source_bytes, format="PNG")
+        original = CoverImage(
+            data=source_bytes.getvalue(),
+            media_type="image/png",
+            provider="gpt-image-1",
+        )
+
+    plain = service._normalize_cover_image(original)
+    with_overlay = service._normalize_cover_image(
+        original,
+        overlay_metadata=CoverOverlayMetadata(
+            title="Epilogue Digest",
+            subtitle="2026-02-14 · Morning",
+            sources=("News", "Newsletter"),
+        ),
+    )
+
+    assert plain is not None
+    assert with_overlay is not None
+    assert plain.data != with_overlay.data
 
 
 @pytest.mark.asyncio
