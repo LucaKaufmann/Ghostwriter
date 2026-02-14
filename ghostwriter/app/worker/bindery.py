@@ -701,6 +701,7 @@ class BinderyPipeline:
             provider = config.cover_provider
             quality = config.cover_quality
             prompt = config.cover_prompt
+            overlay_enabled = config.cover_overlay_enabled
             cover_openai_api_key = config.cover_openai_api_key
             cover_gemini_api_key = config.cover_gemini_api_key
             ai_enabled = config.cover_enabled
@@ -735,6 +736,7 @@ class BinderyPipeline:
                 provider=provider,
                 quality=quality,
                 prompt_suffix=prompt,
+                overlay_enabled=overlay_enabled,
                 cover_openai_api_key=cover_openai_api_key,
                 cover_gemini_api_key=cover_gemini_api_key,
             )

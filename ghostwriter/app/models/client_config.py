@@ -72,6 +72,10 @@ class ClientConfigBase(SQLModel):
         default="",
         description="Optional additional prompt text for cover generation",
     )
+    cover_overlay_enabled: bool = Field(
+        default=True,
+        description="Overlay deterministic metadata (title, date, sources) on AI-generated covers",
+    )
     cover_openai_api_key: str = Field(
         default="",
         description="Optional dedicated OpenAI API key for cover generation",
@@ -144,6 +148,10 @@ class ClientConfigUpdate(SQLModel):
         default=None,
         description="Optional additional prompt text for cover generation",
     )
+    cover_overlay_enabled: bool | None = Field(
+        default=None,
+        description="Overlay deterministic metadata (title, date, sources) on AI-generated covers",
+    )
     cover_openai_api_key: str | None = Field(
         default=None,
         description="Optional dedicated OpenAI API key for cover generation",
@@ -177,6 +185,7 @@ class ClientConfigRead(SQLModel):
     cover_provider: str
     cover_quality: str
     cover_prompt: str
+    cover_overlay_enabled: bool
     cover_openai_api_key: str
     cover_gemini_api_key: str
     updated_at: datetime

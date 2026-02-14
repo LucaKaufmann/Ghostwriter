@@ -69,6 +69,7 @@ class CoverImageService:
         provider: str,
         quality: str,
         prompt_suffix: str = "",
+        overlay_enabled: bool = True,
         cover_openai_api_key: str | None = None,
         cover_gemini_api_key: str | None = None,
     ) -> CoverImage | None:
@@ -100,11 +101,13 @@ class CoverImageService:
         if raw_cover is None:
             return None
 
-        overlay_metadata = self._build_overlay_metadata(
-            period=period,
-            date=date,
-            articles=articles,
-        )
+        overlay_metadata: CoverOverlayMetadata | None = None
+        if overlay_enabled:
+            overlay_metadata = self._build_overlay_metadata(
+                period=period,
+                date=date,
+                articles=articles,
+            )
         normalized_cover = self._normalize_cover_image(raw_cover, overlay_metadata=overlay_metadata)
         if normalized_cover is None:
             logger.warning(
@@ -144,47 +147,75 @@ class CoverImageService:
         articles: list[ExtractedArticle],
         prompt_suffix: str,
     ) -> str:
-        """Build a concise, high-signal prompt from digest metadata."""
-        feed_titles: list[str] = []
-        seen_feeds: set[str] = set()
+        """Build a content-rich prompt from digest metadata."""
+        # Group articles by feed, keeping up to 3 per feed
+        feed_groups: dict[str, list[ExtractedArticle]] = {}
         for article in articles:
-            feed_title = (article.feed_title or "").strip()
-            if not feed_title:
-                continue
-            lowered = feed_title.lower()
-            if lowered in seen_feeds:
-                continue
-            seen_feeds.add(lowered)
-            feed_titles.append(feed_title)
-            if len(feed_titles) >= 6:
-                break
+            feed_title = (article.feed_title or "General").strip()
+            if feed_title not in feed_groups:
+                feed_groups[feed_title] = []
+            if len(feed_groups[feed_title]) < 3:
+                feed_groups[feed_title].append(article)
 
-        article_titles = [
-            a.title.strip()
-            for a in articles
-            if a.title.strip()
-        ][:8]
+        # Build detailed article metadata lines
+        article_details: list[str] = []
+        for feed_title, feed_articles in feed_groups.items():
+            for article in feed_articles:
+                title = article.title.strip() if article.title else "Untitled"
+                author = article.author.strip() if article.author else None
+
+                # Identify content type
+                content_type = (article.content_type or "article").strip().lower()
+                feed_lower = feed_title.lower()
+
+                if content_type == "podcast":
+                    type_label = "[Podcast]"
+                elif content_type == "youtube":
+                    type_label = "[YouTube]"
+                elif feed_lower == "wallabag":
+                    type_label = "[Wallabag]"
+                elif feed_lower == "newsletter":
+                    type_label = "[Newsletter]"
+                else:
+                    type_label = ""
+
+                # Format: "[Type] Title - Author (Feed)"
+                detail_parts = []
+                if type_label:
+                    detail_parts.append(type_label)
+                detail_parts.append(title)
+                if author:
+                    detail_parts.append(f"by {author}")
+                if type_label:
+                    # For special types, include type in detail
+                    detail = " ".join(detail_parts)
+                else:
+                    # For regular articles, include feed source
+                    detail = f"{' '.join(detail_parts)} ({feed_title})"
+
+                article_details.append(detail)
+
+                # Limit total articles in prompt to avoid token bloat
+                if len(article_details) >= 15:
+                    break
+            if len(article_details) >= 15:
+                break
 
         date_label = date.strftime("%Y-%m-%d")
         period_label = period.capitalize()
-        feeds_line = ", ".join(feed_titles) if feed_titles else "General news"
-        headlines_line = "; ".join(article_titles) if article_titles else "No headline list available"
         source_mix = ", ".join(self._extract_source_labels(articles))
+        content_summary = "; ".join(article_details) if article_details else "Mixed content"
 
         base_prompt = (
-            "Create a magazine-style cover illustration for a news digest edition. "
-            "High contrast, clean composition, no logos, no watermarks, no UI elements. "
-            "Do not render any readable text or letters; typography will be added in post-processing. "
-            "Leave uncluttered negative space near the top and bottom for deterministic title overlays. "
-            "Visual style: editorial magazine art, minimalist, monochrome-friendly. "
-            "Compose for a 5:8 portrait book-cover ratio. "
-            f"Digest date: {date_label}. Edition: {period_label}. "
-            f"Included source types: {source_mix}. "
-            f"Primary sources/topics: {feeds_line}. "
-            f"Headline themes: {headlines_line}."
+            f"Create a magazine-style cover illustration for a news digest edition. "
+            f"Visual style: editorial magazine art, clean composition, expressive and thematic. "
+            f"Compose for a 5:8 portrait book-cover ratio suitable for e-readers. "
+            f"Date: {date_label}. Edition: {period_label}. "
+            f"Content types: {source_mix}. "
+            f"Articles included: {content_summary}"
         )
         if prompt_suffix.strip():
-            base_prompt = f"{base_prompt} Additional direction: {prompt_suffix.strip()}."
+            base_prompt = f"{base_prompt}. Additional direction: {prompt_suffix.strip()}"
         return base_prompt
 
     def _extract_source_labels(self, articles: list[ExtractedArticle]) -> list[str]:
