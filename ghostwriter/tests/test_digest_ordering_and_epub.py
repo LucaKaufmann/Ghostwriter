@@ -198,6 +198,25 @@ def test_epub_generator_embeds_generated_cover_image(tmp_path: Path) -> None:
         cover_html = zf.read(cover_name).decode("utf-8")
         assert 'src="images/cover.png"' in cover_html
 
+        opf_name = next(name for name in names if name.endswith("content.opf"))
+        opf_xml = zf.read(opf_name)
+
+    opf_root = ET.fromstring(opf_xml)
+    ns = {"opf": "http://www.idpf.org/2007/opf"}
+
+    cover_manifest = opf_root.find(".//opf:manifest/opf:item[@id='cover-img']", ns)
+    assert cover_manifest is not None
+    assert cover_manifest.get("href") == "images/cover.png"
+    assert cover_manifest.get("properties") == "cover-image"
+
+    cover_meta = opf_root.find(".//opf:metadata/opf:meta[@name='cover']", ns)
+    assert cover_meta is not None
+    assert cover_meta.get("content") == "cover-img"
+
+    guide_cover_ref = opf_root.find(".//opf:guide/opf:reference[@type='cover']", ns)
+    assert guide_cover_ref is not None
+    assert guide_cover_ref.get("href") == "cover.xhtml"
+
 
 def test_cover_image_service_normalizes_cover_to_5_8_jpeg() -> None:
     """Generated cover images should be normalized to compact 5:8 JPEG output."""
@@ -219,6 +238,11 @@ def test_cover_image_service_normalizes_cover_to_5_8_jpeg() -> None:
 
     with Image.open(io.BytesIO(normalized.data)) as normalized_img:
         assert normalized_img.size == (960, 1536)
+
+
+def test_epub_cover_file_name_normalizes_media_type_parameters() -> None:
+    """Cover image extension mapping should ignore media-type parameters."""
+    assert EpubGenerator._cover_image_file_name("image/jpeg; charset=binary") == "images/cover.jpg"
 
 
 @pytest.mark.asyncio
