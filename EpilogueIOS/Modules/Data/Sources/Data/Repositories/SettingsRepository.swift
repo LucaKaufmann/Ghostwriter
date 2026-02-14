@@ -35,6 +35,7 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         // Ghostwriter settings
         static let ghostwriterEnabled = "ghostwriter_enabled"
         static let ghostwriterURL = "ghostwriter_url"
+        static let ghostwriterDownloadEpubsOnSync = "ghostwriter_download_epubs_on_sync"
         static let lastFeedSyncTime = "ghostwriter_last_feed_sync"
         static let lastDigestSyncTime = "ghostwriter_last_digest_sync"
         static let ghostwriterConfigUpdatedAt = "ghostwriter_config_updated_at"
@@ -254,6 +255,17 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
         } else {
             try keychainService.delete(forKey: KeychainKeys.ghostwriterAPIKey)
         }
+    }
+
+    public func getGhostwriterDownloadEpubsOnSync() async throws -> Bool {
+        if userDefaults.object(forKey: DefaultsKeys.ghostwriterDownloadEpubsOnSync) == nil {
+            return true
+        }
+        return userDefaults.bool(forKey: DefaultsKeys.ghostwriterDownloadEpubsOnSync)
+    }
+
+    public func setGhostwriterDownloadEpubsOnSync(_ enabled: Bool) async throws {
+        userDefaults.set(enabled, forKey: DefaultsKeys.ghostwriterDownloadEpubsOnSync)
     }
 
     public func getLastFeedSyncTime() async throws -> Date? {

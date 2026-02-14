@@ -13,6 +13,8 @@
 		BookOpen,
 		ChevronRight,
 		LayoutDashboard,
+		Headphones,
+		Youtube,
 		LogOut,
 		Mail,
 		Menu,
@@ -27,6 +29,8 @@
 	const navItems = [
 		{ href: '/', label: 'Dashboard', icon: LayoutDashboard },
 		{ href: '/feeds', label: 'Feeds', icon: Rss },
+		{ href: '/podcasts', label: 'Podcasts', icon: Headphones },
+		{ href: '/youtube', label: 'YouTube', icon: Youtube },
 		{ href: '/digests', label: 'Digests', icon: BookCopy },
 		{ href: '/newsletters', label: 'Newsletters', icon: Mail },
 		{ href: '/settings', label: 'Settings', icon: Settings }

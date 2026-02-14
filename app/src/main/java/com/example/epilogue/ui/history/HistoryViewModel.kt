@@ -7,8 +7,12 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.epilogue.data.repository.DigestRepository
+import com.example.epilogue.data.repository.GhostwriterRepository
+import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.service.DigestScheduler
+import com.example.epilogue.service.EpubExporter
+import com.example.epilogue.service.ExportResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
@@ -28,7 +32,9 @@ import javax.inject.Inject
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
     private val digestRepository: DigestRepository,
+    private val ghostwriterRepository: GhostwriterRepository,
     private val digestScheduler: DigestScheduler,
+    private val epubExporter: EpubExporter,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -76,7 +82,12 @@ class HistoryViewModel @Inject constructor(
     fun openInExternalReader(digest: Digest) {
         val file = File(digest.epubFilePath)
         if (!file.exists()) {
-            _uiState.update { it.copy(error = "EPUB file not found") }
+            val message = if (digest.isFromGhostwriter) {
+                "EPUB not downloaded yet. Use Download in history first."
+            } else {
+                "EPUB file not found"
+            }
+            _uiState.update { it.copy(error = message) }
             return
         }
 
@@ -141,6 +152,54 @@ class HistoryViewModel @Inject constructor(
     }
 
     /**
+     * Download a synced Ghostwriter digest EPUB on demand.
+     */
+    fun downloadEpub(digest: Digest) {
+        if (!digest.isFromGhostwriter) {
+            _uiState.update { it.copy(error = "Only Ghostwriter digests can be downloaded") }
+            return
+        }
+        if (_uiState.value.downloadingDigestIds.contains(digest.id)) {
+            return
+        }
+
+        val filename = digest.epubFilePath.takeIf { it.isNotBlank() }?.let { File(it).name }
+        if (filename.isNullOrBlank()) {
+            _uiState.update { it.copy(error = "Missing digest filename for download") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(downloadingDigestIds = it.downloadingDigestIds + digest.id) }
+
+            when (val result = ghostwriterRepository.downloadDigest(filename)) {
+                is GhostwriterResult.Success -> {
+                    val file = result.data
+                    digestRepository.updateDigestEpubPath(digest.id, file.absolutePath)
+                    when (val exportResult = epubExporter.exportToCustomDirectory(file)) {
+                        is ExportResult.Success -> Unit
+                        is ExportResult.PermissionRevoked -> {
+                            _uiState.update { it.copy(error = "Custom export permission revoked") }
+                        }
+                        is ExportResult.Error -> {
+                            _uiState.update { it.copy(error = "Custom export failed: ${exportResult.message}") }
+                        }
+                        ExportResult.NotConfigured -> Unit
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update { it.copy(error = "Download failed: ${result.message}") }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(error = "Ghostwriter is not configured") }
+                }
+            }
+
+            _uiState.update { it.copy(downloadingDigestIds = it.downloadingDigestIds - digest.id) }
+        }
+    }
+
+    /**
      * Refresh digests from Ghostwriter.
      * Triggers a sync and shows a brief loading indicator.
      */
@@ -167,5 +226,6 @@ data class HistoryUiState(
     val digestToDelete: Digest? = null,
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
+    val downloadingDigestIds: Set<Long> = emptySet(),
     val error: String? = null
 )
