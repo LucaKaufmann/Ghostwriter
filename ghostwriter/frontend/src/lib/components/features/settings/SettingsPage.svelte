@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -105,6 +105,29 @@
 		},
 		onError: (err: Error) => {
 			toast.error('Failed to revoke token', {
+				description: err.message ?? 'Unknown error'
+			});
+		}
+	}));
+
+	const downloadKoreaderPluginMutation = createMutation(() => ({
+		mutationFn: (data: KoreaderPluginDownloadRequest) => api.downloadKoreaderPlugin(data),
+		onSuccess: ({ blob, filename }) => {
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = filename;
+			anchor.click();
+			URL.revokeObjectURL(url);
+
+			queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
+			toast.success('KOReader plugin downloaded', {
+				description: 'A new API token was created and embedded in the plugin.'
+			});
+			showKoreaderPluginDialog = false;
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to download KOReader plugin', {
 				description: err.message ?? 'Unknown error'
 			});
 		}
@@ -336,6 +359,9 @@
 	let newlyCreatedToken = $state('');
 	let copiedNewToken = $state(false);
 	let tokenToRevoke = $state<APITokenResponse | null>(null);
+	let showKoreaderPluginDialog = $state(false);
+	let koreaderPluginTokenName = $state('KOReader Plugin');
+	let koreaderPluginServerUrl = $state('');
 
 	// Get stored token (JWT)
 	const storedToken = $derived(api.getToken() || '');
@@ -454,6 +480,25 @@
 		} catch {
 			toast.error('Failed to copy token');
 		}
+	}
+
+	function openKoreaderPluginDialog() {
+		if (!koreaderPluginServerUrl && typeof window !== 'undefined') {
+			koreaderPluginServerUrl = window.location.origin;
+		}
+		showKoreaderPluginDialog = true;
+	}
+
+	function downloadKoreaderPlugin() {
+		const tokenName = koreaderPluginTokenName.trim();
+		if (!tokenName) {
+			toast.error('Token name is required');
+			return;
+		}
+		downloadKoreaderPluginMutation.mutate({
+			token_name: tokenName,
+			server_url: koreaderPluginServerUrl.trim() || undefined
+		});
 	}
 
 	function formatNextRun(schedule: Schedule): string {
@@ -692,21 +737,27 @@
 	<Card.Root>
 		<Card.Header>
 			<div class="flex items-center justify-between">
-				<div>
-					<Card.Title class="flex items-center gap-2">
-						<Key class="h-5 w-5" />
-						API Tokens
-					</Card.Title>
-					<Card.Description>
-						Manage tokens for mobile apps and external integrations
-					</Card.Description>
+					<div>
+						<Card.Title class="flex items-center gap-2">
+							<Key class="h-5 w-5" />
+							API Tokens
+						</Card.Title>
+						<Card.Description>
+							Manage tokens for mobile apps and external integrations
+						</Card.Description>
+					</div>
+					<div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+						<Button variant="outline" size="sm" onclick={openKoreaderPluginDialog}>
+							<Download class="mr-2 h-4 w-4" />
+							Download KOReader Plugin
+						</Button>
+						<Button size="sm" onclick={() => (showCreateTokenDialog = true)}>
+							<Plus class="mr-2 h-4 w-4" />
+							Create Token
+						</Button>
+					</div>
 				</div>
-				<Button size="sm" onclick={() => (showCreateTokenDialog = true)}>
-					<Plus class="mr-2 h-4 w-4" />
-					Create Token
-				</Button>
-			</div>
-		</Card.Header>
+			</Card.Header>
 		<Card.Content>
 			{#if tokensQuery.isPending}
 				<div class="space-y-3">
@@ -1312,6 +1363,77 @@
 		</Tabs.Content>
 	</Tabs.Root>
 </div>
+
+<!-- KOReader Plugin Download Dialog -->
+<Dialog.Root bind:open={showKoreaderPluginDialog}>
+	<Dialog.Content class="sm:max-w-lg">
+		<Dialog.Header>
+			<Dialog.Title class="flex items-center gap-2">
+				<Download class="h-5 w-5" />
+				Download KOReader Plugin
+			</Dialog.Title>
+			<Dialog.Description>
+				Create a preconfigured plugin zip with your server URL and a newly generated API token.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				downloadKoreaderPlugin();
+			}}
+			class="space-y-4"
+		>
+			<div class="space-y-2">
+				<Label for="koreader-token-name">Token Name</Label>
+				<Input
+					id="koreader-token-name"
+					placeholder="KOReader Plugin"
+					bind:value={koreaderPluginTokenName}
+					disabled={downloadKoreaderPluginMutation.isPending}
+				/>
+			</div>
+			<div class="space-y-2">
+				<Label for="koreader-server-url">Server URL</Label>
+				<Input
+					id="koreader-server-url"
+					placeholder="https://ghostwriter.example.com"
+					bind:value={koreaderPluginServerUrl}
+					disabled={downloadKoreaderPluginMutation.isPending}
+				/>
+				<p class="text-xs text-muted-foreground">
+					Leave as-is unless KOReader will connect through a different public URL.
+				</p>
+			</div>
+			<div class="rounded-lg border border-warning/30 bg-warning/10 p-3">
+				<div class="flex items-start gap-2">
+					<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+					<p class="text-xs text-warning/90">
+						Keep the downloaded plugin zip private. It includes a live API token tied to your account.
+					</p>
+				</div>
+			</div>
+			<Dialog.Footer>
+				<Button
+					type="button"
+					variant="outline"
+					onclick={() => (showKoreaderPluginDialog = false)}
+					disabled={downloadKoreaderPluginMutation.isPending}
+				>
+					Cancel
+				</Button>
+				<Button
+					type="submit"
+					disabled={!koreaderPluginTokenName.trim() || downloadKoreaderPluginMutation.isPending}
+				>
+					{#if downloadKoreaderPluginMutation.isPending}
+						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+					{/if}
+					Download Plugin
+				</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
 
 <!-- Create Token Dialog -->
 <Dialog.Root bind:open={showCreateTokenDialog}>
