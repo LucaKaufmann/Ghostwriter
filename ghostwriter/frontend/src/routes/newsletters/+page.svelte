@@ -1,30 +1,32 @@
 <script lang="ts">
-	import { createQuery } from '@tanstack/svelte-query';
+	import { onDestroy, onMount } from 'svelte';
+	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { api } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { onMount, onDestroy } from 'svelte';
-	import { useQueryClient } from '@tanstack/svelte-query';
+	import { toast } from 'svelte-sonner';
 	import {
-		Mail,
-		CheckCircle2,
-		XCircle,
-		ExternalLink,
 		AlertCircle,
-		Inbox
+		CheckCircle2,
+		ExternalLink,
+		Inbox,
+		Mail,
+		RefreshCw,
+		Shield,
+		Unplug
 	} from 'lucide-svelte';
 
 	const queryClient = useQueryClient();
 
-	// Queries
+	let connectInProgress = $state(false);
+
 	const statusQuery = createQuery(() => ({
 		queryKey: ['newsletters', 'status'],
 		queryFn: () => api.getNewsletterStatus()
 	}));
 
-	// Refetch status when window regains focus (after OAuth popup completes)
 	function handleFocus() {
 		queryClient.invalidateQueries({ queryKey: ['newsletters', 'status'] });
 	}
@@ -37,9 +39,23 @@
 		window.removeEventListener('focus', handleFocus);
 	});
 
+	async function refreshStatus() {
+		await statusQuery.refetch();
+	}
+
 	function handleConnect() {
-		// Open OAuth flow in new window
-		window.open(api.getOAuthStartUrl(), '_blank', 'width=600,height=700');
+		const oauthWindow = window.open(api.getOAuthStartUrl(), '_blank', 'width=600,height=700');
+		if (!oauthWindow) {
+			toast.error('Popup blocked', {
+				description: 'Allow popups for this site and try connecting again.'
+			});
+			return;
+		}
+		oauthWindow.focus();
+		connectInProgress = true;
+		toast.message('OAuth window opened', {
+			description: 'Complete authorization, then return to refresh connection status.'
+		});
 	}
 </script>
 
@@ -48,12 +64,17 @@
 </svelte:head>
 
 <div class="space-y-6">
-	<div>
-		<h1 class="text-2xl font-bold tracking-tight">Newsletters</h1>
-		<p class="text-muted-foreground">Connect Gmail to include newsletters in your digests</p>
+	<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+		<div>
+			<h1 class="text-2xl font-bold tracking-tight">Newsletters</h1>
+			<p class="text-muted-foreground">Connect Gmail and include labeled newsletters in your digests</p>
+		</div>
+		<Button variant="outline" size="sm" onclick={refreshStatus} disabled={statusQuery.isFetching}>
+			<RefreshCw class="mr-2 h-4 w-4 {statusQuery.isFetching ? 'animate-spin' : ''}" />
+			Refresh Status
+		</Button>
 	</div>
 
-	<!-- Connection Status -->
 	<Card.Root>
 		<Card.Header>
 			<Card.Title class="flex items-center gap-2">
@@ -61,150 +82,165 @@
 				Gmail Integration
 			</Card.Title>
 			<Card.Description>
-				Connect your Gmail account to automatically include newsletter emails in your digests
+				Connect Gmail once, then label newsletters to include them in future digests.
 			</Card.Description>
 		</Card.Header>
-		<Card.Content>
+		<Card.Content class="space-y-4">
 			{#if statusQuery.isPending}
-				<div class="space-y-4">
-					<Skeleton class="h-12 w-full" />
-					<Skeleton class="h-4 w-48" />
+				<div class="space-y-3">
+					<Skeleton class="h-16 w-full" />
+					<Skeleton class="h-10 w-40" />
 				</div>
-			{:else if statusQuery.error}
-				<div class="flex items-center gap-2 text-destructive">
-					<AlertCircle class="h-5 w-5" />
-					<span>Failed to load status</span>
+			{:else if statusQuery.isError}
+				<div class="rounded-lg border border-destructive/30 bg-destructive/10 p-4">
+					<div class="flex items-start gap-3">
+						<AlertCircle class="mt-0.5 h-5 w-5 text-destructive" />
+						<div class="space-y-2">
+							<p class="font-medium text-destructive">Could not load newsletter status</p>
+							<p class="text-sm text-destructive/90">
+								{statusQuery.error instanceof Error ? statusQuery.error.message : 'Unknown error'}
+							</p>
+							<Button variant="outline" size="sm" onclick={refreshStatus}>Try Again</Button>
+						</div>
+					</div>
 				</div>
 			{:else if statusQuery.data?.configured}
 				<div class="space-y-4">
-					<div class="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950">
-						<CheckCircle2 class="h-6 w-6 text-green-600" />
-						<div>
-							<p class="font-medium text-green-800 dark:text-green-200">Gmail Connected</p>
-							<p class="text-sm text-green-700 dark:text-green-300">
-								Your newsletters will be included in digests
-							</p>
+					<div class="rounded-lg border border-success/30 bg-success/10 p-4">
+						<div class="flex items-start gap-3">
+							<CheckCircle2 class="mt-0.5 h-5 w-5 text-success" />
+							<div>
+								<p class="font-medium text-success">Connected and ready</p>
+								<p class="text-sm text-success/90">
+									Labeled Gmail messages will be included in upcoming digest runs.
+								</p>
+							</div>
 						</div>
 					</div>
 
-					<div class="rounded-lg border p-4 space-y-2">
-						<div class="flex items-center gap-2 text-sm">
-							<Inbox class="h-4 w-4 text-muted-foreground" />
-							<span class="text-muted-foreground">Gmail Label:</span>
+					<div class="rounded-lg border p-4">
+						<div class="flex flex-wrap items-center gap-2">
+							<span class="text-sm text-muted-foreground">Processing label</span>
 							<Badge variant="secondary">{statusQuery.data.label}</Badge>
 						</div>
-						<p class="text-sm text-muted-foreground">
-							Emails with this label will be processed as newsletters
+						<p class="mt-2 text-sm text-muted-foreground">
+							Only messages with this label are imported for newsletters.
 						</p>
 					</div>
 
-					<Button variant="outline" onclick={handleConnect}>
-						<ExternalLink class="mr-2 h-4 w-4" />
-						Re-authorize Gmail
-					</Button>
+					<div class="flex flex-wrap gap-2">
+						<Button onclick={handleConnect}>
+							<ExternalLink class="mr-2 h-4 w-4" />
+							Reconnect Gmail
+						</Button>
+						<a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">
+							<Button variant="outline">
+								<Shield class="mr-2 h-4 w-4" />
+								Google Permissions
+							</Button>
+						</a>
+					</div>
 				</div>
 			{:else if statusQuery.data?.oauth_ready}
 				<div class="space-y-4">
-					<div class="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
-						<AlertCircle class="h-6 w-6 text-amber-600" />
-						<div>
-							<p class="font-medium text-amber-800 dark:text-amber-200">Gmail Not Connected</p>
-							<p class="text-sm text-amber-700 dark:text-amber-300">
-								Connect your Gmail to include newsletters
-							</p>
+					<div class="rounded-lg border border-warning/30 bg-warning/10 p-4">
+						<div class="flex items-start gap-3">
+							<AlertCircle class="mt-0.5 h-5 w-5 text-warning" />
+							<div>
+								<p class="font-medium text-warning">Gmail is not connected yet</p>
+								<p class="text-sm text-warning/90">
+									OAuth is configured. Finish one authorization step to start importing newsletters.
+								</p>
+							</div>
 						</div>
 					</div>
 
-					<Button onclick={handleConnect}>
-						<Mail class="mr-2 h-4 w-4" />
-						Connect Gmail
-					</Button>
+					{#if connectInProgress}
+						<div class="rounded-lg border border-info/30 bg-info/10 p-4">
+							<div class="flex items-start gap-3">
+								<Mail class="mt-0.5 h-5 w-5 text-info" />
+								<div>
+									<p class="font-medium text-info">Authorization in progress</p>
+									<p class="text-sm text-info/90">
+										After approving access in the popup, return here and click "Refresh Status".
+									</p>
+								</div>
+							</div>
+						</div>
+					{/if}
+
+					<div class="flex flex-wrap gap-2">
+						<Button onclick={handleConnect}>
+							<Mail class="mr-2 h-4 w-4" />
+							Connect Gmail
+						</Button>
+						<Button variant="outline" onclick={refreshStatus}>I finished OAuth</Button>
+					</div>
 				</div>
 			{:else}
-				<div class="flex items-center gap-3 rounded-lg border border-muted p-4">
-					<XCircle class="h-6 w-6 text-muted-foreground" />
-					<div>
-						<p class="font-medium">Gmail Integration Unavailable</p>
-						<p class="text-sm text-muted-foreground">
-							Gmail OAuth credentials are not configured on the server
-						</p>
+				<div class="rounded-lg border border-muted p-4">
+					<div class="flex items-start gap-3">
+						<Unplug class="mt-0.5 h-5 w-5 text-muted-foreground" />
+						<div class="space-y-2">
+							<p class="font-medium">Integration not configured on server</p>
+							<p class="text-sm text-muted-foreground">
+								Gmail OAuth credentials are missing. Add server OAuth settings, then refresh this page.
+							</p>
+						</div>
 					</div>
 				</div>
 			{/if}
 		</Card.Content>
 	</Card.Root>
 
-	<!-- Setup Instructions -->
 	<Card.Root>
 		<Card.Header>
-			<Card.Title>How It Works</Card.Title>
+			<Card.Title>Setup Flow</Card.Title>
 		</Card.Header>
-		<Card.Content class="space-y-4">
-			<div class="grid gap-4 md:grid-cols-3">
-				<div class="flex gap-3">
-					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
-						1
-					</div>
-					<div>
-						<p class="font-medium">Connect Gmail</p>
-						<p class="text-sm text-muted-foreground">
-							Authorize Ghostwriter to read your emails
-						</p>
-					</div>
-				</div>
-				<div class="flex gap-3">
-					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
-						2
-					</div>
-					<div>
-						<p class="font-medium">Label Newsletters</p>
-						<p class="text-sm text-muted-foreground">
-							Apply the "{statusQuery.data?.label || 'Ghostwriter'}" label to newsletter emails
-						</p>
-					</div>
-				</div>
-				<div class="flex gap-3">
-					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
-						3
-					</div>
-					<div>
-						<p class="font-medium">Automatic Processing</p>
-						<p class="text-sm text-muted-foreground">
-							Labeled emails are automatically included in your digests
-						</p>
-					</div>
-				</div>
+		<Card.Content class="grid gap-4 md:grid-cols-3">
+			<div class="rounded-lg border p-4">
+				<p class="text-sm font-semibold">1. Connect Gmail</p>
+				<p class="mt-2 text-sm text-muted-foreground">Authorize Ghostwriter to read labeled newsletter messages.</p>
 			</div>
-
-			<div class="rounded-lg bg-muted/50 p-4 text-sm">
-				<p class="font-medium mb-2">💡 Pro Tip</p>
-				<p class="text-muted-foreground">
-					Create a Gmail filter to automatically apply the label to emails from your favorite
-					newsletter senders. This way, they'll be included in your digests without manual
-					labeling.
+			<div class="rounded-lg border p-4">
+				<p class="text-sm font-semibold">2. Apply label</p>
+				<p class="mt-2 text-sm text-muted-foreground">
+					Use the <span class="font-medium">{statusQuery.data?.label || 'Ghostwriter'}</span> label in Gmail filters.
 				</p>
+			</div>
+			<div class="rounded-lg border p-4">
+				<p class="text-sm font-semibold">3. Run digest</p>
+				<p class="mt-2 text-sm text-muted-foreground">Labeled emails are merged into generated digest content.</p>
 			</div>
 		</Card.Content>
 	</Card.Root>
 
-	<!-- Privacy Note -->
 	<Card.Root>
 		<Card.Header>
-			<Card.Title>Privacy & Security</Card.Title>
+			<Card.Title>Troubleshooting</Card.Title>
 		</Card.Header>
-		<Card.Content class="text-sm text-muted-foreground space-y-2">
+		<Card.Content class="space-y-3 text-sm text-muted-foreground">
+			<p>If OAuth keeps failing, first disconnect/reconnect from Google account permissions, then connect again here.</p>
+			<p>If status never changes, click "Refresh Status" after returning from the OAuth popup window.</p>
 			<p>
-				Ghostwriter only reads emails that have the specific newsletter label applied.
-				Your other emails are never accessed.
+				If messages are missing, verify the Gmail label exists and is applied to the newsletters you expect.
 			</p>
-			<p>
-				Email content is processed locally on your server and is not sent to any
-				third parties except the configured AI provider for summarization (if enabled).
-			</p>
-			<p>
-				You can revoke access at any time by disconnecting the integration or from
-				your Google Account settings.
-			</p>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title>Privacy</Card.Title>
+		</Card.Header>
+		<Card.Content class="space-y-2 text-sm text-muted-foreground">
+			<div class="flex items-start gap-2">
+				<Inbox class="mt-0.5 h-4 w-4" />
+				<p>Only messages with the configured label are read.</p>
+			</div>
+			<div class="flex items-start gap-2">
+				<Shield class="mt-0.5 h-4 w-4" />
+				<p>Processing runs on your Ghostwriter server with your configured summarization provider.</p>
+			</div>
 		</Card.Content>
 	</Card.Root>
 </div>
