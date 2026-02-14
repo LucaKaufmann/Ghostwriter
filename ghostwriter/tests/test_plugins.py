@@ -67,8 +67,10 @@ def test_download_koreader_plugin_embeds_settings_and_creates_token(client):
 
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         names = set(archive.namelist())
-        assert "ghostwriter.koplugin/settings.lua" in names
-        settings_lua = archive.read("ghostwriter.koplugin/settings.lua").decode(
+        assert "ghostwriter.koplugin/ghostwriter_settings.lua" in names
+        settings_lua = archive.read(
+            "ghostwriter.koplugin/ghostwriter_settings.lua"
+        ).decode(
             "utf-8"
         )
 
@@ -105,7 +107,9 @@ def test_download_koreader_plugin_uses_request_origin_when_server_url_missing(
     assert response.status_code == 200
 
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-        settings_lua = archive.read("ghostwriter.koplugin/settings.lua").decode(
+        settings_lua = archive.read(
+            "ghostwriter.koplugin/ghostwriter_settings.lua"
+        ).decode(
             "utf-8"
         )
 
