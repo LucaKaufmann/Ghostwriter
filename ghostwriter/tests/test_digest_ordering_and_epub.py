@@ -327,6 +327,8 @@ def test_cover_image_service_prompt_requests_overlay_safe_space() -> None:
 
     assert "Do not render any readable text or letters" in prompt
     assert "negative space near the top and bottom" in prompt
+    assert "magazine-style cover illustration for a news digest edition" in prompt
+    assert "original portrait ebook cover illustration" not in prompt
     assert "Included source types: News, Wallabag." in prompt
 
 

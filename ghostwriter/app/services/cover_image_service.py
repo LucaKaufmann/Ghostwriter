@@ -172,11 +172,11 @@ class CoverImageService:
         source_mix = ", ".join(self._extract_source_labels(articles))
 
         base_prompt = (
-            "Create an original portrait ebook cover illustration for an e-ink digest. "
+            "Create a magazine-style cover illustration for a news digest edition. "
             "High contrast, clean composition, no logos, no watermarks, no UI elements. "
             "Do not render any readable text or letters; typography will be added in post-processing. "
             "Leave uncluttered negative space near the top and bottom for deterministic title overlays. "
-            "Visual style: editorial, minimalist, monochrome-friendly. "
+            "Visual style: editorial magazine art, minimalist, monochrome-friendly. "
             "Compose for a 5:8 portrait book-cover ratio. "
             f"Digest date: {date_label}. Edition: {period_label}. "
             f"Included source types: {source_mix}. "
