@@ -47,6 +47,7 @@ import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.TriggerType
 import com.example.epilogue.service.DigestSyncWorker
 import com.example.epilogue.ui.components.SyncStatusIndicator
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -164,7 +165,9 @@ fun HistoryScreen(
                             digest = digest,
                             onClick = { onDigestClick(digest.id) },
                             onDelete = { viewModel.showDeleteConfirmation(digest) },
-                            onOpenExternal = { viewModel.openInExternalReader(digest) }
+                            onOpenExternal = { viewModel.openInExternalReader(digest) },
+                            onDownload = { viewModel.downloadEpub(digest) },
+                            isDownloading = uiState.downloadingDigestIds.contains(digest.id)
                         )
                     }
                 }
@@ -208,10 +211,15 @@ fun DigestHistoryItem(
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onOpenExternal: () -> Unit,
+    onDownload: () -> Unit,
+    isDownloading: Boolean,
     modifier: Modifier = Modifier
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val epubExists = remember(digest.epubFilePath, isDownloading) {
+        digest.epubFilePath.isNotBlank() && File(digest.epubFilePath).exists()
+    }
 
     Card(
         modifier = modifier
@@ -281,15 +289,32 @@ fun DigestHistoryItem(
                         maxLines = 1
                     )
                 }
+
+                if (digest.isFromGhostwriter && !epubExists) {
+                    Text(
+                        text = "EPUB not downloaded",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
             }
 
             // Action buttons
             Row {
-                IconButton(onClick = onOpenExternal) {
-                    Icon(
-                        imageVector = Icons.Default.OpenInNew,
-                        contentDescription = "Open in reader"
-                    )
+                if (digest.isFromGhostwriter && !epubExists) {
+                    TextButton(
+                        onClick = onDownload,
+                        enabled = !isDownloading
+                    ) {
+                        Text(if (isDownloading) "Downloading..." else "Download")
+                    }
+                } else {
+                    IconButton(onClick = onOpenExternal) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInNew,
+                            contentDescription = "Open in reader"
+                        )
+                    }
                 }
                 IconButton(onClick = onDelete) {
                     Icon(

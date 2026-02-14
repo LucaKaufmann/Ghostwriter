@@ -24,6 +24,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -51,6 +52,7 @@ class DigestSyncWorker @AssistedInject constructor(
         const val NOTIFICATION_ID = 1002
 
         const val MAX_RETRY_ATTEMPTS = 3
+        private const val REMOTE_EPUB_RETENTION_MILLIS = 30L * 24L * 60L * 60L * 1000L
     }
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
@@ -102,14 +104,22 @@ class DigestSyncWorker @AssistedInject constructor(
             is GhostwriterResult.Success -> {
                 val syncData = syncResult.data
                 val newDigests = syncData.digests.newDigests
+                val shouldDownloadEpubs = settingsRepository.shouldDownloadGhostwriterEpubsOnSync()
 
-                Log.i(TAG, "Combined sync: ${newDigests.size} new digests to download")
+                Log.i(
+                    TAG,
+                    "Combined sync: ${newDigests.size} new digests " +
+                            if (shouldDownloadEpubs) "to download" else "to index only"
+                )
 
-                // Download EPUBs in parallel (max 3 concurrent)
-                val downloadedCount = downloadDigestsParallel(newDigests)
+                val processedCount = downloadDigestsParallel(
+                    digests = newDigests,
+                    shouldDownloadEpubs = shouldDownloadEpubs
+                )
 
-                Log.i(TAG, "Downloaded $downloadedCount new digests via combined sync")
+                Log.i(TAG, "Processed $processedCount new digests via combined sync")
                 settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())
+                runRemoteEpubCleanup()
                 Result.success()
             }
             is GhostwriterResult.Error -> {
@@ -124,27 +134,33 @@ class DigestSyncWorker @AssistedInject constructor(
     }
 
     /**
-     * Download digests in parallel with a concurrency limit of 3.
-     * Articles are already embedded in the sync response.
+     * Download or index digests in parallel with a concurrency limit of 3.
      */
-    private suspend fun downloadDigestsParallel(digests: List<SyncDigest>): Int {
+    private suspend fun downloadDigestsParallel(
+        digests: List<SyncDigest>,
+        shouldDownloadEpubs: Boolean
+    ): Int {
         if (digests.isEmpty()) return 0
 
         val semaphore = Semaphore(3)
-        var downloadedCount = 0
+        var processedCount = 0
 
         coroutineScope {
             val results = digests.map { digest ->
                 async {
                     semaphore.withPermit {
-                        downloadAndSaveDigest(digest)
+                        if (shouldDownloadEpubs) {
+                            downloadAndSaveDigest(digest)
+                        } else {
+                            saveDigestMetadataOnly(digest)
+                        }
                     }
                 }
             }
-            downloadedCount = results.awaitAll().count { it }
+            processedCount = results.awaitAll().count { it }
         }
 
-        return downloadedCount
+        return processedCount
     }
 
     /**
@@ -203,10 +219,43 @@ class DigestSyncWorker @AssistedInject constructor(
     }
 
     /**
+     * Save digest metadata/articles without downloading the EPUB file.
+     * The EPUB path still points to where the file will be downloaded on demand.
+     */
+    private suspend fun saveDigestMetadataOnly(digest: SyncDigest): Boolean {
+        return try {
+            val generatedAt = try {
+                digest.completedAt?.let { dateFormat.parse(it)?.time } ?: System.currentTimeMillis()
+            } catch (e: Exception) {
+                System.currentTimeMillis()
+            }
+
+            val expectedPath = getExpectedEpubPath(digest.filename)
+            val articles = digest.articles.ifEmpty { null }
+
+            digestRepository.saveRemoteDigest(
+                remoteId = digest.id,
+                epubFilePath = expectedPath,
+                articleCount = digest.articleCount,
+                generatedAt = generatedAt,
+                period = digest.period,
+                articles = articles
+            )
+
+            Log.i(TAG, "Indexed digest without EPUB download: ${digest.id}")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save digest metadata for ${digest.id}", e)
+            false
+        }
+    }
+
+    /**
      * Legacy sync using individual API calls (fallback).
      */
     private suspend fun doWorkLegacy(): Result {
         val digestsResult = ghostwriterRepository.listDigests()
+        val shouldDownloadEpubs = settingsRepository.shouldDownloadGhostwriterEpubsOnSync()
 
         return when (digestsResult) {
             is GhostwriterResult.Success -> {
@@ -218,10 +267,41 @@ class DigestSyncWorker @AssistedInject constructor(
                     digest.id !in existingRemoteIds
                 }
 
-                Log.i(TAG, "Legacy sync: ${newDigests.size} new digests to download")
+                Log.i(
+                    TAG,
+                    "Legacy sync: ${newDigests.size} new digests " +
+                            if (shouldDownloadEpubs) "to download" else "to index only"
+                )
 
-                var downloadedCount = 0
+                var processedCount = 0
                 for (digest in newDigests) {
+                    if (!shouldDownloadEpubs) {
+                        val generatedAt = try {
+                            digest.completedAt?.let { dateFormat.parse(it)?.time }
+                                ?: System.currentTimeMillis()
+                        } catch (e: Exception) {
+                            System.currentTimeMillis()
+                        }
+
+                        val articlesResult = ghostwriterRepository.getDigestArticles(digest.id)
+                        val articles = when (articlesResult) {
+                            is GhostwriterResult.Success -> articlesResult.data.articles
+                            is GhostwriterResult.Error -> null
+                            is GhostwriterResult.NotConfigured -> null
+                        }
+
+                        digestRepository.saveRemoteDigest(
+                            remoteId = digest.id,
+                            epubFilePath = getExpectedEpubPath(digest.filename),
+                            articleCount = digest.articleCount,
+                            generatedAt = generatedAt,
+                            period = digest.period,
+                            articles = articles
+                        )
+                        processedCount++
+                        continue
+                    }
+
                     val downloadResult = ghostwriterRepository.downloadDigest(digest.filename)
 
                     when (downloadResult) {
@@ -258,7 +338,7 @@ class DigestSyncWorker @AssistedInject constructor(
                                 ExportResult.NotConfigured -> { }
                             }
 
-                            downloadedCount++
+                            processedCount++
                         }
                         is GhostwriterResult.Error -> {
                             Log.e(TAG, "Failed to download ${digest.filename}: ${downloadResult.message}")
@@ -269,7 +349,9 @@ class DigestSyncWorker @AssistedInject constructor(
                     }
                 }
 
+                Log.i(TAG, "Legacy sync processed $processedCount digests")
                 settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())
+                runRemoteEpubCleanup()
                 Result.success()
             }
             is GhostwriterResult.Error -> {
@@ -289,6 +371,24 @@ class DigestSyncWorker @AssistedInject constructor(
         } else {
             Log.e(TAG, "Max retry attempts reached, failing")
             Result.failure()
+        }
+    }
+
+    private fun getExpectedEpubPath(filename: String): String {
+        val documentsDir = File(applicationContext.getExternalFilesDir(null), "Epilogue")
+        if (!documentsDir.exists()) {
+            documentsDir.mkdirs()
+        }
+        return File(documentsDir, filename).absolutePath
+    }
+
+    /**
+     * Remove stale downloaded remote EPUB files while keeping digest metadata.
+     */
+    private suspend fun runRemoteEpubCleanup() {
+        val deletedCount = digestRepository.cleanupStaleRemoteEpubFiles(REMOTE_EPUB_RETENTION_MILLIS)
+        if (deletedCount > 0) {
+            Log.i(TAG, "Cleaned up $deletedCount stale remote EPUB files")
         }
     }
 

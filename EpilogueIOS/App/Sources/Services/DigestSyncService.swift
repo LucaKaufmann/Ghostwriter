@@ -18,6 +18,7 @@ public final class DigestSyncService {
     private let settingsRepository: SettingsRepositoryProtocol
     private let digestRepository: DigestRepositoryProtocol
     private let logger = Logger(subsystem: "com.epilogue", category: "DigestSync")
+    private static let remoteEpubRetentionDays: TimeInterval = 30
 
     /// Directory where downloaded EPUBs are stored
     private let digestsDirectory: URL
@@ -59,27 +60,37 @@ public final class DigestSyncService {
         let newDigests = remoteDigests.filter { digest in
             digest.isCompleted && !existingRemoteIds.contains(digest.id)
         }
+        let shouldDownloadEpubs = try await settingsRepository.getGhostwriterDownloadEpubsOnSync()
 
-        logger.info("Found \(newDigests.count) new digests to download")
+        logger.info(
+            "Found \(newDigests.count) new digests \(shouldDownloadEpubs ? "to download" : "to index without download")"
+        )
 
-        var downloadedCount = 0
+        var processedCount = 0
 
         for digest in newDigests {
             do {
-                // Download EPUB
-                let epubState = tracker?.beginInterval("EPUB Download [\(digest.id.prefix(8))]")
-                let epubData = try await client.downloadDigest(filename: digest.filename)
-                if let epubState { tracker?.endInterval("EPUB Download [\(digest.id.prefix(8))]", state: epubState, bytes: epubData.count) }
+                let localURL: URL
+                if shouldDownloadEpubs {
+                    let epubState = tracker?.beginInterval("EPUB Download [\(digest.id.prefix(8))]")
+                    let epubData = try await client.downloadDigest(filename: digest.filename)
+                    if let epubState {
+                        tracker?.endInterval("EPUB Download [\(digest.id.prefix(8))]", state: epubState, bytes: epubData.count)
+                    }
 
-                let ioState = tracker?.beginInterval("EPUB Write [\(digest.id.prefix(8))]")
-                let localURL = try saveEPUB(data: epubData, filename: digest.filename)
-                if let ioState { tracker?.endInterval("EPUB Write [\(digest.id.prefix(8))]", state: ioState) }
+                    let ioState = tracker?.beginInterval("EPUB Write [\(digest.id.prefix(8))]")
+                    localURL = try saveEPUB(data: epubData, filename: digest.filename)
+                    if let ioState { tracker?.endInterval("EPUB Write [\(digest.id.prefix(8))]", state: ioState) }
 
-                logger.info("Downloaded: \(localURL.lastPathComponent) (\(SyncPerformanceTracker.formatBytes(epubData.count)))")
-                await CustomExportHelper.exportIfConfigured(
-                    fileURL: localURL,
-                    settingsRepository: settingsRepository
-                )
+                    logger.info("Downloaded: \(localURL.lastPathComponent) (\(SyncPerformanceTracker.formatBytes(epubData.count)))")
+                    await CustomExportHelper.exportIfConfigured(
+                        fileURL: localURL,
+                        settingsRepository: settingsRepository
+                    )
+                } else {
+                    localURL = expectedEPUBURL(filename: digest.filename)
+                    logger.info("Indexed digest without EPUB download: \(digest.id)")
+                }
 
                 // Fetch articles for in-app display
                 var articlesData: [DigestArticleData]?
@@ -110,17 +121,18 @@ public final class DigestSyncService {
                 )
                 if let saveState { tracker?.endInterval("DB Save [\(digest.id.prefix(8))]", state: saveState) }
 
-                downloadedCount += 1
+                processedCount += 1
             } catch {
-                logger.error("Failed to download digest \(digest.filename): \(error.localizedDescription)")
+                logger.error("Failed to process digest \(digest.filename): \(error.localizedDescription)")
                 // Continue with other digests
             }
         }
 
         // Update sync timestamp
         try await settingsRepository.setLastDigestSyncTime(Date())
+        await cleanupStaleRemoteEpubFiles()
 
-        logger.info("Digest sync completed: downloaded \(downloadedCount) new digests")
+        logger.info("Digest sync completed: processed \(processedCount) new digests")
     }
 
     /// Get all known remote digest IDs from local database
@@ -137,37 +149,49 @@ public final class DigestSyncService {
             return
         }
 
-        logger.info("Processing \(digests.count) new digests from combined sync")
+        let shouldDownloadEpubs = try await settingsRepository.getGhostwriterDownloadEpubsOnSync()
+        logger.info(
+            "Processing \(digests.count) new digests from combined sync \(shouldDownloadEpubs ? "with EPUB download" : "without EPUB download")"
+        )
 
-        var downloadedCount = 0
+        var processedCount = 0
 
-        // Download EPUBs concurrently with max 3 concurrent
-        await withTaskGroup(of: Bool.self) { group in
-            var inFlight = 0
+        if shouldDownloadEpubs {
+            // Download EPUBs concurrently with max 3 concurrent
+            await withTaskGroup(of: Bool.self) { group in
+                var inFlight = 0
 
-            for digest in digests {
-                // Wait if we have 3 in flight
-                if inFlight >= 3 {
-                    if let success = await group.next() {
-                        if success { downloadedCount += 1 }
-                        inFlight -= 1
+                for digest in digests {
+                    // Wait if we have 3 in flight
+                    if inFlight >= 3 {
+                        if let success = await group.next() {
+                            if success { processedCount += 1 }
+                            inFlight -= 1
+                        }
+                    }
+
+                    inFlight += 1
+                    group.addTask { [self] in
+                        await self.downloadAndSaveFromSync(digest, tracker: tracker)
                     }
                 }
 
-                inFlight += 1
-                group.addTask { [self] in
-                    await self.downloadAndSaveFromSync(digest, tracker: tracker)
+                // Collect remaining
+                for await success in group {
+                    if success { processedCount += 1 }
                 }
             }
-
-            // Collect remaining
-            for await success in group {
-                if success { downloadedCount += 1 }
+        } else {
+            for digest in digests {
+                if await saveFromSyncWithoutDownload(digest, tracker: tracker) {
+                    processedCount += 1
+                }
             }
         }
 
         try await settingsRepository.setLastDigestSyncTime(Date())
-        logger.info("Combined sync digest processing completed: downloaded \(downloadedCount) digests")
+        await cleanupStaleRemoteEpubFiles()
+        logger.info("Combined sync digest processing completed: processed \(processedCount) digests")
     }
 
     /// Download a single digest from sync data and save it.
@@ -225,6 +249,46 @@ public final class DigestSyncService {
         }
     }
 
+    /// Save a synced digest and embedded articles without downloading the EPUB.
+    private func saveFromSyncWithoutDownload(_ digest: SyncDigest, tracker: SyncPerformanceTracker? = nil) async -> Bool {
+        do {
+            let generatedAt = digest.createdAt.toISO8601Date() ?? digest.completedAt?.toISO8601Date() ?? Date()
+            let localURL = expectedEPUBURL(filename: digest.filename)
+
+            let articlesData: [DigestArticleData]? = digest.articles.isEmpty ? nil : digest.articles.map { article in
+                DigestArticleData(
+                    id: article.id,
+                    title: article.title,
+                    url: article.url,
+                    mode: article.mode,
+                    wordCount: article.wordCount,
+                    content: article.content,
+                    author: article.author,
+                    feedTitle: article.feedTitle,
+                    sortOrder: article.sortOrder
+                )
+            }
+
+            if let articlesData { tracker?.addArticlesSynced(articlesData.count) }
+
+            let saveState = tracker?.beginInterval("DB Save [\(digest.id.prefix(8))]")
+            _ = try await digestRepository.saveRemoteDigest(
+                remoteId: digest.id,
+                epubFilePath: localURL.path,
+                articleCount: digest.articleCount,
+                generatedAt: generatedAt,
+                period: digest.period,
+                articles: articlesData
+            )
+            if let saveState { tracker?.endInterval("DB Save [\(digest.id.prefix(8))]", state: saveState) }
+            logger.info("Indexed digest \(digest.id) without EPUB download")
+            return true
+        } catch {
+            logger.error("Failed to save digest \(digest.id) without EPUB download: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     /// Trigger a digest generation on the server
     /// - Parameter period: The period (morning, noon, evening, manual)
     /// - Returns: The digest ID and status
@@ -253,6 +317,25 @@ public final class DigestSyncService {
         return try await client.getDigestStatus(id: digestId)
     }
 
+    /// Download an EPUB for a previously synced digest.
+    /// Uses filename hint when available, otherwise resolves from server by remote ID.
+    public func downloadDigestEpub(remoteId: String, filenameHint: String? = nil) async throws -> URL {
+        guard try await settingsRepository.isGhostwriterConfigured() else {
+            throw GhostwriterError.notConfigured
+        }
+
+        let client = try await createClient()
+        let filename = try await resolveFilename(client: client, remoteId: remoteId, filenameHint: filenameHint)
+        let epubData = try await client.downloadDigest(filename: filename)
+        let localURL = try saveEPUB(data: epubData, filename: filename)
+
+        await CustomExportHelper.exportIfConfigured(
+            fileURL: localURL,
+            settingsRepository: settingsRepository
+        )
+        return localURL
+    }
+
     // MARK: - Private Helpers
 
     private func createClient() async throws -> GhostwriterClient {
@@ -274,6 +357,58 @@ public final class DigestSyncService {
 
         try data.write(to: fileURL)
         return fileURL
+    }
+
+    private func expectedEPUBURL(filename: String) -> URL {
+        digestsDirectory.appendingPathComponent(filename)
+    }
+
+    private func resolveFilename(client: GhostwriterClient, remoteId: String, filenameHint: String?) async throws -> String {
+        if let filenameHint, !filenameHint.isEmpty {
+            return filenameHint
+        }
+
+        let digests = try await client.listDigests(limit: 200, offset: 0, status: "completed")
+        if let matched = digests.first(where: { $0.id == remoteId }) {
+            return matched.filename
+        }
+
+        throw GhostwriterError.notFound("digest \(remoteId)")
+    }
+
+    /// Remove stale downloaded EPUB files for remote digests while keeping digest records.
+    private func cleanupStaleRemoteEpubFiles() async {
+        do {
+            let digests = try await digestRepository.getAllDigests()
+            let cutoff = Date().addingTimeInterval(-(Self.remoteEpubRetentionDays * 24 * 60 * 60))
+            var deletedCount = 0
+
+            for digest in digests where digest.remoteId != nil {
+                guard !digest.epubFilePath.isEmpty else { continue }
+
+                let fileURL = URL(fileURLWithPath: digest.epubFilePath)
+                guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+
+                let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+                let modifiedAt = attributes?[.modificationDate] as? Date
+                let referenceDate = modifiedAt ?? digest.generatedAt
+
+                guard referenceDate < cutoff else { continue }
+
+                do {
+                    try FileManager.default.removeItem(at: fileURL)
+                    deletedCount += 1
+                } catch {
+                    logger.warning("Failed to delete stale EPUB at \(fileURL.path): \(error.localizedDescription)")
+                }
+            }
+
+            if deletedCount > 0 {
+                logger.info("Cleaned up \(deletedCount) stale remote EPUB files")
+            }
+        } catch {
+            logger.warning("Failed remote EPUB cleanup: \(error.localizedDescription)")
+        }
     }
 
     private func fetchArticles(client: GhostwriterClient, digestId: String) async throws -> [DigestArticleData] {
