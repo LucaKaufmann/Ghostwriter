@@ -1,13 +1,16 @@
 """Digest management and download endpoints."""
 
 import os
+import posixpath
+import re
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
+import zipfile
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -26,6 +29,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _epub_media_type_from_name(name: str) -> str:
+    lowered = name.lower()
+    if lowered.endswith(".jpg") or lowered.endswith(".jpeg"):
+        return "image/jpeg"
+    if lowered.endswith(".webp"):
+        return "image/webp"
+    if lowered.endswith(".gif"):
+        return "image/gif"
+    return "image/png"
 
 
 class TriggerRequest(BaseModel):
@@ -393,6 +407,79 @@ async def get_digest_article_source(
         size_bytes=doc.size_bytes,
         html=doc.html,
     )
+
+
+@router.get("/{digest_id}/cover", dependencies=[Depends(verify_api_key)])
+async def get_digest_cover(
+    digest_id: UUID,
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Extract and return embedded cover image from a digest EPUB."""
+    digest = session.get(Digest, digest_id)
+    if not digest:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Digest not found",
+        )
+
+    if not digest.filename:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Digest has no EPUB file",
+        )
+
+    file_path = os.path.join(settings.output_dir, digest.filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Digest file not found",
+        )
+
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            names = zf.namelist()
+            cover_xhtml = next((name for name in names if name.endswith("cover.xhtml")), None)
+            if not cover_xhtml:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No cover page found in digest",
+                )
+
+            cover_html = zf.read(cover_xhtml).decode("utf-8", errors="ignore")
+            match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', cover_html, re.IGNORECASE)
+            if not match:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No embedded cover image found",
+                )
+
+            src = match.group(1).split("?")[0].strip()
+            cover_entry = posixpath.normpath(
+                posixpath.join(posixpath.dirname(cover_xhtml), src)
+            )
+            if cover_entry.startswith("../") or cover_entry == "..":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid cover image path in digest",
+                )
+            if cover_entry not in names:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Cover image entry not found in digest",
+                )
+
+            payload = zf.read(cover_entry)
+            return Response(
+                content=payload,
+                media_type=_epub_media_type_from_name(cover_entry),
+                headers={"Cache-Control": "public, max-age=300"},
+            )
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Digest EPUB is invalid",
+        ) from exc
 
 
 @router.get("/{filename}", dependencies=[Depends(verify_api_key)])

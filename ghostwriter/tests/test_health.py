@@ -1,6 +1,16 @@
 """Tests for health and system endpoints."""
 
 import base64
+from datetime import datetime
+import os
+from pathlib import Path
+from uuid import uuid4
+import zipfile
+
+from sqlmodel import Session
+
+from app.core.database import engine
+from app.models.digest import Digest
 
 SECRET_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022"
 
@@ -127,3 +137,42 @@ def test_manual_cover_upload_activate_delete_flow(client):
     assert all(item["id"] != cover_two["id"] for item in remaining)
     matching = [item for item in remaining if item["id"] == cover_one["id"]]
     assert matching and matching[0]["is_active"] is True
+
+
+def test_digest_cover_endpoint_returns_embedded_cover(client):
+    """Digest cover endpoint should return embedded EPUB cover image bytes."""
+    epub_name = f"{uuid4()}.epub"
+    output_dir = Path(os.environ["OUTPUT_DIR"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    epub_path = output_dir / epub_name
+
+    cover_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4"
+        "//8/AwAI/AL+X4xL9QAAAABJRU5ErkJggg=="
+    )
+
+    with zipfile.ZipFile(epub_path, "w") as zf:
+        zf.writestr(
+            "cover.xhtml",
+            '<html><body><img src="images/cover.png" alt="cover"/></body></html>',
+        )
+        zf.writestr("images/cover.png", cover_png)
+
+    digest_id = uuid4()
+    with Session(engine) as session:
+        session.add(
+            Digest(
+                id=digest_id,
+                filename=epub_name,
+                period="manual",
+                status="completed",
+                stage="completed",
+                created_at=datetime.utcnow(),
+            )
+        )
+        session.commit()
+
+    response = client.get(f"/api/digests/{digest_id}/cover")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content == cover_png

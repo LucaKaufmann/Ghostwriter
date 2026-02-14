@@ -443,6 +443,10 @@ class ApiClient {
 		return this.download(`/digests/${filename}`, filename);
 	}
 
+	downloadDigestCover(digestId: string): Promise<{ blob: Blob; filename: string }> {
+		return this.download(`/digests/${digestId}/cover`, `${digestId}-cover.jpg`);
+	}
+
 	// ============ Schedules ============
 
 	async getSchedules(): Promise<Schedule[]> {
