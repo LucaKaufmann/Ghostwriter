@@ -23,6 +23,7 @@ from app.services.reader_service import (
     NonHtmlContentError,
     fetch_html_document,
 )
+from app.services.digest_content_formatter import format_digest_content_to_html
 from app.worker.bindery import generate_digest
 import logging
 
@@ -93,6 +94,7 @@ class DigestArticleRead(BaseModel):
     mode: str
     word_count: int
     content: str
+    content_html: str
     author: str | None
     feed_title: str
     sort_order: int
@@ -323,6 +325,7 @@ async def get_digest_articles(
                 mode=article.mode,
                 word_count=article.word_count,
                 content=article.content,
+                content_html=format_digest_content_to_html(article.content),
                 author=article.author,
                 feed_title=article.feed_title,
                 sort_order=article.sort_order,

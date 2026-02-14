@@ -320,7 +320,9 @@
 		if (!article) return;
 
 		void (async () => {
-			const raw = looksLikeHtml(article.content) ? article.content : plainTextToHtml(article.content);
+			const raw =
+				article.content_html?.trim() ||
+				(looksLikeHtml(article.content) ? article.content : plainTextToHtml(article.content));
 			const sanitized = await sanitizeAndNormalize(raw, article.url);
 			if (sequence !== renderSeq) return;
 			fallbackHtml = sanitized;
