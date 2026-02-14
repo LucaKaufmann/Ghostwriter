@@ -1,192 +1,147 @@
 # Epilogue
 
-A cross-platform app that creates daily EPUB digests from your RSS feeds, optimized for e-ink devices.
+Epilogue is a cross-platform RSS-to-EPUB workflow for focused reading.
 
-## Overview
+- Mobile apps (Android + iOS) manage feeds and read digests.
+- Ghostwriter (self-hosted backend) generates digests, runs schedules, and syncs across devices.
 
-Epilogue aggregates content from RSS/Atom feeds, processes articles through either full extraction or AI summarization, and compiles them into a clean EPUB file for offline reading. Think of it as your personal "daily newspaper" generator.
+If you want to try the project quickly, start with Ghostwriter.
 
-**Target Devices:** Onyx Boox Palma 2 (Android), iPhone (iOS)
+## Why Epilogue
 
-## Features
+- Build a daily reading digest from RSS/Atom feeds.
+- `Fidelity` mode for full-article extraction.
+- `Briefing` mode for AI summaries.
+- Read generated EPUBs on e-ink devices, phones, or tablets.
+- Optionally sync feeds and digests through a self-hosted backend.
 
-- **RSS/Atom Feed Support** - Add unlimited feeds with custom nicknames
-- **Two Processing Modes:**
-  - **Fidelity** - Full article extraction with ads/sidebars removed
-  - **Briefing** - AI-powered summaries using OpenAI API
-- **Daily EPUB Generation** - Scheduled background generation (morning, noon, evening)
-- **E-ink Optimized UI** - High contrast, monochrome tint, serif typography, no animations
-- **Digest History** - Browse and re-read past digests
-- **Ghostwriter Server** - Optional self-hosted server for centralized digest generation
-- **Cross-device Sync** - Sync feeds, config, and digests via Ghostwriter
+## Project Layout
 
-## Screenshots
+- `app/`: Android app (Kotlin, Compose, Room, WorkManager).
+- `EpilogueIOS/`: iOS app (Swift, SwiftUI, Tuist modules).
+- `ghostwriter/`: FastAPI backend + Svelte web UI.
+- `docs/`, `examples/`: project docs and sample files.
 
-*Coming soon*
+## Ghostwriter Quick Start (Docker)
 
----
+### Prerequisites
 
-## iOS App
+- Docker + Docker Compose
 
-### Requirements
-
-- iOS 18.0+
-- Xcode 26+
-- [Tuist](https://tuist.io) for project generation
-- OpenAI API key (for Briefing mode only)
-
-### Building
+### 1. Configure Environment
 
 ```bash
-cd EpilogueIOS
-
-# Install dependencies and generate Xcode project
-tuist install
-tuist generate
-
-# Build from command line
-xcodebuild -workspace Epilogue.xcworkspace -scheme Epilogue build
+cd ghostwriter
+cp .env.example .env
 ```
 
-### Tech Stack
+Edit `.env` as needed (AI provider, timezone, schedule, credentials).
 
-- **Language:** Swift 5.9
-- **UI:** SwiftUI
-- **Architecture:** Clean Architecture with modular Tuist workspace
-- **Persistence:** SwiftData
-- **Secrets:** Keychain (via custom wrapper)
-- **RSS Parsing:** [FeedKit](https://github.com/nmdias/FeedKit)
-- **Content Extraction:** [SwiftSoup](https://github.com/scinfu/SwiftSoup) (HTML parsing + readability)
-- **EPUB Generation:** Custom builder with [ZIPFoundation](https://github.com/weichsel/ZIPFoundation)
-- **AI Summarization:** OpenAI API (direct integration)
-- **Background Tasks:** BGProcessingTask for scheduled digest generation
-- **Text Rendering:** CoreText pagination with NSAttributedString
-
-### Project Structure
-
-```
-EpilogueIOS/
-├── App/                          # Main iOS app target
-│   └── Sources/
-│       ├── EpilogueApp.swift     # App entry point & dependency wiring
-│       ├── ContentView.swift     # Tab-based navigation
-│       ├── Views/
-│       │   ├── FeedListView      # Feed management (add/edit/delete)
-│       │   ├── HistoryView       # Digest history with swipe actions
-│       │   ├── DigestDetailView  # Digest → e-ink reader
-│       │   ├── EinkReaderView    # Paginated e-ink reader (CoreText)
-│       │   ├── SettingsView      # Schedule, API key, generation
-│       │   └── GhostwriterSettingsView
-│       └── Services/
-│           ├── LocalDigestService     # On-device digest generation
-│           ├── LocalDigestScheduler   # BGProcessingTask scheduling
-│           └── GhostwriterSync*       # Server sync coordinator
-├── Modules/
-│   ├── Domain/                   # Models, protocols (zero dependencies)
-│   ├── Data/                     # Repositories, SwiftData, generators
-│   ├── ContentProcessing/        # FeedParser, ContentExtractor
-│   ├── EPUBGeneration/           # EPUB builder (ZIPFoundation)
-│   ├── AIServices/               # OpenAI summarization service
-│   └── GhostwriterClient/       # Server API client
-└── Tuist/
-    ├── ProjectDescriptionHelpers/
-    └── Package.swift             # External dependencies
-```
-
-### E-ink Reader
-
-The built-in reader is designed for e-ink-like reading on any device:
-
-- **CoreText pagination** - Articles split across pages using precise text measurement
-- **Serif typography** - Georgia font family with proper bold/italic support
-- **Tap/swipe navigation** - Left/right tap zones and swipe gestures
-- **Markdown rendering** - Converts `**bold**`, `*italic*`, and `## headings` from AI output
-- **Monochrome UI** - Black tint throughout, no system blue
-- **Table of contents** - Jump to any article instantly
-
----
-
-## Android App
-
-### Requirements
-
-- Android 13+ (API 33)
-- OpenAI API key (for Briefing mode only)
-
-### Building
+### 2. Start Services
 
 ```bash
-# Build debug APK
+docker compose up -d
+```
+
+This starts Ghostwriter and an Ollama sidecar by default.
+
+### 3. Pull the Default Ollama Model (First Run)
+
+```bash
+docker exec ollama ollama pull llama3.2
+```
+
+### 4. Verify and Open
+
+```bash
+curl http://localhost:8080/health
+```
+
+Open [http://localhost:8080](http://localhost:8080).
+
+On first run:
+
+1. Create the first user account (becomes admin).
+2. Generate API tokens in `Settings -> API Tokens` for mobile clients.
+
+### Cloud AI Only (No Ollama)
+
+```bash
+cd ghostwriter
+cp .env.example .env
+# set AI_PROVIDER=openai (or gemini) and required API key(s) in .env
+docker compose -f docker-compose.cloud.yml up -d
+```
+
+## Ghostwriter Local Development
+
+Backend:
+
+```bash
+cd ghostwriter
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8080
+```
+
+Frontend (separate terminal):
+
+```bash
+cd ghostwriter/frontend
+npm install
+npm run dev
+```
+
+The frontend dev server proxies `/api` to `http://localhost:8080`.
+
+## Mobile App Setup
+
+### Android
+
+Requirements:
+
+- Android 13+ (API 33+)
+- JDK 17
+
+Build and test:
+
+```bash
 ./gradlew assembleDebug
-
-# Build release APK
-./gradlew assembleRelease
-
-# Run tests
 ./gradlew test
 ```
 
-### Tech Stack
+### iOS
 
-- **Language:** Kotlin
-- **UI:** Jetpack Compose with Material 3
-- **Architecture:** MVVM with Clean Architecture
-- **DI:** Hilt
-- **Database:** Room
-- **Networking:** Retrofit + OkHttp
-- **Background:** WorkManager
-- **RSS Parsing:** [RSS-Parser](https://github.com/prof18/RSS-Parser)
-- **Article Extraction:** [Readability4J](https://github.com/dankito/Readability4J)
-- **EPUB Generation:** [epub4j](https://github.com/documentnode/epub4j)
+Requirements:
 
-### Project Structure
+- iOS 18.0+
+- Xcode 17+
+- Tuist
 
-```
-app/
-├── data/
-│   ├── local/          # Room database entities and DAOs
-│   ├── remote/         # Retrofit services, OpenAI API
-│   └── repository/     # Data repositories
-├── domain/
-│   └── model/          # Domain models (Feed, ProcessedArticle, etc.)
-├── di/                 # Hilt dependency injection modules
-├── service/
-│   ├── ContentProcessor    # Article extraction pipeline
-│   ├── EpubGenerator       # EPUB file creation
-│   ├── OpenAIService       # AI summarization
-│   └── DailyDigestWorker   # Background job scheduler
-└── ui/
-    ├── feed/           # Feed management screens
-    ├── history/        # Digest history browser
-    └── settings/       # App configuration
+Build:
+
+```bash
+cd EpilogueIOS
+tuist install
+tuist generate
+xcodebuild -workspace Epilogue.xcworkspace -scheme Epilogue build
 ```
 
----
+## Development Commands
 
-## Ghostwriter Server
+- Android release build: `./gradlew assembleRelease`
+- Android tests: `./gradlew test`
+- iOS workspace generation: `cd EpilogueIOS && tuist install && tuist generate`
+- Ghostwriter backend tests: `cd ghostwriter && pytest`
+- Ghostwriter frontend type checks: `cd ghostwriter/frontend && npm run check`
+- Ghostwriter frontend production build: `cd ghostwriter/frontend && npm run build`
 
-An optional Python server that handles digest generation centrally, useful when running on a NAS or home server.
+## Notes Before Open Sourcing
 
-- **Scheduled generation** - Configurable morning/noon/evening schedules
-- **AI processing** - OpenAI, Gemini, or local Ollama
-- **REST API** - Full feed, digest, and config management
-- **Docker deployment** - Single container with docker-compose
-
-See [`ghostwriter/README.md`](ghostwriter/README.md) for setup instructions.
-
-## EPUB Output
-
-Generated files use the naming convention `Epilogue_YYYY-MM-DD.epub` (local) or `YYYY-MM-DD_period.epub` (Ghostwriter).
-
-The EPUB structure:
-- **Cover Page** - Title and date
-- **The Briefing** - AI summaries (if any feeds use Briefing mode)
-- **Deep Dives** - Full articles (Fidelity mode)
-
-## License
-
-*TBD*
+- A root `LICENSE` file is not present yet. Add one before publishing publicly.
+- Screenshots and demo media are not included yet; adding them will improve first impressions.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome. For now, use small focused PRs with clear test notes.
