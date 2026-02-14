@@ -252,6 +252,7 @@ export interface DigestArticle {
 	mode: string;
 	word_count: number;
 	content: string;
+	content_html?: string;
 	author?: string | null;
 	feed_title: string;
 	sort_order: number;
