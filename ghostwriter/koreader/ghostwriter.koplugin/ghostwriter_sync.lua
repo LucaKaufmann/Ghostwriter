@@ -1,5 +1,5 @@
 local api = require("ghostwriter_api")
-local lfs = require("lfs")
+local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 
 local GhostwriterSync = {}
