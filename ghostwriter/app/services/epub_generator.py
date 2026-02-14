@@ -152,13 +152,9 @@ class EpubGenerator:
         cover_image_href: str | None = None
         if cover_image:
             cover_image_href = self._cover_image_file_name(cover_image.media_type)
-            image_item = epub.EpubItem(
-                uid="cover-image",
-                file_name=cover_image_href,
-                media_type=cover_image.media_type,
-                content=cover_image.data,
-            )
-            book.add_item(image_item)
+            # Register canonical cover metadata for EPUB readers while we keep
+            # our custom cover.xhtml page in the reading order.
+            book.set_cover(cover_image_href, cover_image.data, create_page=False)
 
         # Create cover page
         cover_content = self._create_cover(
@@ -175,6 +171,7 @@ class EpubGenerator:
         cover.content = cover_content.encode("utf-8")
         cover.add_item(css)
         book.add_item(cover)
+        book.guide.append({"type": "cover", "title": "Cover", "href": cover.file_name})
 
         # Create one chapter per feed with sub-chapters for each feed article.
         toc_entries: list = [cover]
@@ -286,11 +283,12 @@ class EpubGenerator:
 
     @staticmethod
     def _cover_image_file_name(media_type: str) -> str:
-        if media_type == "image/jpeg":
+        normalized = media_type.split(";")[0].strip().lower()
+        if normalized == "image/jpeg":
             ext = "jpg"
-        elif media_type == "image/webp":
+        elif normalized == "image/webp":
             ext = "webp"
-        elif media_type == "image/gif":
+        elif normalized == "image/gif":
             ext = "gif"
         else:
             ext = "png"
