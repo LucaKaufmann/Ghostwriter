@@ -64,6 +64,7 @@ class ConfigResponse(BaseModel):
     cover_provider: str
     cover_quality: str
     cover_prompt: str
+    cover_overlay_enabled: bool
     cover_openai_api_key: str
     cover_gemini_api_key: str
     # Integration status
@@ -116,6 +117,10 @@ class ConfigUpdateRequest(BaseModel):
     cover_prompt: str | None = Field(
         default=None,
         description="Optional additional prompt text for cover generation",
+    )
+    cover_overlay_enabled: bool | None = Field(
+        default=None,
+        description="Overlay deterministic metadata (title, date, sources) on AI-generated covers",
     )
     cover_openai_api_key: str | None = Field(
         default=None,
@@ -249,6 +254,7 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         cover_provider=config.cover_provider,
         cover_quality=config.cover_quality,
         cover_prompt=config.cover_prompt,
+        cover_overlay_enabled=config.cover_overlay_enabled,
         cover_openai_api_key=SECRET_MASK if config.cover_openai_api_key else "",
         cover_gemini_api_key=SECRET_MASK if config.cover_gemini_api_key else "",
         wallabag=IntegrationStatus(
@@ -512,6 +518,9 @@ async def update_config(
 
     if request.cover_prompt is not None:
         config.cover_prompt = request.cover_prompt.strip()
+
+    if request.cover_overlay_enabled is not None:
+        config.cover_overlay_enabled = request.cover_overlay_enabled
 
     if request.cover_openai_api_key is not None and request.cover_openai_api_key != SECRET_MASK:
         config.cover_openai_api_key = request.cover_openai_api_key.strip()
