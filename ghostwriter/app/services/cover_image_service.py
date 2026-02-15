@@ -208,8 +208,11 @@ class CoverImageService:
 
         base_prompt = (
             f"Create a magazine-style cover illustration for a news digest edition. "
-            f"Visual style: editorial magazine art, clean composition, expressive and thematic. "
-            f"Compose for a 5:8 portrait book-cover ratio suitable for e-readers. "
+            f"High contrast, clean composition, no logos, no watermarks, no UI elements. "
+            f"Do not render any readable text or letters; typography will be added in post-processing. "
+            f"Leave uncluttered negative space near the top and bottom for deterministic title overlays. "
+            f"Visual style: editorial magazine art, minimalist, monochrome-friendly. "
+            f"Compose for a 5:8 portrait book-cover ratio. "
             f"Date: {date_label}. Edition: {period_label}. "
             f"Content types: {source_mix}. "
             f"Articles included: {content_summary}"
