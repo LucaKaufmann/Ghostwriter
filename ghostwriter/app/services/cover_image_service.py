@@ -210,7 +210,6 @@ class CoverImageService:
             f"Create a magazine-style cover illustration for a news digest edition. "
             f"High contrast, clean composition, no logos, no watermarks, no UI elements. "
             f"Include the digest title prominently at the top: \"{date_label} - {period_label}\". "
-            f"Leave uncluttered negative space at the bottom for source attribution overlay. "
             f"Visual style: editorial magazine art, minimalist, monochrome-friendly. "
             f"Compose for a 5:8 portrait book-cover ratio. "
             f"Content types: {source_mix}. "
