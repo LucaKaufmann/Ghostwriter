@@ -106,6 +106,7 @@ class MediaItemSummary(SQLModel):
     word_count: int
     is_summary: bool
     ai_failed: bool
+    processing_ms: int = 0
     status: str
     error_message: str | None = None
     consumed_at: datetime | None = None

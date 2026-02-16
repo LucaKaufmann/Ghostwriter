@@ -6,7 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { ArrowLeft, ExternalLink, Youtube } from 'lucide-svelte';
+	import { ArrowLeft, ExternalLink, Youtube, Timer } from 'lucide-svelte';
 
 	const itemId = $derived($page.params.id);
 
@@ -29,6 +29,15 @@
 			day: 'numeric',
 			year: 'numeric'
 		});
+	}
+
+	function formatDuration(ms: number): string {
+		if (ms < 1000) return `${ms}ms`;
+		const seconds = Math.round(ms / 1000);
+		if (seconds < 60) return `${seconds}s`;
+		const minutes = Math.floor(seconds / 60);
+		const secs = seconds % 60;
+		return `${minutes}m ${secs}s`;
 	}
 </script>
 
@@ -83,6 +92,13 @@
 							<span>-</span>
 						{/if}
 						<span>{item.word_count.toLocaleString()} words</span>
+						{#if item.processing_ms > 0}
+							<span>-</span>
+							<span class="inline-flex items-center gap-1">
+								<Timer class="h-3.5 w-3.5" />
+								{formatDuration(item.processing_ms)}
+							</span>
+						{/if}
 						{#if item.completed_at}
 							<span>-</span>
 							<span>{formatDate(item.completed_at)}</span>

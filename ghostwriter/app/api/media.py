@@ -18,6 +18,7 @@ from app.models.media_feed import (
     MediaFeedUpdate,
 )
 from app.models.media_item import MediaItem, MediaItemRead, MediaItemSummary
+from app.models.media_processing_run import MediaProcessingRun, MediaProcessingRunRead
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class MediaProcessingStatus(BaseModel):
     current_item_content_type: str | None = None
     last_completed_at: str | None = None
     next_run_at: str | None = None
+    last_run: MediaProcessingRunRead | None = None
 
 
 class MediaTriggerResponse(BaseModel):
@@ -371,6 +373,14 @@ async def get_media_status(session: Session = Depends(get_session)):
     except Exception:
         pass
 
+    # Latest pipeline run
+    latest_run = session.exec(
+        select(MediaProcessingRun)
+        .order_by(MediaProcessingRun.started_at.desc())
+        .limit(1)
+    ).first()
+    last_run = MediaProcessingRunRead.model_validate(latest_run) if latest_run else None
+
     return MediaProcessingStatus(
         is_running=processing > 0,
         pending_count=pending,
@@ -381,7 +391,26 @@ async def get_media_status(session: Session = Depends(get_session)):
         current_item_content_type=current_content_type,
         last_completed_at=last_completed_at,
         next_run_at=next_run_at,
+        last_run=last_run,
     )
+
+
+@router.get(
+    "/runs",
+    response_model=list[MediaProcessingRunRead],
+    dependencies=[Depends(verify_api_key)],
+)
+async def list_media_runs(
+    limit: int = 20,
+    session: Session = Depends(get_session),
+):
+    """List recent media processing pipeline runs."""
+    runs = session.exec(
+        select(MediaProcessingRun)
+        .order_by(MediaProcessingRun.started_at.desc())
+        .limit(limit)
+    ).all()
+    return runs
 
 
 # ============ Internal helpers ============

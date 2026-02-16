@@ -42,6 +42,7 @@ import type {
 	MediaItem,
 	MediaItemSummary,
 	MediaProcessingStatus,
+	MediaProcessingRun,
 	YouTubeResolveResponse,
 	MediaTriggerResponse,
 	FeedCheckResponse
@@ -626,6 +627,10 @@ class ApiClient {
 
 	async getMediaProcessingStatus(): Promise<MediaProcessingStatus> {
 		return this.request<MediaProcessingStatus>('/media/status');
+	}
+
+	async getMediaRuns(limit: number = 20): Promise<MediaProcessingRun[]> {
+		return this.request<MediaProcessingRun[]>(`/media/runs?limit=${limit}`);
 	}
 }
 
