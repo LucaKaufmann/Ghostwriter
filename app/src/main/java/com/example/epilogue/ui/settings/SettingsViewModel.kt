@@ -8,6 +8,7 @@ import androidx.work.WorkInfo
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
+import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.GhostwriterRepository
@@ -47,6 +48,10 @@ class SettingsViewModel @Inject constructor(
 
     init {
         loadSettings()
+        if (settingsRepository.isGhostwriterConfigured()) {
+            fetchIntegrationStatus()
+            refreshMediaOverview()
+        }
     }
 
     private fun loadSettings() {
@@ -432,6 +437,7 @@ class SettingsViewModel @Inject constructor(
                 digestScheduler.scheduleDigestSync()
                 digestScheduler.syncDigestsNow()
                 performInitialGhostwriterSync()
+                refreshMediaOverview()
             } else if (!enabled) {
                 // Stop periodic digest sync when Ghostwriter is disabled
                 digestScheduler.cancelDigestSync()
@@ -540,6 +546,7 @@ class SettingsViewModel @Inject constructor(
             // If connection successful, fetch integration status
             if (connectionSuccessful) {
                 fetchIntegrationStatus()
+                refreshMediaOverview()
 
                 // If Ghostwriter is enabled, perform initial sync
                 if (_uiState.value.ghostwriterEnabled) {
@@ -578,6 +585,78 @@ class SettingsViewModel @Inject constructor(
                     Log.w(TAG, "Failed to fetch integration status: ${result.message}")
                 }
                 is GhostwriterResult.NotConfigured -> { }
+            }
+        }
+    }
+
+    fun refreshMediaOverview() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(mediaRefreshing = true) }
+
+            var podcastCount = _uiState.value.podcastFeedCount
+            var youtubeCount = _uiState.value.youtubeFeedCount
+            var mediaStatus = _uiState.value.mediaStatus
+            var actionMessage: String? = null
+
+            when (val podcastResult = ghostwriterRepository.getPodcastFeeds()) {
+                is GhostwriterResult.Success -> podcastCount = podcastResult.data.size
+                is GhostwriterResult.Error -> actionMessage = "Failed to load podcast feeds: ${podcastResult.message}"
+                is GhostwriterResult.NotConfigured -> actionMessage = "Ghostwriter is not configured"
+            }
+
+            when (val youtubeResult = ghostwriterRepository.getYouTubeFeeds()) {
+                is GhostwriterResult.Success -> youtubeCount = youtubeResult.data.size
+                is GhostwriterResult.Error -> actionMessage = actionMessage ?: "Failed to load YouTube feeds: ${youtubeResult.message}"
+                is GhostwriterResult.NotConfigured -> actionMessage = actionMessage ?: "Ghostwriter is not configured"
+            }
+
+            when (val statusResult = ghostwriterRepository.getMediaStatus()) {
+                is GhostwriterResult.Success -> mediaStatus = statusResult.data
+                is GhostwriterResult.Error -> actionMessage = actionMessage ?: "Failed to load media status: ${statusResult.message}"
+                is GhostwriterResult.NotConfigured -> actionMessage = actionMessage ?: "Ghostwriter is not configured"
+            }
+
+            _uiState.update {
+                it.copy(
+                    mediaRefreshing = false,
+                    podcastFeedCount = podcastCount,
+                    youtubeFeedCount = youtubeCount,
+                    mediaStatus = mediaStatus,
+                    integrationActionResult = actionMessage
+                )
+            }
+        }
+    }
+
+    fun triggerMediaProcessing() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(mediaTriggering = true) }
+            when (val result = ghostwriterRepository.triggerMediaProcessing()) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            mediaTriggering = false,
+                            integrationActionResult = result.data.detail ?: "Media processing triggered"
+                        )
+                    }
+                    refreshMediaOverview()
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            mediaTriggering = false,
+                            integrationActionResult = "Failed to trigger media processing: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            mediaTriggering = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
             }
         }
     }
@@ -852,6 +931,11 @@ data class SettingsUiState(
     val ghostwriterSyncResult: String? = null,
     val integrationActionRunning: Boolean = false,
     val integrationActionResult: String? = null,
+    val mediaRefreshing: Boolean = false,
+    val mediaTriggering: Boolean = false,
+    val podcastFeedCount: Int = 0,
+    val youtubeFeedCount: Int = 0,
+    val mediaStatus: MediaProcessingStatusResponse? = null,
     val ghostwriterHealth: HealthResponse? = null,
     // Integration status
     val wallabagIntegration: IntegrationStatus? = null,

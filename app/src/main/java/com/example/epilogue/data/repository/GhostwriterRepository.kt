@@ -19,6 +19,9 @@ import com.example.epilogue.data.remote.ghostwriter.FeedSyncResponse
 import com.example.epilogue.data.remote.ghostwriter.GhostwriterApi
 import com.example.epilogue.data.remote.ghostwriter.HeartbeatResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaFeedResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaTriggerResponse
 import com.example.epilogue.data.remote.ghostwriter.PreviewResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
@@ -751,6 +754,94 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Clear newsletter seen failed", e)
             GhostwriterResult.Error("Failed to clear newsletter seen cache: ${e.message}")
+        }
+    }
+
+    /**
+     * List configured podcast feeds.
+     */
+    suspend fun getPodcastFeeds(): GhostwriterResult<List<MediaFeedResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listPodcastFeeds(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load podcast feeds: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get podcast feeds failed", e)
+            GhostwriterResult.Error("Failed to load podcast feeds: ${e.message}")
+        }
+    }
+
+    /**
+     * List configured YouTube feeds.
+     */
+    suspend fun getYouTubeFeeds(): GhostwriterResult<List<MediaFeedResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listYouTubeFeeds(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load YouTube feeds: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get YouTube feeds failed", e)
+            GhostwriterResult.Error("Failed to load YouTube feeds: ${e.message}")
+        }
+    }
+
+    /**
+     * Get aggregate media processing status.
+     */
+    suspend fun getMediaStatus(): GhostwriterResult<MediaProcessingStatusResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getMediaStatus(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load media status: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get media status failed", e)
+            GhostwriterResult.Error("Failed to load media status: ${e.message}")
+        }
+    }
+
+    /**
+     * Trigger media processing pipeline.
+     */
+    suspend fun triggerMediaProcessing(): GhostwriterResult<MediaTriggerResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.triggerMediaProcessing(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to trigger media processing: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Trigger media processing failed", e)
+            GhostwriterResult.Error("Failed to trigger media processing: ${e.message}")
         }
     }
 }

@@ -261,6 +261,42 @@ struct GhostwriterSettingsView: View {
                     }
                 }
             }
+
+            // MARK: - Media
+            if viewModel.isConfigured {
+                Section("Media") {
+                    LabeledContent("Podcast Feeds", value: "\(viewModel.podcastFeedCount)")
+                    LabeledContent("YouTube Feeds", value: "\(viewModel.youtubeFeedCount)")
+
+                    if let status = viewModel.mediaStatus {
+                        Text(
+                            "Queue: \(status.pendingCount) pending, \(status.processingCount) processing, " +
+                                "\(status.completedCount) completed, \(status.failedCount) failed"
+                        )
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                        if let current = status.currentItemTitle, !current.isEmpty {
+                            Text("Current: \(current)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    HStack(spacing: 12) {
+                        Button("Refresh") {
+                            Task { await viewModel.refreshMediaOverview() }
+                        }
+                        .disabled(viewModel.mediaActionRunning)
+
+                        Button("Trigger") {
+                            Task { await viewModel.triggerMediaProcessing() }
+                        }
+                        .disabled(viewModel.mediaActionRunning)
+                    }
+                }
+            }
         }
         .navigationTitle("Ghostwriter")
         .alert("API Token", isPresented: $showingAPIKeyAlert) {
@@ -334,6 +370,10 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var newslettersIntegration: IntegrationStatus?
     @Published var integrationActionMessage: String?
     @Published var integrationActionRunning = false
+    @Published var podcastFeedCount = 0
+    @Published var youtubeFeedCount = 0
+    @Published var mediaStatus: MediaProcessingStatusResponse?
+    @Published var mediaActionRunning = false
     @Published var lastSyncTime: Date?
     @Published var isTesting = false
     @Published var isSyncing = false
@@ -360,6 +400,8 @@ class GhostwriterSettingsViewModel: ObservableObject {
 
             if isConfigured {
                 await refreshClientStatus()
+                await fetchIntegrationStatus()
+                await refreshMediaOverview()
             }
         } catch {
             // Ignore load errors
@@ -440,6 +482,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
             // Also get client status and integrations
             await refreshClientStatus()
             await fetchIntegrationStatus()
+            await refreshMediaOverview()
         } catch {
             connectionStatus = .failed
             connectionError = error.localizedDescription
@@ -492,6 +535,41 @@ class GhostwriterSettingsViewModel: ObservableObject {
             newslettersIntegration = config.newsletters
         } catch {
             // Ignore integration status errors
+        }
+    }
+
+    func refreshMediaOverview() async {
+        guard !serverURL.isEmpty else { return }
+        mediaActionRunning = true
+        defer { mediaActionRunning = false }
+
+        do {
+            let client = try await createClient()
+            async let podcasts = client.getPodcastFeeds()
+            async let youtube = client.getYouTubeFeeds()
+            async let status = client.getMediaProcessingStatus()
+
+            let (podcastFeeds, youtubeFeeds, processingStatus) = try await (podcasts, youtube, status)
+            podcastFeedCount = podcastFeeds.count
+            youtubeFeedCount = youtubeFeeds.count
+            mediaStatus = processingStatus
+        } catch {
+            integrationActionMessage = "Failed to load media status: \(error.localizedDescription)"
+        }
+    }
+
+    func triggerMediaProcessing() async {
+        guard !serverURL.isEmpty else { return }
+        mediaActionRunning = true
+        defer { mediaActionRunning = false }
+
+        do {
+            let client = try await createClient()
+            let response = try await client.triggerMediaProcessing()
+            integrationActionMessage = response.detail ?? "Media processing triggered"
+            await refreshMediaOverview()
+        } catch {
+            integrationActionMessage = "Failed to trigger media processing: \(error.localizedDescription)"
         }
     }
 
