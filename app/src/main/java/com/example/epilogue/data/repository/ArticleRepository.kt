@@ -157,7 +157,7 @@ class ArticleRepository @Inject constructor(
      * @return List of all processed articles
      */
     suspend fun fetchFromAllFeeds(onlyNew: Boolean = true): List<ProcessedArticle> {
-        val feeds = feedRepository.getAllFeedsList()
+        val feeds = feedRepository.getEnabledFeedsList()
         return fetchAllArticles(feeds, onlyNew)
     }
 }

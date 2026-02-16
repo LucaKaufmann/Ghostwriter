@@ -149,7 +149,11 @@ struct SettingsView: View {
                         Slider(
                             value: Binding(
                                 get: { Double(minWordCount) },
-                                set: { minWordCount = Int($0) }
+                                set: { newValue in
+                                    let count = Int(newValue)
+                                    minWordCount = count
+                                    Task { await updateMinWordCount(count) }
+                                }
                             ),
                             in: 0...1000,
                             step: 100
@@ -338,8 +342,23 @@ struct SettingsView: View {
         do {
             try await settingsRepository.togglePeriod(period, enabled: enabled)
             enabledPeriods = try await settingsRepository.getEnabledPeriods()
+
+            if ghostwriterEnabled {
+                try await ghostwriterCoordinator.updateSchedule(period: period, enabled: enabled)
+            }
         } catch {
             // Revert on error
+        }
+    }
+
+    private func updateMinWordCount(_ count: Int) async {
+        do {
+            try await settingsRepository.setMinWordCount(count)
+            if ghostwriterEnabled {
+                try await ghostwriterCoordinator.pushMinWordCount(count)
+            }
+        } catch {
+            // Ignore for now; UI keeps local value.
         }
     }
 

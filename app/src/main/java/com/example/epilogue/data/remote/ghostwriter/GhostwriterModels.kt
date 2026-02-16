@@ -206,15 +206,31 @@ data class IntegrationStatus(
  * Response model for client configuration (shared settings).
  */
 data class ClientConfigResponse(
+    @SerializedName("min_word_count") val minWordCount: Int? = null,
+    @SerializedName("morning_hour") val morningHour: Int? = null,
+    @SerializedName("morning_minute") val morningMinute: Int? = null,
+    @SerializedName("noon_hour") val noonHour: Int? = null,
+    @SerializedName("noon_minute") val noonMinute: Int? = null,
+    @SerializedName("evening_hour") val eveningHour: Int? = null,
+    @SerializedName("evening_minute") val eveningMinute: Int? = null,
     @SerializedName("timezone") val timezone: String,
-    @SerializedName("ai_provider") val aiProvider: String? = null,
-    @SerializedName("ai_model") val aiModel: String? = null,
-    @SerializedName("schedule_enabled") val scheduleEnabled: Boolean? = null,
+    // Legacy fields for backwards-compatible parsing against older servers.
     @SerializedName("schedule_morning") val scheduleMorning: String? = null,
     @SerializedName("schedule_noon") val scheduleNoon: String? = null,
     @SerializedName("schedule_evening") val scheduleEvening: String? = null,
-    @SerializedName("digest_retention_days") val digestRetentionDays: Int? = null,
-    @SerializedName("max_articles_per_digest") val maxArticlesPerDigest: Int? = null,
+    @SerializedName("whisper_provider") val whisperProvider: String? = null,
+    @SerializedName("whisper_model") val whisperModel: String? = null,
+    @SerializedName("whisper_timeout_minutes") val whisperTimeoutMinutes: Int? = null,
+    @SerializedName("media_processing_interval_hours") val mediaProcessingIntervalHours: Int? = null,
+    @SerializedName("include_podcasts_in_digest") val includePodcastsInDigest: Boolean? = null,
+    @SerializedName("include_youtube_in_digest") val includeYoutubeInDigest: Boolean? = null,
+    @SerializedName("cover_enabled") val coverEnabled: Boolean? = null,
+    @SerializedName("cover_provider") val coverProvider: String? = null,
+    @SerializedName("cover_quality") val coverQuality: String? = null,
+    @SerializedName("cover_prompt") val coverPrompt: String? = null,
+    @SerializedName("cover_overlay_enabled") val coverOverlayEnabled: Boolean? = null,
+    @SerializedName("cover_openai_api_key") val coverOpenAiApiKey: String? = null,
+    @SerializedName("cover_gemini_api_key") val coverGeminiApiKey: String? = null,
     @SerializedName("updated_at") val updatedAt: String? = null,
     // Integration status
     @SerializedName("wallabag") val wallabag: IntegrationStatus? = null,
@@ -225,8 +241,15 @@ data class ClientConfigResponse(
  * Request model for updating client configuration.
  */
 data class ClientConfigUpdateRequest(
+    @SerializedName("min_word_count") val minWordCount: Int? = null,
+    @SerializedName("morning_hour") val morningHour: Int? = null,
+    @SerializedName("morning_minute") val morningMinute: Int? = null,
+    @SerializedName("noon_hour") val noonHour: Int? = null,
+    @SerializedName("noon_minute") val noonMinute: Int? = null,
+    @SerializedName("evening_hour") val eveningHour: Int? = null,
+    @SerializedName("evening_minute") val eveningMinute: Int? = null,
     @SerializedName("timezone") val timezone: String? = null,
-    @SerializedName("schedule_enabled") val scheduleEnabled: Boolean? = null,
+    // Legacy fields kept for compatibility with older server builds.
     @SerializedName("schedule_morning") val scheduleMorning: String? = null,
     @SerializedName("schedule_noon") val scheduleNoon: String? = null,
     @SerializedName("schedule_evening") val scheduleEvening: String? = null,
