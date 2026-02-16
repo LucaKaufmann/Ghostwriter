@@ -311,6 +311,32 @@ struct GhostwriterSettingsView: View {
                     }
                 }
             }
+
+            // MARK: - Diagnostics
+            if viewModel.isConfigured {
+                Section("Diagnostics") {
+                    Button {
+                        Task { await viewModel.refreshLogFiles() }
+                    } label: {
+                        HStack {
+                            Text("Refresh Logs")
+                            Spacer()
+                            if viewModel.logsActionRunning {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(viewModel.logsActionRunning)
+
+                    if !viewModel.logFiles.isEmpty {
+                        ForEach(viewModel.logFiles, id: \.filename) { log in
+                            Text("\(log.filename) (\(log.sizeBytes / 1024) KB)")
+                                .font(.caption)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
         }
         .navigationTitle("Ghostwriter")
         .alert("API Token", isPresented: $showingAPIKeyAlert) {
@@ -389,6 +415,8 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var mediaStatus: MediaProcessingStatusResponse?
     @Published var recentMediaItems: [MediaItemSummaryResponse] = []
     @Published var mediaActionRunning = false
+    @Published var logFiles: [LogFileInfoResponse] = []
+    @Published var logsActionRunning = false
     @Published var lastSyncTime: Date?
     @Published var isTesting = false
     @Published var isSyncing = false
@@ -417,6 +445,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
                 await refreshClientStatus()
                 await fetchIntegrationStatus()
                 await refreshMediaOverview()
+                await refreshLogFiles()
             }
         } catch {
             // Ignore load errors
@@ -498,6 +527,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
             await refreshClientStatus()
             await fetchIntegrationStatus()
             await refreshMediaOverview()
+            await refreshLogFiles()
         } catch {
             connectionStatus = .failed
             connectionError = error.localizedDescription
@@ -592,6 +622,22 @@ class GhostwriterSettingsViewModel: ObservableObject {
             await refreshMediaOverview()
         } catch {
             integrationActionMessage = "Failed to trigger media processing: \(error.localizedDescription)"
+        }
+    }
+
+    func refreshLogFiles() async {
+        guard !serverURL.isEmpty else { return }
+        logsActionRunning = true
+        defer { logsActionRunning = false }
+
+        do {
+            let client = try await createClient()
+            logFiles = try await client.getLogFiles()
+                .sorted { $0.modifiedAt > $1.modifiedAt }
+                .prefix(8)
+                .map { $0 }
+        } catch {
+            integrationActionMessage = "Failed to load logs: \(error.localizedDescription)"
         }
     }
 
