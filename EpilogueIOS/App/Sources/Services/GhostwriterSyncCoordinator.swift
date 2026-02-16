@@ -294,6 +294,16 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         try await feedSyncService.notifyFeedDeleted(url: url)
     }
 
+    /// Push schedule enable/disable state to the server.
+    public func updateSchedule(period: DigestPeriod, enabled: Bool) async throws {
+        try await configSyncManager.updateSchedule(period: period, enabled: enabled)
+    }
+
+    /// Push min_word_count to the server.
+    public func pushMinWordCount(_ count: Int) async throws {
+        try await configSyncManager.pushMinWordCount(count)
+    }
+
     /// Check server health
     public func checkServerHealth() async throws -> HealthResponse {
         return try await heartbeatService.checkHealth()

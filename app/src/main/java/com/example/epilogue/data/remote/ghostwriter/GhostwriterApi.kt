@@ -133,6 +133,16 @@ interface GhostwriterApi {
     ): Response<DigestArticlesResponse>
 
     /**
+     * Get raw/source HTML for an article from a digest.
+     */
+    @GET("digests/{digestId}/articles/{articleId}/source")
+    suspend fun getDigestArticleSource(
+        @Header("Authorization") authorization: String?,
+        @Path("digestId") digestId: String,
+        @Path("articleId") articleId: String
+    ): Response<DigestArticleSourceResponse>
+
+    /**
      * Download a digest EPUB file.
      */
     @Streaming
@@ -201,4 +211,210 @@ interface GhostwriterApi {
         @Header("Authorization") authorization: String?,
         @Body request: ClientConfigUpdateRequest
     ): Response<ClientConfigResponse>
+
+    // ===== Integrations =====
+
+    /**
+     * Preview Wallabag items without marking them as read.
+     */
+    @POST("config/wallabag/preview")
+    suspend fun previewWallabag(
+        @Header("Authorization") authorization: String?
+    ): Response<PreviewResponse>
+
+    /**
+     * Preview newsletter items without marking them as read.
+     */
+    @POST("newsletters/preview")
+    suspend fun previewNewsletters(
+        @Header("Authorization") authorization: String?
+    ): Response<PreviewResponse>
+
+    /**
+     * Clear seen-marker cache for Wallabag synthetic feed.
+     */
+    @POST("config/wallabag/clear-seen")
+    suspend fun clearWallabagSeen(
+        @Header("Authorization") authorization: String?
+    ): Response<ClearSeenResponse>
+
+    /**
+     * Clear seen-marker cache for newsletter synthetic feed.
+     */
+    @POST("config/newsletters/clear-seen")
+    suspend fun clearNewsletterSeen(
+        @Header("Authorization") authorization: String?
+    ): Response<ClearSeenResponse>
+
+    // ===== Media =====
+
+    /**
+     * List configured podcast feeds.
+     */
+    @GET("media/podcasts")
+    suspend fun listPodcastFeeds(
+        @Header("Authorization") authorization: String?
+    ): Response<List<MediaFeedResponse>>
+
+    /**
+     * Create a podcast feed.
+     */
+    @POST("media/podcasts")
+    suspend fun createPodcastFeed(
+        @Header("Authorization") authorization: String?,
+        @Body request: MediaFeedCreateRequest
+    ): Response<MediaFeedResponse>
+
+    /**
+     * Update a podcast feed.
+     */
+    @PUT("media/podcasts/{feedId}")
+    suspend fun updatePodcastFeed(
+        @Header("Authorization") authorization: String?,
+        @Path("feedId") feedId: String,
+        @Body request: MediaFeedUpdateRequest
+    ): Response<MediaFeedResponse>
+
+    /**
+     * Delete a podcast feed.
+     */
+    @DELETE("media/podcasts/{feedId}")
+    suspend fun deletePodcastFeed(
+        @Header("Authorization") authorization: String?,
+        @Path("feedId") feedId: String
+    ): Response<StatusMessageResponse>
+
+    /**
+     * List configured YouTube feeds.
+     */
+    @GET("media/youtube")
+    suspend fun listYouTubeFeeds(
+        @Header("Authorization") authorization: String?
+    ): Response<List<MediaFeedResponse>>
+
+    /**
+     * Resolve a YouTube channel URL to RSS feed URL.
+     */
+    @POST("media/youtube/resolve")
+    suspend fun resolveYouTubeFeed(
+        @Header("Authorization") authorization: String?,
+        @Body request: YouTubeResolveRequest
+    ): Response<YouTubeResolveResponse>
+
+    /**
+     * Create a YouTube feed.
+     */
+    @POST("media/youtube")
+    suspend fun createYouTubeFeed(
+        @Header("Authorization") authorization: String?,
+        @Body request: MediaFeedCreateRequest
+    ): Response<MediaFeedResponse>
+
+    /**
+     * Update a YouTube feed.
+     */
+    @PUT("media/youtube/{feedId}")
+    suspend fun updateYouTubeFeed(
+        @Header("Authorization") authorization: String?,
+        @Path("feedId") feedId: String,
+        @Body request: MediaFeedUpdateRequest
+    ): Response<MediaFeedResponse>
+
+    /**
+     * Delete a YouTube feed.
+     */
+    @DELETE("media/youtube/{feedId}")
+    suspend fun deleteYouTubeFeed(
+        @Header("Authorization") authorization: String?,
+        @Path("feedId") feedId: String
+    ): Response<StatusMessageResponse>
+
+    /**
+     * List all podcast items with processing status.
+     */
+    @GET("media/podcasts/items/all")
+    suspend fun listAllPodcastItems(
+        @Header("Authorization") authorization: String?
+    ): Response<List<MediaItemSummaryResponse>>
+
+    /**
+     * List all YouTube items with processing status.
+     */
+    @GET("media/youtube/items/all")
+    suspend fun listAllYouTubeItems(
+        @Header("Authorization") authorization: String?
+    ): Response<List<MediaItemSummaryResponse>>
+
+    /**
+     * Get full media item details with transcript/content.
+     */
+    @GET("media/items/{itemId}")
+    suspend fun getMediaItem(
+        @Header("Authorization") authorization: String?,
+        @Path("itemId") itemId: String
+    ): Response<MediaItemResponse>
+
+    /**
+     * Get media processing queue status.
+     */
+    @GET("media/status")
+    suspend fun getMediaStatus(
+        @Header("Authorization") authorization: String?
+    ): Response<MediaProcessingStatusResponse>
+
+    /**
+     * Manually trigger media processing pipeline.
+     */
+    @POST("media/trigger")
+    suspend fun triggerMediaProcessing(
+        @Header("Authorization") authorization: String?
+    ): Response<MediaTriggerResponse>
+
+    // ===== Logs =====
+
+    /**
+     * List available server log files.
+     */
+    @GET("logs")
+    suspend fun listLogFiles(
+        @Header("Authorization") authorization: String?
+    ): Response<List<LogFileInfoResponse>>
+
+    /**
+     * Download a specific log file.
+     */
+    @Streaming
+    @GET("logs/{filename}")
+    suspend fun downloadLogFile(
+        @Header("Authorization") authorization: String?,
+        @Path("filename") filename: String
+    ): Response<ResponseBody>
+
+    // ===== Auth Tokens =====
+
+    /**
+     * List auth API tokens for the current user (JWT required).
+     */
+    @GET("auth/tokens")
+    suspend fun listAuthTokens(
+        @Header("Authorization") authorization: String?
+    ): Response<List<AuthApiTokenResponse>>
+
+    /**
+     * Create an auth API token (JWT required).
+     */
+    @POST("auth/tokens")
+    suspend fun createAuthToken(
+        @Header("Authorization") authorization: String?,
+        @Body request: AuthApiTokenCreateRequest
+    ): Response<AuthApiTokenCreateResponse>
+
+    /**
+     * Revoke an auth API token (JWT required).
+     */
+    @DELETE("auth/tokens/{tokenId}")
+    suspend fun revokeAuthToken(
+        @Header("Authorization") authorization: String?,
+        @Path("tokenId") tokenId: String
+    ): Response<StatusMessageResponse>
 }

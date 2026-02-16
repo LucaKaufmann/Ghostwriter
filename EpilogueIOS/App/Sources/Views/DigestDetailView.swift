@@ -25,7 +25,8 @@ struct DigestDetailView: View {
     var body: some View {
         EinkReaderView(
             articles: orderedArticles,
-            epubFilePath: digest.epubFilePath
+            epubFilePath: digest.epubFilePath,
+            remoteDigestId: digest.remoteId
         )
         .navigationTitle(dateFormatter.string(from: digest.generatedAt))
         .navigationBarTitleDisplayMode(.inline)

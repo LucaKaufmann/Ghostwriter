@@ -12,7 +12,6 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.example.epilogue.R
-import com.example.epilogue.data.local.FeedEntity
 import com.example.epilogue.data.remote.ghostwriter.FeedResponse
 import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.GhostwriterRepository
@@ -186,6 +185,7 @@ class FeedSyncWorker @AssistedInject constructor(
             name = response.title,
             mode = mode,
             maxArticles = response.maxArticles,
+            isEnabled = response.isActive,
             serverUpdatedAt = serverUpdatedAt,
             locallyModified = false  // Server data is authoritative
         )

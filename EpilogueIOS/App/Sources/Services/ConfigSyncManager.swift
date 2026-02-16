@@ -97,30 +97,40 @@ public final class ConfigSyncManager {
         // If local is newer, don't overwrite — regular sync will push later
     }
 
-    /// Push a specific setting change to server immediately
-    public func pushSchedule(morning: String, noon: String, evening: String, timezone: String) async throws {
+    /// Push a schedule enable/disable change to server immediately.
+    public func updateSchedule(period: DigestPeriod, enabled: Bool) async throws {
+        guard try await settingsRepository.isGhostwriterConfigured() else {
+            return
+        }
+
+        let client = try await createClient()
+        _ = try await client.updateSchedule(
+            period: period.serverPeriod,
+            request: ScheduleUpdateRequest(enabled: enabled)
+        )
+        logger.info("Updated schedule \(period.serverPeriod), enabled=\(enabled)")
+    }
+
+    /// Push min_word_count to server immediately.
+    public func pushMinWordCount(_ count: Int) async throws {
         guard try await settingsRepository.isGhostwriterConfigured() else {
             return
         }
 
         let client = try await createClient()
         let localTimestamp = try await settingsRepository.getGhostwriterConfigUpdatedAt()
-
         let request = ClientConfigUpdateRequest(
-            timezone: timezone,
-            scheduleMorning: morning,
-            scheduleNoon: noon,
-            scheduleEvening: evening,
+            minWordCount: count,
             clientUpdatedAt: localTimestamp
         )
 
         do {
             let response = try await client.updateConfig(request)
             try await settingsRepository.setGhostwriterConfigUpdatedAt(response.updatedAt)
-            logger.info("Pushed schedule to server")
+            logger.info("Pushed min_word_count to server: \(count)")
         } catch GhostwriterError.conflict {
             // Server was modified, re-sync
-            logger.warning("Conflict pushing config, re-syncing")
+            logger.warning("Conflict pushing min_word_count, re-syncing")
             try await sync()
         }
     }
@@ -137,21 +147,43 @@ public final class ConfigSyncManager {
     }
 
     private func applyServerConfig(_ config: ClientConfigResponse) async throws {
-        // Parse schedule times from "HH:mm" strings into hour/minute
-        let morning = Self.parseTime(config.scheduleMorning)
-        let noon = Self.parseTime(config.scheduleNoon)
-        let evening = Self.parseTime(config.scheduleEvening)
+        // Prefer v2 hour/minute fields, fallback to legacy HH:mm strings.
+        let morning = Self.resolveTime(
+            hour: config.morningHour,
+            minute: config.morningMinute,
+            legacyTime: config.scheduleMorning,
+            defaultHour: 7,
+            defaultMinute: 0
+        )
+        let noon = Self.resolveTime(
+            hour: config.noonHour,
+            minute: config.noonMinute,
+            legacyTime: config.scheduleNoon,
+            defaultHour: 12,
+            defaultMinute: 0
+        )
+        let evening = Self.resolveTime(
+            hour: config.eveningHour,
+            minute: config.eveningMinute,
+            legacyTime: config.scheduleEvening,
+            defaultHour: 18,
+            defaultMinute: 0
+        )
 
         // Apply schedule times (for display - server handles actual scheduling)
         try await settingsRepository.setGhostwriterSchedule(
-            morningHour: morning?.hour ?? 7,
-            morningMinute: morning?.minute ?? 0,
-            noonHour: noon?.hour ?? 12,
-            noonMinute: noon?.minute ?? 0,
-            eveningHour: evening?.hour ?? 18,
-            eveningMinute: evening?.minute ?? 0,
+            morningHour: morning.hour,
+            morningMinute: morning.minute,
+            noonHour: noon.hour,
+            noonMinute: noon.minute,
+            eveningHour: evening.hour,
+            eveningMinute: evening.minute,
             timezone: config.timezone
         )
+
+        if let minWordCount = config.minWordCount {
+            try await settingsRepository.setMinWordCount(minWordCount)
+        }
 
         // Save server's updated_at timestamp for future comparisons
         try await settingsRepository.setGhostwriterConfigUpdatedAt(config.updatedAt)
@@ -169,12 +201,34 @@ public final class ConfigSyncManager {
         return (hour, minute)
     }
 
+    private static func resolveTime(
+        hour: Int?,
+        minute: Int?,
+        legacyTime: String?,
+        defaultHour: Int,
+        defaultMinute: Int
+    ) -> (hour: Int, minute: Int) {
+        if let hour, let minute {
+            return (hour, minute)
+        }
+        return parseTime(legacyTime) ?? (defaultHour, defaultMinute)
+    }
+
     private func pushLocalConfig(client: GhostwriterClient) async throws {
         let localTimestamp = try await settingsRepository.getGhostwriterConfigUpdatedAt()
         let schedule = try await settingsRepository.getGhostwriterSchedule()
+        let minWordCount = try await settingsRepository.getMinWordCount()
 
         let request = ClientConfigUpdateRequest(
+            minWordCount: minWordCount,
+            morningHour: schedule?.morningHour,
+            morningMinute: schedule?.morningMinute,
+            noonHour: schedule?.noonHour,
+            noonMinute: schedule?.noonMinute,
+            eveningHour: schedule?.eveningHour,
+            eveningMinute: schedule?.eveningMinute,
             timezone: schedule?.timezone,
+            // Legacy payload for older server builds.
             scheduleMorning: schedule.map { String(format: "%02d:%02d", $0.morningHour, $0.morningMinute) },
             scheduleNoon: schedule.map { String(format: "%02d:%02d", $0.noonHour, $0.noonMinute) },
             scheduleEvening: schedule.map { String(format: "%02d:%02d", $0.eveningHour, $0.eveningMinute) },

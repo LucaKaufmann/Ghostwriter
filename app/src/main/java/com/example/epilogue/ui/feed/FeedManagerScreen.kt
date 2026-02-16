@@ -35,6 +35,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -148,8 +149,8 @@ fun FeedManagerScreen(
     if (uiState.showAddDialog) {
         AddFeedDialog(
             onDismiss = { viewModel.hideAddDialog() },
-            onConfirm = { url, name, mode, maxArticles ->
-                viewModel.addFeed(url, name, mode, maxArticles)
+            onConfirm = { url, name, mode, maxArticles, isEnabled ->
+                viewModel.addFeed(url, name, mode, maxArticles, isEnabled)
                 viewModel.hideAddDialog()
             }
         )
@@ -290,6 +291,12 @@ fun FeedItem(
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (!feed.isEnabled) {
+                        Text(
+                            text = "Paused",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
                     Text(
                         text = if (feed.mode == ProcessingMode.FIDELITY) "Fidelity" else "Briefing",
                         style = MaterialTheme.typography.labelMedium
@@ -314,11 +321,18 @@ private val maxArticleOptions = listOf(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 0)
 @Composable
 fun AddFeedDialog(
     onDismiss: () -> Unit,
-    onConfirm: (url: String, name: String, mode: ProcessingMode, maxArticles: Int) -> Unit
+    onConfirm: (
+        url: String,
+        name: String,
+        mode: ProcessingMode,
+        maxArticles: Int,
+        isEnabled: Boolean
+    ) -> Unit
 ) {
     var url by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf(ProcessingMode.FIDELITY) }
+    var isEnabled by remember { mutableStateOf(true) }
     var maxArticlesIndex by remember { mutableStateOf(maxArticleOptions.lastIndex) } // Default to Unlimited
     val maxArticles = maxArticleOptions[maxArticlesIndex]
 
@@ -358,6 +372,18 @@ fun AddFeedDialog(
                     Text("Briefing")
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Enabled", style = MaterialTheme.typography.labelLarge)
+                    Switch(
+                        checked = isEnabled,
+                        onCheckedChange = { isEnabled = it }
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
                 Text("Max articles", style = MaterialTheme.typography.labelLarge)
                 Spacer(modifier = Modifier.height(8.dp))
                 // Stepper control - easier for e-ink than slider
@@ -395,7 +421,7 @@ fun AddFeedDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(url, name, mode, maxArticles) },
+                onClick = { onConfirm(url, name, mode, maxArticles, isEnabled) },
                 enabled = url.isNotBlank() && name.isNotBlank()
             ) {
                 Text("Add")
@@ -417,6 +443,7 @@ fun EditFeedDialog(
 ) {
     var name by remember { mutableStateOf(feed.name) }
     var mode by remember { mutableStateOf(feed.mode) }
+    var isEnabled by remember { mutableStateOf(feed.isEnabled) }
     val initialIndex = maxArticleOptions.indexOf(feed.maxArticles).takeIf { it >= 0 } ?: maxArticleOptions.lastIndex
     var maxArticlesIndex by remember { mutableStateOf(initialIndex) }
     val maxArticles = maxArticleOptions[maxArticlesIndex]
@@ -452,6 +479,18 @@ fun EditFeedDialog(
                         onClick = { mode = ProcessingMode.BRIEFING }
                     )
                     Text("Briefing")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Enabled", style = MaterialTheme.typography.labelLarge)
+                    Switch(
+                        checked = isEnabled,
+                        onCheckedChange = { isEnabled = it }
+                    )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Max articles", style = MaterialTheme.typography.labelLarge)
@@ -492,7 +531,14 @@ fun EditFeedDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onConfirm(feed.copy(name = name.trim(), mode = mode, maxArticles = maxArticles))
+                    onConfirm(
+                        feed.copy(
+                            name = name.trim(),
+                            mode = mode,
+                            maxArticles = maxArticles,
+                            isEnabled = isEnabled
+                        )
+                    )
                 },
                 enabled = name.isNotBlank()
             ) {

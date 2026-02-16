@@ -4,8 +4,13 @@ import android.content.Context
 import android.util.Log
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.ClearSeenResponse
 import com.example.epilogue.data.remote.ghostwriter.SyncResponse
+import com.example.epilogue.data.remote.ghostwriter.AuthApiTokenCreateRequest
+import com.example.epilogue.data.remote.ghostwriter.AuthApiTokenCreateResponse
+import com.example.epilogue.data.remote.ghostwriter.AuthApiTokenResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.DigestArticleSourceResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestArticlesResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
@@ -17,8 +22,20 @@ import com.example.epilogue.data.remote.ghostwriter.FeedSyncResponse
 import com.example.epilogue.data.remote.ghostwriter.GhostwriterApi
 import com.example.epilogue.data.remote.ghostwriter.HeartbeatResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaFeedCreateRequest
+import com.example.epilogue.data.remote.ghostwriter.MediaFeedResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaFeedUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.MediaItemResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaItemSummaryResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaTriggerResponse
+import com.example.epilogue.data.remote.ghostwriter.PreviewResponse
+import com.example.epilogue.data.remote.ghostwriter.LogFileInfoResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.StatusMessageResponse
+import com.example.epilogue.data.remote.ghostwriter.YouTubeResolveRequest
+import com.example.epilogue.data.remote.ghostwriter.YouTubeResolveResponse
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -123,7 +140,7 @@ class GhostwriterRepository @Inject constructor(
                 FeedSyncRequest(
                     url = feed.url,
                     title = feed.name,
-                    isActive = true,
+                    isActive = feed.isEnabled,
                     mode = when (feed.mode) {
                         ProcessingMode.BRIEFING -> "summarize"
                         ProcessingMode.FIDELITY -> "raw"
@@ -264,6 +281,38 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Get digest articles failed", e)
             GhostwriterResult.Error("Failed to get articles: ${e.message}")
+        }
+    }
+
+    /**
+     * Get raw/source HTML for a digest article.
+     * Used for reader/source-mode parity with the web client.
+     */
+    suspend fun getDigestArticleSource(
+        digestId: String,
+        articleId: String
+    ): GhostwriterResult<DigestArticleSourceResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getDigestArticleSource(getAuthHeader(), digestId, articleId)
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else if (response.code() == 404) {
+                GhostwriterResult.Error(
+                    message = "Article not found",
+                    code = 404
+                )
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to get article source: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get digest article source failed", e)
+            GhostwriterResult.Error("Failed to get article source: ${e.message}")
         }
     }
 
@@ -565,27 +614,69 @@ class GhostwriterRepository @Inject constructor(
     /**
      * Update the shared client configuration on the server.
      *
+     * @param minWordCount Minimum article word count (null to not update)
+     * @param morningHour Morning schedule hour (24h)
+     * @param morningMinute Morning schedule minute
+     * @param noonHour Noon schedule hour (24h)
+     * @param noonMinute Noon schedule minute
+     * @param eveningHour Evening schedule hour (24h)
+     * @param eveningMinute Evening schedule minute
      * @param timezone IANA timezone (null to not update)
-     * @param scheduleMorning Morning schedule time as "HH:mm" (null to not update)
-     * @param scheduleNoon Noon schedule time as "HH:mm" (null to not update)
-     * @param scheduleEvening Evening schedule time as "HH:mm" (null to not update)
+     * @param scheduleMorning Legacy morning schedule time as "HH:mm" for backwards compatibility
+     * @param scheduleNoon Legacy noon schedule time as "HH:mm" for backwards compatibility
+     * @param scheduleEvening Legacy evening schedule time as "HH:mm" for backwards compatibility
+     * @param includePodcastsInDigest Include completed podcast transcripts in digest generation
+     * @param includeYoutubeInDigest Include completed YouTube transcripts in digest generation
+     * @param coverEnabled Enable AI cover generation
+     * @param coverProvider Cover generation provider identifier
+     * @param coverQuality Cover quality level
+     * @param coverPrompt Additional cover generation prompt text
+     * @param coverOverlayEnabled Enable deterministic metadata overlay on generated covers
      * @param clientUpdatedAt Client's last known server timestamp for conflict detection
      */
     suspend fun updateConfig(
+        minWordCount: Int? = null,
+        morningHour: Int? = null,
+        morningMinute: Int? = null,
+        noonHour: Int? = null,
+        noonMinute: Int? = null,
+        eveningHour: Int? = null,
+        eveningMinute: Int? = null,
         timezone: String? = null,
         scheduleMorning: String? = null,
         scheduleNoon: String? = null,
         scheduleEvening: String? = null,
+        includePodcastsInDigest: Boolean? = null,
+        includeYoutubeInDigest: Boolean? = null,
+        coverEnabled: Boolean? = null,
+        coverProvider: String? = null,
+        coverQuality: String? = null,
+        coverPrompt: String? = null,
+        coverOverlayEnabled: Boolean? = null,
         clientUpdatedAt: String? = null
     ): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
             val request = ClientConfigUpdateRequest(
+                minWordCount = minWordCount,
+                morningHour = morningHour,
+                morningMinute = morningMinute,
+                noonHour = noonHour,
+                noonMinute = noonMinute,
+                eveningHour = eveningHour,
+                eveningMinute = eveningMinute,
                 timezone = timezone,
                 scheduleMorning = scheduleMorning,
                 scheduleNoon = scheduleNoon,
                 scheduleEvening = scheduleEvening,
+                includePodcastsInDigest = includePodcastsInDigest,
+                includeYoutubeInDigest = includeYoutubeInDigest,
+                coverEnabled = coverEnabled,
+                coverProvider = coverProvider,
+                coverQuality = coverQuality,
+                coverPrompt = coverPrompt,
+                coverOverlayEnabled = coverOverlayEnabled,
                 clientUpdatedAt = clientUpdatedAt
             )
             val response = api.updateConfig(getAuthHeader(), request)
@@ -607,6 +698,541 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Update config failed", e)
             GhostwriterResult.Error("Failed to update config: ${e.message}")
+        }
+    }
+
+    /**
+     * Preview Wallabag items without mutating read state.
+     */
+    suspend fun previewWallabag(): GhostwriterResult<PreviewResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.previewWallabag(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to preview Wallabag: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Preview Wallabag failed", e)
+            GhostwriterResult.Error("Failed to preview Wallabag: ${e.message}")
+        }
+    }
+
+    /**
+     * Preview newsletter items without mutating read state.
+     */
+    suspend fun previewNewsletters(): GhostwriterResult<PreviewResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.previewNewsletters(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to preview newsletters: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Preview newsletters failed", e)
+            GhostwriterResult.Error("Failed to preview newsletters: ${e.message}")
+        }
+    }
+
+    /**
+     * Clear seen markers for Wallabag synthetic feed.
+     */
+    suspend fun clearWallabagSeen(): GhostwriterResult<ClearSeenResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.clearWallabagSeen(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to clear Wallabag seen cache: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Clear Wallabag seen failed", e)
+            GhostwriterResult.Error("Failed to clear Wallabag seen cache: ${e.message}")
+        }
+    }
+
+    /**
+     * Clear seen markers for newsletters synthetic feed.
+     */
+    suspend fun clearNewsletterSeen(): GhostwriterResult<ClearSeenResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.clearNewsletterSeen(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to clear newsletter seen cache: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Clear newsletter seen failed", e)
+            GhostwriterResult.Error("Failed to clear newsletter seen cache: ${e.message}")
+        }
+    }
+
+    /**
+     * List configured podcast feeds.
+     */
+    suspend fun getPodcastFeeds(): GhostwriterResult<List<MediaFeedResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listPodcastFeeds(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load podcast feeds: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get podcast feeds failed", e)
+            GhostwriterResult.Error("Failed to load podcast feeds: ${e.message}")
+        }
+    }
+
+    /**
+     * Create a podcast feed.
+     */
+    suspend fun createPodcastFeed(
+        url: String,
+        title: String,
+        mode: String = "raw",
+        maxItems: Int = 5,
+        isActive: Boolean = true
+    ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = MediaFeedCreateRequest(
+                feedType = "podcast",
+                url = url,
+                title = title,
+                isActive = isActive,
+                mode = mode,
+                maxItems = maxItems
+            )
+            val response = api.createPodcastFeed(getAuthHeader(), request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to create podcast feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Create podcast feed failed", e)
+            GhostwriterResult.Error("Failed to create podcast feed: ${e.message}")
+        }
+    }
+
+    /**
+     * Update a podcast feed.
+     */
+    suspend fun updatePodcastFeed(
+        feedId: String,
+        title: String? = null,
+        isActive: Boolean? = null,
+        mode: String? = null,
+        maxItems: Int? = null
+    ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = MediaFeedUpdateRequest(
+                title = title,
+                isActive = isActive,
+                mode = mode,
+                maxItems = maxItems
+            )
+            val response = api.updatePodcastFeed(getAuthHeader(), feedId, request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to update podcast feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Update podcast feed failed", e)
+            GhostwriterResult.Error("Failed to update podcast feed: ${e.message}")
+        }
+    }
+
+    /**
+     * Delete a podcast feed.
+     */
+    suspend fun deletePodcastFeed(feedId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.deletePodcastFeed(getAuthHeader(), feedId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to delete podcast feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Delete podcast feed failed", e)
+            GhostwriterResult.Error("Failed to delete podcast feed: ${e.message}")
+        }
+    }
+
+    /**
+     * List configured YouTube feeds.
+     */
+    suspend fun getYouTubeFeeds(): GhostwriterResult<List<MediaFeedResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listYouTubeFeeds(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load YouTube feeds: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get YouTube feeds failed", e)
+            GhostwriterResult.Error("Failed to load YouTube feeds: ${e.message}")
+        }
+    }
+
+    /**
+     * Resolve a YouTube channel URL to RSS URL.
+     */
+    suspend fun resolveYouTubeFeed(url: String): GhostwriterResult<YouTubeResolveResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.resolveYouTubeFeed(getAuthHeader(), YouTubeResolveRequest(url))
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to resolve YouTube URL: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Resolve YouTube feed failed", e)
+            GhostwriterResult.Error("Failed to resolve YouTube URL: ${e.message}")
+        }
+    }
+
+    /**
+     * Create a YouTube feed.
+     */
+    suspend fun createYouTubeFeed(
+        url: String,
+        resolvedFeedUrl: String? = null,
+        title: String,
+        mode: String = "raw",
+        maxItems: Int = 5,
+        isActive: Boolean = true
+    ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = MediaFeedCreateRequest(
+                feedType = "youtube",
+                url = url,
+                resolvedFeedUrl = resolvedFeedUrl,
+                title = title,
+                isActive = isActive,
+                mode = mode,
+                maxItems = maxItems
+            )
+            val response = api.createYouTubeFeed(getAuthHeader(), request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to create YouTube feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Create YouTube feed failed", e)
+            GhostwriterResult.Error("Failed to create YouTube feed: ${e.message}")
+        }
+    }
+
+    /**
+     * Update a YouTube feed.
+     */
+    suspend fun updateYouTubeFeed(
+        feedId: String,
+        title: String? = null,
+        isActive: Boolean? = null,
+        mode: String? = null,
+        maxItems: Int? = null
+    ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = MediaFeedUpdateRequest(
+                title = title,
+                isActive = isActive,
+                mode = mode,
+                maxItems = maxItems
+            )
+            val response = api.updateYouTubeFeed(getAuthHeader(), feedId, request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to update YouTube feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Update YouTube feed failed", e)
+            GhostwriterResult.Error("Failed to update YouTube feed: ${e.message}")
+        }
+    }
+
+    /**
+     * Delete a YouTube feed.
+     */
+    suspend fun deleteYouTubeFeed(feedId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.deleteYouTubeFeed(getAuthHeader(), feedId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to delete YouTube feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Delete YouTube feed failed", e)
+            GhostwriterResult.Error("Failed to delete YouTube feed: ${e.message}")
+        }
+    }
+
+    /**
+     * List all podcast media items.
+     */
+    suspend fun getAllPodcastItems(): GhostwriterResult<List<MediaItemSummaryResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listAllPodcastItems(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load podcast items: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get podcast items failed", e)
+            GhostwriterResult.Error("Failed to load podcast items: ${e.message}")
+        }
+    }
+
+    /**
+     * List all YouTube media items.
+     */
+    suspend fun getAllYouTubeItems(): GhostwriterResult<List<MediaItemSummaryResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listAllYouTubeItems(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load YouTube items: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get YouTube items failed", e)
+            GhostwriterResult.Error("Failed to load YouTube items: ${e.message}")
+        }
+    }
+
+    /**
+     * Get full media item details with transcript body.
+     */
+    suspend fun getMediaItem(itemId: String): GhostwriterResult<MediaItemResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getMediaItem(getAuthHeader(), itemId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load media item: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get media item failed", e)
+            GhostwriterResult.Error("Failed to load media item: ${e.message}")
+        }
+    }
+
+    /**
+     * Get aggregate media processing status.
+     */
+    suspend fun getMediaStatus(): GhostwriterResult<MediaProcessingStatusResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getMediaStatus(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load media status: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get media status failed", e)
+            GhostwriterResult.Error("Failed to load media status: ${e.message}")
+        }
+    }
+
+    /**
+     * Trigger media processing pipeline.
+     */
+    suspend fun triggerMediaProcessing(): GhostwriterResult<MediaTriggerResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.triggerMediaProcessing(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to trigger media processing: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Trigger media processing failed", e)
+            GhostwriterResult.Error("Failed to trigger media processing: ${e.message}")
+        }
+    }
+
+    /**
+     * List available server logs.
+     */
+    suspend fun getLogFiles(): GhostwriterResult<List<LogFileInfoResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listLogFiles(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to list log files: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get log files failed", e)
+            GhostwriterResult.Error("Failed to list log files: ${e.message}")
+        }
+    }
+
+    /**
+     * List auth API tokens for current JWT-authenticated user.
+     */
+    suspend fun listAuthTokens(): GhostwriterResult<List<AuthApiTokenResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+        try {
+            val response = api.listAuthTokens(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to list auth tokens: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "List auth tokens failed", e)
+            GhostwriterResult.Error("Failed to list auth tokens: ${e.message}")
+        }
+    }
+
+    /**
+     * Create a new auth API token for current JWT-authenticated user.
+     */
+    suspend fun createAuthToken(name: String): GhostwriterResult<AuthApiTokenCreateResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+        try {
+            val response = api.createAuthToken(getAuthHeader(), AuthApiTokenCreateRequest(name))
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to create auth token: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Create auth token failed", e)
+            GhostwriterResult.Error("Failed to create auth token: ${e.message}")
+        }
+    }
+
+    /**
+     * Revoke an existing auth API token.
+     */
+    suspend fun revokeAuthToken(tokenId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+        try {
+            val response = api.revokeAuthToken(getAuthHeader(), tokenId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to revoke auth token: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Revoke auth token failed", e)
+            GhostwriterResult.Error("Failed to revoke auth token: ${e.message}")
         }
     }
 }

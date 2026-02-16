@@ -68,10 +68,18 @@ struct FeedListView: View {
     }
 
     private func deleteFeeds(at offsets: IndexSet) {
+        let deletedURLs = offsets.map { feeds[$0].url }
+
         for index in offsets {
             modelContext.delete(feeds[index])
         }
         try? modelContext.save()
+
+        Task {
+            for url in deletedURLs {
+                try? await ghostwriterCoordinator.notifyFeedDeleted(url: url)
+            }
+        }
     }
 }
 
@@ -87,6 +95,10 @@ struct FeedRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             HStack(spacing: 8) {
+                if !feed.isEnabled {
+                    Text("Paused")
+                        .font(.caption)
+                }
                 Text(feed.mode == .fidelity ? "Fidelity" : "Briefing")
                     .font(.caption)
                 if feed.maxArticles > 0 {
@@ -106,6 +118,7 @@ struct AddFeedView: View {
     @State private var url = ""
     @State private var name = ""
     @State private var mode: ProcessingMode = .fidelity
+    @State private var isEnabled = true
     @State private var maxArticles: Double = 0
 
     var body: some View {
@@ -124,6 +137,10 @@ struct AddFeedView: View {
                         Text("Briefing").tag(ProcessingMode.briefing)
                     }
                     .pickerStyle(.segmented)
+                }
+
+                Section("State") {
+                    Toggle("Enabled", isOn: $isEnabled)
                 }
 
                 Section {
@@ -160,7 +177,8 @@ struct AddFeedView: View {
             url: url.trimmingCharacters(in: .whitespacesAndNewlines),
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             mode: mode,
-            maxArticles: Int(maxArticles)
+            maxArticles: Int(maxArticles),
+            isEnabled: isEnabled
         )
         modelContext.insert(feed)
         try? modelContext.save()
@@ -175,12 +193,14 @@ struct EditFeedView: View {
 
     @State private var name: String
     @State private var mode: ProcessingMode
+    @State private var isEnabled: Bool
     @State private var maxArticles: Double
 
     init(feed: Feed) {
         self.feed = feed
         _name = State(initialValue: feed.name)
         _mode = State(initialValue: feed.mode)
+        _isEnabled = State(initialValue: feed.isEnabled)
         _maxArticles = State(initialValue: Double(feed.maxArticles))
     }
 
@@ -203,6 +223,10 @@ struct EditFeedView: View {
                         Text("Briefing").tag(ProcessingMode.briefing)
                     }
                     .pickerStyle(.segmented)
+                }
+
+                Section("State") {
+                    Toggle("Enabled", isOn: $isEnabled)
                 }
 
                 Section {
@@ -237,6 +261,7 @@ struct EditFeedView: View {
     private func saveFeed() {
         feed.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         feed.mode = mode
+        feed.isEnabled = isEnabled
         feed.maxArticles = Int(maxArticles)
         try? modelContext.save()
     }
