@@ -62,6 +62,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
+import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -238,6 +239,11 @@ fun SettingsScreen(
                     apiKey = uiState.ghostwriterApiKey,
                     isTesting = uiState.ghostwriterTesting,
                     integrationActionRunning = uiState.integrationActionRunning,
+                    mediaRefreshing = uiState.mediaRefreshing,
+                    mediaTriggering = uiState.mediaTriggering,
+                    podcastFeedCount = uiState.podcastFeedCount,
+                    youtubeFeedCount = uiState.youtubeFeedCount,
+                    mediaStatus = uiState.mediaStatus,
                     health = uiState.ghostwriterHealth,
                     wallabagIntegration = uiState.wallabagIntegration,
                     newslettersIntegration = uiState.newslettersIntegration,
@@ -252,6 +258,8 @@ fun SettingsScreen(
                     onPreviewNewsletters = viewModel::previewNewsletters,
                     onClearWallabagSeen = viewModel::clearWallabagSeen,
                     onClearNewslettersSeen = viewModel::clearNewslettersSeen,
+                    onRefreshMediaStatus = viewModel::refreshMediaOverview,
+                    onTriggerMediaProcessing = viewModel::triggerMediaProcessing,
                     onStartNewsletterOAuth = {
                         val base = uiState.ghostwriterUrl.trim()
                         if (base.isNotBlank()) {
@@ -630,6 +638,11 @@ fun GhostwriterInput(
     apiKey: String,
     isTesting: Boolean,
     integrationActionRunning: Boolean,
+    mediaRefreshing: Boolean,
+    mediaTriggering: Boolean,
+    podcastFeedCount: Int,
+    youtubeFeedCount: Int,
+    mediaStatus: MediaProcessingStatusResponse?,
     health: HealthResponse?,
     wallabagIntegration: IntegrationStatus?,
     newslettersIntegration: IntegrationStatus?,
@@ -644,6 +657,8 @@ fun GhostwriterInput(
     onPreviewNewsletters: () -> Unit,
     onClearWallabagSeen: () -> Unit,
     onClearNewslettersSeen: () -> Unit,
+    onRefreshMediaStatus: () -> Unit,
+    onTriggerMediaProcessing: () -> Unit,
     onStartNewsletterOAuth: () -> Unit
 ) {
     var showApiKey by remember { mutableStateOf(false) }
@@ -898,6 +913,60 @@ fun GhostwriterInput(
                         ) {
                             Text("Clear Seen")
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Media",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Text(
+                    text = "Feeds: $podcastFeedCount podcasts · $youtubeFeedCount YouTube",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                mediaStatus?.let { status ->
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Queue: ${status.pendingCount} pending, " +
+                            "${status.processingCount} processing, " +
+                            "${status.completedCount} completed, ${status.failedCount} failed",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    status.currentItemTitle?.let { title ->
+                        Text(
+                            text = "Current: $title",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onRefreshMediaStatus,
+                        enabled = !mediaRefreshing && !integrationActionRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (mediaRefreshing) "Refreshing..." else "Refresh")
+                    }
+                    Button(
+                        onClick = onTriggerMediaProcessing,
+                        enabled = !mediaTriggering && !integrationActionRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (mediaTriggering) "Triggering..." else "Trigger")
                     }
                 }
             }

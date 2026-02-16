@@ -342,6 +342,28 @@ public actor GhostwriterClient {
     public func newsletterOAuthStartURL() -> URL {
         baseURL.appendingPathComponent("newsletters/oauth/start")
     }
+
+    // MARK: - Media
+
+    /// List configured podcast feeds.
+    public func getPodcastFeeds() async throws -> [MediaFeedResponse] {
+        return try await get(path: "/media/podcasts")
+    }
+
+    /// List configured YouTube feeds.
+    public func getYouTubeFeeds() async throws -> [MediaFeedResponse] {
+        return try await get(path: "/media/youtube")
+    }
+
+    /// Get media processing status.
+    public func getMediaProcessingStatus() async throws -> MediaProcessingStatusResponse {
+        return try await get(path: "/media/status")
+    }
+
+    /// Trigger media processing pipeline.
+    public func triggerMediaProcessing() async throws -> MediaTriggerResponse {
+        return try await post(path: "/media/trigger", body: EmptyRequest())
+    }
     
     // MARK: - Private Helpers
     

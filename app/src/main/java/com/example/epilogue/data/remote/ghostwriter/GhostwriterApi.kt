@@ -245,4 +245,38 @@ interface GhostwriterApi {
     suspend fun clearNewsletterSeen(
         @Header("Authorization") authorization: String?
     ): Response<ClearSeenResponse>
+
+    // ===== Media =====
+
+    /**
+     * List configured podcast feeds.
+     */
+    @GET("media/podcasts")
+    suspend fun listPodcastFeeds(
+        @Header("Authorization") authorization: String?
+    ): Response<List<MediaFeedResponse>>
+
+    /**
+     * List configured YouTube feeds.
+     */
+    @GET("media/youtube")
+    suspend fun listYouTubeFeeds(
+        @Header("Authorization") authorization: String?
+    ): Response<List<MediaFeedResponse>>
+
+    /**
+     * Get media processing queue status.
+     */
+    @GET("media/status")
+    suspend fun getMediaStatus(
+        @Header("Authorization") authorization: String?
+    ): Response<MediaProcessingStatusResponse>
+
+    /**
+     * Manually trigger media processing pipeline.
+     */
+    @POST("media/trigger")
+    suspend fun triggerMediaProcessing(
+        @Header("Authorization") authorization: String?
+    ): Response<MediaTriggerResponse>
 }

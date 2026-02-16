@@ -49,6 +49,66 @@ public struct ClearSeenResponse: Codable, Sendable {
     public let cleared: Int
 }
 
+/// Media feed summary (podcast or YouTube feed).
+public struct MediaFeedResponse: Codable, Sendable {
+    public let id: String
+    public let feedType: String
+    public let url: String
+    public let resolvedFeedURL: String?
+    public let title: String
+    public let isActive: Bool
+    public let mode: String
+    public let maxItems: Int
+    public let createdAt: String
+    public let updatedAt: String
+    public let deletedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case feedType = "feed_type"
+        case url
+        case resolvedFeedURL = "resolved_feed_url"
+        case title
+        case isActive = "is_active"
+        case mode
+        case maxItems = "max_items"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case deletedAt = "deleted_at"
+    }
+}
+
+/// Media processing queue status.
+public struct MediaProcessingStatusResponse: Codable, Sendable {
+    public let isRunning: Bool
+    public let pendingCount: Int
+    public let processingCount: Int
+    public let completedCount: Int
+    public let failedCount: Int
+    public let currentItemTitle: String?
+    public let currentItemContentType: String?
+    public let lastCompletedAt: String?
+    public let nextRunAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case isRunning = "is_running"
+        case pendingCount = "pending_count"
+        case processingCount = "processing_count"
+        case completedCount = "completed_count"
+        case failedCount = "failed_count"
+        case currentItemTitle = "current_item_title"
+        case currentItemContentType = "current_item_content_type"
+        case lastCompletedAt = "last_completed_at"
+        case nextRunAt = "next_run_at"
+    }
+}
+
+/// Response for manually triggering media processing.
+public struct MediaTriggerResponse: Codable, Sendable {
+    public let status: String
+    public let detail: String?
+}
+
 /// Response model for client configuration (shared settings)
 public struct ClientConfigResponse: Codable, Sendable {
     public let minWordCount: Int?

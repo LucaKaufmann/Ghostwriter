@@ -244,6 +244,46 @@ data class ClearSeenResponse(
 )
 
 /**
+ * Media feed response (podcast or YouTube).
+ */
+data class MediaFeedResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("feed_type") val feedType: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("resolved_feed_url") val resolvedFeedUrl: String?,
+    @SerializedName("title") val title: String,
+    @SerializedName("is_active") val isActive: Boolean,
+    @SerializedName("mode") val mode: String,
+    @SerializedName("max_items") val maxItems: Int,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("updated_at") val updatedAt: String,
+    @SerializedName("deleted_at") val deletedAt: String?
+)
+
+/**
+ * Media processing status summary.
+ */
+data class MediaProcessingStatusResponse(
+    @SerializedName("is_running") val isRunning: Boolean,
+    @SerializedName("pending_count") val pendingCount: Int,
+    @SerializedName("processing_count") val processingCount: Int,
+    @SerializedName("completed_count") val completedCount: Int,
+    @SerializedName("failed_count") val failedCount: Int,
+    @SerializedName("current_item_title") val currentItemTitle: String?,
+    @SerializedName("current_item_content_type") val currentItemContentType: String?,
+    @SerializedName("last_completed_at") val lastCompletedAt: String?,
+    @SerializedName("next_run_at") val nextRunAt: String?
+)
+
+/**
+ * Media trigger response.
+ */
+data class MediaTriggerResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("detail") val detail: String? = null
+)
+
+/**
  * Response model for client configuration (shared settings).
  */
 data class ClientConfigResponse(
