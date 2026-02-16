@@ -16,6 +16,8 @@ struct GhostwriterSettingsView: View {
     @Environment(\.openURL) private var openURL
     @StateObject private var viewModel: GhostwriterSettingsViewModel
     @State private var showingAPIKeyAlert = false
+    @State private var newPodcastURL = ""
+    @State private var newYouTubeURL = ""
 
     init(settingsRepository: SettingsRepositoryProtocol) {
         _viewModel = StateObject(wrappedValue: GhostwriterSettingsViewModel(settingsRepository: settingsRepository))
@@ -268,6 +270,118 @@ struct GhostwriterSettingsView: View {
                     LabeledContent("Podcast Feeds", value: "\(viewModel.podcastFeedCount)")
                     LabeledContent("YouTube Feeds", value: "\(viewModel.youtubeFeedCount)")
 
+                    TextField("New Podcast Feed URL", text: $newPodcastURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    HStack {
+                        Spacer()
+                        Button("Add Podcast") {
+                            Task {
+                                await viewModel.addPodcastFeed(url: newPodcastURL)
+                                newPodcastURL = ""
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(viewModel.mediaActionRunning || newPodcastURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    TextField("New YouTube Channel URL", text: $newYouTubeURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    HStack {
+                        Spacer()
+                        Button("Add YouTube") {
+                            Task {
+                                await viewModel.addYouTubeFeed(url: newYouTubeURL)
+                                newYouTubeURL = ""
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(viewModel.mediaActionRunning || newYouTubeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    if !viewModel.podcastFeeds.isEmpty {
+                        Text("Podcast Feeds")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        ForEach(viewModel.podcastFeeds, id: \.id) { feed in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(feed.title)
+                                    .font(.caption)
+                                Text(feed.url)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                HStack(spacing: 8) {
+                                    Button(feed.isActive ? "Pause" : "Enable") {
+                                        Task { await viewModel.toggleMediaFeedActive(feed: feed) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.mediaActionRunning)
+
+                                    Button(feed.mode == "summarize" ? "Mode: Briefing" : "Mode: Raw") {
+                                        Task { await viewModel.toggleMediaFeedMode(feed: feed) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.mediaActionRunning)
+
+                                    Button("Max \(feed.maxItems)") {
+                                        Task { await viewModel.bumpMediaFeedMaxItems(feed: feed) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.mediaActionRunning)
+
+                                    Button("Delete", role: .destructive) {
+                                        Task { await viewModel.deleteMediaFeed(feed: feed) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.mediaActionRunning)
+                                }
+                            }
+                        }
+                    }
+
+                    if !viewModel.youtubeFeeds.isEmpty {
+                        Text("YouTube Feeds")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        ForEach(viewModel.youtubeFeeds, id: \.id) { feed in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(feed.title)
+                                    .font(.caption)
+                                Text(feed.url)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                HStack(spacing: 8) {
+                                    Button(feed.isActive ? "Pause" : "Enable") {
+                                        Task { await viewModel.toggleMediaFeedActive(feed: feed) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.mediaActionRunning)
+
+                                    Button(feed.mode == "summarize" ? "Mode: Briefing" : "Mode: Raw") {
+                                        Task { await viewModel.toggleMediaFeedMode(feed: feed) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.mediaActionRunning)
+
+                                    Button("Max \(feed.maxItems)") {
+                                        Task { await viewModel.bumpMediaFeedMaxItems(feed: feed) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.mediaActionRunning)
+
+                                    Button("Delete", role: .destructive) {
+                                        Task { await viewModel.deleteMediaFeed(feed: feed) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.mediaActionRunning)
+                                }
+                            }
+                        }
+                    }
+
                     if let status = viewModel.mediaStatus {
                         Text(
                             "Queue: \(status.pendingCount) pending, \(status.processingCount) processing, " +
@@ -292,9 +406,17 @@ struct GhostwriterSettingsView: View {
                             let typeLabel = item.contentType.lowercased() == "podcast"
                                 ? "Podcast"
                                 : (item.contentType.lowercased() == "youtube" ? "YouTube" : item.contentType)
-                            Text("[\(typeLabel) • \(item.status)] \(item.title)")
-                                .font(.caption)
-                                .lineLimit(1)
+                            HStack {
+                                Text("[\(typeLabel) • \(item.status)] \(item.title)")
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Button("Open") {
+                                    Task { await viewModel.openMediaItemDetail(itemID: item.id) }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(viewModel.mediaActionRunning)
+                            }
                         }
                     }
 
@@ -314,6 +436,7 @@ struct GhostwriterSettingsView: View {
 
             digestContentSection
             coverSettingsSection
+            authTokensSection
 
             // MARK: - Diagnostics
             if viewModel.isConfigured {
@@ -362,6 +485,45 @@ struct GhostwriterSettingsView: View {
             }
         } message: {
             Text(viewModel.integrationActionMessage ?? "")
+        }
+        .sheet(isPresented: Binding(
+            get: { viewModel.mediaItemDetail != nil },
+            set: { if !$0 { viewModel.dismissMediaItemDetail() } }
+        )) {
+            if let detail = viewModel.mediaItemDetail {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(detail.title)
+                                .font(.headline)
+                            Text("\(detail.contentType.uppercased()) • \(detail.mode)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(detail.content.isEmpty ? "(No transcript content available)" : detail.content)
+                                .font(.body)
+                        }
+                        .padding()
+                    }
+                    .navigationTitle("Transcript")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") {
+                                viewModel.dismissMediaItemDetail()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .alert("New API Token", isPresented: Binding(
+            get: { viewModel.newlyCreatedAuthToken != nil },
+            set: { if !$0 { viewModel.dismissCreatedAuthToken() } }
+        )) {
+            Button("OK", role: .cancel) {
+                viewModel.dismissCreatedAuthToken()
+            }
+        } message: {
+            Text((viewModel.newlyCreatedAuthToken ?? "") + "\n\nCopy this token now; it will not be shown again.")
         }
         .task {
             await viewModel.load()
@@ -444,10 +606,97 @@ struct GhostwriterSettingsView: View {
                     )
                 )
                 .disabled(!viewModel.coverEnabled || viewModel.configActionRunning)
+
+                Picker(
+                    "Provider",
+                    selection: Binding(
+                        get: { viewModel.coverProvider },
+                        set: { newValue in
+                            Task { await viewModel.setCoverProvider(newValue) }
+                        }
+                    )
+                ) {
+                    Text("OpenAI").tag("gpt-image-1")
+                    Text("Gemini").tag("nano-banana")
+                }
+                .disabled(viewModel.configActionRunning)
+
+                Picker(
+                    "Quality",
+                    selection: Binding(
+                        get: { viewModel.coverQuality },
+                        set: { newValue in
+                            Task { await viewModel.setCoverQuality(newValue) }
+                        }
+                    )
+                ) {
+                    Text("Low").tag("low")
+                    Text("Medium").tag("medium")
+                    Text("High").tag("high")
+                }
+                .disabled(viewModel.configActionRunning)
+
+                TextField("Cover Prompt", text: $viewModel.coverPrompt, axis: .vertical)
+                    .lineLimit(2...4)
+                    .disabled(viewModel.configActionRunning)
+
+                Button("Save Prompt") {
+                    Task { await viewModel.saveCoverPrompt() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.configActionRunning)
             } header: {
                 Text("Covers")
             } footer: {
                 Text("Overlay adds deterministic title/date/source labels on AI-generated covers.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var authTokensSection: some View {
+        if viewModel.isConfigured {
+            Section("Auth Tokens (JWT)") {
+                TextField("New Token Name", text: $viewModel.authTokenName)
+                    .autocapitalization(.none)
+                    .autocorrectionDisabled()
+
+                HStack(spacing: 12) {
+                    Button("Refresh") {
+                        Task { await viewModel.refreshAuthTokens() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.authTokensLoading || viewModel.authTokenActionRunning)
+
+                    Button("Create") {
+                        Task { await viewModel.createAuthToken() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.authTokenName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.authTokenActionRunning)
+                }
+
+                if viewModel.authTokens.isEmpty {
+                    Text("No active tokens found or current session is not JWT-authenticated.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(viewModel.authTokens, id: \.id) { token in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(token.name)
+                                Text(token.tokenPrefix)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Button("Revoke", role: .destructive) {
+                                Task { await viewModel.revokeAuthToken(id: token.id) }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(viewModel.authTokenActionRunning)
+                        }
+                    }
+                }
             }
         }
     }
@@ -484,13 +733,25 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var includeYoutubeInDigest = true
     @Published var coverEnabled = false
     @Published var coverOverlayEnabled = true
+    @Published var coverProvider = "gpt-image-1"
+    @Published var coverQuality = "medium"
+    @Published var coverPrompt = ""
     @Published var podcastFeedCount = 0
     @Published var youtubeFeedCount = 0
+    @Published var podcastFeeds: [MediaFeedResponse] = []
+    @Published var youtubeFeeds: [MediaFeedResponse] = []
     @Published var mediaStatus: MediaProcessingStatusResponse?
     @Published var recentMediaItems: [MediaItemSummaryResponse] = []
+    @Published var mediaItemDetail: MediaItemResponse?
+    @Published var mediaItemDetailLoading = false
     @Published var mediaActionRunning = false
     @Published var logFiles: [LogFileInfoResponse] = []
     @Published var logsActionRunning = false
+    @Published var authTokens: [AuthAPITokenResponse] = []
+    @Published var authTokensLoading = false
+    @Published var authTokenName = ""
+    @Published var authTokenActionRunning = false
+    @Published var newlyCreatedAuthToken: String?
     @Published var lastSyncTime: Date?
     @Published var isTesting = false
     @Published var isSyncing = false
@@ -520,6 +781,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
                 await fetchIntegrationStatus()
                 await refreshMediaOverview()
                 await refreshLogFiles()
+                await refreshAuthTokens()
             }
         } catch {
             // Ignore load errors
@@ -602,6 +864,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
             await fetchIntegrationStatus()
             await refreshMediaOverview()
             await refreshLogFiles()
+            await refreshAuthTokens()
         } catch {
             connectionStatus = .failed
             connectionError = error.localizedDescription
@@ -705,6 +968,43 @@ class GhostwriterSettingsViewModel: ObservableObject {
         }
     }
 
+    func setCoverProvider(_ provider: String) async {
+        await updateConfigToggle(
+            applyOptimistic: { coverProvider = provider },
+            rollback: { coverProvider = (provider == "nano-banana" ? "gpt-image-1" : "nano-banana") }
+        ) { timestamp in
+            ClientConfigUpdateRequest(
+                coverProvider: provider,
+                clientUpdatedAt: timestamp
+            )
+        }
+    }
+
+    func setCoverQuality(_ quality: String) async {
+        await updateConfigToggle(
+            applyOptimistic: { coverQuality = quality },
+            rollback: { coverQuality = "medium" }
+        ) { timestamp in
+            ClientConfigUpdateRequest(
+                coverQuality: quality,
+                clientUpdatedAt: timestamp
+            )
+        }
+    }
+
+    func saveCoverPrompt() async {
+        let prompt = coverPrompt
+        await updateConfigToggle(
+            applyOptimistic: {},
+            rollback: {}
+        ) { timestamp in
+            ClientConfigUpdateRequest(
+                coverPrompt: prompt,
+                clientUpdatedAt: timestamp
+            )
+        }
+    }
+
     func refreshMediaOverview() async {
         guard !serverURL.isEmpty else { return }
         mediaActionRunning = true
@@ -722,6 +1022,8 @@ class GhostwriterSettingsViewModel: ObservableObject {
                 try await (podcasts, youtube, podcastItems, youtubeItems, status)
             podcastFeedCount = podcastFeeds.count
             youtubeFeedCount = youtubeFeeds.count
+            self.podcastFeeds = podcastFeeds
+            self.youtubeFeeds = youtubeFeeds
             recentMediaItems = (podcastSummaries + youtubeSummaries)
                 .sorted { $0.createdAt > $1.createdAt }
                 .prefix(8)
@@ -745,6 +1047,188 @@ class GhostwriterSettingsViewModel: ObservableObject {
         } catch {
             integrationActionMessage = "Failed to trigger media processing: \(error.localizedDescription)"
         }
+    }
+
+    func addPodcastFeed(url: String) async {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            integrationActionMessage = "Podcast URL cannot be empty."
+            return
+        }
+
+        mediaActionRunning = true
+        defer { mediaActionRunning = false }
+
+        do {
+            let client = try await createClient()
+            _ = try await client.createPodcastFeed(
+                MediaFeedCreateRequest(feedType: "podcast", url: trimmed, title: trimmed)
+            )
+            integrationActionMessage = "Podcast feed added."
+            await refreshMediaOverview()
+        } catch {
+            integrationActionMessage = "Failed to add podcast feed: \(error.localizedDescription)"
+        }
+    }
+
+    func addYouTubeFeed(url: String) async {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            integrationActionMessage = "YouTube URL cannot be empty."
+            return
+        }
+
+        mediaActionRunning = true
+        defer { mediaActionRunning = false }
+
+        do {
+            let client = try await createClient()
+            let resolved = try await client.resolveYouTubeFeed(url: trimmed)
+            _ = try await client.createYouTubeFeed(
+                MediaFeedCreateRequest(
+                    feedType: "youtube",
+                    url: trimmed,
+                    resolvedFeedURL: resolved.rssFeedURL,
+                    title: resolved.channelTitle ?? trimmed
+                )
+            )
+            integrationActionMessage = "YouTube feed added."
+            await refreshMediaOverview()
+        } catch {
+            integrationActionMessage = "Failed to add YouTube feed: \(error.localizedDescription)"
+        }
+    }
+
+    func toggleMediaFeedActive(feed: MediaFeedResponse) async {
+        mediaActionRunning = true
+        defer { mediaActionRunning = false }
+        do {
+            let client = try await createClient()
+            let request = MediaFeedUpdateRequest(isActive: !feed.isActive)
+            if feed.feedType == "podcast" {
+                _ = try await client.updatePodcastFeed(feedId: feed.id, request: request)
+            } else {
+                _ = try await client.updateYouTubeFeed(feedId: feed.id, request: request)
+            }
+            await refreshMediaOverview()
+        } catch {
+            integrationActionMessage = "Failed to update feed: \(error.localizedDescription)"
+        }
+    }
+
+    func toggleMediaFeedMode(feed: MediaFeedResponse) async {
+        mediaActionRunning = true
+        defer { mediaActionRunning = false }
+        do {
+            let client = try await createClient()
+            let nextMode = feed.mode == "summarize" ? "raw" : "summarize"
+            let request = MediaFeedUpdateRequest(mode: nextMode)
+            if feed.feedType == "podcast" {
+                _ = try await client.updatePodcastFeed(feedId: feed.id, request: request)
+            } else {
+                _ = try await client.updateYouTubeFeed(feedId: feed.id, request: request)
+            }
+            await refreshMediaOverview()
+        } catch {
+            integrationActionMessage = "Failed to update feed mode: \(error.localizedDescription)"
+        }
+    }
+
+    func bumpMediaFeedMaxItems(feed: MediaFeedResponse) async {
+        mediaActionRunning = true
+        defer { mediaActionRunning = false }
+        do {
+            let client = try await createClient()
+            let nextMax = feed.maxItems >= 20 ? 5 : (feed.maxItems + 5)
+            let request = MediaFeedUpdateRequest(maxItems: nextMax)
+            if feed.feedType == "podcast" {
+                _ = try await client.updatePodcastFeed(feedId: feed.id, request: request)
+            } else {
+                _ = try await client.updateYouTubeFeed(feedId: feed.id, request: request)
+            }
+            await refreshMediaOverview()
+        } catch {
+            integrationActionMessage = "Failed to update max items: \(error.localizedDescription)"
+        }
+    }
+
+    func deleteMediaFeed(feed: MediaFeedResponse) async {
+        mediaActionRunning = true
+        defer { mediaActionRunning = false }
+        do {
+            let client = try await createClient()
+            if feed.feedType == "podcast" {
+                _ = try await client.deletePodcastFeed(feedId: feed.id)
+            } else {
+                _ = try await client.deleteYouTubeFeed(feedId: feed.id)
+            }
+            integrationActionMessage = "Feed deleted."
+            await refreshMediaOverview()
+        } catch {
+            integrationActionMessage = "Failed to delete feed: \(error.localizedDescription)"
+        }
+    }
+
+    func openMediaItemDetail(itemID: String) async {
+        mediaItemDetailLoading = true
+        defer { mediaItemDetailLoading = false }
+        do {
+            let client = try await createClient()
+            mediaItemDetail = try await client.getMediaItem(id: itemID)
+        } catch {
+            integrationActionMessage = "Failed to load transcript: \(error.localizedDescription)"
+        }
+    }
+
+    func dismissMediaItemDetail() {
+        mediaItemDetail = nil
+    }
+
+    func refreshAuthTokens() async {
+        guard !serverURL.isEmpty else { return }
+        authTokensLoading = true
+        defer { authTokensLoading = false }
+        do {
+            let client = try await createClient()
+            authTokens = try await client.listAuthTokens()
+        } catch {
+            integrationActionMessage = "Failed to load auth tokens: \(error.localizedDescription)"
+        }
+    }
+
+    func createAuthToken() async {
+        let trimmed = authTokenName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            integrationActionMessage = "Token name cannot be empty."
+            return
+        }
+        authTokenActionRunning = true
+        defer { authTokenActionRunning = false }
+        do {
+            let client = try await createClient()
+            let response = try await client.createAuthToken(name: trimmed)
+            authTokenName = ""
+            newlyCreatedAuthToken = response.token
+            await refreshAuthTokens()
+        } catch {
+            integrationActionMessage = "Failed to create auth token: \(error.localizedDescription)"
+        }
+    }
+
+    func revokeAuthToken(id: String) async {
+        authTokenActionRunning = true
+        defer { authTokenActionRunning = false }
+        do {
+            let client = try await createClient()
+            _ = try await client.revokeAuthToken(id: id)
+            await refreshAuthTokens()
+        } catch {
+            integrationActionMessage = "Failed to revoke auth token: \(error.localizedDescription)"
+        }
+    }
+
+    func dismissCreatedAuthToken() {
+        newlyCreatedAuthToken = nil
     }
 
     func refreshLogFiles() async {
@@ -858,6 +1342,9 @@ class GhostwriterSettingsViewModel: ObservableObject {
         includeYoutubeInDigest = config.includeYoutubeInDigest ?? includeYoutubeInDigest
         coverEnabled = config.coverEnabled ?? coverEnabled
         coverOverlayEnabled = config.coverOverlayEnabled ?? coverOverlayEnabled
+        coverProvider = config.coverProvider ?? coverProvider
+        coverQuality = config.coverQuality ?? coverQuality
+        coverPrompt = config.coverPrompt ?? coverPrompt
     }
 
     private func createClient() async throws -> GhostwriterClient {

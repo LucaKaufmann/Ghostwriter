@@ -53,6 +53,7 @@ class SettingsViewModel @Inject constructor(
             fetchIntegrationStatus()
             refreshMediaOverview()
             refreshLogFiles()
+            refreshAuthTokens()
         }
     }
 
@@ -551,6 +552,7 @@ class SettingsViewModel @Inject constructor(
                 fetchIntegrationStatus()
                 refreshMediaOverview()
                 refreshLogFiles()
+                refreshAuthTokens()
 
                 // If Ghostwriter is enabled, perform initial sync
                 if (_uiState.value.ghostwriterEnabled) {
@@ -662,6 +664,58 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun updateCoverProvider(provider: String) {
+        updateGhostwriterConfig(
+            optimisticUpdate = { it.copy(coverProvider = provider) },
+            rollbackUpdate = { state ->
+                state.copy(coverProvider = if (provider == "nano-banana") "gpt-image-1" else "nano-banana")
+            },
+            successMessage = "Cover provider updated"
+        ) { timestamp ->
+            ghostwriterRepository.updateConfig(
+                coverProvider = provider,
+                clientUpdatedAt = timestamp
+            )
+        }
+    }
+
+    fun updateCoverQuality(quality: String) {
+        updateGhostwriterConfig(
+            optimisticUpdate = { it.copy(coverQuality = quality) },
+            rollbackUpdate = { state ->
+                state.copy(coverQuality = when (quality) {
+                    "low" -> "medium"
+                    "high" -> "medium"
+                    else -> "high"
+                })
+            },
+            successMessage = "Cover quality updated"
+        ) { timestamp ->
+            ghostwriterRepository.updateConfig(
+                coverQuality = quality,
+                clientUpdatedAt = timestamp
+            )
+        }
+    }
+
+    fun updateCoverPrompt(prompt: String) {
+        _uiState.update { it.copy(coverPrompt = prompt) }
+    }
+
+    fun saveCoverPrompt() {
+        val prompt = _uiState.value.coverPrompt
+        updateGhostwriterConfig(
+            optimisticUpdate = { it },
+            rollbackUpdate = { it },
+            successMessage = "Cover prompt saved"
+        ) { timestamp ->
+            ghostwriterRepository.updateConfig(
+                coverPrompt = prompt,
+                clientUpdatedAt = timestamp
+            )
+        }
+    }
+
     private fun updateGhostwriterConfig(
         optimisticUpdate: (SettingsUiState) -> SettingsUiState,
         rollbackUpdate: (SettingsUiState) -> SettingsUiState,
@@ -748,7 +802,10 @@ class SettingsViewModel @Inject constructor(
             includePodcastsInDigest = config.includePodcastsInDigest ?: state.includePodcastsInDigest,
             includeYoutubeInDigest = config.includeYoutubeInDigest ?: state.includeYoutubeInDigest,
             coverEnabled = config.coverEnabled ?: state.coverEnabled,
-            coverOverlayEnabled = config.coverOverlayEnabled ?: state.coverOverlayEnabled
+            coverOverlayEnabled = config.coverOverlayEnabled ?: state.coverOverlayEnabled,
+            coverProvider = config.coverProvider ?: state.coverProvider,
+            coverQuality = config.coverQuality ?: state.coverQuality,
+            coverPrompt = config.coverPrompt ?: state.coverPrompt
         )
     }
 
@@ -758,18 +815,46 @@ class SettingsViewModel @Inject constructor(
 
             var podcastCount = _uiState.value.podcastFeedCount
             var youtubeCount = _uiState.value.youtubeFeedCount
+            var podcastFeeds = _uiState.value.podcastFeeds
+            var youtubeFeeds = _uiState.value.youtubeFeeds
             var mediaStatus = _uiState.value.mediaStatus
             var recentMediaItems = _uiState.value.recentMediaItems
             var actionMessage: String? = null
 
             when (val podcastResult = ghostwriterRepository.getPodcastFeeds()) {
-                is GhostwriterResult.Success -> podcastCount = podcastResult.data.size
+                is GhostwriterResult.Success -> {
+                    podcastCount = podcastResult.data.size
+                    podcastFeeds = podcastResult.data.map { feed ->
+                        MediaFeedUi(
+                            id = feed.id,
+                            title = feed.title,
+                            url = feed.url,
+                            feedType = feed.feedType,
+                            isActive = feed.isActive,
+                            mode = feed.mode,
+                            maxItems = feed.maxItems
+                        )
+                    }
+                }
                 is GhostwriterResult.Error -> actionMessage = "Failed to load podcast feeds: ${podcastResult.message}"
                 is GhostwriterResult.NotConfigured -> actionMessage = "Ghostwriter is not configured"
             }
 
             when (val youtubeResult = ghostwriterRepository.getYouTubeFeeds()) {
-                is GhostwriterResult.Success -> youtubeCount = youtubeResult.data.size
+                is GhostwriterResult.Success -> {
+                    youtubeCount = youtubeResult.data.size
+                    youtubeFeeds = youtubeResult.data.map { feed ->
+                        MediaFeedUi(
+                            id = feed.id,
+                            title = feed.title,
+                            url = feed.url,
+                            feedType = feed.feedType,
+                            isActive = feed.isActive,
+                            mode = feed.mode,
+                            maxItems = feed.maxItems
+                        )
+                    }
+                }
                 is GhostwriterResult.Error -> actionMessage = actionMessage ?: "Failed to load YouTube feeds: ${youtubeResult.message}"
                 is GhostwriterResult.NotConfigured -> actionMessage = actionMessage ?: "Ghostwriter is not configured"
             }
@@ -823,6 +908,8 @@ class SettingsViewModel @Inject constructor(
                     mediaRefreshing = false,
                     podcastFeedCount = podcastCount,
                     youtubeFeedCount = youtubeCount,
+                    podcastFeeds = podcastFeeds,
+                    youtubeFeeds = youtubeFeeds,
                     mediaStatus = mediaStatus,
                     recentMediaItems = recentMediaItems,
                     integrationActionResult = actionMessage
@@ -904,6 +991,359 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    fun createPodcastFeed(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isBlank()) {
+            _uiState.update { it.copy(integrationActionResult = "Podcast URL cannot be empty") }
+            return
+        }
+        viewModelScope.launch {
+            when (val result = ghostwriterRepository.createPodcastFeed(url = trimmed, title = trimmed)) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(integrationActionResult = "Podcast feed added: ${result.data.title}")
+                    }
+                    refreshMediaOverview()
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(integrationActionResult = "Failed to add podcast feed: ${result.message}")
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(integrationActionResult = "Ghostwriter is not configured") }
+                }
+            }
+        }
+    }
+
+    fun createYouTubeFeed(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isBlank()) {
+            _uiState.update { it.copy(integrationActionResult = "YouTube URL cannot be empty") }
+            return
+        }
+        viewModelScope.launch {
+            val resolved = ghostwriterRepository.resolveYouTubeFeed(trimmed)
+            when (resolved) {
+                is GhostwriterResult.Success -> {
+                    val createResult = ghostwriterRepository.createYouTubeFeed(
+                        url = trimmed,
+                        resolvedFeedUrl = resolved.data.rssFeedUrl,
+                        title = resolved.data.channelTitle ?: trimmed
+                    )
+                    when (createResult) {
+                        is GhostwriterResult.Success -> {
+                            _uiState.update {
+                                it.copy(integrationActionResult = "YouTube feed added: ${createResult.data.title}")
+                            }
+                            refreshMediaOverview()
+                        }
+                        is GhostwriterResult.Error -> {
+                            _uiState.update {
+                                it.copy(integrationActionResult = "Failed to add YouTube feed: ${createResult.message}")
+                            }
+                        }
+                        is GhostwriterResult.NotConfigured -> {
+                            _uiState.update { it.copy(integrationActionResult = "Ghostwriter is not configured") }
+                        }
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(integrationActionResult = "Failed to resolve YouTube URL: ${resolved.message}")
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(integrationActionResult = "Ghostwriter is not configured") }
+                }
+            }
+        }
+    }
+
+    fun updateMediaFeedActive(feedType: String, feedId: String, enabled: Boolean) {
+        viewModelScope.launch {
+            val result = when (feedType.lowercase()) {
+                "podcast" -> ghostwriterRepository.updatePodcastFeed(feedId = feedId, isActive = enabled)
+                "youtube" -> ghostwriterRepository.updateYouTubeFeed(feedId = feedId, isActive = enabled)
+                else -> {
+                    _uiState.update { it.copy(integrationActionResult = "Unsupported feed type: $feedType") }
+                    return@launch
+                }
+            }
+            when (result) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionResult = "${result.data.title}: ${if (enabled) "Enabled" else "Paused"}"
+                        )
+                    }
+                    refreshMediaOverview()
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update { it.copy(integrationActionResult = "Failed to update feed: ${result.message}") }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(integrationActionResult = "Ghostwriter is not configured") }
+                }
+            }
+        }
+    }
+
+    fun updateMediaFeedMode(feedType: String, feedId: String, mode: String) {
+        viewModelScope.launch {
+            val result = when (feedType.lowercase()) {
+                "podcast" -> ghostwriterRepository.updatePodcastFeed(feedId = feedId, mode = mode)
+                "youtube" -> ghostwriterRepository.updateYouTubeFeed(feedId = feedId, mode = mode)
+                else -> {
+                    _uiState.update { it.copy(integrationActionResult = "Unsupported feed type: $feedType") }
+                    return@launch
+                }
+            }
+            when (result) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionResult = "${result.data.title}: mode set to $mode"
+                        )
+                    }
+                    refreshMediaOverview()
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update { it.copy(integrationActionResult = "Failed to update feed mode: ${result.message}") }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(integrationActionResult = "Ghostwriter is not configured") }
+                }
+            }
+        }
+    }
+
+    fun updateMediaFeedMaxItems(feedType: String, feedId: String, maxItems: Int) {
+        viewModelScope.launch {
+            val safeMax = maxItems.coerceIn(1, 50)
+            val result = when (feedType.lowercase()) {
+                "podcast" -> ghostwriterRepository.updatePodcastFeed(feedId = feedId, maxItems = safeMax)
+                "youtube" -> ghostwriterRepository.updateYouTubeFeed(feedId = feedId, maxItems = safeMax)
+                else -> {
+                    _uiState.update { it.copy(integrationActionResult = "Unsupported feed type: $feedType") }
+                    return@launch
+                }
+            }
+            when (result) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(integrationActionResult = "${result.data.title}: max items set to $safeMax")
+                    }
+                    refreshMediaOverview()
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update { it.copy(integrationActionResult = "Failed to update max items: ${result.message}") }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(integrationActionResult = "Ghostwriter is not configured") }
+                }
+            }
+        }
+    }
+
+    fun deleteMediaFeed(feedType: String, feedId: String) {
+        viewModelScope.launch {
+            val result = when (feedType.lowercase()) {
+                "podcast" -> ghostwriterRepository.deletePodcastFeed(feedId)
+                "youtube" -> ghostwriterRepository.deleteYouTubeFeed(feedId)
+                else -> {
+                    _uiState.update { it.copy(integrationActionResult = "Unsupported feed type: $feedType") }
+                    return@launch
+                }
+            }
+            when (result) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update { it.copy(integrationActionResult = result.data.message ?: "Feed deleted") }
+                    refreshMediaOverview()
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update { it.copy(integrationActionResult = "Failed to delete feed: ${result.message}") }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(integrationActionResult = "Ghostwriter is not configured") }
+                }
+            }
+        }
+    }
+
+    fun loadMediaItemDetail(itemId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(mediaItemDetailLoading = true, mediaItemDetail = null) }
+            when (val result = ghostwriterRepository.getMediaItem(itemId)) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            mediaItemDetailLoading = false,
+                            mediaItemDetail = MediaItemDetailUi(
+                                id = result.data.id,
+                                title = result.data.title,
+                                author = result.data.author,
+                                contentType = result.data.contentType,
+                                status = result.data.status,
+                                mode = result.data.mode,
+                                wordCount = result.data.wordCount,
+                                isSummary = result.data.isSummary,
+                                content = result.data.content,
+                                errorMessage = result.data.errorMessage,
+                                url = result.data.url,
+                                createdAt = result.data.createdAt,
+                                completedAt = result.data.completedAt
+                            )
+                        )
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            mediaItemDetailLoading = false,
+                            integrationActionResult = "Failed to load media item: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            mediaItemDetailLoading = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearMediaItemDetail() {
+        _uiState.update { it.copy(mediaItemDetail = null) }
+    }
+
+    fun refreshAuthTokens() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(authTokensLoading = true) }
+            when (val result = ghostwriterRepository.listAuthTokens()) {
+                is GhostwriterResult.Success -> {
+                    val tokens = result.data.map { token ->
+                        AuthTokenUi(
+                            id = token.id,
+                            name = token.name,
+                            tokenPrefix = token.tokenPrefix,
+                            createdAt = token.createdAt,
+                            lastUsedAt = token.lastUsedAt
+                        )
+                    }
+                    _uiState.update {
+                        it.copy(
+                            authTokensLoading = false,
+                            authTokens = tokens
+                        )
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            authTokensLoading = false,
+                            integrationActionResult = "Failed to load auth tokens: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            authTokensLoading = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun updateAuthTokenCreateName(name: String) {
+        _uiState.update { it.copy(authTokenCreateName = name) }
+    }
+
+    fun createAuthToken() {
+        viewModelScope.launch {
+            val name = _uiState.value.authTokenCreateName.trim()
+            if (name.isBlank()) {
+                _uiState.update { it.copy(integrationActionResult = "Token name cannot be empty") }
+                return@launch
+            }
+            _uiState.update { it.copy(authTokensActionRunning = true) }
+            when (val result = ghostwriterRepository.createAuthToken(name)) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            authTokensActionRunning = false,
+                            authTokenCreateName = "",
+                            newlyCreatedAuthToken = result.data.token,
+                            integrationActionResult = "Token created: ${result.data.tokenPrefix}"
+                        )
+                    }
+                    refreshAuthTokens()
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            authTokensActionRunning = false,
+                            integrationActionResult = "Failed to create token: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            authTokensActionRunning = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun revokeAuthToken(tokenId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(authTokensActionRunning = true) }
+            when (val result = ghostwriterRepository.revokeAuthToken(tokenId)) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            authTokensActionRunning = false,
+                            integrationActionResult = result.data.message ?: "Token revoked"
+                        )
+                    }
+                    refreshAuthTokens()
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            authTokensActionRunning = false,
+                            integrationActionResult = "Failed to revoke token: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            authTokensActionRunning = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearNewlyCreatedAuthToken() {
+        _uiState.update { it.copy(newlyCreatedAuthToken = null) }
     }
 
     fun clearGhostwriterTestResult() {
@@ -1179,14 +1619,26 @@ data class SettingsUiState(
     val includeYoutubeInDigest: Boolean = true,
     val coverEnabled: Boolean = false,
     val coverOverlayEnabled: Boolean = true,
+    val coverProvider: String = "gpt-image-1",
+    val coverQuality: String = "medium",
+    val coverPrompt: String = "",
     val integrationActionRunning: Boolean = false,
     val integrationActionResult: String? = null,
     val mediaRefreshing: Boolean = false,
     val mediaTriggering: Boolean = false,
     val podcastFeedCount: Int = 0,
     val youtubeFeedCount: Int = 0,
+    val podcastFeeds: List<MediaFeedUi> = emptyList(),
+    val youtubeFeeds: List<MediaFeedUi> = emptyList(),
     val mediaStatus: MediaProcessingStatusResponse? = null,
     val recentMediaItems: List<MediaItemUi> = emptyList(),
+    val mediaItemDetailLoading: Boolean = false,
+    val mediaItemDetail: MediaItemDetailUi? = null,
+    val authTokensLoading: Boolean = false,
+    val authTokensActionRunning: Boolean = false,
+    val authTokens: List<AuthTokenUi> = emptyList(),
+    val authTokenCreateName: String = "",
+    val newlyCreatedAuthToken: String? = null,
     val logsRefreshing: Boolean = false,
     val logFiles: List<LogFileUi> = emptyList(),
     val ghostwriterHealth: HealthResponse? = null,
@@ -1202,6 +1654,40 @@ data class MediaItemUi(
     val contentType: String,
     val status: String,
     val createdAt: String
+)
+
+data class MediaFeedUi(
+    val id: String,
+    val title: String,
+    val url: String,
+    val feedType: String,
+    val isActive: Boolean,
+    val mode: String,
+    val maxItems: Int
+)
+
+data class MediaItemDetailUi(
+    val id: String,
+    val title: String,
+    val author: String?,
+    val contentType: String,
+    val status: String,
+    val mode: String,
+    val wordCount: Int,
+    val isSummary: Boolean,
+    val content: String,
+    val errorMessage: String?,
+    val url: String,
+    val createdAt: String,
+    val completedAt: String?
+)
+
+data class AuthTokenUi(
+    val id: String,
+    val name: String,
+    val tokenPrefix: String,
+    val createdAt: String,
+    val lastUsedAt: String?
 )
 
 data class LogFileUi(

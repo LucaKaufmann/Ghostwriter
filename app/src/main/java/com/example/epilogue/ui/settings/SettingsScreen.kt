@@ -245,17 +245,29 @@ fun SettingsScreen(
                     includeYoutubeInDigest = uiState.includeYoutubeInDigest,
                     coverEnabled = uiState.coverEnabled,
                     coverOverlayEnabled = uiState.coverOverlayEnabled,
+                    coverProvider = uiState.coverProvider,
+                    coverQuality = uiState.coverQuality,
+                    coverPrompt = uiState.coverPrompt,
                     mediaRefreshing = uiState.mediaRefreshing,
                     mediaTriggering = uiState.mediaTriggering,
                     podcastFeedCount = uiState.podcastFeedCount,
                     youtubeFeedCount = uiState.youtubeFeedCount,
+                    podcastFeeds = uiState.podcastFeeds,
+                    youtubeFeeds = uiState.youtubeFeeds,
                     mediaStatus = uiState.mediaStatus,
                     recentMediaItems = uiState.recentMediaItems,
+                    mediaItemDetailLoading = uiState.mediaItemDetailLoading,
+                    mediaItemDetail = uiState.mediaItemDetail,
+                    newlyCreatedAuthToken = uiState.newlyCreatedAuthToken,
                     logsRefreshing = uiState.logsRefreshing,
                     logFiles = uiState.logFiles,
                     health = uiState.ghostwriterHealth,
                     wallabagIntegration = uiState.wallabagIntegration,
                     newslettersIntegration = uiState.newslettersIntegration,
+                    authTokensLoading = uiState.authTokensLoading,
+                    authTokensActionRunning = uiState.authTokensActionRunning,
+                    authTokens = uiState.authTokens,
+                    authTokenCreateName = uiState.authTokenCreateName,
                     onEnabledChange = viewModel::updateGhostwriterEnabled,
                     onUrlChange = viewModel::updateGhostwriterUrl,
                     onSaveUrl = viewModel::saveGhostwriterUrl,
@@ -267,13 +279,30 @@ fun SettingsScreen(
                     onIncludeYoutubeInDigestChange = viewModel::updateIncludeYoutubeInDigest,
                     onCoverEnabledChange = viewModel::updateCoverEnabled,
                     onCoverOverlayEnabledChange = viewModel::updateCoverOverlayEnabled,
+                    onCoverProviderChange = viewModel::updateCoverProvider,
+                    onCoverQualityChange = viewModel::updateCoverQuality,
+                    onCoverPromptChange = viewModel::updateCoverPrompt,
+                    onSaveCoverPrompt = viewModel::saveCoverPrompt,
                     onPreviewWallabag = viewModel::previewWallabag,
                     onPreviewNewsletters = viewModel::previewNewsletters,
                     onClearWallabagSeen = viewModel::clearWallabagSeen,
                     onClearNewslettersSeen = viewModel::clearNewslettersSeen,
                     onRefreshMediaStatus = viewModel::refreshMediaOverview,
                     onTriggerMediaProcessing = viewModel::triggerMediaProcessing,
+                    onCreatePodcastFeed = viewModel::createPodcastFeed,
+                    onCreateYoutubeFeed = viewModel::createYouTubeFeed,
+                    onToggleMediaFeedActive = viewModel::updateMediaFeedActive,
+                    onUpdateMediaFeedMode = viewModel::updateMediaFeedMode,
+                    onUpdateMediaFeedMaxItems = viewModel::updateMediaFeedMaxItems,
+                    onDeleteMediaFeed = viewModel::deleteMediaFeed,
+                    onOpenMediaItemDetail = viewModel::loadMediaItemDetail,
                     onRefreshLogs = viewModel::refreshLogFiles,
+                    onRefreshAuthTokens = viewModel::refreshAuthTokens,
+                    onAuthTokenCreateNameChange = viewModel::updateAuthTokenCreateName,
+                    onCreateAuthToken = viewModel::createAuthToken,
+                    onRevokeAuthToken = viewModel::revokeAuthToken,
+                    onDismissMediaItemDetail = viewModel::clearMediaItemDetail,
+                    onDismissCreatedAuthToken = viewModel::clearNewlyCreatedAuthToken,
                     onStartNewsletterOAuth = {
                         val base = uiState.ghostwriterUrl.trim()
                         if (base.isNotBlank()) {
@@ -657,17 +686,29 @@ fun GhostwriterInput(
     includeYoutubeInDigest: Boolean,
     coverEnabled: Boolean,
     coverOverlayEnabled: Boolean,
+    coverProvider: String,
+    coverQuality: String,
+    coverPrompt: String,
     mediaRefreshing: Boolean,
     mediaTriggering: Boolean,
     podcastFeedCount: Int,
     youtubeFeedCount: Int,
+    podcastFeeds: List<MediaFeedUi>,
+    youtubeFeeds: List<MediaFeedUi>,
     mediaStatus: MediaProcessingStatusResponse?,
     recentMediaItems: List<MediaItemUi>,
+    mediaItemDetailLoading: Boolean,
+    mediaItemDetail: MediaItemDetailUi?,
+    newlyCreatedAuthToken: String?,
     logsRefreshing: Boolean,
     logFiles: List<LogFileUi>,
     health: HealthResponse?,
     wallabagIntegration: IntegrationStatus?,
     newslettersIntegration: IntegrationStatus?,
+    authTokensLoading: Boolean,
+    authTokensActionRunning: Boolean,
+    authTokens: List<AuthTokenUi>,
+    authTokenCreateName: String,
     onEnabledChange: (Boolean) -> Unit,
     onUrlChange: (String) -> Unit,
     onSaveUrl: () -> Unit,
@@ -679,16 +720,35 @@ fun GhostwriterInput(
     onIncludeYoutubeInDigestChange: (Boolean) -> Unit,
     onCoverEnabledChange: (Boolean) -> Unit,
     onCoverOverlayEnabledChange: (Boolean) -> Unit,
+    onCoverProviderChange: (String) -> Unit,
+    onCoverQualityChange: (String) -> Unit,
+    onCoverPromptChange: (String) -> Unit,
+    onSaveCoverPrompt: () -> Unit,
     onPreviewWallabag: () -> Unit,
     onPreviewNewsletters: () -> Unit,
     onClearWallabagSeen: () -> Unit,
     onClearNewslettersSeen: () -> Unit,
     onRefreshMediaStatus: () -> Unit,
     onTriggerMediaProcessing: () -> Unit,
+    onCreatePodcastFeed: (String) -> Unit,
+    onCreateYoutubeFeed: (String) -> Unit,
+    onToggleMediaFeedActive: (String, String, Boolean) -> Unit,
+    onUpdateMediaFeedMode: (String, String, String) -> Unit,
+    onUpdateMediaFeedMaxItems: (String, String, Int) -> Unit,
+    onDeleteMediaFeed: (String, String) -> Unit,
+    onOpenMediaItemDetail: (String) -> Unit,
     onRefreshLogs: () -> Unit,
+    onRefreshAuthTokens: () -> Unit,
+    onAuthTokenCreateNameChange: (String) -> Unit,
+    onCreateAuthToken: () -> Unit,
+    onRevokeAuthToken: (String) -> Unit,
+    onDismissMediaItemDetail: () -> Unit,
+    onDismissCreatedAuthToken: () -> Unit,
     onStartNewsletterOAuth: () -> Unit
 ) {
     var showApiKey by remember { mutableStateOf(false) }
+    var newPodcastUrl by remember { mutableStateOf("") }
+    var newYoutubeUrl by remember { mutableStateOf("") }
 
     Column {
         // Enable toggle
@@ -936,6 +996,76 @@ fun GhostwriterInput(
                     )
                 }
 
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Provider",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { onCoverProviderChange("gpt-image-1") },
+                        enabled = !configActionRunning && !integrationActionRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (coverProvider == "gpt-image-1") "OpenAI ✓" else "OpenAI")
+                    }
+                    OutlinedButton(
+                        onClick = { onCoverProviderChange("nano-banana") },
+                        enabled = !configActionRunning && !integrationActionRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (coverProvider == "nano-banana") "Gemini ✓" else "Gemini")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Quality",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("low", "medium", "high").forEach { option ->
+                        OutlinedButton(
+                            onClick = { onCoverQualityChange(option) },
+                            enabled = !configActionRunning && !integrationActionRunning,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            val label = option.replaceFirstChar { it.uppercase() }
+                            Text(if (coverQuality == option) "$label ✓" else label)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = coverPrompt,
+                    onValueChange = onCoverPromptChange,
+                    label = { Text("Cover Prompt") },
+                    placeholder = { Text("Optional style guidance for generated covers") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 4,
+                    enabled = !configActionRunning && !integrationActionRunning
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = onSaveCoverPrompt,
+                        enabled = !configActionRunning && !integrationActionRunning
+                    ) {
+                        Text("Save Prompt")
+                    }
+                }
+
                 // Server health summary (shown after successful test)
                 if (health != null) {
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1056,6 +1186,179 @@ fun GhostwriterInput(
                     style = MaterialTheme.typography.bodySmall
                 )
 
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = newPodcastUrl,
+                    onValueChange = { newPodcastUrl = it },
+                    label = { Text("New Podcast Feed URL") },
+                    placeholder = { Text("https://example.com/podcast.rss") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            onCreatePodcastFeed(newPodcastUrl)
+                            newPodcastUrl = ""
+                        },
+                        enabled = !integrationActionRunning && newPodcastUrl.isNotBlank()
+                    ) {
+                        Text("Add Podcast")
+                    }
+                }
+
+                OutlinedTextField(
+                    value = newYoutubeUrl,
+                    onValueChange = { newYoutubeUrl = it },
+                    label = { Text("New YouTube Channel URL") },
+                    placeholder = { Text("https://youtube.com/@channel") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            onCreateYoutubeFeed(newYoutubeUrl)
+                            newYoutubeUrl = ""
+                        },
+                        enabled = !integrationActionRunning && newYoutubeUrl.isNotBlank()
+                    ) {
+                        Text("Add YouTube")
+                    }
+                }
+
+                if (podcastFeeds.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Podcast Feeds",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    podcastFeeds.forEach { feed ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = feed.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = feed.url,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { onToggleMediaFeedActive("podcast", feed.id, !feed.isActive) },
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (feed.isActive) "Pause" else "Enable")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val nextMode = if (feed.mode == "summarize") "raw" else "summarize"
+                                    onUpdateMediaFeedMode("podcast", feed.id, nextMode)
+                                },
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (feed.mode == "summarize") "Mode: Briefing" else "Mode: Raw")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val nextMax = if (feed.maxItems >= 20) 5 else feed.maxItems + 5
+                                    onUpdateMediaFeedMaxItems("podcast", feed.id, nextMax)
+                                },
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Max ${feed.maxItems}")
+                            }
+                            OutlinedButton(
+                                onClick = { onDeleteMediaFeed("podcast", feed.id) },
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Delete")
+                            }
+                        }
+                    }
+                }
+
+                if (youtubeFeeds.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "YouTube Feeds",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    youtubeFeeds.forEach { feed ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = feed.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = feed.url,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { onToggleMediaFeedActive("youtube", feed.id, !feed.isActive) },
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (feed.isActive) "Pause" else "Enable")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val nextMode = if (feed.mode == "summarize") "raw" else "summarize"
+                                    onUpdateMediaFeedMode("youtube", feed.id, nextMode)
+                                },
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (feed.mode == "summarize") "Mode: Briefing" else "Mode: Raw")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val nextMax = if (feed.maxItems >= 20) 5 else feed.maxItems + 5
+                                    onUpdateMediaFeedMaxItems("youtube", feed.id, nextMax)
+                                },
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Max ${feed.maxItems}")
+                            }
+                            OutlinedButton(
+                                onClick = { onDeleteMediaFeed("youtube", feed.id) },
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Delete")
+                            }
+                        }
+                    }
+                }
+
                 mediaStatus?.let { status ->
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
@@ -1087,13 +1390,34 @@ fun GhostwriterInput(
                             "youtube" -> "YouTube"
                             else -> item.contentType
                         }
-                        Text(
-                            text = "[$typeLabel • ${item.status}] ${item.title}",
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "[$typeLabel • ${item.status}] ${item.title}",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedButton(
+                                onClick = { onOpenMediaItemDetail(item.id) },
+                                enabled = !integrationActionRunning
+                            ) {
+                                Text("Open")
+                            }
+                        }
                     }
+                }
+
+                if (mediaItemDetailLoading) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Loading transcript...",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1147,8 +1471,135 @@ fun GhostwriterInput(
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Auth Tokens (JWT)",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                OutlinedTextField(
+                    value = authTokenCreateName,
+                    onValueChange = onAuthTokenCreateNameChange,
+                    label = { Text("New Token Name") },
+                    placeholder = { Text("e.g. mobile-app") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onRefreshAuthTokens,
+                        enabled = !authTokensLoading && !authTokensActionRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (authTokensLoading) "Refreshing..." else "Refresh")
+                    }
+                    Button(
+                        onClick = onCreateAuthToken,
+                        enabled = authTokenCreateName.isNotBlank() && !authTokensActionRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (authTokensActionRunning) "Creating..." else "Create")
+                    }
+                }
+
+                if (authTokens.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    authTokens.forEach { token ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = token.name,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = token.tokenPrefix,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { onRevokeAuthToken(token.id) },
+                                enabled = !authTokensActionRunning
+                            ) {
+                                Text("Revoke")
+                            }
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "No active auth tokens found or current token is not a JWT session.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
+    }
+
+    if (mediaItemDetail != null) {
+        AlertDialog(
+            onDismissRequest = onDismissMediaItemDetail,
+            confirmButton = {
+                TextButton(onClick = onDismissMediaItemDetail) {
+                    Text("Close")
+                }
+            },
+            title = {
+                Text(mediaItemDetail.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "${mediaItemDetail.contentType.uppercase()} · ${mediaItemDetail.mode}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = mediaItemDetail.content.ifBlank { "(No transcript content available)" },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        )
+    }
+
+    if (newlyCreatedAuthToken != null) {
+        AlertDialog(
+            onDismissRequest = onDismissCreatedAuthToken,
+            confirmButton = {
+                TextButton(onClick = onDismissCreatedAuthToken) {
+                    Text("OK")
+                }
+            },
+            title = { Text("New API Token") },
+            text = {
+                Column {
+                    Text(
+                        text = "Copy this token now. It won't be shown again.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = newlyCreatedAuthToken,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        )
     }
 }
 
