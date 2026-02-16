@@ -172,6 +172,20 @@ data class DigestArticlesResponse(
     @SerializedName("articles") val articles: List<DigestArticleResponse>
 )
 
+/**
+ * Raw upstream/source HTML for a digest article.
+ */
+data class DigestArticleSourceResponse(
+    @SerializedName("digest_id") val digestId: String,
+    @SerializedName("article_id") val articleId: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("final_url") val finalUrl: String,
+    @SerializedName("content_type") val contentType: String?,
+    @SerializedName("fetched_at") val fetchedAt: String,
+    @SerializedName("size_bytes") val sizeBytes: Long,
+    @SerializedName("html") val html: String
+)
+
 // ===== Feed Sync Models =====
 
 /**

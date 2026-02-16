@@ -133,6 +133,16 @@ interface GhostwriterApi {
     ): Response<DigestArticlesResponse>
 
     /**
+     * Get raw/source HTML for an article from a digest.
+     */
+    @GET("digests/{digestId}/articles/{articleId}/source")
+    suspend fun getDigestArticleSource(
+        @Header("Authorization") authorization: String?,
+        @Path("digestId") digestId: String,
+        @Path("articleId") articleId: String
+    ): Response<DigestArticleSourceResponse>
+
+    /**
      * Download a digest EPUB file.
      */
     @Streaming
