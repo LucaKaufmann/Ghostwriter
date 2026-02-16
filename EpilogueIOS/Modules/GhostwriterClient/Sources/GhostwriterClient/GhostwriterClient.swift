@@ -254,7 +254,19 @@ public actor GhostwriterClient {
     public func getDigestArticles(id: String) async throws -> DigestArticlesResponse {
         return try await get(path: "/digests/\(id)/articles")
     }
-    
+
+    /// Get raw/source HTML for a digest article.
+    /// - Parameters:
+    ///   - digestId: Digest identifier
+    ///   - articleId: Article identifier
+    /// - Returns: Source payload containing upstream HTML
+    public func getDigestArticleSource(
+        digestId: String,
+        articleId: String
+    ) async throws -> DigestArticleSourceResponse {
+        return try await get(path: "/digests/\(digestId)/articles/\(articleId)/source")
+    }
+
     /// Download a digest EPUB file
     /// - Parameter filename: The EPUB filename
     /// - Returns: Raw EPUB data

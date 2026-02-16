@@ -6,6 +6,7 @@ import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigUpdateRequest
 import com.example.epilogue.data.remote.ghostwriter.SyncResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientStatusResponse
+import com.example.epilogue.data.remote.ghostwriter.DigestArticleSourceResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestArticlesResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
@@ -264,6 +265,38 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Get digest articles failed", e)
             GhostwriterResult.Error("Failed to get articles: ${e.message}")
+        }
+    }
+
+    /**
+     * Get raw/source HTML for a digest article.
+     * Used for reader/source-mode parity with the web client.
+     */
+    suspend fun getDigestArticleSource(
+        digestId: String,
+        articleId: String
+    ): GhostwriterResult<DigestArticleSourceResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getDigestArticleSource(getAuthHeader(), digestId, articleId)
+
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else if (response.code() == 404) {
+                GhostwriterResult.Error(
+                    message = "Article not found",
+                    code = 404
+                )
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to get article source: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get digest article source failed", e)
+            GhostwriterResult.Error("Failed to get article source: ${e.message}")
         }
     }
 

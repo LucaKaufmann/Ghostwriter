@@ -37,13 +37,20 @@ class FeedViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(FeedUiState())
     val uiState: StateFlow<FeedUiState> = _uiState
 
-    fun addFeed(url: String, name: String, mode: ProcessingMode, maxArticles: Int = 0) {
+    fun addFeed(
+        url: String,
+        name: String,
+        mode: ProcessingMode,
+        maxArticles: Int = 0,
+        isEnabled: Boolean = true
+    ) {
         viewModelScope.launch {
             val feed = Feed(
                 url = url.trim(),
                 name = name.trim(),
                 mode = mode,
-                maxArticles = maxArticles
+                maxArticles = maxArticles,
+                isEnabled = isEnabled
             )
             feedRepository.insertFeed(feed)
         }

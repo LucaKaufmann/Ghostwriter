@@ -138,6 +138,29 @@ public struct DigestArticlesResponse: Codable, Sendable {
     }
 }
 
+/// Raw/source HTML response for a digest article.
+public struct DigestArticleSourceResponse: Codable, Sendable {
+    public let digestId: String
+    public let articleId: String
+    public let url: String
+    public let finalURL: String
+    public let contentType: String?
+    public let fetchedAt: String
+    public let sizeBytes: Int
+    public let html: String
+
+    enum CodingKeys: String, CodingKey {
+        case digestId = "digest_id"
+        case articleId = "article_id"
+        case url
+        case finalURL = "final_url"
+        case contentType = "content_type"
+        case fetchedAt = "fetched_at"
+        case sizeBytes = "size_bytes"
+        case html
+    }
+}
+
 /// Response for checking new digests
 public struct NewDigestsResponse: Codable, Sendable {
     public let hasNew: Bool
