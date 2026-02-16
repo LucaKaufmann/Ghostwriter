@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
+import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
@@ -570,7 +571,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Fetch integration status (Wallabag, Newsletters) from Ghostwriter config.
+     * Fetch config-backed settings from Ghostwriter (integrations, media inclusion, covers).
      */
     private fun fetchIntegrationStatus() {
         viewModelScope.launch {
@@ -578,11 +579,12 @@ class SettingsViewModel @Inject constructor(
             when (result) {
                 is GhostwriterResult.Success -> {
                     _uiState.update {
-                        it.copy(
-                            wallabagIntegration = result.data.wallabag,
-                            newslettersIntegration = result.data.newsletters
+                        applyConfigResponse(
+                            state = it,
+                            config = result.data
                         )
                     }
+                    settingsRepository.setConfigUpdatedAt(result.data.updatedAt)
                 }
                 is GhostwriterResult.Error -> {
                     Log.w(TAG, "Failed to fetch integration status: ${result.message}")
@@ -590,6 +592,164 @@ class SettingsViewModel @Inject constructor(
                 is GhostwriterResult.NotConfigured -> { }
             }
         }
+    }
+
+    fun updateIncludePodcastsInDigest(enabled: Boolean) {
+        updateGhostwriterConfig(
+            optimisticUpdate = { it.copy(includePodcastsInDigest = enabled) },
+            rollbackUpdate = { it.copy(includePodcastsInDigest = !enabled) },
+            successMessage = if (enabled) {
+                "Podcasts will be included in digests"
+            } else {
+                "Podcasts will be excluded from digests"
+            }
+        ) { timestamp ->
+            ghostwriterRepository.updateConfig(
+                includePodcastsInDigest = enabled,
+                clientUpdatedAt = timestamp
+            )
+        }
+    }
+
+    fun updateIncludeYoutubeInDigest(enabled: Boolean) {
+        updateGhostwriterConfig(
+            optimisticUpdate = { it.copy(includeYoutubeInDigest = enabled) },
+            rollbackUpdate = { it.copy(includeYoutubeInDigest = !enabled) },
+            successMessage = if (enabled) {
+                "YouTube items will be included in digests"
+            } else {
+                "YouTube items will be excluded from digests"
+            }
+        ) { timestamp ->
+            ghostwriterRepository.updateConfig(
+                includeYoutubeInDigest = enabled,
+                clientUpdatedAt = timestamp
+            )
+        }
+    }
+
+    fun updateCoverEnabled(enabled: Boolean) {
+        updateGhostwriterConfig(
+            optimisticUpdate = { it.copy(coverEnabled = enabled) },
+            rollbackUpdate = { it.copy(coverEnabled = !enabled) },
+            successMessage = if (enabled) {
+                "AI cover generation enabled"
+            } else {
+                "AI cover generation disabled"
+            }
+        ) { timestamp ->
+            ghostwriterRepository.updateConfig(
+                coverEnabled = enabled,
+                clientUpdatedAt = timestamp
+            )
+        }
+    }
+
+    fun updateCoverOverlayEnabled(enabled: Boolean) {
+        updateGhostwriterConfig(
+            optimisticUpdate = { it.copy(coverOverlayEnabled = enabled) },
+            rollbackUpdate = { it.copy(coverOverlayEnabled = !enabled) },
+            successMessage = if (enabled) {
+                "Cover metadata overlay enabled"
+            } else {
+                "Cover metadata overlay disabled"
+            }
+        ) { timestamp ->
+            ghostwriterRepository.updateConfig(
+                coverOverlayEnabled = enabled,
+                clientUpdatedAt = timestamp
+            )
+        }
+    }
+
+    private fun updateGhostwriterConfig(
+        optimisticUpdate: (SettingsUiState) -> SettingsUiState,
+        rollbackUpdate: (SettingsUiState) -> SettingsUiState,
+        successMessage: String,
+        action: suspend (String?) -> GhostwriterResult<ClientConfigResponse>
+    ) {
+        viewModelScope.launch {
+            if (_uiState.value.configActionRunning) {
+                return@launch
+            }
+
+            _uiState.update {
+                optimisticUpdate(it).copy(
+                    configActionRunning = true,
+                    integrationActionResult = null
+                )
+            }
+
+            val localUpdatedAt = settingsRepository.getConfigUpdatedAt()
+            when (val result = action(localUpdatedAt)) {
+                is GhostwriterResult.Success -> {
+                    settingsRepository.setConfigUpdatedAt(result.data.updatedAt)
+                    _uiState.update {
+                        applyConfigResponse(
+                            state = it.copy(configActionRunning = false),
+                            config = result.data
+                        ).copy(integrationActionResult = successMessage)
+                    }
+                }
+
+                is GhostwriterResult.Error -> {
+                    if (result.code == 409) {
+                        when (val refetch = ghostwriterRepository.getConfig()) {
+                            is GhostwriterResult.Success -> {
+                                settingsRepository.setConfigUpdatedAt(refetch.data.updatedAt)
+                                _uiState.update {
+                                    applyConfigResponse(
+                                        state = it.copy(configActionRunning = false),
+                                        config = refetch.data
+                                    ).copy(
+                                        integrationActionResult = "Config changed on server. Refreshed latest values."
+                                    )
+                                }
+                            }
+
+                            else -> {
+                                _uiState.update {
+                                    rollbackUpdate(it).copy(
+                                        configActionRunning = false,
+                                        integrationActionResult = "Config changed on server. Please retry."
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        _uiState.update {
+                            rollbackUpdate(it).copy(
+                                configActionRunning = false,
+                                integrationActionResult = "Config update failed: ${result.message}"
+                            )
+                        }
+                    }
+                }
+
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        rollbackUpdate(it).copy(
+                            configActionRunning = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyConfigResponse(
+        state: SettingsUiState,
+        config: ClientConfigResponse
+    ): SettingsUiState {
+        return state.copy(
+            wallabagIntegration = config.wallabag,
+            newslettersIntegration = config.newsletters,
+            includePodcastsInDigest = config.includePodcastsInDigest ?: state.includePodcastsInDigest,
+            includeYoutubeInDigest = config.includeYoutubeInDigest ?: state.includeYoutubeInDigest,
+            coverEnabled = config.coverEnabled ?: state.coverEnabled,
+            coverOverlayEnabled = config.coverOverlayEnabled ?: state.coverOverlayEnabled
+        )
     }
 
     fun refreshMediaOverview() {
@@ -1014,6 +1174,11 @@ data class SettingsUiState(
     val ghostwriterError: String? = null,
     val ghostwriterSyncing: Boolean = false,
     val ghostwriterSyncResult: String? = null,
+    val configActionRunning: Boolean = false,
+    val includePodcastsInDigest: Boolean = true,
+    val includeYoutubeInDigest: Boolean = true,
+    val coverEnabled: Boolean = false,
+    val coverOverlayEnabled: Boolean = true,
     val integrationActionRunning: Boolean = false,
     val integrationActionResult: String? = null,
     val mediaRefreshing: Boolean = false,

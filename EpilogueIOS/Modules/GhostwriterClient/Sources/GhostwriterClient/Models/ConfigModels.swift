@@ -245,6 +245,10 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
     public let scheduleMorning: String?
     public let scheduleNoon: String?
     public let scheduleEvening: String?
+    public let includePodcastsInDigest: Bool?
+    public let includeYoutubeInDigest: Bool?
+    public let coverEnabled: Bool?
+    public let coverOverlayEnabled: Bool?
     public let clientUpdatedAt: String?
 
     public init(
@@ -259,6 +263,10 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         scheduleMorning: String? = nil,
         scheduleNoon: String? = nil,
         scheduleEvening: String? = nil,
+        includePodcastsInDigest: Bool? = nil,
+        includeYoutubeInDigest: Bool? = nil,
+        coverEnabled: Bool? = nil,
+        coverOverlayEnabled: Bool? = nil,
         clientUpdatedAt: String? = nil
     ) {
         self.minWordCount = minWordCount
@@ -272,6 +280,10 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         self.scheduleMorning = scheduleMorning
         self.scheduleNoon = scheduleNoon
         self.scheduleEvening = scheduleEvening
+        self.includePodcastsInDigest = includePodcastsInDigest
+        self.includeYoutubeInDigest = includeYoutubeInDigest
+        self.coverEnabled = coverEnabled
+        self.coverOverlayEnabled = coverOverlayEnabled
         self.clientUpdatedAt = clientUpdatedAt
     }
 
@@ -287,6 +299,10 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         case scheduleMorning = "schedule_morning"
         case scheduleNoon = "schedule_noon"
         case scheduleEvening = "schedule_evening"
+        case includePodcastsInDigest = "include_podcasts_in_digest"
+        case includeYoutubeInDigest = "include_youtube_in_digest"
+        case coverEnabled = "cover_enabled"
+        case coverOverlayEnabled = "cover_overlay_enabled"
         case clientUpdatedAt = "client_updated_at"
     }
 }

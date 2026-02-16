@@ -239,7 +239,12 @@ fun SettingsScreen(
                     url = uiState.ghostwriterUrl,
                     apiKey = uiState.ghostwriterApiKey,
                     isTesting = uiState.ghostwriterTesting,
+                    configActionRunning = uiState.configActionRunning,
                     integrationActionRunning = uiState.integrationActionRunning,
+                    includePodcastsInDigest = uiState.includePodcastsInDigest,
+                    includeYoutubeInDigest = uiState.includeYoutubeInDigest,
+                    coverEnabled = uiState.coverEnabled,
+                    coverOverlayEnabled = uiState.coverOverlayEnabled,
                     mediaRefreshing = uiState.mediaRefreshing,
                     mediaTriggering = uiState.mediaTriggering,
                     podcastFeedCount = uiState.podcastFeedCount,
@@ -258,6 +263,10 @@ fun SettingsScreen(
                     onSaveApiKey = viewModel::saveGhostwriterApiKey,
                     onDownloadEpubsOnSyncChange = viewModel::updateGhostwriterDownloadEpubsOnSync,
                     onTestConnection = viewModel::testGhostwriterConnection,
+                    onIncludePodcastsInDigestChange = viewModel::updateIncludePodcastsInDigest,
+                    onIncludeYoutubeInDigestChange = viewModel::updateIncludeYoutubeInDigest,
+                    onCoverEnabledChange = viewModel::updateCoverEnabled,
+                    onCoverOverlayEnabledChange = viewModel::updateCoverOverlayEnabled,
                     onPreviewWallabag = viewModel::previewWallabag,
                     onPreviewNewsletters = viewModel::previewNewsletters,
                     onClearWallabagSeen = viewModel::clearWallabagSeen,
@@ -642,7 +651,12 @@ fun GhostwriterInput(
     url: String,
     apiKey: String,
     isTesting: Boolean,
+    configActionRunning: Boolean,
     integrationActionRunning: Boolean,
+    includePodcastsInDigest: Boolean,
+    includeYoutubeInDigest: Boolean,
+    coverEnabled: Boolean,
+    coverOverlayEnabled: Boolean,
     mediaRefreshing: Boolean,
     mediaTriggering: Boolean,
     podcastFeedCount: Int,
@@ -661,6 +675,10 @@ fun GhostwriterInput(
     onSaveApiKey: () -> Unit,
     onDownloadEpubsOnSyncChange: (Boolean) -> Unit,
     onTestConnection: () -> Unit,
+    onIncludePodcastsInDigestChange: (Boolean) -> Unit,
+    onIncludeYoutubeInDigestChange: (Boolean) -> Unit,
+    onCoverEnabledChange: (Boolean) -> Unit,
+    onCoverOverlayEnabledChange: (Boolean) -> Unit,
     onPreviewWallabag: () -> Unit,
     onPreviewNewsletters: () -> Unit,
     onClearWallabagSeen: () -> Unit,
@@ -817,6 +835,104 @@ fun GhostwriterInput(
                     Switch(
                         checked = downloadEpubsOnSync,
                         onCheckedChange = onDownloadEpubsOnSyncChange
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Digest Content",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Include podcasts",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Switch(
+                        checked = includePodcastsInDigest,
+                        onCheckedChange = onIncludePodcastsInDigestChange,
+                        enabled = !configActionRunning && !integrationActionRunning
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Include YouTube",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Switch(
+                        checked = includeYoutubeInDigest,
+                        onCheckedChange = onIncludeYoutubeInDigestChange,
+                        enabled = !configActionRunning && !integrationActionRunning
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Covers",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Generate AI covers",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = "Create a digest cover image automatically.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = coverEnabled,
+                        onCheckedChange = onCoverEnabledChange,
+                        enabled = !configActionRunning && !integrationActionRunning
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Overlay digest metadata",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = "Add date, edition, and source mix to generated covers.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = coverOverlayEnabled,
+                        onCheckedChange = onCoverOverlayEnabledChange,
+                        enabled = coverEnabled && !configActionRunning && !integrationActionRunning
                     )
                 }
 
