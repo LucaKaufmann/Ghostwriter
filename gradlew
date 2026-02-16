@@ -131,7 +131,18 @@ location of your Java installation."
     fi
 else
     JAVACMD=java
-    if ! command -v java >/dev/null 2>&1
+    if "$darwin" ; then
+        ANDROID_STUDIO_JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home
+        if [ -x "$ANDROID_STUDIO_JAVA_HOME/bin/java" ] \
+            && { ! command -v java >/dev/null 2>&1 || ! java -version >/dev/null 2>&1; }
+        then
+            # Prefer Android Studio's bundled JBR on macOS when no usable system JRE is present.
+            JAVA_HOME=$ANDROID_STUDIO_JAVA_HOME
+            export JAVA_HOME
+            JAVACMD=$JAVA_HOME/bin/java
+        fi
+    fi
+    if ! "$JAVACMD" -version >/dev/null 2>&1
     then
         die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
 

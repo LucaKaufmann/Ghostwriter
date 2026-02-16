@@ -172,6 +172,20 @@ data class DigestArticlesResponse(
     @SerializedName("articles") val articles: List<DigestArticleResponse>
 )
 
+/**
+ * Raw upstream/source HTML for a digest article.
+ */
+data class DigestArticleSourceResponse(
+    @SerializedName("digest_id") val digestId: String,
+    @SerializedName("article_id") val articleId: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("final_url") val finalUrl: String,
+    @SerializedName("content_type") val contentType: String?,
+    @SerializedName("fetched_at") val fetchedAt: String,
+    @SerializedName("size_bytes") val sizeBytes: Long,
+    @SerializedName("html") val html: String
+)
+
 // ===== Feed Sync Models =====
 
 /**
@@ -203,18 +217,233 @@ data class IntegrationStatus(
 )
 
 /**
+ * Preview article response for integrations like Wallabag/Newsletters.
+ */
+data class PreviewArticleResponse(
+    @SerializedName("title") val title: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("author") val author: String? = null,
+    @SerializedName("word_count") val wordCount: Int? = null
+)
+
+/**
+ * Generic preview response.
+ */
+data class PreviewResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("count") val count: Int = 0,
+    @SerializedName("articles") val articles: List<PreviewArticleResponse> = emptyList(),
+    @SerializedName("detail") val detail: String? = null
+)
+
+/**
+ * Response for clear-seen operations.
+ */
+data class ClearSeenResponse(
+    @SerializedName("cleared") val cleared: Int
+)
+
+/**
+ * Media feed response (podcast or YouTube).
+ */
+data class MediaFeedResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("feed_type") val feedType: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("resolved_feed_url") val resolvedFeedUrl: String?,
+    @SerializedName("title") val title: String,
+    @SerializedName("is_active") val isActive: Boolean,
+    @SerializedName("mode") val mode: String,
+    @SerializedName("max_items") val maxItems: Int,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("updated_at") val updatedAt: String,
+    @SerializedName("deleted_at") val deletedAt: String?
+)
+
+/**
+ * Request model for creating a media feed.
+ */
+data class MediaFeedCreateRequest(
+    @SerializedName("feed_type") val feedType: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("resolved_feed_url") val resolvedFeedUrl: String? = null,
+    @SerializedName("title") val title: String,
+    @SerializedName("is_active") val isActive: Boolean = true,
+    @SerializedName("mode") val mode: String = "raw",
+    @SerializedName("max_items") val maxItems: Int = 5
+)
+
+/**
+ * Request model for partially updating a media feed.
+ */
+data class MediaFeedUpdateRequest(
+    @SerializedName("title") val title: String? = null,
+    @SerializedName("is_active") val isActive: Boolean? = null,
+    @SerializedName("mode") val mode: String? = null,
+    @SerializedName("max_items") val maxItems: Int? = null
+)
+
+/**
+ * Request model for resolving a YouTube channel URL to RSS.
+ */
+data class YouTubeResolveRequest(
+    @SerializedName("url") val url: String
+)
+
+/**
+ * Response model from YouTube resolve endpoint.
+ */
+data class YouTubeResolveResponse(
+    @SerializedName("rss_feed_url") val rssFeedUrl: String,
+    @SerializedName("channel_id") val channelId: String,
+    @SerializedName("channel_title") val channelTitle: String?
+)
+
+/**
+ * Media processing status summary.
+ */
+data class MediaProcessingStatusResponse(
+    @SerializedName("is_running") val isRunning: Boolean,
+    @SerializedName("pending_count") val pendingCount: Int,
+    @SerializedName("processing_count") val processingCount: Int,
+    @SerializedName("completed_count") val completedCount: Int,
+    @SerializedName("failed_count") val failedCount: Int,
+    @SerializedName("current_item_title") val currentItemTitle: String?,
+    @SerializedName("current_item_content_type") val currentItemContentType: String?,
+    @SerializedName("last_completed_at") val lastCompletedAt: String?,
+    @SerializedName("next_run_at") val nextRunAt: String?
+)
+
+/**
+ * Media trigger response.
+ */
+data class MediaTriggerResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("detail") val detail: String? = null
+)
+
+/**
+ * Media item summary (without full transcript content).
+ */
+data class MediaItemSummaryResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("media_feed_id") val mediaFeedId: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("author") val author: String?,
+    @SerializedName("content_type") val contentType: String,
+    @SerializedName("mode") val mode: String,
+    @SerializedName("word_count") val wordCount: Int,
+    @SerializedName("is_summary") val isSummary: Boolean,
+    @SerializedName("ai_failed") val aiFailed: Boolean,
+    @SerializedName("status") val status: String,
+    @SerializedName("error_message") val errorMessage: String?,
+    @SerializedName("consumed_at") val consumedAt: String?,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("completed_at") val completedAt: String?
+)
+
+/**
+ * Full media item response including transcript/content body.
+ */
+data class MediaItemResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("media_feed_id") val mediaFeedId: String,
+    @SerializedName("guid") val guid: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("content_url") val contentUrl: String?,
+    @SerializedName("title") val title: String,
+    @SerializedName("author") val author: String?,
+    @SerializedName("content") val content: String,
+    @SerializedName("content_type") val contentType: String,
+    @SerializedName("mode") val mode: String,
+    @SerializedName("word_count") val wordCount: Int,
+    @SerializedName("is_summary") val isSummary: Boolean,
+    @SerializedName("ai_failed") val aiFailed: Boolean,
+    @SerializedName("processing_ms") val processingMs: Int,
+    @SerializedName("status") val status: String,
+    @SerializedName("error_message") val errorMessage: String?,
+    @SerializedName("consumed_at") val consumedAt: String?,
+    @SerializedName("consumed_digest_id") val consumedDigestId: String?,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("completed_at") val completedAt: String?
+)
+
+/**
+ * Server log file metadata.
+ */
+data class LogFileInfoResponse(
+    @SerializedName("filename") val filename: String,
+    @SerializedName("size_bytes") val sizeBytes: Long,
+    @SerializedName("modified_at") val modifiedAt: String
+)
+
+/**
+ * Auth API token model (list endpoint).
+ */
+data class AuthApiTokenResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("token_prefix") val tokenPrefix: String,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("last_used_at") val lastUsedAt: String?,
+    @SerializedName("revoked_at") val revokedAt: String?
+)
+
+/**
+ * Request model for creating a new auth API token.
+ */
+data class AuthApiTokenCreateRequest(
+    @SerializedName("name") val name: String
+)
+
+/**
+ * Response model when creating a new auth API token.
+ */
+data class AuthApiTokenCreateResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("token") val token: String,
+    @SerializedName("token_prefix") val tokenPrefix: String,
+    @SerializedName("created_at") val createdAt: String
+)
+
+/**
+ * Generic status/message response.
+ */
+data class StatusMessageResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String? = null
+)
+
+/**
  * Response model for client configuration (shared settings).
  */
 data class ClientConfigResponse(
+    @SerializedName("min_word_count") val minWordCount: Int? = null,
+    @SerializedName("morning_hour") val morningHour: Int? = null,
+    @SerializedName("morning_minute") val morningMinute: Int? = null,
+    @SerializedName("noon_hour") val noonHour: Int? = null,
+    @SerializedName("noon_minute") val noonMinute: Int? = null,
+    @SerializedName("evening_hour") val eveningHour: Int? = null,
+    @SerializedName("evening_minute") val eveningMinute: Int? = null,
     @SerializedName("timezone") val timezone: String,
-    @SerializedName("ai_provider") val aiProvider: String? = null,
-    @SerializedName("ai_model") val aiModel: String? = null,
-    @SerializedName("schedule_enabled") val scheduleEnabled: Boolean? = null,
+    // Legacy fields for backwards-compatible parsing against older servers.
     @SerializedName("schedule_morning") val scheduleMorning: String? = null,
     @SerializedName("schedule_noon") val scheduleNoon: String? = null,
     @SerializedName("schedule_evening") val scheduleEvening: String? = null,
-    @SerializedName("digest_retention_days") val digestRetentionDays: Int? = null,
-    @SerializedName("max_articles_per_digest") val maxArticlesPerDigest: Int? = null,
+    @SerializedName("whisper_provider") val whisperProvider: String? = null,
+    @SerializedName("whisper_model") val whisperModel: String? = null,
+    @SerializedName("whisper_timeout_minutes") val whisperTimeoutMinutes: Int? = null,
+    @SerializedName("media_processing_interval_hours") val mediaProcessingIntervalHours: Int? = null,
+    @SerializedName("include_podcasts_in_digest") val includePodcastsInDigest: Boolean? = null,
+    @SerializedName("include_youtube_in_digest") val includeYoutubeInDigest: Boolean? = null,
+    @SerializedName("cover_enabled") val coverEnabled: Boolean? = null,
+    @SerializedName("cover_provider") val coverProvider: String? = null,
+    @SerializedName("cover_quality") val coverQuality: String? = null,
+    @SerializedName("cover_prompt") val coverPrompt: String? = null,
+    @SerializedName("cover_overlay_enabled") val coverOverlayEnabled: Boolean? = null,
+    @SerializedName("cover_openai_api_key") val coverOpenAiApiKey: String? = null,
+    @SerializedName("cover_gemini_api_key") val coverGeminiApiKey: String? = null,
     @SerializedName("updated_at") val updatedAt: String? = null,
     // Integration status
     @SerializedName("wallabag") val wallabag: IntegrationStatus? = null,
@@ -225,10 +454,24 @@ data class ClientConfigResponse(
  * Request model for updating client configuration.
  */
 data class ClientConfigUpdateRequest(
+    @SerializedName("min_word_count") val minWordCount: Int? = null,
+    @SerializedName("morning_hour") val morningHour: Int? = null,
+    @SerializedName("morning_minute") val morningMinute: Int? = null,
+    @SerializedName("noon_hour") val noonHour: Int? = null,
+    @SerializedName("noon_minute") val noonMinute: Int? = null,
+    @SerializedName("evening_hour") val eveningHour: Int? = null,
+    @SerializedName("evening_minute") val eveningMinute: Int? = null,
     @SerializedName("timezone") val timezone: String? = null,
-    @SerializedName("schedule_enabled") val scheduleEnabled: Boolean? = null,
+    // Legacy fields kept for compatibility with older server builds.
     @SerializedName("schedule_morning") val scheduleMorning: String? = null,
     @SerializedName("schedule_noon") val scheduleNoon: String? = null,
     @SerializedName("schedule_evening") val scheduleEvening: String? = null,
+    @SerializedName("include_podcasts_in_digest") val includePodcastsInDigest: Boolean? = null,
+    @SerializedName("include_youtube_in_digest") val includeYoutubeInDigest: Boolean? = null,
+    @SerializedName("cover_enabled") val coverEnabled: Boolean? = null,
+    @SerializedName("cover_provider") val coverProvider: String? = null,
+    @SerializedName("cover_quality") val coverQuality: String? = null,
+    @SerializedName("cover_prompt") val coverPrompt: String? = null,
+    @SerializedName("cover_overlay_enabled") val coverOverlayEnabled: Boolean? = null,
     @SerializedName("client_updated_at") val clientUpdatedAt: String? = null
 )

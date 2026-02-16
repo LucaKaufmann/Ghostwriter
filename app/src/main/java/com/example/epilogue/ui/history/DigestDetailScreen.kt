@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -175,6 +176,14 @@ fun DigestDetailScreen(
                     // Standard mode: Scrollable list
                     ScrollableArticleList(
                         articles = orderedArticles,
+                        sourceStates = uiState.articleSourceStates,
+                        showSourceToggle = digest.remoteId != null,
+                        onSourceModeChange = { article, useSource ->
+                            viewModel.setArticleSourceMode(article, useSource)
+                        },
+                        onRetrySource = { article ->
+                            viewModel.retryArticleSource(article)
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
@@ -192,6 +201,10 @@ fun DigestDetailScreen(
 @Composable
 fun ScrollableArticleList(
     articles: List<DigestArticle>,
+    sourceStates: Map<Long, ArticleSourceUiState>,
+    showSourceToggle: Boolean,
+    onSourceModeChange: (article: DigestArticle, useSource: Boolean) -> Unit,
+    onRetrySource: (article: DigestArticle) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val einkMode = LocalEinkMode.current
@@ -234,7 +247,16 @@ fun ScrollableArticleList(
                 }
 
                 items(feedArticles, key = { it.id }) { article ->
-                    ArticleCard(article = article, einkMode = einkMode)
+                    ArticleCard(
+                        article = article,
+                        sourceState = sourceStates[article.id] ?: ArticleSourceUiState(),
+                        showSourceToggle = showSourceToggle,
+                        onSourceModeChange = { useSource ->
+                            onSourceModeChange(article, useSource)
+                        },
+                        onRetrySource = { onRetrySource(article) },
+                        einkMode = einkMode
+                    )
                 }
             }
         }
@@ -249,6 +271,10 @@ fun ScrollableArticleList(
 @Composable
 fun ArticleCard(
     article: DigestArticle,
+    sourceState: ArticleSourceUiState,
+    showSourceToggle: Boolean,
+    onSourceModeChange: (useSource: Boolean) -> Unit,
+    onRetrySource: () -> Unit,
     modifier: Modifier = Modifier,
     einkMode: Boolean = false
 ) {
@@ -293,35 +319,114 @@ fun ArticleCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             if (expanded) {
-                // Full content - use AndroidView with TextView for proper HTML rendering
-                val htmlContent = remember(article.content) {
-                    HtmlCompat.fromHtml(article.content, HtmlCompat.FROM_HTML_MODE_LEGACY)
+                if (showSourceToggle) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { onSourceModeChange(false) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (!sourceState.isSourceMode) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                contentColor = if (!sourceState.isSourceMode) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        ) {
+                            Text("Processed")
+                        }
+                        Button(
+                            onClick = { onSourceModeChange(true) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (sourceState.isSourceMode) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                contentColor = if (sourceState.isSourceMode) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        ) {
+                            Text("Source")
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                AndroidView(
-                    factory = { context ->
-                        TextView(context).apply {
-                            // Text styling
-                            setTextColor(textColor)
-                            setLinkTextColor(linkColor)
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                            setLineSpacing(4f, 1.2f)
-                            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                // Full content - use AndroidView with TextView for proper HTML rendering
+                val contentToRender = when {
+                    sourceState.isSourceMode -> sourceState.sourceHtml ?: ""
+                    else -> article.content
+                }
 
-                            // Enable clickable links
-                            movementMethod = LinkMovementMethod.getInstance()
+                val htmlContent = remember(contentToRender) {
+                    HtmlCompat.fromHtml(contentToRender, HtmlCompat.FROM_HTML_MODE_LEGACY)
+                }
 
-                            // Remove extra padding that TextView adds
-                            includeFontPadding = false
+                when {
+                    sourceState.isSourceMode && sourceState.isLoading -> {
+                        Text(
+                            text = "Loading source HTML...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    sourceState.isSourceMode && sourceState.error != null -> {
+                        Text(
+                            text = sourceState.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(onClick = onRetrySource) {
+                            Text("Retry Source")
                         }
-                    },
-                    update = { textView ->
-                        textView.text = htmlContent
-                        textView.setTextColor(textColor)
-                        textView.setLinkTextColor(linkColor)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                    }
+                    sourceState.isSourceMode && sourceState.sourceHtml.isNullOrBlank() -> {
+                        Text(
+                            text = "No source HTML available for this article.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    else -> {
+                        AndroidView(
+                            factory = { context ->
+                                TextView(context).apply {
+                                    // Text styling
+                                    setTextColor(textColor)
+                                    setLinkTextColor(linkColor)
+                                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                                    setLineSpacing(4f, 1.2f)
+                                    typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+
+                                    // Enable clickable links
+                                    movementMethod = LinkMovementMethod.getInstance()
+
+                                    // Remove extra padding that TextView adds
+                                    includeFontPadding = false
+                                }
+                            },
+                            update = { textView ->
+                                textView.text = htmlContent
+                                textView.setTextColor(textColor)
+                                textView.setLinkTextColor(linkColor)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -331,8 +436,12 @@ fun ArticleCard(
                 )
             } else {
                 // Preview - first 200 characters of plain text
-                val preview = remember(article.content) {
-                    val plainText = HtmlCompat.fromHtml(article.content, HtmlCompat.FROM_HTML_MODE_COMPACT)
+                val previewSource = when {
+                    sourceState.isSourceMode && !sourceState.sourceHtml.isNullOrBlank() -> sourceState.sourceHtml ?: article.content
+                    else -> article.content
+                }
+                val preview = remember(previewSource) {
+                    val plainText = HtmlCompat.fromHtml(previewSource, HtmlCompat.FROM_HTML_MODE_COMPACT)
                         .toString()
                         .trim()
                     if (plainText.length > 200) {

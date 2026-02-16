@@ -16,6 +16,9 @@ interface FeedDao {
     @Query("SELECT * FROM feeds ORDER BY name ASC")
     suspend fun getAllFeedsList(): List<FeedEntity>
 
+    @Query("SELECT * FROM feeds WHERE isEnabled = 1 ORDER BY name ASC")
+    suspend fun getEnabledFeedsList(): List<FeedEntity>
+
     @Query("SELECT * FROM feeds WHERE url = :url")
     suspend fun getFeedByUrl(url: String): FeedEntity?
 
