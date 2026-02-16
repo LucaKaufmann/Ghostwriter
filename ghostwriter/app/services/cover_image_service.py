@@ -81,6 +81,15 @@ class CoverImageService:
             prompt_suffix=prompt_suffix,
         )
 
+        logger.info(
+            "Cover prompt for %s %s (%s, quality=%s): %s",
+            date.strftime("%Y-%m-%d"),
+            period,
+            provider,
+            quality,
+            prompt,
+        )
+
         raw_cover: CoverImage | None = None
         if provider == "gpt-image-1":
             normalized_quality = quality if quality in self._OPENAI_QUALITY_VALUES else "low"
