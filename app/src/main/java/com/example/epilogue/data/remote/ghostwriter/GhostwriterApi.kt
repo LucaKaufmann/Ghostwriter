@@ -265,6 +265,22 @@ interface GhostwriterApi {
     ): Response<List<MediaFeedResponse>>
 
     /**
+     * List all podcast items with processing status.
+     */
+    @GET("media/podcasts/items/all")
+    suspend fun listAllPodcastItems(
+        @Header("Authorization") authorization: String?
+    ): Response<List<MediaItemSummaryResponse>>
+
+    /**
+     * List all YouTube items with processing status.
+     */
+    @GET("media/youtube/items/all")
+    suspend fun listAllYouTubeItems(
+        @Header("Authorization") authorization: String?
+    ): Response<List<MediaItemSummaryResponse>>
+
+    /**
      * Get media processing queue status.
      */
     @GET("media/status")

@@ -596,6 +596,7 @@ class SettingsViewModel @Inject constructor(
             var podcastCount = _uiState.value.podcastFeedCount
             var youtubeCount = _uiState.value.youtubeFeedCount
             var mediaStatus = _uiState.value.mediaStatus
+            var recentMediaItems = _uiState.value.recentMediaItems
             var actionMessage: String? = null
 
             when (val podcastResult = ghostwriterRepository.getPodcastFeeds()) {
@@ -610,6 +611,44 @@ class SettingsViewModel @Inject constructor(
                 is GhostwriterResult.NotConfigured -> actionMessage = actionMessage ?: "Ghostwriter is not configured"
             }
 
+            val podcastItems = when (val podcastItemsResult = ghostwriterRepository.getAllPodcastItems()) {
+                is GhostwriterResult.Success -> podcastItemsResult.data
+                is GhostwriterResult.Error -> {
+                    actionMessage = actionMessage ?: "Failed to load podcast items: ${podcastItemsResult.message}"
+                    emptyList()
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    actionMessage = actionMessage ?: "Ghostwriter is not configured"
+                    emptyList()
+                }
+            }
+
+            val youtubeItems = when (val youtubeItemsResult = ghostwriterRepository.getAllYouTubeItems()) {
+                is GhostwriterResult.Success -> youtubeItemsResult.data
+                is GhostwriterResult.Error -> {
+                    actionMessage = actionMessage ?: "Failed to load YouTube items: ${youtubeItemsResult.message}"
+                    emptyList()
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    actionMessage = actionMessage ?: "Ghostwriter is not configured"
+                    emptyList()
+                }
+            }
+
+            recentMediaItems = (podcastItems + youtubeItems)
+                .map { item ->
+                    MediaItemUi(
+                        id = item.id,
+                        title = item.title,
+                        author = item.author,
+                        contentType = item.contentType,
+                        status = item.status,
+                        createdAt = item.createdAt
+                    )
+                }
+                .sortedByDescending { it.createdAt }
+                .take(8)
+
             when (val statusResult = ghostwriterRepository.getMediaStatus()) {
                 is GhostwriterResult.Success -> mediaStatus = statusResult.data
                 is GhostwriterResult.Error -> actionMessage = actionMessage ?: "Failed to load media status: ${statusResult.message}"
@@ -622,6 +661,7 @@ class SettingsViewModel @Inject constructor(
                     podcastFeedCount = podcastCount,
                     youtubeFeedCount = youtubeCount,
                     mediaStatus = mediaStatus,
+                    recentMediaItems = recentMediaItems,
                     integrationActionResult = actionMessage
                 )
             }
@@ -936,8 +976,18 @@ data class SettingsUiState(
     val podcastFeedCount: Int = 0,
     val youtubeFeedCount: Int = 0,
     val mediaStatus: MediaProcessingStatusResponse? = null,
+    val recentMediaItems: List<MediaItemUi> = emptyList(),
     val ghostwriterHealth: HealthResponse? = null,
     // Integration status
     val wallabagIntegration: IntegrationStatus? = null,
     val newslettersIntegration: IntegrationStatus? = null
+)
+
+data class MediaItemUi(
+    val id: String,
+    val title: String,
+    val author: String?,
+    val contentType: String,
+    val status: String,
+    val createdAt: String
 )

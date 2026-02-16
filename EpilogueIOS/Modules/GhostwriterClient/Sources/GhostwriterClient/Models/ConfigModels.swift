@@ -109,6 +109,41 @@ public struct MediaTriggerResponse: Codable, Sendable {
     public let detail: String?
 }
 
+/// Media item summary without full transcript content.
+public struct MediaItemSummaryResponse: Codable, Sendable {
+    public let id: String
+    public let mediaFeedID: String
+    public let title: String
+    public let author: String?
+    public let contentType: String
+    public let mode: String
+    public let wordCount: Int
+    public let isSummary: Bool
+    public let aiFailed: Bool
+    public let status: String
+    public let errorMessage: String?
+    public let consumedAt: String?
+    public let createdAt: String
+    public let completedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case mediaFeedID = "media_feed_id"
+        case title
+        case author
+        case contentType = "content_type"
+        case mode
+        case wordCount = "word_count"
+        case isSummary = "is_summary"
+        case aiFailed = "ai_failed"
+        case status
+        case errorMessage = "error_message"
+        case consumedAt = "consumed_at"
+        case createdAt = "created_at"
+        case completedAt = "completed_at"
+    }
+}
+
 /// Response model for client configuration (shared settings)
 public struct ClientConfigResponse: Codable, Sendable {
     public let minWordCount: Int?

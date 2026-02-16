@@ -20,6 +20,7 @@ import com.example.epilogue.data.remote.ghostwriter.GhostwriterApi
 import com.example.epilogue.data.remote.ghostwriter.HeartbeatResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.MediaFeedResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaItemSummaryResponse
 import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.MediaTriggerResponse
 import com.example.epilogue.data.remote.ghostwriter.PreviewResponse
@@ -798,6 +799,50 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Get YouTube feeds failed", e)
             GhostwriterResult.Error("Failed to load YouTube feeds: ${e.message}")
+        }
+    }
+
+    /**
+     * List all podcast media items.
+     */
+    suspend fun getAllPodcastItems(): GhostwriterResult<List<MediaItemSummaryResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listAllPodcastItems(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load podcast items: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get podcast items failed", e)
+            GhostwriterResult.Error("Failed to load podcast items: ${e.message}")
+        }
+    }
+
+    /**
+     * List all YouTube media items.
+     */
+    suspend fun getAllYouTubeItems(): GhostwriterResult<List<MediaItemSummaryResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listAllYouTubeItems(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load YouTube items: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get YouTube items failed", e)
+            GhostwriterResult.Error("Failed to load YouTube items: ${e.message}")
         }
     }
 

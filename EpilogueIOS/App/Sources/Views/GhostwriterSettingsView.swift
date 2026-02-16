@@ -284,6 +284,20 @@ struct GhostwriterSettingsView: View {
                         }
                     }
 
+                    if !viewModel.recentMediaItems.isEmpty {
+                        Text("Recent Items")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        ForEach(viewModel.recentMediaItems, id: \.id) { item in
+                            let typeLabel = item.contentType.lowercased() == "podcast"
+                                ? "Podcast"
+                                : (item.contentType.lowercased() == "youtube" ? "YouTube" : item.contentType)
+                            Text("[\(typeLabel) • \(item.status)] \(item.title)")
+                                .font(.caption)
+                                .lineLimit(1)
+                        }
+                    }
+
                     HStack(spacing: 12) {
                         Button("Refresh") {
                             Task { await viewModel.refreshMediaOverview() }
@@ -373,6 +387,7 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var podcastFeedCount = 0
     @Published var youtubeFeedCount = 0
     @Published var mediaStatus: MediaProcessingStatusResponse?
+    @Published var recentMediaItems: [MediaItemSummaryResponse] = []
     @Published var mediaActionRunning = false
     @Published var lastSyncTime: Date?
     @Published var isTesting = false
@@ -547,11 +562,18 @@ class GhostwriterSettingsViewModel: ObservableObject {
             let client = try await createClient()
             async let podcasts = client.getPodcastFeeds()
             async let youtube = client.getYouTubeFeeds()
+            async let podcastItems = client.getAllPodcastItems()
+            async let youtubeItems = client.getAllYouTubeItems()
             async let status = client.getMediaProcessingStatus()
 
-            let (podcastFeeds, youtubeFeeds, processingStatus) = try await (podcasts, youtube, status)
+            let (podcastFeeds, youtubeFeeds, podcastSummaries, youtubeSummaries, processingStatus) =
+                try await (podcasts, youtube, podcastItems, youtubeItems, status)
             podcastFeedCount = podcastFeeds.count
             youtubeFeedCount = youtubeFeeds.count
+            recentMediaItems = (podcastSummaries + youtubeSummaries)
+                .sorted { $0.createdAt > $1.createdAt }
+                .prefix(8)
+                .map { $0 }
             mediaStatus = processingStatus
         } catch {
             integrationActionMessage = "Failed to load media status: \(error.localizedDescription)"
