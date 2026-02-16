@@ -284,6 +284,26 @@ data class MediaTriggerResponse(
 )
 
 /**
+ * Media item summary (without full transcript content).
+ */
+data class MediaItemSummaryResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("media_feed_id") val mediaFeedId: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("author") val author: String?,
+    @SerializedName("content_type") val contentType: String,
+    @SerializedName("mode") val mode: String,
+    @SerializedName("word_count") val wordCount: Int,
+    @SerializedName("is_summary") val isSummary: Boolean,
+    @SerializedName("ai_failed") val aiFailed: Boolean,
+    @SerializedName("status") val status: String,
+    @SerializedName("error_message") val errorMessage: String?,
+    @SerializedName("consumed_at") val consumedAt: String?,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("completed_at") val completedAt: String?
+)
+
+/**
  * Response model for client configuration (shared settings).
  */
 data class ClientConfigResponse(

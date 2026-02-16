@@ -244,6 +244,7 @@ fun SettingsScreen(
                     podcastFeedCount = uiState.podcastFeedCount,
                     youtubeFeedCount = uiState.youtubeFeedCount,
                     mediaStatus = uiState.mediaStatus,
+                    recentMediaItems = uiState.recentMediaItems,
                     health = uiState.ghostwriterHealth,
                     wallabagIntegration = uiState.wallabagIntegration,
                     newslettersIntegration = uiState.newslettersIntegration,
@@ -643,6 +644,7 @@ fun GhostwriterInput(
     podcastFeedCount: Int,
     youtubeFeedCount: Int,
     mediaStatus: MediaProcessingStatusResponse?,
+    recentMediaItems: List<MediaItemUi>,
     health: HealthResponse?,
     wallabagIntegration: IntegrationStatus?,
     newslettersIntegration: IntegrationStatus?,
@@ -942,6 +944,28 @@ fun GhostwriterInput(
                     status.currentItemTitle?.let { title ->
                         Text(
                             text = "Current: $title",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                if (recentMediaItems.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Recent Items",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    recentMediaItems.forEach { item ->
+                        val typeLabel = when (item.contentType.lowercase()) {
+                            "podcast" -> "Podcast"
+                            "youtube" -> "YouTube"
+                            else -> item.contentType
+                        }
+                        Text(
+                            text = "[$typeLabel • ${item.status}] ${item.title}",
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis

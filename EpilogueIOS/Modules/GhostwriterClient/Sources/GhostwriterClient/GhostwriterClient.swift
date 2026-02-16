@@ -355,6 +355,16 @@ public actor GhostwriterClient {
         return try await get(path: "/media/youtube")
     }
 
+    /// List all podcast items (summary view).
+    public func getAllPodcastItems() async throws -> [MediaItemSummaryResponse] {
+        return try await get(path: "/media/podcasts/items/all")
+    }
+
+    /// List all YouTube items (summary view).
+    public func getAllYouTubeItems() async throws -> [MediaItemSummaryResponse] {
+        return try await get(path: "/media/youtube/items/all")
+    }
+
     /// Get media processing status.
     public func getMediaProcessingStatus() async throws -> MediaProcessingStatusResponse {
         return try await get(path: "/media/status")
