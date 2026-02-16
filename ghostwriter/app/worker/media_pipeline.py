@@ -14,6 +14,7 @@ from app.core.logging import digest_logger
 from app.models.client_config import ClientConfig
 from app.models.media_feed import MediaFeed
 from app.models.media_item import MediaItem
+from app.models.media_processing_run import MediaProcessingRun
 from app.services.content_processor import ContentProcessor
 from app.services.llm_service import LLMService
 from app.services.media_processor import MediaProcessor
@@ -56,12 +57,37 @@ async def run_media_pipeline() -> None:
         event="started",
     )
 
+    # Create a run record
+    run = MediaProcessingRun(status="running")
+    with Session(engine) as session:
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        run_id = run.id
+
+    run_start = time.time()
+
     try:
         # Stage 1 & 2: Fetch feeds and create pending items
         new_items_count = await _fetch_and_create_items(settings)
 
+        # Update run with discovered items
+        _update_run(run_id, items_discovered=new_items_count)
+
         # Stage 3: Process pending items sequentially
-        processed_count = await _process_pending_items(settings)
+        processed_count, failed_count = await _process_pending_items(settings)
+
+        duration_ms = int((time.time() - run_start) * 1000)
+
+        # Finalize run as completed
+        _update_run(
+            run_id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            duration_ms=duration_ms,
+            items_processed=processed_count,
+            items_failed=failed_count,
+        )
 
         logger.info(
             f"Media pipeline: completed. New items: {new_items_count}, Processed: {processed_count}"
@@ -73,6 +99,14 @@ async def run_media_pipeline() -> None:
             context={"new_items": new_items_count, "processed": processed_count},
         )
     except Exception as e:
+        duration_ms = int((time.time() - run_start) * 1000)
+        _update_run(
+            run_id,
+            status="failed",
+            completed_at=datetime.now(timezone.utc),
+            duration_ms=duration_ms,
+            error_message=str(e)[:500],
+        )
         logger.exception(f"Media pipeline failed: {e}")
         digest_logger.error(
             f"Media processing pipeline failed: {e}",
@@ -80,6 +114,17 @@ async def run_media_pipeline() -> None:
             event="failed",
             context={"error": str(e)},
         )
+
+
+def _update_run(run_id: UUID, **kwargs) -> None:
+    """Update fields on a MediaProcessingRun."""
+    with Session(engine) as session:
+        run = session.get(MediaProcessingRun, run_id)
+        if run:
+            for key, value in kwargs.items():
+                setattr(run, key, value)
+            session.add(run)
+            session.commit()
 
 
 def _release_stale_processing_items() -> None:
@@ -168,11 +213,12 @@ async def _fetch_and_create_items(settings) -> int:
     return new_count
 
 
-async def _process_pending_items(settings) -> int:
-    """Process all pending media items sequentially."""
+async def _process_pending_items(settings) -> tuple[int, int]:
+    """Process all pending media items sequentially. Returns (processed, failed) counts."""
     media_processor = MediaProcessor(settings)
     llm_service = LLMService(settings)
     processed_count = 0
+    failed_count = 0
 
     # Load whisper config
     with Session(engine) as session:
@@ -181,6 +227,9 @@ async def _process_pending_items(settings) -> int:
         whisper_model = client_config.whisper_model if client_config else "base.en"
         whisper_timeout = (
             client_config.whisper_timeout_minutes * 60 if client_config else 1800
+        )
+        whisper_timeout_minutes = (
+            client_config.whisper_timeout_minutes if client_config else 30
         )
 
     while True:
@@ -224,14 +273,14 @@ async def _process_pending_items(settings) -> int:
 
             if not result.is_media:
                 _update_item_failed(item_id, "URL is not a media source", start_time)
+                failed_count += 1
                 continue
 
             if result.error or not result.text:
-                _update_item_failed(
-                    item_id,
-                    result.error or "Transcription returned empty",
-                    start_time,
-                )
+                error_msg = result.error or "Transcription returned empty"
+                error_msg = _enrich_timeout_error(error_msg, whisper_timeout_minutes)
+                _update_item_failed(item_id, error_msg, start_time)
+                failed_count += 1
                 continue
 
             content = result.text
@@ -286,10 +335,22 @@ async def _process_pending_items(settings) -> int:
             )
 
         except Exception as e:
+            error_msg = _enrich_timeout_error(str(e)[:500], whisper_timeout_minutes)
             logger.exception(f"Failed to process media item: {item_title}")
-            _update_item_failed(item_id, str(e)[:500], start_time)
+            _update_item_failed(item_id, error_msg, start_time)
+            failed_count += 1
 
-    return processed_count
+    return processed_count, failed_count
+
+
+def _enrich_timeout_error(error: str, timeout_minutes: int) -> str:
+    """Append actionable context to timeout errors."""
+    if "timed out" in error.lower():
+        return (
+            f"{error} (current timeout: {timeout_minutes}m — "
+            f"you can increase this in Settings > Media Processing)"
+        )
+    return error
 
 
 def _update_item_failed(item_id: UUID, error: str, start_time: float) -> None:

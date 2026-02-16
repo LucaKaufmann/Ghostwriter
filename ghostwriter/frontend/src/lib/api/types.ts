@@ -463,11 +463,24 @@ export interface MediaItemSummary {
 	word_count: number;
 	is_summary: boolean;
 	ai_failed: boolean;
+	processing_ms: number;
 	status: MediaItemStatus;
 	error_message: string | null;
 	consumed_at: string | null;
 	created_at: string;
 	completed_at: string | null;
+}
+
+export interface MediaProcessingRun {
+	id: string;
+	started_at: string;
+	completed_at: string | null;
+	duration_ms: number;
+	status: 'running' | 'completed' | 'failed';
+	items_discovered: number;
+	items_processed: number;
+	items_failed: number;
+	error_message: string | null;
 }
 
 export interface MediaProcessingStatus {
@@ -480,6 +493,7 @@ export interface MediaProcessingStatus {
 	current_item_content_type: string | null;
 	last_completed_at: string | null;
 	next_run_at: string | null;
+	last_run: MediaProcessingRun | null;
 }
 
 export interface YouTubeResolveResponse {

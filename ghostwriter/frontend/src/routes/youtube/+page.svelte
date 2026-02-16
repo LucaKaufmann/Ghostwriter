@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { api } from '$lib/api/client';
-	import type { MediaFeed, MediaFeedCreate, MediaFeedUpdate } from '$lib/api/types';
+	import type { MediaFeed, MediaFeedCreate, MediaFeedUpdate, MediaProcessingRun } from '$lib/api/types';
 	import * as Card from '$lib/components/ui/card';
 	import * as Table from '$lib/components/ui/table';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -27,7 +27,10 @@
 		CheckCircle2,
 		XCircle,
 		Clock,
-		AlertCircle
+		AlertCircle,
+		ChevronDown,
+		Timer,
+		Settings
 	} from 'lucide-svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 
@@ -49,6 +52,11 @@
 		queryKey: ['youtube-items'],
 		queryFn: () => api.getAllYouTubeItems(),
 		refetchInterval: mediaStatusQuery.data?.is_running ? 5000 : false
+	}));
+
+	const runsQuery = createQuery(() => ({
+		queryKey: ['media-runs'],
+		queryFn: () => api.getMediaRuns(5)
 	}));
 
 	// Mutations
@@ -131,6 +139,7 @@
 	let feedToEdit = $state<MediaFeed | null>(null);
 	let updatingFeedId = $state<string | null>(null);
 	let activeTab = $state<'feeds' | 'items'>('feeds');
+	let runsExpanded = $state(false);
 
 	// Form state
 	let formUrl = $state('');
@@ -232,6 +241,24 @@
 			year: 'numeric'
 		});
 	}
+
+	function formatDuration(ms: number): string {
+		if (ms < 1000) return `${ms}ms`;
+		const seconds = Math.round(ms / 1000);
+		if (seconds < 60) return `${seconds}s`;
+		const minutes = Math.floor(seconds / 60);
+		const secs = seconds % 60;
+		return `${minutes}m ${secs}s`;
+	}
+
+	function formatDateTime(dateStr: string): string {
+		return parseUTC(dateStr).toLocaleString('en-US', {
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit'
+		});
+	}
 </script>
 
 <svelte:head>
@@ -269,6 +296,49 @@
 			Transcripts ({completedItems.length})
 		</button>
 	</div>
+
+	<!-- Recent Runs -->
+	{#if runsQuery.data?.length}
+		<div class="rounded-lg border">
+			<button
+				type="button"
+				class="flex w-full items-center justify-between p-3 text-sm font-medium hover:bg-accent/50 transition-colors"
+				onclick={() => (runsExpanded = !runsExpanded)}
+			>
+				<span>Recent Runs</span>
+				<ChevronDown class="h-4 w-4 transition-transform {runsExpanded ? 'rotate-180' : ''}" />
+			</button>
+			{#if runsExpanded}
+				<div class="border-t divide-y">
+					{#each runsQuery.data as run}
+						<div class="px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+							<span class="text-muted-foreground">{formatDateTime(run.started_at)}</span>
+							<Badge
+								variant={run.status === 'completed' ? 'secondary' : run.status === 'running' ? 'default' : 'destructive'}
+								class="text-xs"
+							>
+								{run.status}
+							</Badge>
+							{#if run.duration_ms > 0}
+								<span class="inline-flex items-center gap-1 text-muted-foreground">
+									<Timer class="h-3 w-3" />
+									{formatDuration(run.duration_ms)}
+								</span>
+							{/if}
+							{#if run.items_discovered > 0 || run.items_processed > 0}
+								<span class="text-muted-foreground">
+									{run.items_processed} processed{run.items_failed > 0 ? `, ${run.items_failed} failed` : ''}
+								</span>
+							{/if}
+							{#if run.error_message}
+								<span class="text-destructive basis-full">{run.error_message}</span>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	{#if activeTab === 'feeds'}
 		<!-- Search -->
@@ -513,9 +583,15 @@
 										</div>
 										{#if item.error_message}
 											<p class="text-xs text-destructive ml-6 mt-1">{item.error_message}</p>
+										{#if item.error_message.toLowerCase().includes('timed out')}
+											<a href="/settings" class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground ml-6 mt-1">
+												<Settings class="h-3 w-3" />
+												Adjust timeout in Settings
+											</a>
 										{/if}
-									</div>
-									<Badge variant="destructive" class="text-xs flex-shrink-0">Failed</Badge>
+									{/if}
+								</div>
+								<Badge variant="destructive" class="text-xs flex-shrink-0">Failed</Badge>
 								</div>
 							</div>
 						{/each}
@@ -539,6 +615,12 @@
 								</div>
 								<div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
 									<span>{item.word_count.toLocaleString()} words</span>
+									{#if item.processing_ms > 0}
+										<span class="inline-flex items-center gap-1">
+											<Timer class="h-3 w-3" />
+											{formatDuration(item.processing_ms)}
+										</span>
+									{/if}
 									{#if item.completed_at}
 										<span>{formatDate(item.completed_at)}</span>
 									{/if}
