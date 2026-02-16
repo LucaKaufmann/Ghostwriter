@@ -163,7 +163,7 @@ class CoverImageService:
             feed_title = (article.feed_title or "General").strip()
             if feed_title not in feed_groups:
                 feed_groups[feed_title] = []
-            if len(feed_groups[feed_title]) < 3:
+            if len(feed_groups[feed_title]) < 2:
                 feed_groups[feed_title].append(article)
 
         # Build detailed article metadata lines
@@ -205,9 +205,9 @@ class CoverImageService:
                 article_details.append(detail)
 
                 # Limit total articles in prompt to avoid token bloat
-                if len(article_details) >= 15:
+                if len(article_details) >= 20:
                     break
-            if len(article_details) >= 15:
+            if len(article_details) >= 20:
                 break
 
         date_label = date.strftime("%Y-%m-%d")
