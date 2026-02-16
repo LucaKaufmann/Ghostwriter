@@ -51,6 +51,7 @@ class SettingsViewModel @Inject constructor(
         if (settingsRepository.isGhostwriterConfigured()) {
             fetchIntegrationStatus()
             refreshMediaOverview()
+            refreshLogFiles()
         }
     }
 
@@ -438,6 +439,7 @@ class SettingsViewModel @Inject constructor(
                 digestScheduler.syncDigestsNow()
                 performInitialGhostwriterSync()
                 refreshMediaOverview()
+                refreshLogFiles()
             } else if (!enabled) {
                 // Stop periodic digest sync when Ghostwriter is disabled
                 digestScheduler.cancelDigestSync()
@@ -547,6 +549,7 @@ class SettingsViewModel @Inject constructor(
             if (connectionSuccessful) {
                 fetchIntegrationStatus()
                 refreshMediaOverview()
+                refreshLogFiles()
 
                 // If Ghostwriter is enabled, perform initial sync
                 if (_uiState.value.ghostwriterEnabled) {
@@ -693,6 +696,48 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             mediaTriggering = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun refreshLogFiles() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(logsRefreshing = true) }
+            when (val result = ghostwriterRepository.getLogFiles()) {
+                is GhostwriterResult.Success -> {
+                    val logs = result.data
+                        .sortedByDescending { it.modifiedAt }
+                        .take(8)
+                        .map {
+                            LogFileUi(
+                                filename = it.filename,
+                                sizeBytes = it.sizeBytes,
+                                modifiedAt = it.modifiedAt
+                            )
+                        }
+                    _uiState.update {
+                        it.copy(
+                            logsRefreshing = false,
+                            logFiles = logs
+                        )
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            logsRefreshing = false,
+                            integrationActionResult = "Failed to load logs: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            logsRefreshing = false,
                             integrationActionResult = "Ghostwriter is not configured"
                         )
                     }
@@ -977,6 +1022,8 @@ data class SettingsUiState(
     val youtubeFeedCount: Int = 0,
     val mediaStatus: MediaProcessingStatusResponse? = null,
     val recentMediaItems: List<MediaItemUi> = emptyList(),
+    val logsRefreshing: Boolean = false,
+    val logFiles: List<LogFileUi> = emptyList(),
     val ghostwriterHealth: HealthResponse? = null,
     // Integration status
     val wallabagIntegration: IntegrationStatus? = null,
@@ -990,4 +1037,10 @@ data class MediaItemUi(
     val contentType: String,
     val status: String,
     val createdAt: String
+)
+
+data class LogFileUi(
+    val filename: String,
+    val sizeBytes: Long,
+    val modifiedAt: String
 )

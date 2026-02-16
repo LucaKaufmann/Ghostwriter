@@ -144,6 +144,19 @@ public struct MediaItemSummaryResponse: Codable, Sendable {
     }
 }
 
+/// Server log file metadata.
+public struct LogFileInfoResponse: Codable, Sendable {
+    public let filename: String
+    public let sizeBytes: Int64
+    public let modifiedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case filename
+        case sizeBytes = "size_bytes"
+        case modifiedAt = "modified_at"
+    }
+}
+
 /// Response model for client configuration (shared settings)
 public struct ClientConfigResponse: Codable, Sendable {
     public let minWordCount: Int?

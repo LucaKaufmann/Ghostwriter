@@ -295,4 +295,24 @@ interface GhostwriterApi {
     suspend fun triggerMediaProcessing(
         @Header("Authorization") authorization: String?
     ): Response<MediaTriggerResponse>
+
+    // ===== Logs =====
+
+    /**
+     * List available server log files.
+     */
+    @GET("logs")
+    suspend fun listLogFiles(
+        @Header("Authorization") authorization: String?
+    ): Response<List<LogFileInfoResponse>>
+
+    /**
+     * Download a specific log file.
+     */
+    @Streaming
+    @GET("logs/{filename}")
+    suspend fun downloadLogFile(
+        @Header("Authorization") authorization: String?,
+        @Path("filename") filename: String
+    ): Response<ResponseBody>
 }

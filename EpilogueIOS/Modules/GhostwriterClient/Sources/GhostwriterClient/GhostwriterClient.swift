@@ -374,6 +374,13 @@ public actor GhostwriterClient {
     public func triggerMediaProcessing() async throws -> MediaTriggerResponse {
         return try await post(path: "/media/trigger", body: EmptyRequest())
     }
+
+    // MARK: - Logs
+
+    /// List available server log files.
+    public func getLogFiles() async throws -> [LogFileInfoResponse] {
+        return try await get(path: "/logs")
+    }
     
     // MARK: - Private Helpers
     

@@ -245,6 +245,8 @@ fun SettingsScreen(
                     youtubeFeedCount = uiState.youtubeFeedCount,
                     mediaStatus = uiState.mediaStatus,
                     recentMediaItems = uiState.recentMediaItems,
+                    logsRefreshing = uiState.logsRefreshing,
+                    logFiles = uiState.logFiles,
                     health = uiState.ghostwriterHealth,
                     wallabagIntegration = uiState.wallabagIntegration,
                     newslettersIntegration = uiState.newslettersIntegration,
@@ -261,6 +263,7 @@ fun SettingsScreen(
                     onClearNewslettersSeen = viewModel::clearNewslettersSeen,
                     onRefreshMediaStatus = viewModel::refreshMediaOverview,
                     onTriggerMediaProcessing = viewModel::triggerMediaProcessing,
+                    onRefreshLogs = viewModel::refreshLogFiles,
                     onStartNewsletterOAuth = {
                         val base = uiState.ghostwriterUrl.trim()
                         if (base.isNotBlank()) {
@@ -645,6 +648,8 @@ fun GhostwriterInput(
     youtubeFeedCount: Int,
     mediaStatus: MediaProcessingStatusResponse?,
     recentMediaItems: List<MediaItemUi>,
+    logsRefreshing: Boolean,
+    logFiles: List<LogFileUi>,
     health: HealthResponse?,
     wallabagIntegration: IntegrationStatus?,
     newslettersIntegration: IntegrationStatus?,
@@ -661,6 +666,7 @@ fun GhostwriterInput(
     onClearNewslettersSeen: () -> Unit,
     onRefreshMediaStatus: () -> Unit,
     onTriggerMediaProcessing: () -> Unit,
+    onRefreshLogs: () -> Unit,
     onStartNewsletterOAuth: () -> Unit
 ) {
     var showApiKey by remember { mutableStateOf(false) }
@@ -991,6 +997,37 @@ fun GhostwriterInput(
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(if (mediaTriggering) "Triggering..." else "Trigger")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Diagnostics",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                OutlinedButton(
+                    onClick = onRefreshLogs,
+                    enabled = !logsRefreshing && !integrationActionRunning,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (logsRefreshing) "Refreshing Logs..." else "Refresh Logs")
+                }
+
+                if (logFiles.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    logFiles.forEach { log ->
+                        val sizeKb = log.sizeBytes / 1024
+                        Text(
+                            text = "${log.filename} (${sizeKb} KB)",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }

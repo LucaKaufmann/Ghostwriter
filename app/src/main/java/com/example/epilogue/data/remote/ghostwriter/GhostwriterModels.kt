@@ -304,6 +304,15 @@ data class MediaItemSummaryResponse(
 )
 
 /**
+ * Server log file metadata.
+ */
+data class LogFileInfoResponse(
+    @SerializedName("filename") val filename: String,
+    @SerializedName("size_bytes") val sizeBytes: Long,
+    @SerializedName("modified_at") val modifiedAt: String
+)
+
+/**
  * Response model for client configuration (shared settings).
  */
 data class ClientConfigResponse(

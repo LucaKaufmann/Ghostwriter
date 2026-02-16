@@ -24,6 +24,7 @@ import com.example.epilogue.data.remote.ghostwriter.MediaItemSummaryResponse
 import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.MediaTriggerResponse
 import com.example.epilogue.data.remote.ghostwriter.PreviewResponse
+import com.example.epilogue.data.remote.ghostwriter.LogFileInfoResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
 import java.text.SimpleDateFormat
@@ -887,6 +888,28 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Trigger media processing failed", e)
             GhostwriterResult.Error("Failed to trigger media processing: ${e.message}")
+        }
+    }
+
+    /**
+     * List available server logs.
+     */
+    suspend fun getLogFiles(): GhostwriterResult<List<LogFileInfoResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.listLogFiles(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to list log files: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get log files failed", e)
+            GhostwriterResult.Error("Failed to list log files: ${e.message}")
         }
     }
 }
