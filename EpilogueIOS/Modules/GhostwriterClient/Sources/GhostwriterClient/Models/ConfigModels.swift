@@ -23,30 +23,64 @@ public struct IntegrationStatus: Codable, Sendable {
 
 /// Response model for client configuration (shared settings)
 public struct ClientConfigResponse: Codable, Sendable {
+    public let minWordCount: Int?
+    public let morningHour: Int?
+    public let morningMinute: Int?
+    public let noonHour: Int?
+    public let noonMinute: Int?
+    public let eveningHour: Int?
+    public let eveningMinute: Int?
     public let timezone: String
     public let aiProvider: String?
     public let aiModel: String?
-    public let scheduleEnabled: Bool?
     public let scheduleMorning: String?
     public let scheduleNoon: String?
     public let scheduleEvening: String?
-    public let digestRetentionDays: Int?
-    public let maxArticlesPerDigest: Int?
+    public let whisperProvider: String?
+    public let whisperModel: String?
+    public let whisperTimeoutMinutes: Int?
+    public let mediaProcessingIntervalHours: Int?
+    public let includePodcastsInDigest: Bool?
+    public let includeYoutubeInDigest: Bool?
+    public let coverEnabled: Bool?
+    public let coverProvider: String?
+    public let coverQuality: String?
+    public let coverPrompt: String?
+    public let coverOverlayEnabled: Bool?
+    public let coverOpenAIAPIKey: String?
+    public let coverGeminiAPIKey: String?
     public let updatedAt: String?
     // Integration status
     public let wallabag: IntegrationStatus?
     public let newsletters: IntegrationStatus?
 
     enum CodingKeys: String, CodingKey {
+        case minWordCount = "min_word_count"
+        case morningHour = "morning_hour"
+        case morningMinute = "morning_minute"
+        case noonHour = "noon_hour"
+        case noonMinute = "noon_minute"
+        case eveningHour = "evening_hour"
+        case eveningMinute = "evening_minute"
         case timezone
         case aiProvider = "ai_provider"
         case aiModel = "ai_model"
-        case scheduleEnabled = "schedule_enabled"
         case scheduleMorning = "schedule_morning"
         case scheduleNoon = "schedule_noon"
         case scheduleEvening = "schedule_evening"
-        case digestRetentionDays = "digest_retention_days"
-        case maxArticlesPerDigest = "max_articles_per_digest"
+        case whisperProvider = "whisper_provider"
+        case whisperModel = "whisper_model"
+        case whisperTimeoutMinutes = "whisper_timeout_minutes"
+        case mediaProcessingIntervalHours = "media_processing_interval_hours"
+        case includePodcastsInDigest = "include_podcasts_in_digest"
+        case includeYoutubeInDigest = "include_youtube_in_digest"
+        case coverEnabled = "cover_enabled"
+        case coverProvider = "cover_provider"
+        case coverQuality = "cover_quality"
+        case coverPrompt = "cover_prompt"
+        case coverOverlayEnabled = "cover_overlay_enabled"
+        case coverOpenAIAPIKey = "cover_openai_api_key"
+        case coverGeminiAPIKey = "cover_gemini_api_key"
         case updatedAt = "updated_at"
         case wallabag
         case newsletters
@@ -63,23 +97,42 @@ public struct ClientConfigResponse: Codable, Sendable {
 
 /// Request model for updating client configuration
 public struct ClientConfigUpdateRequest: Codable, Sendable {
+    public let minWordCount: Int?
+    public let morningHour: Int?
+    public let morningMinute: Int?
+    public let noonHour: Int?
+    public let noonMinute: Int?
+    public let eveningHour: Int?
+    public let eveningMinute: Int?
     public let timezone: String?
-    public let scheduleEnabled: Bool?
+    /// Legacy compatibility fields for older server versions.
     public let scheduleMorning: String?
     public let scheduleNoon: String?
     public let scheduleEvening: String?
     public let clientUpdatedAt: String?
 
     public init(
+        minWordCount: Int? = nil,
+        morningHour: Int? = nil,
+        morningMinute: Int? = nil,
+        noonHour: Int? = nil,
+        noonMinute: Int? = nil,
+        eveningHour: Int? = nil,
+        eveningMinute: Int? = nil,
         timezone: String? = nil,
-        scheduleEnabled: Bool? = nil,
         scheduleMorning: String? = nil,
         scheduleNoon: String? = nil,
         scheduleEvening: String? = nil,
         clientUpdatedAt: String? = nil
     ) {
+        self.minWordCount = minWordCount
+        self.morningHour = morningHour
+        self.morningMinute = morningMinute
+        self.noonHour = noonHour
+        self.noonMinute = noonMinute
+        self.eveningHour = eveningHour
+        self.eveningMinute = eveningMinute
         self.timezone = timezone
-        self.scheduleEnabled = scheduleEnabled
         self.scheduleMorning = scheduleMorning
         self.scheduleNoon = scheduleNoon
         self.scheduleEvening = scheduleEvening
@@ -87,8 +140,14 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case minWordCount = "min_word_count"
+        case morningHour = "morning_hour"
+        case morningMinute = "morning_minute"
+        case noonHour = "noon_hour"
+        case noonMinute = "noon_minute"
+        case eveningHour = "evening_hour"
+        case eveningMinute = "evening_minute"
         case timezone
-        case scheduleEnabled = "schedule_enabled"
         case scheduleMorning = "schedule_morning"
         case scheduleNoon = "schedule_noon"
         case scheduleEvening = "schedule_evening"

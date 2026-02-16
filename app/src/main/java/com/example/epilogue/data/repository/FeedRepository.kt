@@ -20,6 +20,9 @@ class FeedRepository @Inject constructor(
     suspend fun getAllFeedsList(): List<Feed> =
         feedDao.getAllFeedsList().map { it.toDomain() }
 
+    suspend fun getEnabledFeedsList(): List<Feed> =
+        feedDao.getEnabledFeedsList().map { it.toDomain() }
+
     suspend fun getFeedByUrl(url: String): Feed? =
         feedDao.getFeedByUrl(url)?.toDomain()
 

@@ -92,6 +92,15 @@ object DatabaseModule {
         }
     }
 
+    private val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            // Add feed enabled/disabled state for Ghostwriter parity.
+            database.execSQL(
+                "ALTER TABLE feeds ADD COLUMN isEnabled INTEGER NOT NULL DEFAULT 1"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): EpilogueDatabase {
@@ -100,7 +109,14 @@ object DatabaseModule {
             EpilogueDatabase::class.java,
             "epilog_database"
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7
+            )
             .build()
     }
 

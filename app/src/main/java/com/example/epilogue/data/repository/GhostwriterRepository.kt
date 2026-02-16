@@ -123,7 +123,7 @@ class GhostwriterRepository @Inject constructor(
                 FeedSyncRequest(
                     url = feed.url,
                     title = feed.name,
-                    isActive = true,
+                    isActive = feed.isEnabled,
                     mode = when (feed.mode) {
                         ProcessingMode.BRIEFING -> "summarize"
                         ProcessingMode.FIDELITY -> "raw"
@@ -565,13 +565,27 @@ class GhostwriterRepository @Inject constructor(
     /**
      * Update the shared client configuration on the server.
      *
+     * @param minWordCount Minimum article word count (null to not update)
+     * @param morningHour Morning schedule hour (24h)
+     * @param morningMinute Morning schedule minute
+     * @param noonHour Noon schedule hour (24h)
+     * @param noonMinute Noon schedule minute
+     * @param eveningHour Evening schedule hour (24h)
+     * @param eveningMinute Evening schedule minute
      * @param timezone IANA timezone (null to not update)
-     * @param scheduleMorning Morning schedule time as "HH:mm" (null to not update)
-     * @param scheduleNoon Noon schedule time as "HH:mm" (null to not update)
-     * @param scheduleEvening Evening schedule time as "HH:mm" (null to not update)
+     * @param scheduleMorning Legacy morning schedule time as "HH:mm" for backwards compatibility
+     * @param scheduleNoon Legacy noon schedule time as "HH:mm" for backwards compatibility
+     * @param scheduleEvening Legacy evening schedule time as "HH:mm" for backwards compatibility
      * @param clientUpdatedAt Client's last known server timestamp for conflict detection
      */
     suspend fun updateConfig(
+        minWordCount: Int? = null,
+        morningHour: Int? = null,
+        morningMinute: Int? = null,
+        noonHour: Int? = null,
+        noonMinute: Int? = null,
+        eveningHour: Int? = null,
+        eveningMinute: Int? = null,
         timezone: String? = null,
         scheduleMorning: String? = null,
         scheduleNoon: String? = null,
@@ -582,6 +596,13 @@ class GhostwriterRepository @Inject constructor(
 
         try {
             val request = ClientConfigUpdateRequest(
+                minWordCount = minWordCount,
+                morningHour = morningHour,
+                morningMinute = morningMinute,
+                noonHour = noonHour,
+                noonMinute = noonMinute,
+                eveningHour = eveningHour,
+                eveningMinute = eveningMinute,
                 timezone = timezone,
                 scheduleMorning = scheduleMorning,
                 scheduleNoon = scheduleNoon,

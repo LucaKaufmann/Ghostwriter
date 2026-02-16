@@ -68,10 +68,18 @@ struct FeedListView: View {
     }
 
     private func deleteFeeds(at offsets: IndexSet) {
+        let deletedURLs = offsets.map { feeds[$0].url }
+
         for index in offsets {
             modelContext.delete(feeds[index])
         }
         try? modelContext.save()
+
+        Task {
+            for url in deletedURLs {
+                try? await ghostwriterCoordinator.notifyFeedDeleted(url: url)
+            }
+        }
     }
 }
 

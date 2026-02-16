@@ -87,7 +87,7 @@ class DailyDigestWorker @AssistedInject constructor(
             }
 
             // Get all feeds for later reference
-            val feeds = feedRepository.getAllFeedsList()
+            val feeds = feedRepository.getEnabledFeedsList()
 
             // Fetch and process articles from all feeds
             val articles = articleRepository.fetchFromAllFeeds(onlyNew = fetchOnlyNew)

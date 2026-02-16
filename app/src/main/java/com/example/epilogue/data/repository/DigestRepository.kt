@@ -258,7 +258,9 @@ class DigestRepository @Inject constructor(
 
         // Extract feed names and counts from articles if available
         val feedNames = articles?.map { it.feedTitle }?.distinct() ?: emptyList()
-        val briefingCount = articles?.count { it.mode == "summarized" } ?: 0
+        val briefingCount = articles?.count {
+            it.mode == "summarize" || it.mode == "summarized"
+        } ?: 0
         val fidelityCount = articles?.count { it.mode == "raw" } ?: 0
 
         val digestEntity = DigestEntity(
@@ -282,7 +284,7 @@ class DigestRepository @Inject constructor(
                     author = article.author ?: "",
                     content = article.content,
                     originalUrl = article.url,
-                    isSummary = article.mode == "summarized",
+                    isSummary = article.mode == "summarize" || article.mode == "summarized",
                     feedName = article.feedTitle,
                     sortOrder = article.sortOrder
                 )

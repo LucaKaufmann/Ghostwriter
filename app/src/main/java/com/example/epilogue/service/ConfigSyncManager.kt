@@ -5,7 +5,6 @@ import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
 import com.example.epilogue.data.repository.SettingsRepository
-import com.example.epilogue.domain.model.DigestPeriod
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -101,21 +100,41 @@ class ConfigSyncManager @Inject constructor(
      * Apply server configuration to local settings.
      */
     private suspend fun applyServerConfig(config: ClientConfigResponse) {
-        // Parse schedule times from "HH:mm" strings
-        val morning = parseTime(config.scheduleMorning)
-        val noon = parseTime(config.scheduleNoon)
-        val evening = parseTime(config.scheduleEvening)
+        // Prefer current hour/minute fields, fallback to legacy HH:mm strings.
+        val morning = resolveTime(
+            hour = config.morningHour,
+            minute = config.morningMinute,
+            legacyTime = config.scheduleMorning,
+            defaultHour = 7,
+            defaultMinute = 0
+        )
+        val noon = resolveTime(
+            hour = config.noonHour,
+            minute = config.noonMinute,
+            legacyTime = config.scheduleNoon,
+            defaultHour = 12,
+            defaultMinute = 0
+        )
+        val evening = resolveTime(
+            hour = config.eveningHour,
+            minute = config.eveningMinute,
+            legacyTime = config.scheduleEvening,
+            defaultHour = 18,
+            defaultMinute = 0
+        )
 
         // Store schedule times locally for display in the UI
         settingsRepository.setGhostwriterSchedule(
-            morningHour = morning?.first ?: 7,
-            morningMinute = morning?.second ?: 0,
-            noonHour = noon?.first ?: 12,
-            noonMinute = noon?.second ?: 0,
-            eveningHour = evening?.first ?: 18,
-            eveningMinute = evening?.second ?: 0,
+            morningHour = morning.first,
+            morningMinute = morning.second,
+            noonHour = noon.first,
+            noonMinute = noon.second,
+            eveningHour = evening.first,
+            eveningMinute = evening.second,
             timezone = config.timezone
         )
+
+        config.minWordCount?.let { settingsRepository.setMinWordCount(it) }
 
         // Save the server's updated_at timestamp
         config.updatedAt?.let { settingsRepository.setConfigUpdatedAt(it) }
@@ -136,12 +155,37 @@ class ConfigSyncManager @Inject constructor(
     }
 
     /**
+     * Resolve a schedule time from v2 hour/minute fields or legacy HH:mm strings.
+     */
+    private fun resolveTime(
+        hour: Int?,
+        minute: Int?,
+        legacyTime: String?,
+        defaultHour: Int,
+        defaultMinute: Int
+    ): Pair<Int, Int> {
+        if (hour != null && minute != null) {
+            return Pair(hour, minute)
+        }
+        return parseTime(legacyTime) ?: Pair(defaultHour, defaultMinute)
+    }
+
+    /**
      * Push local configuration to the server.
      */
     private suspend fun pushLocalConfig(localUpdatedAt: String) {
         val schedule = settingsRepository.getGhostwriterSchedule()
+        val minWordCount = settingsRepository.getMinWordCount()
         val result = ghostwriterRepository.updateConfig(
+            minWordCount = minWordCount,
+            morningHour = schedule?.morningHour,
+            morningMinute = schedule?.morningMinute,
+            noonHour = schedule?.noonHour,
+            noonMinute = schedule?.noonMinute,
+            eveningHour = schedule?.eveningHour,
+            eveningMinute = schedule?.eveningMinute,
             timezone = schedule?.timezone,
+            // Legacy payload for older server builds.
             scheduleMorning = schedule?.let { String.format("%02d:%02d", it.morningHour, it.morningMinute) },
             scheduleNoon = schedule?.let { String.format("%02d:%02d", it.noonHour, it.noonMinute) },
             scheduleEvening = schedule?.let { String.format("%02d:%02d", it.eveningHour, it.eveningMinute) },
@@ -212,10 +256,38 @@ class ConfigSyncManager @Inject constructor(
      * Push a specific setting change to the server immediately.
      * Called when user changes a synced setting.
      */
-    suspend fun pushMinWordCount(count: Int) {
-        // min_word_count is no longer part of the server config schema;
-        // it's only stored locally now.
-        Log.d(TAG, "Min word count set locally: $count")
+    suspend fun pushMinWordCount(count: Int) = withContext(Dispatchers.IO) {
+        if (!settingsRepository.isGhostwriterConfigured()) {
+            Log.d(TAG, "Ghostwriter not configured, skipping min_word_count push")
+            return@withContext
+        }
+
+        val localUpdatedAt = settingsRepository.getConfigUpdatedAt()
+        val result = ghostwriterRepository.updateConfig(
+            minWordCount = count,
+            clientUpdatedAt = localUpdatedAt
+        )
+
+        when (result) {
+            is GhostwriterResult.Success -> {
+                settingsRepository.setConfigUpdatedAt(result.data.updatedAt)
+                Log.i(TAG, "Synced min_word_count to Ghostwriter: $count")
+            }
+            is GhostwriterResult.Error -> {
+                if (result.code == 409) {
+                    Log.w(TAG, "Config conflict while syncing min_word_count, re-fetching")
+                    val refetchResult = ghostwriterRepository.getConfig()
+                    if (refetchResult is GhostwriterResult.Success) {
+                        applyServerConfig(refetchResult.data)
+                    }
+                } else {
+                    Log.e(TAG, "Failed syncing min_word_count: ${result.message}")
+                }
+            }
+            is GhostwriterResult.NotConfigured -> {
+                Log.d(TAG, "Ghostwriter not configured")
+            }
+        }
     }
 
     /**

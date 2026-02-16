@@ -139,8 +139,10 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
     // MARK: - Content Filters
 
     public func getMinWordCount() async throws -> Int {
-        let count = userDefaults.integer(forKey: DefaultsKeys.minWordCount)
-        return count == 0 ? Defaults.minWordCount : count
+        if userDefaults.object(forKey: DefaultsKeys.minWordCount) == nil {
+            return Defaults.minWordCount
+        }
+        return userDefaults.integer(forKey: DefaultsKeys.minWordCount)
     }
 
     public func setMinWordCount(_ count: Int) async throws {
