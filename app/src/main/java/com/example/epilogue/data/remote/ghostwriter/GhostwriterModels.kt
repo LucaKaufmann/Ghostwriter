@@ -217,6 +217,33 @@ data class IntegrationStatus(
 )
 
 /**
+ * Preview article response for integrations like Wallabag/Newsletters.
+ */
+data class PreviewArticleResponse(
+    @SerializedName("title") val title: String,
+    @SerializedName("url") val url: String,
+    @SerializedName("author") val author: String? = null,
+    @SerializedName("word_count") val wordCount: Int? = null
+)
+
+/**
+ * Generic preview response.
+ */
+data class PreviewResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("count") val count: Int = 0,
+    @SerializedName("articles") val articles: List<PreviewArticleResponse> = emptyList(),
+    @SerializedName("detail") val detail: String? = null
+)
+
+/**
+ * Response for clear-seen operations.
+ */
+data class ClearSeenResponse(
+    @SerializedName("cleared") val cleared: Int
+)
+
+/**
  * Response model for client configuration (shared settings).
  */
 data class ClientConfigResponse(

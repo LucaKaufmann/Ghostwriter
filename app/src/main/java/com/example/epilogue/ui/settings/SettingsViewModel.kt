@@ -590,6 +590,146 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(ghostwriterSyncResult = null) }
     }
 
+    fun previewWallabag() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(integrationActionRunning = true, integrationActionResult = null) }
+            when (val result = ghostwriterRepository.previewWallabag()) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = formatPreviewResult("Wallabag", result.data)
+                        )
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Wallabag preview failed: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun previewNewsletters() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(integrationActionRunning = true, integrationActionResult = null) }
+            when (val result = ghostwriterRepository.previewNewsletters()) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = formatPreviewResult("Newsletters", result.data)
+                        )
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Newsletter preview failed: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearWallabagSeen() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(integrationActionRunning = true, integrationActionResult = null) }
+            when (val result = ghostwriterRepository.clearWallabagSeen()) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Cleared ${result.data.cleared} Wallabag seen markers"
+                        )
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Failed to clear Wallabag seen markers: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearNewslettersSeen() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(integrationActionRunning = true, integrationActionResult = null) }
+            when (val result = ghostwriterRepository.clearNewsletterSeen()) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Cleared ${result.data.cleared} newsletter seen markers"
+                        )
+                    }
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Failed to clear newsletter seen markers: ${result.message}"
+                        )
+                    }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update {
+                        it.copy(
+                            integrationActionRunning = false,
+                            integrationActionResult = "Ghostwriter is not configured"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearIntegrationActionResult() {
+        _uiState.update { it.copy(integrationActionResult = null) }
+    }
+
+    private fun formatPreviewResult(sourceName: String, response: com.example.epilogue.data.remote.ghostwriter.PreviewResponse): String {
+        return if (response.status == "ok") {
+            "$sourceName preview: ${response.count} article${if (response.count == 1) "" else "s"} available"
+        } else {
+            response.detail ?: "$sourceName preview failed"
+        }
+    }
+
     /**
      * Perform initial sync to Ghostwriter when first enabled.
      * Syncs feeds and schedule preferences.
@@ -710,6 +850,8 @@ data class SettingsUiState(
     val ghostwriterError: String? = null,
     val ghostwriterSyncing: Boolean = false,
     val ghostwriterSyncResult: String? = null,
+    val integrationActionRunning: Boolean = false,
+    val integrationActionResult: String? = null,
     val ghostwriterHealth: HealthResponse? = null,
     // Integration status
     val wallabagIntegration: IntegrationStatus? = null,

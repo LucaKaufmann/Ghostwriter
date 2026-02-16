@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.ClearSeenResponse
 import com.example.epilogue.data.remote.ghostwriter.SyncResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestArticleSourceResponse
@@ -18,6 +19,7 @@ import com.example.epilogue.data.remote.ghostwriter.FeedSyncResponse
 import com.example.epilogue.data.remote.ghostwriter.GhostwriterApi
 import com.example.epilogue.data.remote.ghostwriter.HeartbeatResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
+import com.example.epilogue.data.remote.ghostwriter.PreviewResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
 import java.text.SimpleDateFormat
@@ -661,6 +663,94 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Update config failed", e)
             GhostwriterResult.Error("Failed to update config: ${e.message}")
+        }
+    }
+
+    /**
+     * Preview Wallabag items without mutating read state.
+     */
+    suspend fun previewWallabag(): GhostwriterResult<PreviewResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.previewWallabag(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to preview Wallabag: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Preview Wallabag failed", e)
+            GhostwriterResult.Error("Failed to preview Wallabag: ${e.message}")
+        }
+    }
+
+    /**
+     * Preview newsletter items without mutating read state.
+     */
+    suspend fun previewNewsletters(): GhostwriterResult<PreviewResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.previewNewsletters(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to preview newsletters: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Preview newsletters failed", e)
+            GhostwriterResult.Error("Failed to preview newsletters: ${e.message}")
+        }
+    }
+
+    /**
+     * Clear seen markers for Wallabag synthetic feed.
+     */
+    suspend fun clearWallabagSeen(): GhostwriterResult<ClearSeenResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.clearWallabagSeen(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to clear Wallabag seen cache: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Clear Wallabag seen failed", e)
+            GhostwriterResult.Error("Failed to clear Wallabag seen cache: ${e.message}")
+        }
+    }
+
+    /**
+     * Clear seen markers for newsletters synthetic feed.
+     */
+    suspend fun clearNewsletterSeen(): GhostwriterResult<ClearSeenResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.clearNewsletterSeen(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to clear newsletter seen cache: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Clear newsletter seen failed", e)
+            GhostwriterResult.Error("Failed to clear newsletter seen cache: ${e.message}")
         }
     }
 }

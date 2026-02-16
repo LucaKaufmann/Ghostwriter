@@ -143,6 +143,13 @@ fun SettingsScreen(
         }
     }
 
+    LaunchedEffect(uiState.integrationActionResult) {
+        uiState.integrationActionResult?.let { result ->
+            snackbarHostState.showSnackbar(result)
+            viewModel.clearIntegrationActionResult()
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -230,6 +237,7 @@ fun SettingsScreen(
                     url = uiState.ghostwriterUrl,
                     apiKey = uiState.ghostwriterApiKey,
                     isTesting = uiState.ghostwriterTesting,
+                    integrationActionRunning = uiState.integrationActionRunning,
                     health = uiState.ghostwriterHealth,
                     wallabagIntegration = uiState.wallabagIntegration,
                     newslettersIntegration = uiState.newslettersIntegration,
@@ -239,7 +247,28 @@ fun SettingsScreen(
                     onApiKeyChange = viewModel::updateGhostwriterApiKey,
                     onSaveApiKey = viewModel::saveGhostwriterApiKey,
                     onDownloadEpubsOnSyncChange = viewModel::updateGhostwriterDownloadEpubsOnSync,
-                    onTestConnection = viewModel::testGhostwriterConnection
+                    onTestConnection = viewModel::testGhostwriterConnection,
+                    onPreviewWallabag = viewModel::previewWallabag,
+                    onPreviewNewsletters = viewModel::previewNewsletters,
+                    onClearWallabagSeen = viewModel::clearWallabagSeen,
+                    onClearNewslettersSeen = viewModel::clearNewslettersSeen,
+                    onStartNewsletterOAuth = {
+                        val base = uiState.ghostwriterUrl.trim()
+                        if (base.isNotBlank()) {
+                            val withoutSlash = base.trimEnd('/')
+                            val apiBase = if (withoutSlash.endsWith("/api")) {
+                                withoutSlash
+                            } else {
+                                "$withoutSlash/api"
+                            }
+                            val oauthUrl = "$apiBase/newsletters/oauth/start"
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl))
+                                )
+                            }
+                        }
+                    }
                 )
             }
 
@@ -600,6 +629,7 @@ fun GhostwriterInput(
     url: String,
     apiKey: String,
     isTesting: Boolean,
+    integrationActionRunning: Boolean,
     health: HealthResponse?,
     wallabagIntegration: IntegrationStatus?,
     newslettersIntegration: IntegrationStatus?,
@@ -609,7 +639,12 @@ fun GhostwriterInput(
     onApiKeyChange: (String) -> Unit,
     onSaveApiKey: () -> Unit,
     onDownloadEpubsOnSyncChange: (Boolean) -> Unit,
-    onTestConnection: () -> Unit
+    onTestConnection: () -> Unit,
+    onPreviewWallabag: () -> Unit,
+    onPreviewNewsletters: () -> Unit,
+    onClearWallabagSeen: () -> Unit,
+    onClearNewslettersSeen: () -> Unit,
+    onStartNewsletterOAuth: () -> Unit
 ) {
     var showApiKey by remember { mutableStateOf(false) }
 
@@ -806,14 +841,63 @@ fun GhostwriterInput(
                             name = "Wallabag",
                             enabled = wallabagIntegration.enabled
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onPreviewWallabag,
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Preview")
+                            }
+                            OutlinedButton(
+                                onClick = onClearWallabagSeen,
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Clear Seen")
+                            }
+                        }
                     }
 
                     if (newslettersIntegration != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
                         IntegrationStatusRow(
                             name = "Newsletters",
                             enabled = newslettersIntegration.enabled,
                             label = newslettersIntegration.label
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onStartNewsletterOAuth,
+                                enabled = url.isNotBlank() && !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Connect")
+                            }
+                            OutlinedButton(
+                                onClick = onPreviewNewsletters,
+                                enabled = !integrationActionRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Preview")
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onClearNewslettersSeen,
+                            enabled = !integrationActionRunning,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Clear Seen")
+                        }
                     }
                 }
             }

@@ -211,4 +211,38 @@ interface GhostwriterApi {
         @Header("Authorization") authorization: String?,
         @Body request: ClientConfigUpdateRequest
     ): Response<ClientConfigResponse>
+
+    // ===== Integrations =====
+
+    /**
+     * Preview Wallabag items without marking them as read.
+     */
+    @POST("config/wallabag/preview")
+    suspend fun previewWallabag(
+        @Header("Authorization") authorization: String?
+    ): Response<PreviewResponse>
+
+    /**
+     * Preview newsletter items without marking them as read.
+     */
+    @POST("newsletters/preview")
+    suspend fun previewNewsletters(
+        @Header("Authorization") authorization: String?
+    ): Response<PreviewResponse>
+
+    /**
+     * Clear seen-marker cache for Wallabag synthetic feed.
+     */
+    @POST("config/wallabag/clear-seen")
+    suspend fun clearWallabagSeen(
+        @Header("Authorization") authorization: String?
+    ): Response<ClearSeenResponse>
+
+    /**
+     * Clear seen-marker cache for newsletter synthetic feed.
+     */
+    @POST("config/newsletters/clear-seen")
+    suspend fun clearNewsletterSeen(
+        @Header("Authorization") authorization: String?
+    ): Response<ClearSeenResponse>
 }
