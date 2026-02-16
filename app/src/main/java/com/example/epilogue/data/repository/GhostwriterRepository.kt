@@ -616,6 +616,10 @@ class GhostwriterRepository @Inject constructor(
      * @param scheduleMorning Legacy morning schedule time as "HH:mm" for backwards compatibility
      * @param scheduleNoon Legacy noon schedule time as "HH:mm" for backwards compatibility
      * @param scheduleEvening Legacy evening schedule time as "HH:mm" for backwards compatibility
+     * @param includePodcastsInDigest Include completed podcast transcripts in digest generation
+     * @param includeYoutubeInDigest Include completed YouTube transcripts in digest generation
+     * @param coverEnabled Enable AI cover generation
+     * @param coverOverlayEnabled Enable deterministic metadata overlay on generated covers
      * @param clientUpdatedAt Client's last known server timestamp for conflict detection
      */
     suspend fun updateConfig(
@@ -630,6 +634,10 @@ class GhostwriterRepository @Inject constructor(
         scheduleMorning: String? = null,
         scheduleNoon: String? = null,
         scheduleEvening: String? = null,
+        includePodcastsInDigest: Boolean? = null,
+        includeYoutubeInDigest: Boolean? = null,
+        coverEnabled: Boolean? = null,
+        coverOverlayEnabled: Boolean? = null,
         clientUpdatedAt: String? = null
     ): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
@@ -647,6 +655,10 @@ class GhostwriterRepository @Inject constructor(
                 scheduleMorning = scheduleMorning,
                 scheduleNoon = scheduleNoon,
                 scheduleEvening = scheduleEvening,
+                includePodcastsInDigest = includePodcastsInDigest,
+                includeYoutubeInDigest = includeYoutubeInDigest,
+                coverEnabled = coverEnabled,
+                coverOverlayEnabled = coverOverlayEnabled,
                 clientUpdatedAt = clientUpdatedAt
             )
             val response = api.updateConfig(getAuthHeader(), request)

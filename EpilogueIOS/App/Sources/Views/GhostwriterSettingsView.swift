@@ -312,6 +312,9 @@ struct GhostwriterSettingsView: View {
                 }
             }
 
+            digestContentSection
+            coverSettingsSection
+
             // MARK: - Diagnostics
             if viewModel.isConfigured {
                 Section("Diagnostics") {
@@ -382,6 +385,72 @@ struct GhostwriterSettingsView: View {
                 .foregroundColor(.secondary)
         }
     }
+
+    @ViewBuilder
+    private var digestContentSection: some View {
+        if viewModel.isConfigured {
+            Section {
+                Toggle(
+                    "Include podcasts",
+                    isOn: Binding(
+                        get: { viewModel.includePodcastsInDigest },
+                        set: { newValue in
+                            Task { await viewModel.setIncludePodcastsInDigest(newValue) }
+                        }
+                    )
+                )
+                .disabled(viewModel.configActionRunning)
+
+                Toggle(
+                    "Include YouTube",
+                    isOn: Binding(
+                        get: { viewModel.includeYoutubeInDigest },
+                        set: { newValue in
+                            Task { await viewModel.setIncludeYoutubeInDigest(newValue) }
+                        }
+                    )
+                )
+                .disabled(viewModel.configActionRunning)
+            } header: {
+                Text("Digest Content")
+            } footer: {
+                Text("Controls whether completed media transcripts are included in generated digests.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var coverSettingsSection: some View {
+        if viewModel.isConfigured {
+            Section {
+                Toggle(
+                    "Generate AI covers",
+                    isOn: Binding(
+                        get: { viewModel.coverEnabled },
+                        set: { newValue in
+                            Task { await viewModel.setCoverEnabled(newValue) }
+                        }
+                    )
+                )
+                .disabled(viewModel.configActionRunning)
+
+                Toggle(
+                    "Overlay digest metadata",
+                    isOn: Binding(
+                        get: { viewModel.coverOverlayEnabled },
+                        set: { newValue in
+                            Task { await viewModel.setCoverOverlayEnabled(newValue) }
+                        }
+                    )
+                )
+                .disabled(!viewModel.coverEnabled || viewModel.configActionRunning)
+            } header: {
+                Text("Covers")
+            } footer: {
+                Text("Overlay adds deterministic title/date/source labels on AI-generated covers.")
+            }
+        }
+    }
 }
 
 // MARK: - View Model
@@ -410,6 +479,11 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var newslettersIntegration: IntegrationStatus?
     @Published var integrationActionMessage: String?
     @Published var integrationActionRunning = false
+    @Published var configActionRunning = false
+    @Published var includePodcastsInDigest = true
+    @Published var includeYoutubeInDigest = true
+    @Published var coverEnabled = false
+    @Published var coverOverlayEnabled = true
     @Published var podcastFeedCount = 0
     @Published var youtubeFeedCount = 0
     @Published var mediaStatus: MediaProcessingStatusResponse?
@@ -576,10 +650,58 @@ class GhostwriterSettingsViewModel: ObservableObject {
             let apiKey = try await settingsRepository.getGhostwriterAPIKey()
             let client = try GhostwriterClient(baseURLString: serverURL, apiKey: apiKey)
             let config = try await client.getConfig()
-            wallabagIntegration = config.wallabag
-            newslettersIntegration = config.newsletters
+            applyConfig(config)
+            try await settingsRepository.setGhostwriterConfigUpdatedAt(config.updatedAt)
         } catch {
             // Ignore integration status errors
+        }
+    }
+
+    func setIncludePodcastsInDigest(_ enabled: Bool) async {
+        await updateConfigToggle(
+            applyOptimistic: { includePodcastsInDigest = enabled },
+            rollback: { includePodcastsInDigest.toggle() }
+        ) { timestamp in
+            ClientConfigUpdateRequest(
+                includePodcastsInDigest: enabled,
+                clientUpdatedAt: timestamp
+            )
+        }
+    }
+
+    func setIncludeYoutubeInDigest(_ enabled: Bool) async {
+        await updateConfigToggle(
+            applyOptimistic: { includeYoutubeInDigest = enabled },
+            rollback: { includeYoutubeInDigest.toggle() }
+        ) { timestamp in
+            ClientConfigUpdateRequest(
+                includeYoutubeInDigest: enabled,
+                clientUpdatedAt: timestamp
+            )
+        }
+    }
+
+    func setCoverEnabled(_ enabled: Bool) async {
+        await updateConfigToggle(
+            applyOptimistic: { coverEnabled = enabled },
+            rollback: { coverEnabled.toggle() }
+        ) { timestamp in
+            ClientConfigUpdateRequest(
+                coverEnabled: enabled,
+                clientUpdatedAt: timestamp
+            )
+        }
+    }
+
+    func setCoverOverlayEnabled(_ enabled: Bool) async {
+        await updateConfigToggle(
+            applyOptimistic: { coverOverlayEnabled = enabled },
+            rollback: { coverOverlayEnabled.toggle() }
+        ) { timestamp in
+            ClientConfigUpdateRequest(
+                coverOverlayEnabled: enabled,
+                clientUpdatedAt: timestamp
+            )
         }
     }
 
@@ -693,6 +815,49 @@ class GhostwriterSettingsViewModel: ObservableObject {
         } catch {
             integrationActionMessage = error.localizedDescription
         }
+    }
+
+    private func updateConfigToggle(
+        applyOptimistic: () -> Void,
+        rollback: () -> Void,
+        request: (String?) -> ClientConfigUpdateRequest
+    ) async {
+        guard !configActionRunning else { return }
+        integrationActionMessage = nil
+        applyOptimistic()
+        configActionRunning = true
+        defer { configActionRunning = false }
+
+        do {
+            let client = try await createClient()
+            let localTimestamp = try await settingsRepository.getGhostwriterConfigUpdatedAt()
+            let response = try await client.updateConfig(request(localTimestamp))
+            try await settingsRepository.setGhostwriterConfigUpdatedAt(response.updatedAt)
+            applyConfig(response)
+        } catch GhostwriterError.conflict {
+            do {
+                let client = try await createClient()
+                let latest = try await client.getConfig()
+                try await settingsRepository.setGhostwriterConfigUpdatedAt(latest.updatedAt)
+                applyConfig(latest)
+                integrationActionMessage = "Config changed on server. Refreshed latest values."
+            } catch {
+                rollback()
+                integrationActionMessage = "Config changed on server. Please retry."
+            }
+        } catch {
+            rollback()
+            integrationActionMessage = "Config update failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func applyConfig(_ config: ClientConfigResponse) {
+        wallabagIntegration = config.wallabag
+        newslettersIntegration = config.newsletters
+        includePodcastsInDigest = config.includePodcastsInDigest ?? includePodcastsInDigest
+        includeYoutubeInDigest = config.includeYoutubeInDigest ?? includeYoutubeInDigest
+        coverEnabled = config.coverEnabled ?? coverEnabled
+        coverOverlayEnabled = config.coverOverlayEnabled ?? coverOverlayEnabled
     }
 
     private func createClient() async throws -> GhostwriterClient {

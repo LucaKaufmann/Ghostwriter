@@ -363,5 +363,9 @@ data class ClientConfigUpdateRequest(
     @SerializedName("schedule_morning") val scheduleMorning: String? = null,
     @SerializedName("schedule_noon") val scheduleNoon: String? = null,
     @SerializedName("schedule_evening") val scheduleEvening: String? = null,
+    @SerializedName("include_podcasts_in_digest") val includePodcastsInDigest: Boolean? = null,
+    @SerializedName("include_youtube_in_digest") val includeYoutubeInDigest: Boolean? = null,
+    @SerializedName("cover_enabled") val coverEnabled: Boolean? = null,
+    @SerializedName("cover_overlay_enabled") val coverOverlayEnabled: Boolean? = null,
     @SerializedName("client_updated_at") val clientUpdatedAt: String? = null
 )
