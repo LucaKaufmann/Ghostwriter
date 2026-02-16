@@ -10,6 +10,7 @@
 import SwiftUI
 import CoreText
 import Domain
+import GhostwriterClient
 
 // MARK: - Page Model
 
@@ -39,6 +40,13 @@ private enum PageItem: Identifiable {
         default: return nil
         }
     }
+}
+
+private struct ArticleSourceState {
+    var isSourceMode: Bool = false
+    var isLoading: Bool = false
+    var sourceHTML: String?
+    var errorMessage: String?
 }
 
 // MARK: - Text Paginator
@@ -199,10 +207,10 @@ private struct TextPaginator {
     }
 
     /// Combines header + body into one attributed string for an article.
-    static func buildFullArticle(article: DigestArticle) -> NSAttributedString {
+    static func buildFullArticle(article: DigestArticle, bodyHTML: String? = nil) -> NSAttributedString {
         let result = NSMutableAttributedString()
         result.append(buildArticleHeader(article: article))
-        result.append(buildArticleBody(html: article.content))
+        result.append(buildArticleBody(html: bodyHTML ?? article.content))
         return result
     }
 }
@@ -212,8 +220,10 @@ private struct TextPaginator {
 struct EinkReaderView: View {
     let articles: [DigestArticle]
     var epubFilePath: String? = nil
+    var remoteDigestId: String? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.settingsRepository) private var settingsRepository
     @State private var currentPage = 0
     @State private var showNavigationBar = true
     @State private var showTableOfContents = false
@@ -222,6 +232,10 @@ struct EinkReaderView: View {
     @State private var articleFirstPageIndex: [UUID: Int] = [:]
     @State private var isBuilding = true
     @State private var loadingPhrase = Self.randomLoadingPhrase()
+    @State private var articleSourceStates: [UUID: ArticleSourceState] = [:]
+    @State private var remoteArticleIdByLocalId: [UUID: String] = [:]
+    @State private var remoteArticlesByDigestId: [String: [DigestArticleResponse]] = [:]
+    @State private var sourceAlertMessage: String?
 
     private var totalPages: Int { max(paginatedPages.count, 1) }
 
@@ -259,6 +273,17 @@ struct EinkReaderView: View {
             }
         }
         return groups
+    }
+
+    private var currentArticle: DigestArticle? {
+        guard let item = paginatedPages[safe: currentPage] else { return nil }
+        guard case let .articlePage(article, _, _, _) = item else { return nil }
+        return article
+    }
+
+    private var currentArticleSourceState: ArticleSourceState {
+        guard let article = currentArticle else { return ArticleSourceState() }
+        return articleSourceStates[article.id] ?? ArticleSourceState()
     }
 
     var body: some View {
@@ -337,13 +362,40 @@ struct EinkReaderView: View {
                     }
                 }
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if remoteDigestId != nil, let article = currentArticle {
+                    Button {
+                        Task {
+                            await toggleSourceMode(for: article)
+                        }
+                    } label: {
+                        if currentArticleSourceState.isLoading {
+                            ProgressView()
+                        } else {
+                            Text(currentArticleSourceState.isSourceMode ? "Processed" : "Source")
+                        }
+                    }
+                    .disabled(currentArticleSourceState.isLoading)
+                }
                 if epubFilePath != nil {
                     ShareLink(item: URL(fileURLWithPath: epubFilePath!)) {
                         Image(systemName: "square.and.arrow.up")
                     }
                 }
             }
+        }
+        .alert(
+            "Source Mode",
+            isPresented: Binding(
+                get: { sourceAlertMessage != nil },
+                set: { if !$0 { sourceAlertMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                sourceAlertMessage = nil
+            }
+        } message: {
+            Text(sourceAlertMessage ?? "")
         }
         .sheet(isPresented: $showTableOfContents) {
             tableOfContents
@@ -379,7 +431,10 @@ struct EinkReaderView: View {
 
             for article in group.articles {
                 firstPageMap[article.id] = result.count
-                let fullText = TextPaginator.buildFullArticle(article: article)
+                let fullText = TextPaginator.buildFullArticle(
+                    article: article,
+                    bodyHTML: renderedBodyHTML(for: article)
+                )
                 let articlePages = TextPaginator.paginate(attributedString: fullText, size: textSize)
                 for (i, pageText) in articlePages.enumerated() {
                     result.append(.articlePage(
@@ -558,6 +613,123 @@ struct EinkReaderView: View {
         }
     }
 
+    // MARK: - Source Mode
+
+    private func renderedBodyHTML(for article: DigestArticle) -> String {
+        let state = articleSourceStates[article.id] ?? ArticleSourceState()
+        guard state.isSourceMode, let sourceHTML = state.sourceHTML, !sourceHTML.isEmpty else {
+            return article.content
+        }
+        return sourceHTML
+    }
+
+    @MainActor
+    private func toggleSourceMode(for article: DigestArticle) async {
+        guard let remoteDigestId else {
+            sourceAlertMessage = "Source mode is only available for digests synced from Ghostwriter."
+            return
+        }
+
+        var state = articleSourceStates[article.id] ?? ArticleSourceState()
+        if state.isSourceMode {
+            state.isSourceMode = false
+            state.errorMessage = nil
+            articleSourceStates[article.id] = state
+            rebuildPages()
+            return
+        }
+
+        if let existing = state.sourceHTML, !existing.isEmpty {
+            state.isSourceMode = true
+            state.errorMessage = nil
+            articleSourceStates[article.id] = state
+            rebuildPages()
+            return
+        }
+
+        state.isLoading = true
+        state.errorMessage = nil
+        articleSourceStates[article.id] = state
+
+        do {
+            let client = try await createGhostwriterClient()
+            let remoteArticleID = try await resolveRemoteArticleID(
+                for: article,
+                digestId: remoteDigestId,
+                client: client
+            )
+            let source = try await client.getDigestArticleSource(
+                digestId: remoteDigestId,
+                articleId: remoteArticleID
+            )
+
+            var updated = articleSourceStates[article.id] ?? ArticleSourceState()
+            updated.isLoading = false
+            updated.isSourceMode = true
+            updated.sourceHTML = source.html
+            updated.errorMessage = nil
+            articleSourceStates[article.id] = updated
+            rebuildPages()
+        } catch {
+            var updated = articleSourceStates[article.id] ?? ArticleSourceState()
+            updated.isLoading = false
+            updated.isSourceMode = false
+            updated.errorMessage = error.localizedDescription
+            articleSourceStates[article.id] = updated
+            sourceAlertMessage = "Failed to load source HTML: \(error.localizedDescription)"
+        }
+    }
+
+    private func createGhostwriterClient() async throws -> GhostwriterClient {
+        guard let url = try await settingsRepository.getGhostwriterURL(), !url.isEmpty else {
+            throw SourceModeError.notConfigured
+        }
+        let apiKey = try await settingsRepository.getGhostwriterAPIKey()
+        return try GhostwriterClient(baseURLString: url, apiKey: apiKey)
+    }
+
+    @MainActor
+    private func resolveRemoteArticleID(
+        for article: DigestArticle,
+        digestId: String,
+        client: GhostwriterClient
+    ) async throws -> String {
+        if let cached = remoteArticleIdByLocalId[article.id] {
+            return cached
+        }
+
+        let remoteArticles: [DigestArticleResponse]
+        if let cachedArticles = remoteArticlesByDigestId[digestId] {
+            remoteArticles = cachedArticles
+        } else {
+            let response = try await client.getDigestArticles(id: digestId)
+            remoteArticles = response.articles
+            remoteArticlesByDigestId[digestId] = response.articles
+        }
+
+        let normalizedURL = article.originalUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedTitle = article.title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let matched =
+            remoteArticles.first { candidate in
+                candidate.url.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedURL &&
+                    candidate.title.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedTitle
+            } ??
+            remoteArticles.first { candidate in
+                candidate.url.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedURL
+            } ??
+            remoteArticles.first { candidate in
+                candidate.title.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedTitle
+            }
+
+        guard let matched else {
+            throw SourceModeError.articleNotFound
+        }
+
+        remoteArticleIdByLocalId[article.id] = matched.id
+        return matched.id
+    }
+
     // MARK: - Navigation
 
     private func goToNextPage() {
@@ -569,6 +741,20 @@ struct EinkReaderView: View {
     private func goToPreviousPage() {
         if currentPage > 0 {
             currentPage -= 1
+        }
+    }
+}
+
+private enum SourceModeError: LocalizedError {
+    case notConfigured
+    case articleNotFound
+
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured:
+            return "Ghostwriter is not configured on this device."
+        case .articleNotFound:
+            return "Could not match this article with a server-side source record."
         }
     }
 }
