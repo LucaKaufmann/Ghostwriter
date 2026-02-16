@@ -350,9 +350,50 @@ public actor GhostwriterClient {
         return try await get(path: "/media/podcasts")
     }
 
+    /// Create a podcast feed.
+    public func createPodcastFeed(_ request: MediaFeedCreateRequest) async throws -> MediaFeedResponse {
+        return try await post(path: "/media/podcasts", body: request)
+    }
+
+    /// Update a podcast feed.
+    public func updatePodcastFeed(
+        feedId: String,
+        request: MediaFeedUpdateRequest
+    ) async throws -> MediaFeedResponse {
+        return try await put(path: "/media/podcasts/\(feedId)", body: request)
+    }
+
+    /// Delete a podcast feed.
+    public func deletePodcastFeed(feedId: String) async throws -> StatusMessageResponse {
+        return try await delete(path: "/media/podcasts/\(feedId)")
+    }
+
     /// List configured YouTube feeds.
     public func getYouTubeFeeds() async throws -> [MediaFeedResponse] {
         return try await get(path: "/media/youtube")
+    }
+
+    /// Resolve a YouTube channel URL to RSS feed URL.
+    public func resolveYouTubeFeed(url: String) async throws -> YouTubeResolveResponse {
+        return try await post(path: "/media/youtube/resolve", body: YouTubeResolveRequest(url: url))
+    }
+
+    /// Create a YouTube feed.
+    public func createYouTubeFeed(_ request: MediaFeedCreateRequest) async throws -> MediaFeedResponse {
+        return try await post(path: "/media/youtube", body: request)
+    }
+
+    /// Update a YouTube feed.
+    public func updateYouTubeFeed(
+        feedId: String,
+        request: MediaFeedUpdateRequest
+    ) async throws -> MediaFeedResponse {
+        return try await put(path: "/media/youtube/\(feedId)", body: request)
+    }
+
+    /// Delete a YouTube feed.
+    public func deleteYouTubeFeed(feedId: String) async throws -> StatusMessageResponse {
+        return try await delete(path: "/media/youtube/\(feedId)")
     }
 
     /// List all podcast items (summary view).
@@ -363,6 +404,11 @@ public actor GhostwriterClient {
     /// List all YouTube items (summary view).
     public func getAllYouTubeItems() async throws -> [MediaItemSummaryResponse] {
         return try await get(path: "/media/youtube/items/all")
+    }
+
+    /// Fetch a full media item by ID including transcript/content.
+    public func getMediaItem(id: String) async throws -> MediaItemResponse {
+        return try await get(path: "/media/items/\(id)")
     }
 
     /// Get media processing status.
@@ -380,6 +426,23 @@ public actor GhostwriterClient {
     /// List available server log files.
     public func getLogFiles() async throws -> [LogFileInfoResponse] {
         return try await get(path: "/logs")
+    }
+
+    // MARK: - Auth Tokens
+
+    /// List auth API tokens for current user (JWT required).
+    public func listAuthTokens() async throws -> [AuthAPITokenResponse] {
+        return try await get(path: "/auth/tokens")
+    }
+
+    /// Create a new auth API token (JWT required).
+    public func createAuthToken(name: String) async throws -> AuthAPITokenCreateResponse {
+        return try await post(path: "/auth/tokens", body: AuthAPITokenCreateRequest(name: name))
+    }
+
+    /// Revoke an auth API token (JWT required).
+    public func revokeAuthToken(id: String) async throws -> StatusMessageResponse {
+        return try await delete(path: "/auth/tokens/\(id)")
     }
     
     // MARK: - Private Helpers

@@ -6,6 +6,9 @@ import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigUpdateRequest
 import com.example.epilogue.data.remote.ghostwriter.ClearSeenResponse
 import com.example.epilogue.data.remote.ghostwriter.SyncResponse
+import com.example.epilogue.data.remote.ghostwriter.AuthApiTokenCreateRequest
+import com.example.epilogue.data.remote.ghostwriter.AuthApiTokenCreateResponse
+import com.example.epilogue.data.remote.ghostwriter.AuthApiTokenResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestArticleSourceResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestArticlesResponse
@@ -19,7 +22,10 @@ import com.example.epilogue.data.remote.ghostwriter.FeedSyncResponse
 import com.example.epilogue.data.remote.ghostwriter.GhostwriterApi
 import com.example.epilogue.data.remote.ghostwriter.HeartbeatResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaFeedCreateRequest
 import com.example.epilogue.data.remote.ghostwriter.MediaFeedResponse
+import com.example.epilogue.data.remote.ghostwriter.MediaFeedUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.MediaItemResponse
 import com.example.epilogue.data.remote.ghostwriter.MediaItemSummaryResponse
 import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.MediaTriggerResponse
@@ -27,6 +33,9 @@ import com.example.epilogue.data.remote.ghostwriter.PreviewResponse
 import com.example.epilogue.data.remote.ghostwriter.LogFileInfoResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.StatusMessageResponse
+import com.example.epilogue.data.remote.ghostwriter.YouTubeResolveRequest
+import com.example.epilogue.data.remote.ghostwriter.YouTubeResolveResponse
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -619,6 +628,9 @@ class GhostwriterRepository @Inject constructor(
      * @param includePodcastsInDigest Include completed podcast transcripts in digest generation
      * @param includeYoutubeInDigest Include completed YouTube transcripts in digest generation
      * @param coverEnabled Enable AI cover generation
+     * @param coverProvider Cover generation provider identifier
+     * @param coverQuality Cover quality level
+     * @param coverPrompt Additional cover generation prompt text
      * @param coverOverlayEnabled Enable deterministic metadata overlay on generated covers
      * @param clientUpdatedAt Client's last known server timestamp for conflict detection
      */
@@ -637,6 +649,9 @@ class GhostwriterRepository @Inject constructor(
         includePodcastsInDigest: Boolean? = null,
         includeYoutubeInDigest: Boolean? = null,
         coverEnabled: Boolean? = null,
+        coverProvider: String? = null,
+        coverQuality: String? = null,
+        coverPrompt: String? = null,
         coverOverlayEnabled: Boolean? = null,
         clientUpdatedAt: String? = null
     ): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
@@ -658,6 +673,9 @@ class GhostwriterRepository @Inject constructor(
                 includePodcastsInDigest = includePodcastsInDigest,
                 includeYoutubeInDigest = includeYoutubeInDigest,
                 coverEnabled = coverEnabled,
+                coverProvider = coverProvider,
+                coverQuality = coverQuality,
+                coverPrompt = coverPrompt,
                 coverOverlayEnabled = coverOverlayEnabled,
                 clientUpdatedAt = clientUpdatedAt
             )
@@ -794,6 +812,98 @@ class GhostwriterRepository @Inject constructor(
     }
 
     /**
+     * Create a podcast feed.
+     */
+    suspend fun createPodcastFeed(
+        url: String,
+        title: String,
+        mode: String = "raw",
+        maxItems: Int = 5,
+        isActive: Boolean = true
+    ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = MediaFeedCreateRequest(
+                feedType = "podcast",
+                url = url,
+                title = title,
+                isActive = isActive,
+                mode = mode,
+                maxItems = maxItems
+            )
+            val response = api.createPodcastFeed(getAuthHeader(), request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to create podcast feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Create podcast feed failed", e)
+            GhostwriterResult.Error("Failed to create podcast feed: ${e.message}")
+        }
+    }
+
+    /**
+     * Update a podcast feed.
+     */
+    suspend fun updatePodcastFeed(
+        feedId: String,
+        title: String? = null,
+        isActive: Boolean? = null,
+        mode: String? = null,
+        maxItems: Int? = null
+    ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = MediaFeedUpdateRequest(
+                title = title,
+                isActive = isActive,
+                mode = mode,
+                maxItems = maxItems
+            )
+            val response = api.updatePodcastFeed(getAuthHeader(), feedId, request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to update podcast feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Update podcast feed failed", e)
+            GhostwriterResult.Error("Failed to update podcast feed: ${e.message}")
+        }
+    }
+
+    /**
+     * Delete a podcast feed.
+     */
+    suspend fun deletePodcastFeed(feedId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.deletePodcastFeed(getAuthHeader(), feedId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to delete podcast feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Delete podcast feed failed", e)
+            GhostwriterResult.Error("Failed to delete podcast feed: ${e.message}")
+        }
+    }
+
+    /**
      * List configured YouTube feeds.
      */
     suspend fun getYouTubeFeeds(): GhostwriterResult<List<MediaFeedResponse>> = withContext(Dispatchers.IO) {
@@ -812,6 +922,122 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Get YouTube feeds failed", e)
             GhostwriterResult.Error("Failed to load YouTube feeds: ${e.message}")
+        }
+    }
+
+    /**
+     * Resolve a YouTube channel URL to RSS URL.
+     */
+    suspend fun resolveYouTubeFeed(url: String): GhostwriterResult<YouTubeResolveResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.resolveYouTubeFeed(getAuthHeader(), YouTubeResolveRequest(url))
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to resolve YouTube URL: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Resolve YouTube feed failed", e)
+            GhostwriterResult.Error("Failed to resolve YouTube URL: ${e.message}")
+        }
+    }
+
+    /**
+     * Create a YouTube feed.
+     */
+    suspend fun createYouTubeFeed(
+        url: String,
+        resolvedFeedUrl: String? = null,
+        title: String,
+        mode: String = "raw",
+        maxItems: Int = 5,
+        isActive: Boolean = true
+    ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = MediaFeedCreateRequest(
+                feedType = "youtube",
+                url = url,
+                resolvedFeedUrl = resolvedFeedUrl,
+                title = title,
+                isActive = isActive,
+                mode = mode,
+                maxItems = maxItems
+            )
+            val response = api.createYouTubeFeed(getAuthHeader(), request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to create YouTube feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Create YouTube feed failed", e)
+            GhostwriterResult.Error("Failed to create YouTube feed: ${e.message}")
+        }
+    }
+
+    /**
+     * Update a YouTube feed.
+     */
+    suspend fun updateYouTubeFeed(
+        feedId: String,
+        title: String? = null,
+        isActive: Boolean? = null,
+        mode: String? = null,
+        maxItems: Int? = null
+    ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val request = MediaFeedUpdateRequest(
+                title = title,
+                isActive = isActive,
+                mode = mode,
+                maxItems = maxItems
+            )
+            val response = api.updateYouTubeFeed(getAuthHeader(), feedId, request)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to update YouTube feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Update YouTube feed failed", e)
+            GhostwriterResult.Error("Failed to update YouTube feed: ${e.message}")
+        }
+    }
+
+    /**
+     * Delete a YouTube feed.
+     */
+    suspend fun deleteYouTubeFeed(feedId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.deleteYouTubeFeed(getAuthHeader(), feedId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to delete YouTube feed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Delete YouTube feed failed", e)
+            GhostwriterResult.Error("Failed to delete YouTube feed: ${e.message}")
         }
     }
 
@@ -856,6 +1082,28 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Get YouTube items failed", e)
             GhostwriterResult.Error("Failed to load YouTube items: ${e.message}")
+        }
+    }
+
+    /**
+     * Get full media item details with transcript body.
+     */
+    suspend fun getMediaItem(itemId: String): GhostwriterResult<MediaItemResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.getMediaItem(getAuthHeader(), itemId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to load media item: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get media item failed", e)
+            GhostwriterResult.Error("Failed to load media item: ${e.message}")
         }
     }
 
@@ -922,6 +1170,69 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Get log files failed", e)
             GhostwriterResult.Error("Failed to list log files: ${e.message}")
+        }
+    }
+
+    /**
+     * List auth API tokens for current JWT-authenticated user.
+     */
+    suspend fun listAuthTokens(): GhostwriterResult<List<AuthApiTokenResponse>> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+        try {
+            val response = api.listAuthTokens(getAuthHeader())
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to list auth tokens: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "List auth tokens failed", e)
+            GhostwriterResult.Error("Failed to list auth tokens: ${e.message}")
+        }
+    }
+
+    /**
+     * Create a new auth API token for current JWT-authenticated user.
+     */
+    suspend fun createAuthToken(name: String): GhostwriterResult<AuthApiTokenCreateResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+        try {
+            val response = api.createAuthToken(getAuthHeader(), AuthApiTokenCreateRequest(name))
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to create auth token: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Create auth token failed", e)
+            GhostwriterResult.Error("Failed to create auth token: ${e.message}")
+        }
+    }
+
+    /**
+     * Revoke an existing auth API token.
+     */
+    suspend fun revokeAuthToken(tokenId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+        try {
+            val response = api.revokeAuthToken(getAuthHeader(), tokenId)
+            if (response.isSuccessful && response.body() != null) {
+                GhostwriterResult.Success(response.body()!!)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Failed to revoke auth token: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Revoke auth token failed", e)
+            GhostwriterResult.Error("Failed to revoke auth token: ${e.message}")
         }
     }
 }

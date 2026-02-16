@@ -78,6 +78,94 @@ public struct MediaFeedResponse: Codable, Sendable {
     }
 }
 
+/// Request model for creating a media feed.
+public struct MediaFeedCreateRequest: Codable, Sendable {
+    public let feedType: String
+    public let url: String
+    public let resolvedFeedURL: String?
+    public let title: String
+    public let isActive: Bool
+    public let mode: String
+    public let maxItems: Int
+
+    public init(
+        feedType: String,
+        url: String,
+        resolvedFeedURL: String? = nil,
+        title: String,
+        isActive: Bool = true,
+        mode: String = "raw",
+        maxItems: Int = 5
+    ) {
+        self.feedType = feedType
+        self.url = url
+        self.resolvedFeedURL = resolvedFeedURL
+        self.title = title
+        self.isActive = isActive
+        self.mode = mode
+        self.maxItems = maxItems
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case feedType = "feed_type"
+        case url
+        case resolvedFeedURL = "resolved_feed_url"
+        case title
+        case isActive = "is_active"
+        case mode
+        case maxItems = "max_items"
+    }
+}
+
+/// Request model for partially updating a media feed.
+public struct MediaFeedUpdateRequest: Codable, Sendable {
+    public let title: String?
+    public let isActive: Bool?
+    public let mode: String?
+    public let maxItems: Int?
+
+    public init(
+        title: String? = nil,
+        isActive: Bool? = nil,
+        mode: String? = nil,
+        maxItems: Int? = nil
+    ) {
+        self.title = title
+        self.isActive = isActive
+        self.mode = mode
+        self.maxItems = maxItems
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case isActive = "is_active"
+        case mode
+        case maxItems = "max_items"
+    }
+}
+
+/// Request model for resolving a YouTube channel URL.
+public struct YouTubeResolveRequest: Codable, Sendable {
+    public let url: String
+
+    public init(url: String) {
+        self.url = url
+    }
+}
+
+/// Response model from YouTube URL resolve endpoint.
+public struct YouTubeResolveResponse: Codable, Sendable {
+    public let rssFeedURL: String
+    public let channelID: String
+    public let channelTitle: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rssFeedURL = "rss_feed_url"
+        case channelID = "channel_id"
+        case channelTitle = "channel_title"
+    }
+}
+
 /// Media processing queue status.
 public struct MediaProcessingStatusResponse: Codable, Sendable {
     public let isRunning: Bool
@@ -144,6 +232,53 @@ public struct MediaItemSummaryResponse: Codable, Sendable {
     }
 }
 
+/// Full media item payload including transcript/content body.
+public struct MediaItemResponse: Codable, Sendable {
+    public let id: String
+    public let mediaFeedID: String
+    public let guid: String
+    public let url: String
+    public let contentURL: String?
+    public let title: String
+    public let author: String?
+    public let content: String
+    public let contentType: String
+    public let mode: String
+    public let wordCount: Int
+    public let isSummary: Bool
+    public let aiFailed: Bool
+    public let processingMs: Int
+    public let status: String
+    public let errorMessage: String?
+    public let consumedAt: String?
+    public let consumedDigestID: String?
+    public let createdAt: String
+    public let completedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case mediaFeedID = "media_feed_id"
+        case guid
+        case url
+        case contentURL = "content_url"
+        case title
+        case author
+        case content
+        case contentType = "content_type"
+        case mode
+        case wordCount = "word_count"
+        case isSummary = "is_summary"
+        case aiFailed = "ai_failed"
+        case processingMs = "processing_ms"
+        case status
+        case errorMessage = "error_message"
+        case consumedAt = "consumed_at"
+        case consumedDigestID = "consumed_digest_id"
+        case createdAt = "created_at"
+        case completedAt = "completed_at"
+    }
+}
+
 /// Server log file metadata.
 public struct LogFileInfoResponse: Codable, Sendable {
     public let filename: String
@@ -155,6 +290,57 @@ public struct LogFileInfoResponse: Codable, Sendable {
         case sizeBytes = "size_bytes"
         case modifiedAt = "modified_at"
     }
+}
+
+/// Auth API token model from /auth/tokens list endpoint.
+public struct AuthAPITokenResponse: Codable, Sendable {
+    public let id: String
+    public let name: String
+    public let tokenPrefix: String
+    public let createdAt: String
+    public let lastUsedAt: String?
+    public let revokedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case tokenPrefix = "token_prefix"
+        case createdAt = "created_at"
+        case lastUsedAt = "last_used_at"
+        case revokedAt = "revoked_at"
+    }
+}
+
+/// Request model for creating an auth API token.
+public struct AuthAPITokenCreateRequest: Codable, Sendable {
+    public let name: String
+
+    public init(name: String) {
+        self.name = name
+    }
+}
+
+/// Response model for creating an auth API token.
+public struct AuthAPITokenCreateResponse: Codable, Sendable {
+    public let id: String
+    public let name: String
+    public let token: String
+    public let tokenPrefix: String
+    public let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case token
+        case tokenPrefix = "token_prefix"
+        case createdAt = "created_at"
+    }
+}
+
+/// Generic status/message response.
+public struct StatusMessageResponse: Codable, Sendable {
+    public let status: String
+    public let message: String?
 }
 
 /// Response model for client configuration (shared settings)
@@ -248,6 +434,9 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
     public let includePodcastsInDigest: Bool?
     public let includeYoutubeInDigest: Bool?
     public let coverEnabled: Bool?
+    public let coverProvider: String?
+    public let coverQuality: String?
+    public let coverPrompt: String?
     public let coverOverlayEnabled: Bool?
     public let clientUpdatedAt: String?
 
@@ -266,6 +455,9 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         includePodcastsInDigest: Bool? = nil,
         includeYoutubeInDigest: Bool? = nil,
         coverEnabled: Bool? = nil,
+        coverProvider: String? = nil,
+        coverQuality: String? = nil,
+        coverPrompt: String? = nil,
         coverOverlayEnabled: Bool? = nil,
         clientUpdatedAt: String? = nil
     ) {
@@ -283,6 +475,9 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         self.includePodcastsInDigest = includePodcastsInDigest
         self.includeYoutubeInDigest = includeYoutubeInDigest
         self.coverEnabled = coverEnabled
+        self.coverProvider = coverProvider
+        self.coverQuality = coverQuality
+        self.coverPrompt = coverPrompt
         self.coverOverlayEnabled = coverOverlayEnabled
         self.clientUpdatedAt = clientUpdatedAt
     }
@@ -302,6 +497,9 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         case includePodcastsInDigest = "include_podcasts_in_digest"
         case includeYoutubeInDigest = "include_youtube_in_digest"
         case coverEnabled = "cover_enabled"
+        case coverProvider = "cover_provider"
+        case coverQuality = "cover_quality"
+        case coverPrompt = "cover_prompt"
         case coverOverlayEnabled = "cover_overlay_enabled"
         case clientUpdatedAt = "client_updated_at"
     }

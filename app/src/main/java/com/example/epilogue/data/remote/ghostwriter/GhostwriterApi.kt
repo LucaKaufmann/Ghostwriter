@@ -257,12 +257,77 @@ interface GhostwriterApi {
     ): Response<List<MediaFeedResponse>>
 
     /**
+     * Create a podcast feed.
+     */
+    @POST("media/podcasts")
+    suspend fun createPodcastFeed(
+        @Header("Authorization") authorization: String?,
+        @Body request: MediaFeedCreateRequest
+    ): Response<MediaFeedResponse>
+
+    /**
+     * Update a podcast feed.
+     */
+    @PUT("media/podcasts/{feedId}")
+    suspend fun updatePodcastFeed(
+        @Header("Authorization") authorization: String?,
+        @Path("feedId") feedId: String,
+        @Body request: MediaFeedUpdateRequest
+    ): Response<MediaFeedResponse>
+
+    /**
+     * Delete a podcast feed.
+     */
+    @DELETE("media/podcasts/{feedId}")
+    suspend fun deletePodcastFeed(
+        @Header("Authorization") authorization: String?,
+        @Path("feedId") feedId: String
+    ): Response<StatusMessageResponse>
+
+    /**
      * List configured YouTube feeds.
      */
     @GET("media/youtube")
     suspend fun listYouTubeFeeds(
         @Header("Authorization") authorization: String?
     ): Response<List<MediaFeedResponse>>
+
+    /**
+     * Resolve a YouTube channel URL to RSS feed URL.
+     */
+    @POST("media/youtube/resolve")
+    suspend fun resolveYouTubeFeed(
+        @Header("Authorization") authorization: String?,
+        @Body request: YouTubeResolveRequest
+    ): Response<YouTubeResolveResponse>
+
+    /**
+     * Create a YouTube feed.
+     */
+    @POST("media/youtube")
+    suspend fun createYouTubeFeed(
+        @Header("Authorization") authorization: String?,
+        @Body request: MediaFeedCreateRequest
+    ): Response<MediaFeedResponse>
+
+    /**
+     * Update a YouTube feed.
+     */
+    @PUT("media/youtube/{feedId}")
+    suspend fun updateYouTubeFeed(
+        @Header("Authorization") authorization: String?,
+        @Path("feedId") feedId: String,
+        @Body request: MediaFeedUpdateRequest
+    ): Response<MediaFeedResponse>
+
+    /**
+     * Delete a YouTube feed.
+     */
+    @DELETE("media/youtube/{feedId}")
+    suspend fun deleteYouTubeFeed(
+        @Header("Authorization") authorization: String?,
+        @Path("feedId") feedId: String
+    ): Response<StatusMessageResponse>
 
     /**
      * List all podcast items with processing status.
@@ -279,6 +344,15 @@ interface GhostwriterApi {
     suspend fun listAllYouTubeItems(
         @Header("Authorization") authorization: String?
     ): Response<List<MediaItemSummaryResponse>>
+
+    /**
+     * Get full media item details with transcript/content.
+     */
+    @GET("media/items/{itemId}")
+    suspend fun getMediaItem(
+        @Header("Authorization") authorization: String?,
+        @Path("itemId") itemId: String
+    ): Response<MediaItemResponse>
 
     /**
      * Get media processing queue status.
@@ -315,4 +389,32 @@ interface GhostwriterApi {
         @Header("Authorization") authorization: String?,
         @Path("filename") filename: String
     ): Response<ResponseBody>
+
+    // ===== Auth Tokens =====
+
+    /**
+     * List auth API tokens for the current user (JWT required).
+     */
+    @GET("auth/tokens")
+    suspend fun listAuthTokens(
+        @Header("Authorization") authorization: String?
+    ): Response<List<AuthApiTokenResponse>>
+
+    /**
+     * Create an auth API token (JWT required).
+     */
+    @POST("auth/tokens")
+    suspend fun createAuthToken(
+        @Header("Authorization") authorization: String?,
+        @Body request: AuthApiTokenCreateRequest
+    ): Response<AuthApiTokenCreateResponse>
+
+    /**
+     * Revoke an auth API token (JWT required).
+     */
+    @DELETE("auth/tokens/{tokenId}")
+    suspend fun revokeAuthToken(
+        @Header("Authorization") authorization: String?,
+        @Path("tokenId") tokenId: String
+    ): Response<StatusMessageResponse>
 }
