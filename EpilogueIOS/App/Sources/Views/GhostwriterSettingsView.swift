@@ -13,6 +13,7 @@ import GhostwriterClient
 /// Settings view for configuring Ghostwriter sync
 struct GhostwriterSettingsView: View {
     @EnvironmentObject private var coordinator: GhostwriterSyncCoordinator
+    @Environment(\.openURL) private var openURL
     @StateObject private var viewModel: GhostwriterSettingsViewModel
     @State private var showingAPIKeyAlert = false
 
@@ -202,6 +203,18 @@ struct GhostwriterSettingsView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
+                        HStack(spacing: 12) {
+                            Button("Preview") {
+                                Task { await viewModel.previewWallabag() }
+                            }
+                            .disabled(viewModel.integrationActionRunning)
+
+                            Button("Clear Seen") {
+                                Task { await viewModel.clearWallabagSeen() }
+                            }
+                            .disabled(viewModel.integrationActionRunning)
+                        }
+                        .buttonStyle(.bordered)
                     }
 
                     if let newsletters = viewModel.newslettersIntegration {
@@ -222,6 +235,28 @@ struct GhostwriterSettingsView: View {
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
+                            HStack(spacing: 12) {
+                                Button("Connect") {
+                                    if let url = viewModel.newsletterOAuthStartURL() {
+                                        openURL(url)
+                                    } else {
+                                        viewModel.integrationActionMessage = "Set a valid server URL first."
+                                    }
+                                }
+                                .disabled(viewModel.integrationActionRunning)
+
+                                Button("Preview") {
+                                    Task { await viewModel.previewNewsletters() }
+                                }
+                                .disabled(viewModel.integrationActionRunning)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Clear Seen") {
+                                Task { await viewModel.clearNewslettersSeen() }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(viewModel.integrationActionRunning)
                         }
                     }
                 }
@@ -238,6 +273,16 @@ struct GhostwriterSettingsView: View {
             }
         } message: {
             Text("Enter your Ghostwriter API token")
+        }
+        .alert("Integrations", isPresented: Binding(
+            get: { viewModel.integrationActionMessage != nil },
+            set: { if !$0 { viewModel.integrationActionMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                viewModel.integrationActionMessage = nil
+            }
+        } message: {
+            Text(viewModel.integrationActionMessage ?? "")
         }
         .task {
             await viewModel.load()
@@ -287,6 +332,8 @@ class GhostwriterSettingsViewModel: ObservableObject {
     @Published var serverSchedule: GhostwriterSchedule?
     @Published var wallabagIntegration: IntegrationStatus?
     @Published var newslettersIntegration: IntegrationStatus?
+    @Published var integrationActionMessage: String?
+    @Published var integrationActionRunning = false
     @Published var lastSyncTime: Date?
     @Published var isTesting = false
     @Published var isSyncing = false
@@ -446,6 +493,76 @@ class GhostwriterSettingsViewModel: ObservableObject {
         } catch {
             // Ignore integration status errors
         }
+    }
+
+    func newsletterOAuthStartURL() -> URL? {
+        let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let base = URL(string: trimmed) else { return nil }
+        if base.pathComponents.contains("api") {
+            return base.appendingPathComponent("newsletters/oauth/start")
+        }
+        return base.appendingPathComponent("api/newsletters/oauth/start")
+    }
+
+    func previewWallabag() async {
+        await runIntegrationAction {
+            let client = try await self.createClient()
+            let response = try await client.previewWallabag()
+            return self.formatPreviewMessage(source: "Wallabag", response: response)
+        }
+    }
+
+    func previewNewsletters() async {
+        await runIntegrationAction {
+            let client = try await self.createClient()
+            let response = try await client.previewNewsletters()
+            return self.formatPreviewMessage(source: "Newsletters", response: response)
+        }
+    }
+
+    func clearWallabagSeen() async {
+        await runIntegrationAction {
+            let client = try await self.createClient()
+            let response = try await client.clearWallabagSeen()
+            return "Cleared \(response.cleared) Wallabag seen markers"
+        }
+    }
+
+    func clearNewslettersSeen() async {
+        await runIntegrationAction {
+            let client = try await self.createClient()
+            let response = try await client.clearNewsletterSeen()
+            return "Cleared \(response.cleared) newsletter seen markers"
+        }
+    }
+
+    private func runIntegrationAction(_ operation: () async throws -> String) async {
+        guard !integrationActionRunning else { return }
+        integrationActionRunning = true
+        defer { integrationActionRunning = false }
+
+        do {
+            integrationActionMessage = try await operation()
+            await fetchIntegrationStatus()
+        } catch {
+            integrationActionMessage = error.localizedDescription
+        }
+    }
+
+    private func createClient() async throws -> GhostwriterClient {
+        guard !serverURL.isEmpty else {
+            throw GhostwriterError.invalidURL("Missing Ghostwriter server URL")
+        }
+        let apiKey = try await settingsRepository.getGhostwriterAPIKey()
+        return try GhostwriterClient(baseURLString: serverURL, apiKey: apiKey)
+    }
+
+    private func formatPreviewMessage(source: String, response: PreviewResponse) -> String {
+        if response.status == "ok" {
+            let count = response.count ?? response.articles?.count ?? 0
+            return "\(source) preview: \(count) article\(count == 1 ? "" : "s") available"
+        }
+        return response.detail ?? "\(source) preview failed"
     }
 }
 

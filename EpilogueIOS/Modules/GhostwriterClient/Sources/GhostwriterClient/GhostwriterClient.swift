@@ -315,6 +315,33 @@ public actor GhostwriterClient {
     public func updateConfig(_ request: ClientConfigUpdateRequest) async throws -> ClientConfigResponse {
         return try await put(path: "/config", body: request)
     }
+
+    // MARK: - Integrations
+
+    /// Preview Wallabag items without marking them as read.
+    public func previewWallabag() async throws -> PreviewResponse {
+        return try await post(path: "/config/wallabag/preview", body: EmptyRequest())
+    }
+
+    /// Preview newsletter items without marking them as read.
+    public func previewNewsletters() async throws -> PreviewResponse {
+        return try await post(path: "/newsletters/preview", body: EmptyRequest())
+    }
+
+    /// Clear seen markers for Wallabag synthetic feed.
+    public func clearWallabagSeen() async throws -> ClearSeenResponse {
+        return try await post(path: "/config/wallabag/clear-seen", body: EmptyRequest())
+    }
+
+    /// Clear seen markers for newsletters synthetic feed.
+    public func clearNewsletterSeen() async throws -> ClearSeenResponse {
+        return try await post(path: "/config/newsletters/clear-seen", body: EmptyRequest())
+    }
+
+    /// Build the browser URL used to start newsletter OAuth.
+    public func newsletterOAuthStartURL() -> URL {
+        baseURL.appendingPathComponent("newsletters/oauth/start")
+    }
     
     // MARK: - Private Helpers
     

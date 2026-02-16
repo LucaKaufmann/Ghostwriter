@@ -21,6 +21,34 @@ public struct IntegrationStatus: Codable, Sendable {
     }
 }
 
+/// Preview article for integration previews.
+public struct PreviewArticleResponse: Codable, Sendable {
+    public let title: String
+    public let url: String
+    public let author: String?
+    public let wordCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case url
+        case author
+        case wordCount = "word_count"
+    }
+}
+
+/// Generic preview response for Wallabag/Newsletters.
+public struct PreviewResponse: Codable, Sendable {
+    public let status: String
+    public let count: Int?
+    public let articles: [PreviewArticleResponse]?
+    public let detail: String?
+}
+
+/// Response for clear-seen endpoints.
+public struct ClearSeenResponse: Codable, Sendable {
+    public let cleared: Int
+}
+
 /// Response model for client configuration (shared settings)
 public struct ClientConfigResponse: Codable, Sendable {
     public let minWordCount: Int?
