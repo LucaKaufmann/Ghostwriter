@@ -6,6 +6,10 @@ plugins {
 
 kotlin {
     androidTarget()
+    iosX64()
+    iosArm64()
+    iosSimulatorArm64()
+    applyDefaultHierarchyTemplate()
 
     sourceSets {
         val commonMain by getting {
@@ -31,6 +35,12 @@ kotlin {
         val androidMain by getting {
             dependencies {
                 implementation("io.ktor:ktor-client-okhttp:2.3.12")
+            }
+        }
+
+        val iosMain by getting {
+            dependencies {
+                implementation("io.ktor:ktor-client-darwin:2.3.12")
             }
         }
     }
