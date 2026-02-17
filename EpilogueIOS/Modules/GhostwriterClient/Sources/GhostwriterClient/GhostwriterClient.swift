@@ -410,6 +410,12 @@ public actor GhostwriterClient {
     /// Delete a feed by URL
     /// - Parameter url: The feed URL to delete
     public func deleteFeed(byURL url: String) async throws {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            try await sharedHandle.client.deleteFeedByUrl(feedUrl: url)
+            return
+        }
+#endif
         guard let encodedURL = url.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw GhostwriterError.invalidURL(url)
         }
