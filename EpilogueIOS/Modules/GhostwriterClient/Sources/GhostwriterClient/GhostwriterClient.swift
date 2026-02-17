@@ -163,6 +163,117 @@ public actor GhostwriterClient {
     ///   - knownDigestIds: List of digest IDs the client already has (excluded from response)
     /// - Returns: Combined sync response
     public func performSync(feedSince: Date? = nil, knownDigestIds: [String] = []) async throws -> SyncResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            let feedSinceString = feedSince.map { formatter.string(from: $0) }
+            let digestIds = knownDigestIds.isEmpty ? nil : knownDigestIds.joined(separator: ",")
+            let sharedResponse = try await sharedHandle.client.performSync(
+                feedSince: feedSinceString,
+                digestIds: digestIds
+            )
+
+            let config = ClientConfigResponse(
+                minWordCount: sharedResponse.config.minWordCount.map { Int(truncating: $0) },
+                morningHour: sharedResponse.config.morningHour.map { Int(truncating: $0) },
+                morningMinute: sharedResponse.config.morningMinute.map { Int(truncating: $0) },
+                noonHour: sharedResponse.config.noonHour.map { Int(truncating: $0) },
+                noonMinute: sharedResponse.config.noonMinute.map { Int(truncating: $0) },
+                eveningHour: sharedResponse.config.eveningHour.map { Int(truncating: $0) },
+                eveningMinute: sharedResponse.config.eveningMinute.map { Int(truncating: $0) },
+                timezone: sharedResponse.config.timezone,
+                aiProvider: nil,
+                aiModel: nil,
+                scheduleMorning: sharedResponse.config.scheduleMorning,
+                scheduleNoon: sharedResponse.config.scheduleNoon,
+                scheduleEvening: sharedResponse.config.scheduleEvening,
+                whisperProvider: sharedResponse.config.whisperProvider,
+                whisperModel: sharedResponse.config.whisperModel,
+                whisperTimeoutMinutes: sharedResponse.config.whisperTimeoutMinutes.map { Int(truncating: $0) },
+                mediaProcessingIntervalHours: sharedResponse.config.mediaProcessingIntervalHours.map { Int(truncating: $0) },
+                includePodcastsInDigest: sharedResponse.config.includePodcastsInDigest?.boolValue,
+                includeYoutubeInDigest: sharedResponse.config.includeYoutubeInDigest?.boolValue,
+                coverEnabled: sharedResponse.config.coverEnabled?.boolValue,
+                coverProvider: sharedResponse.config.coverProvider,
+                coverQuality: sharedResponse.config.coverQuality,
+                coverPrompt: sharedResponse.config.coverPrompt,
+                coverOverlayEnabled: sharedResponse.config.coverOverlayEnabled?.boolValue,
+                coverOpenAIAPIKey: sharedResponse.config.coverOpenAiApiKey,
+                coverGeminiAPIKey: sharedResponse.config.coverGeminiApiKey,
+                updatedAt: sharedResponse.config.updatedAt,
+                wallabag: sharedResponse.config.wallabag.map { IntegrationStatus(enabled: $0.enabled, label: $0.label) },
+                newsletters: sharedResponse.config.newsletters.map { IntegrationStatus(enabled: $0.enabled, label: $0.label) }
+            )
+
+            let feeds = FeedChangesResponse(
+                feeds: sharedResponse.feeds.feeds.map { feed in
+                    FeedResponse(
+                        id: feed.id,
+                        url: feed.url,
+                        title: feed.title,
+                        isActive: feed.isActive,
+                        mode: feed.mode,
+                        maxArticles: Int(feed.maxArticles),
+                        createdAt: feed.createdAt,
+                        updatedAt: feed.updatedAt,
+                        deletedAt: feed.deletedAt
+                    )
+                },
+                tombstones: sharedResponse.feeds.tombstones.map { tombstone in
+                    FeedTombstone(
+                        url: tombstone.url,
+                        deletedAt: tombstone.deletedAt
+                    )
+                },
+                serverTimestamp: sharedResponse.feeds.serverTimestamp
+            )
+
+            let digests = SyncDigestsSection(
+                newDigests: sharedResponse.digests.newDigests.map { digest in
+                    SyncDigest(
+                        id: digest.id,
+                        filename: digest.filename,
+                        period: digest.period,
+                        status: digest.status,
+                        stage: digest.stage,
+                        articleCount: Int(digest.articleCount),
+                        errorMessage: digest.errorMessage,
+                        createdAt: digest.createdAt,
+                        completedAt: digest.completedAt,
+                        articles: digest.articles.map { article in
+                            DigestArticleResponse(
+                                id: article.id,
+                                title: article.title,
+                                url: article.url,
+                                mode: article.mode,
+                                wordCount: Int(article.wordCount),
+                                content: article.content,
+                                author: article.author,
+                                feedTitle: article.feedTitle,
+                                sortOrder: Int(article.sortOrder),
+                                aiFailed: article.aiFailed
+                            )
+                        }
+                    )
+                }
+            )
+
+            let schedules = sharedResponse.schedules.map { schedule in
+                ScheduleResponse(
+                    id: schedule.id,
+                    period: schedule.period,
+                    hour: Int(schedule.hour),
+                    minute: Int(schedule.minute),
+                    enabled: schedule.enabled,
+                    timezone: schedule.timezone,
+                    nextRunAt: schedule.nextRunAt
+                )
+            }
+
+            return SyncResponse(config: config, feeds: feeds, digests: digests, schedules: schedules)
+        }
+#endif
         var queryItems: [URLQueryItem] = []
         
         if let feedSince = feedSince {
