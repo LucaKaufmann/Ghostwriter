@@ -8,11 +8,13 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 import com.example.epilogue.shared.ghostwriter.ClientConfigResponse as SharedClientConfigResponse
 import com.example.epilogue.shared.ghostwriter.ClientConfigUpdateRequest as SharedClientConfigUpdateRequest
+import com.example.epilogue.shared.ghostwriter.ClientStatusResponse as SharedClientStatusResponse
 import com.example.epilogue.shared.ghostwriter.DigestArticleResponse as SharedDigestArticleResponse
 import com.example.epilogue.shared.ghostwriter.DigestResponse as SharedDigestResponse
 import com.example.epilogue.shared.ghostwriter.FeedChangesResponse as SharedFeedChangesResponse
 import com.example.epilogue.shared.ghostwriter.FeedResponse as SharedFeedResponse
 import com.example.epilogue.shared.ghostwriter.FeedTombstoneResponse as SharedFeedTombstoneResponse
+import com.example.epilogue.shared.ghostwriter.HeartbeatResponse as SharedHeartbeatResponse
 import com.example.epilogue.shared.ghostwriter.IntegrationStatus as SharedIntegrationStatus
 import com.example.epilogue.shared.ghostwriter.ScheduleResponse as SharedScheduleResponse
 import com.example.epilogue.shared.ghostwriter.SyncDigest as SharedSyncDigest
@@ -41,6 +43,22 @@ class SharedGhostwriterAdapter private constructor(
 
     suspend fun updateConfig(request: ClientConfigUpdateRequest): ClientConfigResponse {
         return client.updateConfig(request.toShared()).toApp()
+    }
+
+    suspend fun getConfig(): ClientConfigResponse {
+        return client.getConfig().toApp()
+    }
+
+    suspend fun getClientStatus(): ClientStatusResponse {
+        return client.getClientStatus().toApp()
+    }
+
+    suspend fun sendHeartbeat(): HeartbeatResponse {
+        return client.sendHeartbeat().toApp()
+    }
+
+    suspend fun getSchedules(): List<ScheduleResponse> {
+        return client.listSchedules().map { it.toApp() }
     }
 
     fun close() {
@@ -184,6 +202,22 @@ private fun SharedClientConfigResponse.toApp(): ClientConfigResponse = ClientCon
 private fun SharedIntegrationStatus.toApp(): IntegrationStatus = IntegrationStatus(
     enabled = enabled,
     label = label
+)
+
+private fun SharedClientStatusResponse.toApp(): ClientStatusResponse = ClientStatusResponse(
+    lastHeartbeatAt = lastHeartbeatAt,
+    lastDownloadAt = lastDownloadAt,
+    autoDisableEnabled = autoDisableEnabled,
+    autoDisableAfterDays = autoDisableAfterDays,
+    schedulesAutoDisabled = schedulesAutoDisabled,
+    daysUntilAutoDisable = daysUntilAutoDisable
+)
+
+private fun SharedHeartbeatResponse.toApp(): HeartbeatResponse = HeartbeatResponse(
+    status = status,
+    receivedAt = receivedAt,
+    schedulesActive = schedulesActive,
+    message = message
 )
 
 private fun ClientConfigUpdateRequest.toShared(): SharedClientConfigUpdateRequest = SharedClientConfigUpdateRequest(

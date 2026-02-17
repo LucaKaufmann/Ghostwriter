@@ -500,6 +500,18 @@ class GhostwriterRepository @Inject constructor(
      * Get all schedule configurations.
      */
     suspend fun getSchedules(): GhostwriterResult<List<ScheduleResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getSchedules())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get schedules (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get schedules failed (shared)", e)
+                GhostwriterResult.Error("Failed to get schedules: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -563,6 +575,18 @@ class GhostwriterRepository @Inject constructor(
      * This prevents auto-disable of schedules due to inactivity.
      */
     suspend fun sendHeartbeat(): GhostwriterResult<HeartbeatResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.sendHeartbeat())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Heartbeat failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Heartbeat failed (shared)", e)
+                GhostwriterResult.Error("Heartbeat failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -636,6 +660,18 @@ class GhostwriterRepository @Inject constructor(
      * Get client status including activity tracking info.
      */
     suspend fun getClientStatus(): GhostwriterResult<ClientStatusResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getClientStatus())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get client status (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get client status failed (shared)", e)
+                GhostwriterResult.Error("Failed to get client status: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -660,6 +696,18 @@ class GhostwriterRepository @Inject constructor(
      * Used for syncing settings across devices on app startup.
      */
     suspend fun getConfig(): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getConfig())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get config (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get config failed (shared)", e)
+                GhostwriterResult.Error("Failed to get config: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
