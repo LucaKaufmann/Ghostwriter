@@ -318,6 +318,78 @@ class SharedGhostwriterAdapterTest {
         adapter.close()
     }
 
+    @Test
+    fun getLogFiles_mapsResponse() = runTest {
+        val payload = """
+            [
+              {
+                "filename": "ghostwriter.log",
+                "size_bytes": 1024,
+                "modified_at": "2026-02-17T12:00:00"
+              }
+            ]
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getLogFiles()
+        assertEquals(1, result.size)
+        assertEquals("ghostwriter.log", result.first().filename)
+        assertEquals(1024L, result.first().sizeBytes)
+        adapter.close()
+    }
+
+    @Test
+    fun listAuthTokens_mapsResponse() = runTest {
+        val payload = """
+            [
+              {
+                "id": "t1",
+                "name": "CLI",
+                "token_prefix": "gw_abc",
+                "created_at": "2026-02-17T12:00:00",
+                "last_used_at": null,
+                "revoked_at": null
+              }
+            ]
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.listAuthTokens()
+        assertEquals(1, result.size)
+        assertEquals("t1", result.first().id)
+        assertEquals("gw_abc", result.first().tokenPrefix)
+        adapter.close()
+    }
+
+    @Test
+    fun createAuthToken_mapsResponse() = runTest {
+        val payload = """
+            {
+              "id": "t2",
+              "name": "Mobile",
+              "token": "gw_secret",
+              "token_prefix": "gw_sec",
+              "created_at": "2026-02-17T12:05:00"
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.createAuthToken("Mobile")
+        assertEquals("t2", result.id)
+        assertEquals("gw_secret", result.token)
+        adapter.close()
+    }
+
+    @Test
+    fun revokeAuthToken_mapsResponse() = runTest {
+        val payload = """{"status":"ok","message":"revoked"}"""
+        val adapter = adapterWithJson(payload)
+        val result = adapter.revokeAuthToken("t1")
+        assertEquals("ok", result.status)
+        assertEquals("revoked", result.message)
+        adapter.close()
+    }
+
     private fun adapterWithJson(payload: String): SharedGhostwriterAdapter {
         val engine = MockEngine {
             respond(

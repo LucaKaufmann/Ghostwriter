@@ -10,6 +10,8 @@ import com.example.epilogue.shared.ghostwriter.ClientConfigResponse as SharedCli
 import com.example.epilogue.shared.ghostwriter.ClientConfigUpdateRequest as SharedClientConfigUpdateRequest
 import com.example.epilogue.shared.ghostwriter.ClientStatusResponse as SharedClientStatusResponse
 import com.example.epilogue.shared.ghostwriter.ClearSeenResponse as SharedClearSeenResponse
+import com.example.epilogue.shared.ghostwriter.AuthApiTokenCreateResponse as SharedAuthApiTokenCreateResponse
+import com.example.epilogue.shared.ghostwriter.AuthApiTokenResponse as SharedAuthApiTokenResponse
 import com.example.epilogue.shared.ghostwriter.DigestArticleResponse as SharedDigestArticleResponse
 import com.example.epilogue.shared.ghostwriter.DigestResponse as SharedDigestResponse
 import com.example.epilogue.shared.ghostwriter.FeedChangesResponse as SharedFeedChangesResponse
@@ -17,10 +19,12 @@ import com.example.epilogue.shared.ghostwriter.FeedResponse as SharedFeedRespons
 import com.example.epilogue.shared.ghostwriter.FeedTombstoneResponse as SharedFeedTombstoneResponse
 import com.example.epilogue.shared.ghostwriter.HeartbeatResponse as SharedHeartbeatResponse
 import com.example.epilogue.shared.ghostwriter.IntegrationStatus as SharedIntegrationStatus
+import com.example.epilogue.shared.ghostwriter.LogFileInfoResponse as SharedLogFileInfoResponse
 import com.example.epilogue.shared.ghostwriter.PreviewArticleResponse as SharedPreviewArticleResponse
 import com.example.epilogue.shared.ghostwriter.PreviewResponse as SharedPreviewResponse
 import com.example.epilogue.shared.ghostwriter.ScheduleResponse as SharedScheduleResponse
 import com.example.epilogue.shared.ghostwriter.ScheduleUpdateRequest as SharedScheduleUpdateRequest
+import com.example.epilogue.shared.ghostwriter.StatusMessageResponse as SharedStatusMessageResponse
 import com.example.epilogue.shared.ghostwriter.SyncDigest as SharedSyncDigest
 import com.example.epilogue.shared.ghostwriter.SyncDigestsSection as SharedSyncDigestsSection
 import com.example.epilogue.shared.ghostwriter.SyncResponse as SharedSyncResponse
@@ -86,6 +90,22 @@ class SharedGhostwriterAdapter private constructor(
 
     suspend fun clearNewsletterSeen(): ClearSeenResponse {
         return client.clearNewsletterSeen().toApp()
+    }
+
+    suspend fun getLogFiles(): List<LogFileInfoResponse> {
+        return client.getLogFiles().map { it.toApp() }
+    }
+
+    suspend fun listAuthTokens(): List<AuthApiTokenResponse> {
+        return client.listAuthTokens().map { it.toApp() }
+    }
+
+    suspend fun createAuthToken(name: String): AuthApiTokenCreateResponse {
+        return client.createAuthToken(name).toApp()
+    }
+
+    suspend fun revokeAuthToken(id: String): StatusMessageResponse {
+        return client.revokeAuthToken(id).toApp()
     }
 
     fun close() {
@@ -270,6 +290,34 @@ private fun SharedPreviewArticleResponse.toApp(): PreviewArticleResponse = Previ
 
 private fun SharedClearSeenResponse.toApp(): ClearSeenResponse = ClearSeenResponse(
     cleared = cleared
+)
+
+private fun SharedLogFileInfoResponse.toApp(): LogFileInfoResponse = LogFileInfoResponse(
+    filename = filename,
+    sizeBytes = sizeBytes,
+    modifiedAt = modifiedAt
+)
+
+private fun SharedAuthApiTokenResponse.toApp(): AuthApiTokenResponse = AuthApiTokenResponse(
+    id = id,
+    name = name,
+    tokenPrefix = tokenPrefix,
+    createdAt = createdAt,
+    lastUsedAt = lastUsedAt,
+    revokedAt = revokedAt
+)
+
+private fun SharedAuthApiTokenCreateResponse.toApp(): AuthApiTokenCreateResponse = AuthApiTokenCreateResponse(
+    id = id,
+    name = name,
+    token = token,
+    tokenPrefix = tokenPrefix,
+    createdAt = createdAt
+)
+
+private fun SharedStatusMessageResponse.toApp(): StatusMessageResponse = StatusMessageResponse(
+    status = status,
+    message = message
 )
 
 private fun ClientConfigUpdateRequest.toShared(): SharedClientConfigUpdateRequest = SharedClientConfigUpdateRequest(
