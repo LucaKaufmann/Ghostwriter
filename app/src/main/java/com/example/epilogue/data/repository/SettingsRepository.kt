@@ -1,7 +1,6 @@
 package com.example.epilogue.data.repository
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -363,7 +362,7 @@ class SettingsRepository @Inject constructor(
 
     /**
      * Enables KMP-backed shared Ghostwriter client for Android networking path.
-     * Defaults to enabled for debug builds and disabled for release builds.
+     * Defaults to enabled.
      */
     suspend fun setUseSharedGhostwriterClient(enabled: Boolean) = withContext(Dispatchers.IO) {
         prefs.edit()
@@ -375,10 +374,9 @@ class SettingsRepository @Inject constructor(
      * Returns whether the app should use the KMP shared Ghostwriter client path.
      */
     fun useSharedGhostwriterClient(): Boolean {
-        val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         return prefs.getBoolean(
             KEY_GHOSTWRITER_USE_SHARED_CLIENT,
-            isDebuggable
+            true
         )
     }
 
