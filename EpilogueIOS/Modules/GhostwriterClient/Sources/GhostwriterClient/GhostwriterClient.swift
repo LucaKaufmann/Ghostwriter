@@ -366,6 +366,36 @@ public actor GhostwriterClient {
     /// - Parameter since: Optional timestamp to get changes since
     /// - Returns: Feed changes including updated feeds and tombstones
     public func getFeedChanges(since: Date? = nil) async throws -> FeedChangesResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            let sinceString = since.map { formatter.string(from: $0) }
+            let sharedResponse = try await sharedHandle.client.getFeedChanges(since: sinceString)
+            return FeedChangesResponse(
+                feeds: sharedResponse.feeds.map { feed in
+                    FeedResponse(
+                        id: feed.id,
+                        url: feed.url,
+                        title: feed.title,
+                        isActive: feed.isActive,
+                        mode: feed.mode,
+                        maxArticles: Int(feed.maxArticles),
+                        createdAt: feed.createdAt,
+                        updatedAt: feed.updatedAt,
+                        deletedAt: feed.deletedAt
+                    )
+                },
+                tombstones: sharedResponse.tombstones.map { tombstone in
+                    FeedTombstone(
+                        url: tombstone.url,
+                        deletedAt: tombstone.deletedAt
+                    )
+                },
+                serverTimestamp: sharedResponse.serverTimestamp
+            )
+        }
+#endif
         var queryItems: [URLQueryItem] = []
         
         if let since = since {
