@@ -351,6 +351,42 @@ public actor GhostwriterClient {
     
     /// Get the shared client configuration
     public func getConfig() async throws -> ClientConfigResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.getConfig()
+            return ClientConfigResponse(
+                minWordCount: sharedResponse.minWordCount.map { Int(truncating: $0) },
+                morningHour: sharedResponse.morningHour.map { Int(truncating: $0) },
+                morningMinute: sharedResponse.morningMinute.map { Int(truncating: $0) },
+                noonHour: sharedResponse.noonHour.map { Int(truncating: $0) },
+                noonMinute: sharedResponse.noonMinute.map { Int(truncating: $0) },
+                eveningHour: sharedResponse.eveningHour.map { Int(truncating: $0) },
+                eveningMinute: sharedResponse.eveningMinute.map { Int(truncating: $0) },
+                timezone: sharedResponse.timezone,
+                aiProvider: nil,
+                aiModel: nil,
+                scheduleMorning: sharedResponse.scheduleMorning,
+                scheduleNoon: sharedResponse.scheduleNoon,
+                scheduleEvening: sharedResponse.scheduleEvening,
+                whisperProvider: sharedResponse.whisperProvider,
+                whisperModel: sharedResponse.whisperModel,
+                whisperTimeoutMinutes: sharedResponse.whisperTimeoutMinutes.map { Int(truncating: $0) },
+                mediaProcessingIntervalHours: sharedResponse.mediaProcessingIntervalHours.map { Int(truncating: $0) },
+                includePodcastsInDigest: sharedResponse.includePodcastsInDigest?.boolValue,
+                includeYoutubeInDigest: sharedResponse.includeYoutubeInDigest?.boolValue,
+                coverEnabled: sharedResponse.coverEnabled?.boolValue,
+                coverProvider: sharedResponse.coverProvider,
+                coverQuality: sharedResponse.coverQuality,
+                coverPrompt: sharedResponse.coverPrompt,
+                coverOverlayEnabled: sharedResponse.coverOverlayEnabled?.boolValue,
+                coverOpenAIAPIKey: sharedResponse.coverOpenAiApiKey,
+                coverGeminiAPIKey: sharedResponse.coverGeminiApiKey,
+                updatedAt: sharedResponse.updatedAt,
+                wallabag: sharedResponse.wallabag.map { IntegrationStatus(enabled: $0.enabled, label: $0.label) },
+                newsletters: sharedResponse.newsletters.map { IntegrationStatus(enabled: $0.enabled, label: $0.label) }
+            )
+        }
+#endif
         return try await get(path: "/config")
     }
     
