@@ -656,6 +656,17 @@ public actor GhostwriterClient {
     
     /// Send a heartbeat to indicate the app is active
     public func sendHeartbeat() async throws -> HeartbeatResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.sendHeartbeat()
+            return HeartbeatResponse(
+                status: sharedResponse.status,
+                receivedAt: sharedResponse.receivedAt,
+                schedulesActive: sharedResponse.schedulesActive,
+                message: sharedResponse.message
+            )
+        }
+#endif
         return try await post(path: "/client/heartbeat", body: EmptyRequest())
     }
     
