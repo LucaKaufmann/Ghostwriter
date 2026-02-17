@@ -12,6 +12,15 @@ import com.example.epilogue.shared.ghostwriter.ClientStatusResponse as SharedCli
 import com.example.epilogue.shared.ghostwriter.ClearSeenResponse as SharedClearSeenResponse
 import com.example.epilogue.shared.ghostwriter.AuthApiTokenCreateResponse as SharedAuthApiTokenCreateResponse
 import com.example.epilogue.shared.ghostwriter.AuthApiTokenResponse as SharedAuthApiTokenResponse
+import com.example.epilogue.shared.ghostwriter.DigestArticleSourceResponse as SharedDigestArticleSourceResponse
+import com.example.epilogue.shared.ghostwriter.DigestArticlesResponse as SharedDigestArticlesResponse
+import com.example.epilogue.shared.ghostwriter.DigestProgress as SharedDigestProgress
+import com.example.epilogue.shared.ghostwriter.DigestStatusResponse as SharedDigestStatusResponse
+import com.example.epilogue.shared.ghostwriter.DigestTriggerRequest as SharedDigestTriggerRequest
+import com.example.epilogue.shared.ghostwriter.DigestTriggerResponse as SharedDigestTriggerResponse
+import com.example.epilogue.shared.ghostwriter.FeedSyncRequest as SharedFeedSyncRequest
+import com.example.epilogue.shared.ghostwriter.FeedSyncResponse as SharedFeedSyncResponse
+import com.example.epilogue.shared.ghostwriter.HealthResponse as SharedHealthResponse
 import com.example.epilogue.shared.ghostwriter.DigestArticleResponse as SharedDigestArticleResponse
 import com.example.epilogue.shared.ghostwriter.DigestResponse as SharedDigestResponse
 import com.example.epilogue.shared.ghostwriter.FeedChangesResponse as SharedFeedChangesResponse
@@ -47,6 +56,34 @@ class SharedGhostwriterAdapter private constructor(
 ) {
     suspend fun performSync(feedSince: String?, digestIds: String?): SyncResponse {
         return client.performSync(feedSince = feedSince, digestIds = digestIds).toApp()
+    }
+
+    suspend fun checkHealth(): HealthResponse {
+        return client.getHealth().toApp()
+    }
+
+    suspend fun syncFeeds(feeds: List<FeedSyncRequest>): FeedSyncResponse {
+        return client.syncFeeds(feeds.map { it.toShared() }).toApp()
+    }
+
+    suspend fun triggerDigest(period: String): DigestTriggerResponse {
+        return client.triggerDigest(SharedDigestTriggerRequest(period = period)).toApp()
+    }
+
+    suspend fun getDigestStatus(digestId: String): DigestStatusResponse {
+        return client.getDigestStatus(digestId).toApp()
+    }
+
+    suspend fun getDigestArticles(digestId: String): DigestArticlesResponse {
+        return client.getDigestArticles(digestId).toApp()
+    }
+
+    suspend fun getDigestArticleSource(digestId: String, articleId: String): DigestArticleSourceResponse {
+        return client.getDigestArticleSource(digestId, articleId).toApp()
+    }
+
+    suspend fun getLatestDigest(): DigestResponse {
+        return client.getLatestDigest().toApp()
     }
 
     suspend fun getFeedChanges(since: String?): FeedChangesResponse {
@@ -270,6 +307,39 @@ private fun SharedDigestArticleResponse.toApp(): DigestArticleResponse = DigestA
     aiFailed = aiFailed
 )
 
+private fun SharedDigestArticlesResponse.toApp(): DigestArticlesResponse = DigestArticlesResponse(
+    digestId = digestId,
+    articleCount = articleCount,
+    articles = articles.map { it.toApp() }
+)
+
+private fun SharedDigestArticleSourceResponse.toApp(): DigestArticleSourceResponse = DigestArticleSourceResponse(
+    digestId = digestId,
+    articleId = articleId,
+    url = url,
+    finalUrl = finalUrl,
+    contentType = contentType,
+    fetchedAt = fetchedAt,
+    sizeBytes = sizeBytes,
+    html = html
+)
+
+private fun SharedDigestProgress.toApp(): DigestProgress = DigestProgress(
+    totalFeeds = totalFeeds,
+    feedsFetched = feedsFetched,
+    totalArticles = totalArticles,
+    articlesEnriched = articlesEnriched
+)
+
+private fun SharedDigestStatusResponse.toApp(): DigestStatusResponse = DigestStatusResponse(
+    id = id,
+    status = status,
+    stage = stage,
+    progress = progress.toApp(),
+    startedAt = startedAt,
+    etaSeconds = etaSeconds
+)
+
 private fun SharedScheduleResponse.toApp(): ScheduleResponse = ScheduleResponse(
     id = id,
     period = period,
@@ -380,6 +450,36 @@ private fun SharedAuthApiTokenCreateResponse.toApp(): AuthApiTokenCreateResponse
 )
 
 private fun SharedStatusMessageResponse.toApp(): StatusMessageResponse = StatusMessageResponse(
+    status = status,
+    message = message
+)
+
+private fun SharedHealthResponse.toApp(): HealthResponse = HealthResponse(
+    status = status,
+    version = version,
+    uptimeSeconds = uptimeSeconds,
+    lastSuccessfulDigest = lastSuccessfulDigest,
+    aiProvider = aiProvider,
+    aiModel = aiModel
+)
+
+private fun FeedSyncRequest.toShared(): SharedFeedSyncRequest = SharedFeedSyncRequest(
+    url = url,
+    title = title,
+    isActive = isActive,
+    mode = mode,
+    maxArticles = maxArticles
+)
+
+private fun SharedFeedSyncResponse.toApp(): FeedSyncResponse = FeedSyncResponse(
+    synced = synced,
+    created = created,
+    updated = updated,
+    unchanged = unchanged
+)
+
+private fun SharedDigestTriggerResponse.toApp(): DigestTriggerResponse = DigestTriggerResponse(
+    id = id,
     status = status,
     message = message
 )

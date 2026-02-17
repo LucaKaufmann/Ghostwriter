@@ -141,6 +141,18 @@ class GhostwriterRepository @Inject constructor(
      * Check the health of the Ghostwriter server.
      */
     suspend fun checkHealth(): GhostwriterResult<HealthResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.checkHealth())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Health check failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Health check failed (shared)", e)
+                GhostwriterResult.Error("Connection failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -164,6 +176,31 @@ class GhostwriterRepository @Inject constructor(
      * This performs a full sync - feeds not in the list will be deactivated on the server.
      */
     suspend fun syncFeeds(feeds: List<Feed>): GhostwriterResult<FeedSyncResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val realFeeds = feeds.filter { !it.url.startsWith("synthetic://") }
+                val requests = realFeeds.map { feed ->
+                    FeedSyncRequest(
+                        url = feed.url,
+                        title = feed.name,
+                        isActive = feed.isEnabled,
+                        mode = when (feed.mode) {
+                            ProcessingMode.BRIEFING -> "summarize"
+                            ProcessingMode.FIDELITY -> "raw"
+                        },
+                        maxArticles = if (feed.maxArticles > 0) feed.maxArticles else 10
+                    )
+                }
+                GhostwriterResult.Success(shared.syncFeeds(requests))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Feed sync failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Feed sync failed (shared)", e)
+                GhostwriterResult.Error("Sync failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -250,6 +287,18 @@ class GhostwriterRepository @Inject constructor(
      * @return The digest ID if successful, or an error
      */
     suspend fun triggerDigest(period: String = "manual"): GhostwriterResult<DigestTriggerResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.triggerDigest(period))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Trigger failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Trigger digest failed (shared)", e)
+                GhostwriterResult.Error("Trigger failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -280,6 +329,18 @@ class GhostwriterRepository @Inject constructor(
      * Get the status of a running digest job.
      */
     suspend fun getDigestStatus(digestId: String): GhostwriterResult<DigestStatusResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getDigestStatus(digestId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Status check failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get digest status failed (shared)", e)
+                GhostwriterResult.Error("Status check failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -304,6 +365,18 @@ class GhostwriterRepository @Inject constructor(
      * Used for syncing article content to display in-app.
      */
     suspend fun getDigestArticles(digestId: String): GhostwriterResult<DigestArticlesResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getDigestArticles(digestId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get articles (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get digest articles failed (shared)", e)
+                GhostwriterResult.Error("Failed to get articles: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -336,6 +409,18 @@ class GhostwriterRepository @Inject constructor(
         digestId: String,
         articleId: String
     ): GhostwriterResult<DigestArticleSourceResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getDigestArticleSource(digestId, articleId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get article source (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get digest article source failed (shared)", e)
+                GhostwriterResult.Error("Failed to get article source: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -364,6 +449,18 @@ class GhostwriterRepository @Inject constructor(
      * Get the most recent completed digest.
      */
     suspend fun getLatestDigest(): GhostwriterResult<DigestResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getLatestDigest())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get latest digest (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get latest digest failed (shared)", e)
+                GhostwriterResult.Error("Failed to get latest digest: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
