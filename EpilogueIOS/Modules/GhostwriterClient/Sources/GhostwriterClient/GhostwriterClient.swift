@@ -465,6 +465,23 @@ public actor GhostwriterClient {
     
     /// Get the most recent completed digest
     public func getLatestDigest() async throws -> DigestResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let digest = try await sharedHandle.client.getLatestDigest()
+            return DigestResponse(
+                id: digest.id,
+                filename: digest.filename,
+                period: digest.period,
+                status: digest.status,
+                stage: digest.stage,
+                articleCount: Int(digest.articleCount),
+                errorMessage: digest.errorMessage,
+                createdAt: digest.createdAt,
+                completedAt: digest.completedAt,
+                downloadedAt: nil
+            )
+        }
+#endif
         return try await get(path: "/digests/latest")
     }
     
