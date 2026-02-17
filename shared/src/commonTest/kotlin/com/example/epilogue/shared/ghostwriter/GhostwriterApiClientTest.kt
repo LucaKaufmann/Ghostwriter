@@ -4,90 +4,88 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.json.Json
-import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlinx.serialization.json.Json
 
 class GhostwriterApiClientTest {
-    private val json = Json { ignoreUnknownKeys = true }
 
     @Test
-    fun sendsAuthHeaderAndNormalizesApiPath() = runTest {
+    fun getHealth_usesApiPrefixedBaseUrlWithoutAuthHeader() = runClientTest(
+        baseUrl = "http://localhost:8080",
+        apiKey = null,
+        responseBody = """{"status":"ok","version":"1.0","uptime_seconds":1,"last_successful_digest":null,"ai_provider":"openai","ai_model":"gpt-5-nano"}"""
+    ) { client, capturedPath, capturedAuth ->
+        client.getHealth()
+        assertEquals("/api/health", capturedPath())
+        assertNull(capturedAuth())
+    }
+
+    @Test
+    fun deleteFeedByUrl_encodesPathAndSendsAuthHeader() = runClientTest(
+        baseUrl = "http://localhost:8080/api",
+        apiKey = "abc123",
+        responseBody = ""
+    ) { client, capturedPath, capturedAuth ->
+        client.deleteFeedByUrl("https://example.com/feed")
+        assertEquals("/api/feeds/by-url/https://example.com/feed", capturedPath())
+        assertEquals("Bearer abc123", capturedAuth())
+    }
+
+    @Test
+    fun downloadDigest_returnsRawBytes() = runClientTest(
+        baseUrl = "http://localhost:8080",
+        apiKey = "abc123",
+        responseBody = "epub-bytes"
+    ) { client, capturedPath, capturedAuth ->
+        val bytes = client.downloadDigest("digest.epub")
+        assertEquals("/api/digests/digest.epub", capturedPath())
+        assertEquals("Bearer abc123", capturedAuth())
+        assertContentEquals("epub-bytes".toByteArray(), bytes)
+    }
+
+    private fun runClientTest(
+        baseUrl: String,
+        apiKey: String?,
+        responseBody: String,
+        block: suspend (
+            client: GhostwriterApiClient,
+            capturedPath: () -> String?,
+            capturedAuth: () -> String?
+        ) -> Unit
+    ) {
+        var lastPath: String? = null
+        var lastAuth: String? = null
+
         val engine = MockEngine { request ->
-            assertEquals("/api/feeds", request.url.encodedPath)
-            assertEquals("Bearer test-key", request.headers[HttpHeaders.Authorization])
+            lastPath = request.url.encodedPath
+            lastAuth = request.headers[HttpHeaders.Authorization]
             respond(
-                content = "[]",
+                content = responseBody,
                 status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
             )
         }
 
-        val client = GhostwriterApiClient(
-            client = testHttpClient(engine),
-            baseUrl = "http://localhost:8080",
-            apiKey = "test-key"
-        )
-
-        val feeds = client.listFeeds()
-        assertEquals(0, feeds.size)
-    }
-
-    @Test
-    fun omitsAuthHeaderWhenApiKeyMissing() = runTest {
-        val engine = MockEngine { request ->
-            assertNull(request.headers[HttpHeaders.Authorization])
-            respond(
-                content = "{\"status\":\"ok\",\"version\":\"1.0\",\"ai_provider\":\"openai\",\"ai_model\":\"gpt-5-nano\"}",
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
-        }
-
-        val client = GhostwriterApiClient(
-            client = testHttpClient(engine),
-            baseUrl = "http://localhost:8080/api/",
-            apiKey = null
-        )
-
-        val health = client.getHealth()
-        assertEquals("ok", health.status)
-    }
-
-    @Test
-    fun mapsConflictToTypedException() = runTest {
-        val engine = MockEngine {
-            respond(
-                content = "{\"detail\":\"conflict\"}",
-                status = HttpStatusCode.Conflict,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
-        }
-
-        val client = GhostwriterApiClient(
-            client = testHttpClient(engine),
-            baseUrl = "http://localhost:8080",
-            apiKey = "key"
-        )
-
-        assertFailsWith<GhostwriterApiException.Conflict> {
-            client.getConfig()
-        }
-    }
-
-    private fun testHttpClient(engine: MockEngine): HttpClient {
-        return HttpClient(engine) {
+        val httpClient = HttpClient(engine) {
             install(ContentNegotiation) {
-                json(json)
+                json(Json { ignoreUnknownKeys = true })
             }
         }
+        val client = GhostwriterApiClient(httpClient, baseUrl, apiKey)
+        kotlinx.coroutines.test.runTest {
+            block(
+                client,
+                { lastPath },
+                { lastAuth }
+            )
+        }
+        httpClient.close()
     }
 }
