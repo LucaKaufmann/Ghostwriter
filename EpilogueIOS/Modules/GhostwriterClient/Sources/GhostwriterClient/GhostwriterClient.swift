@@ -313,6 +313,24 @@ public actor GhostwriterClient {
     
     /// List all configured feeds
     public func listFeeds() async throws -> [FeedResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedFeeds = try await sharedHandle.client.listFeeds()
+            return sharedFeeds.map { feed in
+                FeedResponse(
+                    id: feed.id,
+                    url: feed.url,
+                    title: feed.title,
+                    isActive: feed.isActive,
+                    mode: feed.mode,
+                    maxArticles: Int(feed.maxArticles),
+                    createdAt: feed.createdAt,
+                    updatedAt: feed.updatedAt,
+                    deletedAt: feed.deletedAt
+                )
+            }
+        }
+#endif
         return try await get(path: "/feeds")
     }
     
