@@ -41,6 +41,7 @@ class SettingsRepository @Inject constructor(
         private const val KEY_GHOSTWRITER_ENABLED = "ghostwriter_enabled"
         private const val KEY_GHOSTWRITER_URL = "ghostwriter_url"
         private const val KEY_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC = "ghostwriter_download_epubs_on_sync"
+        private const val KEY_GHOSTWRITER_USE_SHARED_CLIENT = "ghostwriter_use_shared_client"
 
         // Encrypted settings keys
         private const val KEY_OPENAI_API_KEY = "openai_api_key"
@@ -66,6 +67,7 @@ class SettingsRepository @Inject constructor(
         private const val DEFAULT_CUSTOM_EXPORT_ENABLED = false
         private const val DEFAULT_GHOSTWRITER_ENABLED = false
         private const val DEFAULT_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC = true
+        private const val DEFAULT_GHOSTWRITER_USE_SHARED_CLIENT = false
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -356,6 +358,26 @@ class SettingsRepository @Inject constructor(
         return prefs.getBoolean(
             KEY_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC,
             DEFAULT_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC
+        )
+    }
+
+    /**
+     * Enables KMP-backed shared Ghostwriter client for Android networking path.
+     * Defaults to enabled for debug builds and disabled for release builds.
+     */
+    suspend fun setUseSharedGhostwriterClient(enabled: Boolean) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putBoolean(KEY_GHOSTWRITER_USE_SHARED_CLIENT, enabled)
+            .apply()
+    }
+
+    /**
+     * Returns whether the app should use the KMP shared Ghostwriter client path.
+     */
+    fun useSharedGhostwriterClient(): Boolean {
+        return prefs.getBoolean(
+            KEY_GHOSTWRITER_USE_SHARED_CLIENT,
+            DEFAULT_GHOSTWRITER_USE_SHARED_CLIENT
         )
     }
 

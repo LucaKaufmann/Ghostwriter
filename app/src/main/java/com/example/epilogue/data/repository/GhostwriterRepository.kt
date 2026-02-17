@@ -1,6 +1,7 @@
 package com.example.epilogue.data.repository
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.util.Log
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigUpdateRequest
@@ -33,9 +34,11 @@ import com.example.epilogue.data.remote.ghostwriter.PreviewResponse
 import com.example.epilogue.data.remote.ghostwriter.LogFileInfoResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.SharedGhostwriterAdapter
 import com.example.epilogue.data.remote.ghostwriter.StatusMessageResponse
 import com.example.epilogue.data.remote.ghostwriter.YouTubeResolveRequest
 import com.example.epilogue.data.remote.ghostwriter.YouTubeResolveResponse
+import com.example.epilogue.shared.ghostwriter.GhostwriterApiException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -68,6 +71,10 @@ class GhostwriterRepository @Inject constructor(
         private const val TAG = "GhostwriterRepository"
     }
 
+    private var cachedSharedAdapter: SharedGhostwriterAdapter? = null
+    private var cachedSharedBaseUrl: String? = null
+    private var cachedSharedApiKey: String? = null
+
     /**
      * Result wrapper for Ghostwriter operations.
      */
@@ -94,6 +101,33 @@ class GhostwriterRepository @Inject constructor(
     private fun getAuthHeader(): String? {
         val apiKey = settingsRepository.getGhostwriterApiKey()
         return if (!apiKey.isNullOrBlank()) "Bearer $apiKey" else null
+    }
+
+    private fun shouldUseSharedClient(): Boolean {
+        val isDebuggable =
+            (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        return isDebuggable && settingsRepository.useSharedGhostwriterClient()
+    }
+
+    private fun getSharedAdapter(): SharedGhostwriterAdapter? {
+        val url = settingsRepository.getGhostwriterUrl()
+        if (url.isNullOrBlank() || !settingsRepository.isGhostwriterEnabled()) {
+            return null
+        }
+        val apiKey = settingsRepository.getGhostwriterApiKey()
+
+        if (cachedSharedAdapter != null &&
+            cachedSharedBaseUrl == url &&
+            cachedSharedApiKey == apiKey
+        ) {
+            return cachedSharedAdapter
+        }
+
+        cachedSharedAdapter?.close()
+        cachedSharedAdapter = SharedGhostwriterAdapter.create(url, apiKey)
+        cachedSharedBaseUrl = url
+        cachedSharedApiKey = apiKey
+        return cachedSharedAdapter
     }
 
     /**
@@ -172,15 +206,25 @@ class GhostwriterRepository @Inject constructor(
      * @return Feed changes including updated feeds and tombstones for deleted feeds.
      */
     suspend fun getFeedChanges(since: Long?): GhostwriterResult<FeedChangesResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val sinceStr = since?.toGhostwriterTimestamp()
+                val response = shared.getFeedChanges(sinceStr)
+                Log.i(TAG, "Got feed changes via shared client: ${response.feeds.size} feeds, ${response.tombstones.size} tombstones")
+                GhostwriterResult.Success(response)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Get feed changes failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get feed changes failed (shared)", e)
+                GhostwriterResult.Error("Get feed changes failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
-            // Convert timestamp to ISO 8601 format for the API
-            val sinceStr = since?.let {
-                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-                sdf.timeZone = TimeZone.getTimeZone("UTC")
-                sdf.format(java.util.Date(it))
-            }
+            val sinceStr = since?.toGhostwriterTimestamp()
 
             val response = api.getFeedChanges(getAuthHeader(), sinceStr)
             if (response.isSuccessful && response.body() != null) {
@@ -348,6 +392,18 @@ class GhostwriterRepository @Inject constructor(
      * List all available digests.
      */
     suspend fun listDigests(): GhostwriterResult<List<DigestResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.listDigests())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("List digests failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "List digests failed (shared)", e)
+                GhostwriterResult.Error("Failed to list digests: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -535,14 +591,26 @@ class GhostwriterRepository @Inject constructor(
      * @param knownDigestIds List of digest IDs the client already has, to exclude from response.
      */
     suspend fun performSync(feedSince: Long?, knownDigestIds: List<String>): GhostwriterResult<SyncResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val sinceStr = feedSince?.toGhostwriterTimestamp()
+                val digestIdsStr = if (knownDigestIds.isNotEmpty()) knownDigestIds.joinToString(",") else null
+                val response = shared.performSync(sinceStr, digestIdsStr)
+                Log.i(TAG, "Combined sync successful via shared client")
+                GhostwriterResult.Success(response)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Combined sync failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Combined sync failed (shared)", e)
+                GhostwriterResult.Error("Combined sync failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
-            val sinceStr = feedSince?.let {
-                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-                sdf.timeZone = TimeZone.getTimeZone("UTC")
-                sdf.format(java.util.Date(it))
-            }
+            val sinceStr = feedSince?.toGhostwriterTimestamp()
 
             val digestIdsStr = if (knownDigestIds.isNotEmpty()) {
                 knownDigestIds.joinToString(",")
@@ -655,6 +723,39 @@ class GhostwriterRepository @Inject constructor(
         coverOverlayEnabled: Boolean? = null,
         clientUpdatedAt: String? = null
     ): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val request = ClientConfigUpdateRequest(
+                    minWordCount = minWordCount,
+                    morningHour = morningHour,
+                    morningMinute = morningMinute,
+                    noonHour = noonHour,
+                    noonMinute = noonMinute,
+                    eveningHour = eveningHour,
+                    eveningMinute = eveningMinute,
+                    timezone = timezone,
+                    scheduleMorning = scheduleMorning,
+                    scheduleNoon = scheduleNoon,
+                    scheduleEvening = scheduleEvening,
+                    includePodcastsInDigest = includePodcastsInDigest,
+                    includeYoutubeInDigest = includeYoutubeInDigest,
+                    coverEnabled = coverEnabled,
+                    coverProvider = coverProvider,
+                    coverQuality = coverQuality,
+                    coverPrompt = coverPrompt,
+                    coverOverlayEnabled = coverOverlayEnabled,
+                    clientUpdatedAt = clientUpdatedAt
+                )
+                GhostwriterResult.Success(shared.updateConfig(request))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Update config failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Update config failed (shared)", e)
+                GhostwriterResult.Error("Failed to update config: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -786,6 +887,22 @@ class GhostwriterRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Clear newsletter seen failed", e)
             GhostwriterResult.Error("Failed to clear newsletter seen cache: ${e.message}")
+        }
+    }
+
+    private fun Long.toGhostwriterTimestamp(): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(java.util.Date(this))
+    }
+
+    private fun sharedApiError(prefix: String, e: GhostwriterApiException): GhostwriterResult.Error {
+        return when (e) {
+            is GhostwriterApiException.Conflict -> GhostwriterResult.Error("$prefix: conflict", 409)
+            is GhostwriterApiException.Unauthorized -> GhostwriterResult.Error("$prefix: unauthorized", 401)
+            is GhostwriterApiException.NotFound -> GhostwriterResult.Error("$prefix: not found", 404)
+            is GhostwriterApiException.RateLimited -> GhostwriterResult.Error("$prefix: rate limited", 429)
+            is GhostwriterApiException.HttpError -> GhostwriterResult.Error("$prefix: http ${e.statusCode}", e.statusCode)
         }
     }
 
