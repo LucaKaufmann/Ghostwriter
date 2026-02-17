@@ -308,6 +308,22 @@ public actor GhostwriterClient {
     
     /// List all schedule configurations
     public func listSchedules() async throws -> [ScheduleResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedSchedules = try await sharedHandle.client.listSchedules()
+            return sharedSchedules.map { schedule in
+                ScheduleResponse(
+                    id: schedule.id,
+                    period: schedule.period,
+                    hour: Int(schedule.hour),
+                    minute: Int(schedule.minute),
+                    enabled: schedule.enabled,
+                    timezone: schedule.timezone,
+                    nextRunAt: schedule.nextRunAt
+                )
+            }
+        }
+#endif
         return try await get(path: "/schedules")
     }
     
@@ -317,6 +333,29 @@ public actor GhostwriterClient {
     ///   - request: The update request
     /// - Returns: Updated schedule
     public func updateSchedule(period: String, request: ScheduleUpdateRequest) async throws -> ScheduleResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedRequest = EpilogueShared.ScheduleUpdateRequest(
+                hour: request.hour.map { KotlinInt(int: Int32($0)) },
+                minute: request.minute.map { KotlinInt(int: Int32($0)) },
+                enabled: request.enabled.map { KotlinBoolean(bool: $0) },
+                timezone: request.timezone
+            )
+            let schedule = try await sharedHandle.client.updateSchedule(
+                period: period.lowercased(),
+                request: sharedRequest
+            )
+            return ScheduleResponse(
+                id: schedule.id,
+                period: schedule.period,
+                hour: Int(schedule.hour),
+                minute: Int(schedule.minute),
+                enabled: schedule.enabled,
+                timezone: schedule.timezone,
+                nextRunAt: schedule.nextRunAt
+            )
+        }
+#endif
         return try await put(path: "/schedules/\(period.lowercased())", body: request)
     }
     
