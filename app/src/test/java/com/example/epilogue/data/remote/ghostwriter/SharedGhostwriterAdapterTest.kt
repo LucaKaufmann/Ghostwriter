@@ -602,6 +602,102 @@ class SharedGhostwriterAdapterTest {
         adapter.close()
     }
 
+    @Test
+    fun checkHealth_mapsResponse() = runTest {
+        val payload = """
+            {
+              "status": "ok",
+              "version": "1.0.0",
+              "uptime_seconds": 10,
+              "last_successful_digest": null,
+              "ai_provider": "openai",
+              "ai_model": "gpt-5-nano"
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.checkHealth()
+        assertEquals("ok", result.status)
+        assertEquals("openai", result.aiProvider)
+        adapter.close()
+    }
+
+    @Test
+    fun syncFeeds_mapsResponse() = runTest {
+        val payload = """{"synced":1,"created":1,"updated":0,"unchanged":0}"""
+        val adapter = adapterWithJson(payload)
+        val result = adapter.syncFeeds(
+            listOf(
+                FeedSyncRequest(
+                    url = "https://example.com/feed",
+                    title = "Feed",
+                    isActive = true,
+                    mode = "raw",
+                    maxArticles = 10
+                )
+            )
+        )
+        assertEquals(1, result.synced)
+        assertEquals(1, result.created)
+        adapter.close()
+    }
+
+    @Test
+    fun triggerDigest_mapsResponse() = runTest {
+        val payload = """{"id":"d1","status":"queued","message":"started"}"""
+        val adapter = adapterWithJson(payload)
+        val result = adapter.triggerDigest("manual")
+        assertEquals("d1", result.id)
+        assertEquals("queued", result.status)
+        adapter.close()
+    }
+
+    @Test
+    fun getDigestStatus_mapsResponse() = runTest {
+        val payload = """
+            {
+              "id":"d1",
+              "status":"processing",
+              "stage":"enriching",
+              "progress":{
+                "total_feeds":2,
+                "feeds_fetched":1,
+                "total_articles":20,
+                "articles_enriched":5
+              },
+              "started_at":"2026-02-17T12:00:00",
+              "eta_seconds":120
+            }
+        """.trimIndent()
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getDigestStatus("d1")
+        assertEquals("processing", result.status)
+        assertEquals(20, result.progress.totalArticles)
+        adapter.close()
+    }
+
+    @Test
+    fun getLatestDigest_mapsResponse() = runTest {
+        val payload = """
+            {
+              "id":"d2",
+              "filename":"f.epub",
+              "period":"manual",
+              "status":"completed",
+              "stage":null,
+              "article_count":2,
+              "error_message":null,
+              "created_at":"2026-02-17T12:00:00",
+              "completed_at":"2026-02-17T12:10:00"
+            }
+        """.trimIndent()
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getLatestDigest()
+        assertEquals("d2", result.id)
+        assertEquals(2, result.articleCount)
+        adapter.close()
+    }
+
     private fun adapterWithJson(payload: String): SharedGhostwriterAdapter {
         val engine = MockEngine {
             respond(
