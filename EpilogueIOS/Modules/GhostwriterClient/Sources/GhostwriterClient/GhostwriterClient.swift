@@ -329,6 +329,21 @@ public actor GhostwriterClient {
     
     /// Get client status including activity tracking info
     public func getClientStatus() async throws -> ClientStatusResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.getClientStatus()
+            return ClientStatusResponse(
+                lastHeartbeatAt: sharedResponse.lastHeartbeatAt,
+                lastDownloadAt: sharedResponse.lastDownloadAt,
+                lastFeedSyncAt: sharedResponse.lastFeedSyncAt,
+                autoDisableEnabled: sharedResponse.autoDisableEnabled,
+                autoDisableAfterDays: Int(sharedResponse.autoDisableAfterDays),
+                schedulesAutoDisabled: sharedResponse.schedulesAutoDisabled,
+                autoDisabledAt: sharedResponse.autoDisabledAt,
+                daysUntilAutoDisable: sharedResponse.daysUntilAutoDisable.map { Int(truncating: $0) }
+            )
+        }
+#endif
         return try await get(path: "/client/status")
     }
     
