@@ -871,6 +871,18 @@ class GhostwriterRepository @Inject constructor(
      * Preview Wallabag items without mutating read state.
      */
     suspend fun previewWallabag(): GhostwriterResult<PreviewResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.previewWallabag())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to preview Wallabag (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Preview Wallabag failed (shared)", e)
+                GhostwriterResult.Error("Failed to preview Wallabag: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -893,6 +905,18 @@ class GhostwriterRepository @Inject constructor(
      * Preview newsletter items without mutating read state.
      */
     suspend fun previewNewsletters(): GhostwriterResult<PreviewResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.previewNewsletters())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to preview newsletters (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Preview newsletters failed (shared)", e)
+                GhostwriterResult.Error("Failed to preview newsletters: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -915,6 +939,18 @@ class GhostwriterRepository @Inject constructor(
      * Clear seen markers for Wallabag synthetic feed.
      */
     suspend fun clearWallabagSeen(): GhostwriterResult<ClearSeenResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.clearWallabagSeen())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to clear Wallabag seen cache (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Clear Wallabag seen failed (shared)", e)
+                GhostwriterResult.Error("Failed to clear Wallabag seen cache: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -937,6 +973,18 @@ class GhostwriterRepository @Inject constructor(
      * Clear seen markers for newsletters synthetic feed.
      */
     suspend fun clearNewsletterSeen(): GhostwriterResult<ClearSeenResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.clearNewsletterSeen())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to clear newsletter seen cache (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Clear newsletter seen failed (shared)", e)
+                GhostwriterResult.Error("Failed to clear newsletter seen cache: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
