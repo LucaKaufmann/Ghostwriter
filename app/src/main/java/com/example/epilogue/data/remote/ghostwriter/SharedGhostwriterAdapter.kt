@@ -66,6 +66,10 @@ class SharedGhostwriterAdapter private constructor(
         return client.syncFeeds(feeds.map { it.toShared() }).toApp()
     }
 
+    suspend fun deleteFeedByUrl(feedUrl: String) {
+        client.deleteFeedByUrl(feedUrl)
+    }
+
     suspend fun triggerDigest(period: String): DigestTriggerResponse {
         return client.triggerDigest(SharedDigestTriggerRequest(period = period)).toApp()
     }

@@ -643,6 +643,13 @@ class SharedGhostwriterAdapterTest {
     }
 
     @Test
+    fun deleteFeedByUrl_completesOnSuccess() = runTest {
+        val adapter = adapterWithJson("""{}""")
+        adapter.deleteFeedByUrl("https://example.com/feed")
+        adapter.close()
+    }
+
+    @Test
     fun triggerDigest_mapsResponse() = runTest {
         val payload = """{"id":"d1","status":"queued","message":"started"}"""
         val adapter = adapterWithJson(payload)
