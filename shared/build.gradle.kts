@@ -4,12 +4,21 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+
 kotlin {
     androidTarget()
     iosX64()
     iosArm64()
     iosSimulatorArm64()
     applyDefaultHierarchyTemplate()
+
+    targets.withType<KotlinNativeTarget>().configureEach {
+        binaries.framework {
+            baseName = "EpilogueShared"
+            isStatic = true
+        }
+    }
 
     sourceSets {
         val commonMain by getting {
