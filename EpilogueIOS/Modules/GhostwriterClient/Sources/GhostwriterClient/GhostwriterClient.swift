@@ -489,6 +489,18 @@ public actor GhostwriterClient {
     /// - Parameter period: The time period ("morning", "noon", "evening", "manual")
     /// - Returns: Trigger response with digest ID
     public func triggerDigest(period: String = "manual") async throws -> DigestTriggerResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.triggerDigest(
+                request: EpilogueShared.DigestTriggerRequest(period: period)
+            )
+            return DigestTriggerResponse(
+                id: sharedResponse.id,
+                status: sharedResponse.status,
+                message: sharedResponse.message
+            )
+        }
+#endif
         let request = DigestTriggerRequest(period: period)
         return try await post(path: "/digests/trigger", body: request)
     }
