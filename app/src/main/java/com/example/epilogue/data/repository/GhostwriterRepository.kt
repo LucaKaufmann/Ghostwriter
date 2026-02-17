@@ -527,6 +527,32 @@ class GhostwriterRepository @Inject constructor(
      * @return The local file path if successful
      */
     suspend fun downloadDigest(filename: String): GhostwriterResult<File> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val bytes = shared.downloadDigest(filename)
+
+                // Save to the app's documents directory
+                val documentsDir = File(context.getExternalFilesDir(null), "Epilogue")
+                if (!documentsDir.exists()) {
+                    documentsDir.mkdirs()
+                }
+
+                val outputFile = File(documentsDir, filename)
+                outputFile.outputStream().use { output ->
+                    output.write(bytes)
+                }
+
+                Log.i(TAG, "Downloaded digest via shared client to: ${outputFile.absolutePath}")
+                GhostwriterResult.Success(outputFile)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Download digest failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Download digest failed (shared)", e)
+                GhostwriterResult.Error("Download failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
