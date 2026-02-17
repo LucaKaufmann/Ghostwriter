@@ -534,6 +534,29 @@ public actor GhostwriterClient {
     /// - Parameter id: The digest ID
     /// - Returns: Articles response with full content
     public func getDigestArticles(id: String) async throws -> DigestArticlesResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.getDigestArticles(digestId: id)
+            return DigestArticlesResponse(
+                digestId: sharedResponse.digestId,
+                articleCount: Int(sharedResponse.articleCount),
+                articles: sharedResponse.articles.map { article in
+                    DigestArticleResponse(
+                        id: article.id,
+                        title: article.title,
+                        url: article.url,
+                        mode: article.mode,
+                        wordCount: Int(article.wordCount),
+                        content: article.content,
+                        author: article.author,
+                        feedTitle: article.feedTitle,
+                        sortOrder: Int(article.sortOrder),
+                        aiFailed: article.aiFailed
+                    )
+                }
+            )
+        }
+#endif
         return try await get(path: "/digests/\(id)/articles")
     }
 
