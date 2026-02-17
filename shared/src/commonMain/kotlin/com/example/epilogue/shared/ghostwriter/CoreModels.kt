@@ -199,6 +199,43 @@ data class ClearSeenResponse(
 )
 
 @Serializable
+data class LogFileInfoResponse(
+    @SerialName("filename") val filename: String,
+    @SerialName("size_bytes") val sizeBytes: Long,
+    @SerialName("modified_at") val modifiedAt: String
+)
+
+@Serializable
+data class AuthApiTokenResponse(
+    @SerialName("id") val id: String,
+    @SerialName("name") val name: String,
+    @SerialName("token_prefix") val tokenPrefix: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("last_used_at") val lastUsedAt: String? = null,
+    @SerialName("revoked_at") val revokedAt: String? = null
+)
+
+@Serializable
+data class AuthApiTokenCreateRequest(
+    @SerialName("name") val name: String
+)
+
+@Serializable
+data class AuthApiTokenCreateResponse(
+    @SerialName("id") val id: String,
+    @SerialName("name") val name: String,
+    @SerialName("token") val token: String,
+    @SerialName("token_prefix") val tokenPrefix: String,
+    @SerialName("created_at") val createdAt: String
+)
+
+@Serializable
+data class StatusMessageResponse(
+    @SerialName("status") val status: String,
+    @SerialName("message") val message: String? = null
+)
+
+@Serializable
 data class ClientConfigResponse(
     @SerialName("min_word_count") val minWordCount: Int? = null,
     @SerialName("morning_hour") val morningHour: Int? = null,

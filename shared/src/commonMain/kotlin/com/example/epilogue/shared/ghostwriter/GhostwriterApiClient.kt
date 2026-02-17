@@ -219,6 +219,40 @@ class GhostwriterApiClient(
         return response.bodyOrThrow()
     }
 
+    suspend fun getLogFiles(): List<LogFileInfoResponse> {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("logs") }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun listAuthTokens(): List<AuthApiTokenResponse> {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("auth", "tokens") }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun createAuthToken(name: String): AuthApiTokenCreateResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("auth", "tokens") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(AuthApiTokenCreateRequest(name))
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun revokeAuthToken(id: String): StatusMessageResponse {
+        val response = client.delete(apiBaseUrl) {
+            url { appendPathSegments("auth", "tokens", id) }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
     private fun io.ktor.client.request.HttpRequestBuilder.authorize() {
         apiKey?.takeIf { it.isNotBlank() }?.let {
             header(HttpHeaders.Authorization, "Bearer $it")

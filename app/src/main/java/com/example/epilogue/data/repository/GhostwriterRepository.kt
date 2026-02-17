@@ -1385,6 +1385,18 @@ class GhostwriterRepository @Inject constructor(
      * List available server logs.
      */
     suspend fun getLogFiles(): GhostwriterResult<List<LogFileInfoResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getLogFiles())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to list log files (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get log files failed (shared)", e)
+                GhostwriterResult.Error("Failed to list log files: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1407,6 +1419,18 @@ class GhostwriterRepository @Inject constructor(
      * List auth API tokens for current JWT-authenticated user.
      */
     suspend fun listAuthTokens(): GhostwriterResult<List<AuthApiTokenResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.listAuthTokens())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to list auth tokens (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "List auth tokens failed (shared)", e)
+                GhostwriterResult.Error("Failed to list auth tokens: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
         try {
             val response = api.listAuthTokens(getAuthHeader())
@@ -1428,6 +1452,18 @@ class GhostwriterRepository @Inject constructor(
      * Create a new auth API token for current JWT-authenticated user.
      */
     suspend fun createAuthToken(name: String): GhostwriterResult<AuthApiTokenCreateResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.createAuthToken(name))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to create auth token (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Create auth token failed (shared)", e)
+                GhostwriterResult.Error("Failed to create auth token: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
         try {
             val response = api.createAuthToken(getAuthHeader(), AuthApiTokenCreateRequest(name))
@@ -1449,6 +1485,18 @@ class GhostwriterRepository @Inject constructor(
      * Revoke an existing auth API token.
      */
     suspend fun revokeAuthToken(tokenId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.revokeAuthToken(tokenId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to revoke auth token (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Revoke auth token failed (shared)", e)
+                GhostwriterResult.Error("Failed to revoke auth token: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
         try {
             val response = api.revokeAuthToken(getAuthHeader(), tokenId)
