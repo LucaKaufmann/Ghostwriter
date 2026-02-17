@@ -133,6 +133,98 @@ class SharedGhostwriterAdapterTest {
         adapter.close()
     }
 
+    @Test
+    fun getConfig_mapsResponseToAppModel() = runTest {
+        val payload = """
+            {
+              "min_word_count": 99,
+              "morning_hour": 7,
+              "morning_minute": 0,
+              "noon_hour": 12,
+              "noon_minute": 0,
+              "evening_hour": 18,
+              "evening_minute": 0,
+              "timezone": "UTC",
+              "updated_at": "2026-02-17T12:30:00"
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getConfig()
+
+        assertEquals(99, result.minWordCount)
+        assertEquals("UTC", result.timezone)
+        adapter.close()
+    }
+
+    @Test
+    fun getClientStatus_mapsResponseToAppModel() = runTest {
+        val payload = """
+            {
+              "last_heartbeat_at": "2026-02-17T11:00:00",
+              "last_download_at": "2026-02-17T10:00:00",
+              "auto_disable_enabled": true,
+              "auto_disable_after_days": 7,
+              "schedules_auto_disabled": false,
+              "days_until_auto_disable": 5
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getClientStatus()
+
+        assertEquals(true, result.autoDisableEnabled)
+        assertEquals(7, result.autoDisableAfterDays)
+        assertEquals(false, result.schedulesAutoDisabled)
+        assertEquals(5, result.daysUntilAutoDisable)
+        adapter.close()
+    }
+
+    @Test
+    fun sendHeartbeat_mapsResponseToAppModel() = runTest {
+        val payload = """
+            {
+              "status": "ok",
+              "received_at": "2026-02-17T11:00:00",
+              "schedules_active": true,
+              "message": "received"
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.sendHeartbeat()
+
+        assertEquals("ok", result.status)
+        assertEquals(true, result.schedulesActive)
+        assertEquals("received", result.message)
+        adapter.close()
+    }
+
+    @Test
+    fun getSchedules_mapsResponseList() = runTest {
+        val payload = """
+            [
+              {
+                "id": "s1",
+                "period": "morning",
+                "hour": 7,
+                "minute": 0,
+                "enabled": true,
+                "timezone": "UTC",
+                "next_run_at": "2026-02-18T07:00:00"
+              }
+            ]
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getSchedules()
+
+        assertEquals(1, result.size)
+        assertEquals("morning", result.first().period)
+        assertEquals(true, result.first().enabled)
+        adapter.close()
+    }
+
     private fun adapterWithJson(payload: String): SharedGhostwriterAdapter {
         val engine = MockEngine {
             respond(
