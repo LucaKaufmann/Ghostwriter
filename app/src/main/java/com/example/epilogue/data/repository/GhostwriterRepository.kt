@@ -545,6 +545,23 @@ class GhostwriterRepository @Inject constructor(
         hour: Int? = null,
         minute: Int? = null
     ): GhostwriterResult<ScheduleResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val request = ScheduleUpdateRequest(
+                    enabled = enabled,
+                    hour = hour,
+                    minute = minute
+                )
+                GhostwriterResult.Success(shared.updateSchedule(period.lowercase(), request))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to update schedule (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Update schedule failed (shared)", e)
+                GhostwriterResult.Error("Failed to update schedule: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {

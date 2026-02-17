@@ -225,6 +225,33 @@ class SharedGhostwriterAdapterTest {
         adapter.close()
     }
 
+    @Test
+    fun updateSchedule_mapsResponseModel() = runTest {
+        val payload = """
+            {
+              "id": "s1",
+              "period": "morning",
+              "hour": 8,
+              "minute": 15,
+              "enabled": false,
+              "timezone": "UTC",
+              "next_run_at": null
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.updateSchedule(
+            period = "morning",
+            request = ScheduleUpdateRequest(enabled = false, hour = 8, minute = 15)
+        )
+
+        assertEquals("morning", result.period)
+        assertEquals(8, result.hour)
+        assertEquals(15, result.minute)
+        assertEquals(false, result.enabled)
+        adapter.close()
+    }
+
     private fun adapterWithJson(payload: String): SharedGhostwriterAdapter {
         val engine = MockEngine {
             respond(
