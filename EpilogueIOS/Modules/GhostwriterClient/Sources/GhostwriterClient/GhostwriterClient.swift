@@ -432,6 +432,25 @@ public actor GhostwriterClient {
     ///   - status: Optional status filter
     /// - Returns: List of digests
     public func listDigests(limit: Int = 20, offset: Int = 0, status: String? = nil) async throws -> [DigestResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle, limit == 20, offset == 0, status == nil {
+            let digests = try await sharedHandle.client.listDigests()
+            return digests.map { digest in
+                DigestResponse(
+                    id: digest.id,
+                    filename: digest.filename,
+                    period: digest.period,
+                    status: digest.status,
+                    stage: digest.stage,
+                    articleCount: Int(digest.articleCount),
+                    errorMessage: digest.errorMessage,
+                    createdAt: digest.createdAt,
+                    completedAt: digest.completedAt,
+                    downloadedAt: nil
+                )
+            }
+        }
+#endif
         var queryItems = [
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset))
