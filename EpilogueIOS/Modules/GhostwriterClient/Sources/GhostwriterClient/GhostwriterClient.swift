@@ -338,6 +338,27 @@ public actor GhostwriterClient {
     /// - Parameter feeds: List of feeds to sync
     /// - Returns: Sync results showing created/updated/unchanged counts
     public func syncFeeds(_ feeds: [FeedSyncRequest]) async throws -> FeedSyncResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.syncFeeds(
+                feeds: feeds.map { feed in
+                    EpilogueShared.FeedSyncRequest(
+                        url: feed.url,
+                        title: feed.title,
+                        isActive: feed.isActive,
+                        mode: feed.mode,
+                        maxArticles: Int32(feed.maxArticles)
+                    )
+                }
+            )
+            return FeedSyncResponse(
+                synced: Int(sharedResponse.synced),
+                created: Int(sharedResponse.created),
+                updated: Int(sharedResponse.updated),
+                unchanged: Int(sharedResponse.unchanged)
+            )
+        }
+#endif
         return try await post(path: "/feeds/sync", body: feeds)
     }
     
