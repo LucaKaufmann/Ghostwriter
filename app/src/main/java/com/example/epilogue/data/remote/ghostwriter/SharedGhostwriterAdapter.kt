@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import com.example.epilogue.shared.ghostwriter.ClientConfigResponse as SharedClientConfigResponse
 import com.example.epilogue.shared.ghostwriter.ClientConfigUpdateRequest as SharedClientConfigUpdateRequest
 import com.example.epilogue.shared.ghostwriter.ClientStatusResponse as SharedClientStatusResponse
+import com.example.epilogue.shared.ghostwriter.ClearSeenResponse as SharedClearSeenResponse
 import com.example.epilogue.shared.ghostwriter.DigestArticleResponse as SharedDigestArticleResponse
 import com.example.epilogue.shared.ghostwriter.DigestResponse as SharedDigestResponse
 import com.example.epilogue.shared.ghostwriter.FeedChangesResponse as SharedFeedChangesResponse
@@ -16,6 +17,8 @@ import com.example.epilogue.shared.ghostwriter.FeedResponse as SharedFeedRespons
 import com.example.epilogue.shared.ghostwriter.FeedTombstoneResponse as SharedFeedTombstoneResponse
 import com.example.epilogue.shared.ghostwriter.HeartbeatResponse as SharedHeartbeatResponse
 import com.example.epilogue.shared.ghostwriter.IntegrationStatus as SharedIntegrationStatus
+import com.example.epilogue.shared.ghostwriter.PreviewArticleResponse as SharedPreviewArticleResponse
+import com.example.epilogue.shared.ghostwriter.PreviewResponse as SharedPreviewResponse
 import com.example.epilogue.shared.ghostwriter.ScheduleResponse as SharedScheduleResponse
 import com.example.epilogue.shared.ghostwriter.ScheduleUpdateRequest as SharedScheduleUpdateRequest
 import com.example.epilogue.shared.ghostwriter.SyncDigest as SharedSyncDigest
@@ -67,6 +70,22 @@ class SharedGhostwriterAdapter private constructor(
             period = period,
             request = request.toShared()
         ).toApp()
+    }
+
+    suspend fun previewWallabag(): PreviewResponse {
+        return client.previewWallabag().toApp()
+    }
+
+    suspend fun previewNewsletters(): PreviewResponse {
+        return client.previewNewsletters().toApp()
+    }
+
+    suspend fun clearWallabagSeen(): ClearSeenResponse {
+        return client.clearWallabagSeen().toApp()
+    }
+
+    suspend fun clearNewsletterSeen(): ClearSeenResponse {
+        return client.clearNewsletterSeen().toApp()
     }
 
     fun close() {
@@ -233,6 +252,24 @@ private fun ScheduleUpdateRequest.toShared(): SharedScheduleUpdateRequest = Shar
     minute = minute,
     enabled = enabled,
     timezone = timezone
+)
+
+private fun SharedPreviewResponse.toApp(): PreviewResponse = PreviewResponse(
+    status = status,
+    count = count,
+    articles = articles.map { it.toApp() },
+    detail = detail
+)
+
+private fun SharedPreviewArticleResponse.toApp(): PreviewArticleResponse = PreviewArticleResponse(
+    title = title,
+    url = url,
+    author = author,
+    wordCount = wordCount
+)
+
+private fun SharedClearSeenResponse.toApp(): ClearSeenResponse = ClearSeenResponse(
+    cleared = cleared
 )
 
 private fun ClientConfigUpdateRequest.toShared(): SharedClientConfigUpdateRequest = SharedClientConfigUpdateRequest(

@@ -179,6 +179,46 @@ class GhostwriterApiClient(
         return response.bodyOrThrow()
     }
 
+    suspend fun previewWallabag(): PreviewResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("config", "wallabag", "preview") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(emptyMap<String, String>())
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun previewNewsletters(): PreviewResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("newsletters", "preview") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(emptyMap<String, String>())
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun clearWallabagSeen(): ClearSeenResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("config", "wallabag", "clear-seen") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(emptyMap<String, String>())
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun clearNewsletterSeen(): ClearSeenResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("config", "newsletters", "clear-seen") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(emptyMap<String, String>())
+        }
+        return response.bodyOrThrow()
+    }
+
     private fun io.ktor.client.request.HttpRequestBuilder.authorize() {
         apiKey?.takeIf { it.isNotBlank() }?.let {
             header(HttpHeaders.Authorization, "Bearer $it")

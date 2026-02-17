@@ -252,6 +252,72 @@ class SharedGhostwriterAdapterTest {
         adapter.close()
     }
 
+    @Test
+    fun previewWallabag_mapsPreviewPayload() = runTest {
+        val payload = """
+            {
+              "status": "ok",
+              "count": 1,
+              "articles": [
+                {
+                  "title": "Sample",
+                  "url": "https://example.com/a",
+                  "author": "Author",
+                  "word_count": 123
+                }
+              ],
+              "detail": null
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.previewWallabag()
+
+        assertEquals("ok", result.status)
+        assertEquals(1, result.count)
+        assertEquals(1, result.articles.size)
+        assertEquals(123, result.articles.first().wordCount)
+        adapter.close()
+    }
+
+    @Test
+    fun previewNewsletters_mapsPreviewPayload() = runTest {
+        val payload = """
+            {
+              "status": "ok",
+              "count": 0,
+              "articles": [],
+              "detail": "none"
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.previewNewsletters()
+
+        assertEquals("ok", result.status)
+        assertEquals(0, result.count)
+        assertEquals("none", result.detail)
+        adapter.close()
+    }
+
+    @Test
+    fun clearWallabagSeen_mapsResponse() = runTest {
+        val payload = """{"cleared": 4}"""
+        val adapter = adapterWithJson(payload)
+        val result = adapter.clearWallabagSeen()
+        assertEquals(4, result.cleared)
+        adapter.close()
+    }
+
+    @Test
+    fun clearNewsletterSeen_mapsResponse() = runTest {
+        val payload = """{"cleared": 2}"""
+        val adapter = adapterWithJson(payload)
+        val result = adapter.clearNewsletterSeen()
+        assertEquals(2, result.cleared)
+        adapter.close()
+    }
+
     private fun adapterWithJson(payload: String): SharedGhostwriterAdapter {
         val engine = MockEngine {
             respond(

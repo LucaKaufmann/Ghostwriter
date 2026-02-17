@@ -178,6 +178,27 @@ data class IntegrationStatus(
 )
 
 @Serializable
+data class PreviewArticleResponse(
+    @SerialName("title") val title: String,
+    @SerialName("url") val url: String,
+    @SerialName("author") val author: String? = null,
+    @SerialName("word_count") val wordCount: Int? = null
+)
+
+@Serializable
+data class PreviewResponse(
+    @SerialName("status") val status: String,
+    @SerialName("count") val count: Int = 0,
+    @SerialName("articles") val articles: List<PreviewArticleResponse> = emptyList(),
+    @SerialName("detail") val detail: String? = null
+)
+
+@Serializable
+data class ClearSeenResponse(
+    @SerialName("cleared") val cleared: Int
+)
+
+@Serializable
 data class ClientConfigResponse(
     @SerialName("min_word_count") val minWordCount: Int? = null,
     @SerialName("morning_hour") val morningHour: Int? = null,
