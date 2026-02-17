@@ -4,17 +4,19 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 
 kotlin {
     androidTarget()
-    iosX64()
-    iosArm64()
-    iosSimulatorArm64()
+    val iosX64Target = iosX64()
+    val iosArm64Target = iosArm64()
+    val iosSimulatorArm64Target = iosSimulatorArm64()
     applyDefaultHierarchyTemplate()
 
-    targets.withType<KotlinNativeTarget>().configureEach {
-        binaries.framework {
+    val xcf = XCFramework("EpilogueShared")
+    listOf(iosX64Target, iosArm64Target, iosSimulatorArm64Target).forEach { target ->
+        target.binaries.framework {
+            xcf.add(this)
             baseName = "EpilogueShared"
             isStatic = true
         }

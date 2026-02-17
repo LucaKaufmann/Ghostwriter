@@ -1,14 +1,8 @@
 package com.example.epilogue.data.remote.ghostwriter
 
 import com.example.epilogue.shared.ghostwriter.GhostwriterApiClient
+import com.example.epilogue.shared.ghostwriter.GhostwriterClientHandle
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.plugins.HttpRequestRetry
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.json.Json
-import java.io.IOException
 import com.example.epilogue.shared.ghostwriter.ClientConfigResponse as SharedClientConfigResponse
 import com.example.epilogue.shared.ghostwriter.ClientConfigUpdateRequest as SharedClientConfigUpdateRequest
 import com.example.epilogue.shared.ghostwriter.ClientStatusResponse as SharedClientStatusResponse
@@ -54,7 +48,7 @@ import com.example.epilogue.shared.ghostwriter.YouTubeResolveResponse as SharedY
  * Maps shared DTOs back to existing Android app DTOs.
  */
 class SharedGhostwriterAdapter private constructor(
-    private val httpClient: HttpClient,
+    private val closeable: () -> Unit,
     private val client: GhostwriterApiClient
 ) {
     suspend fun performSync(feedSince: String?, digestIds: String?): SyncResponse {
@@ -221,40 +215,23 @@ class SharedGhostwriterAdapter private constructor(
     }
 
     fun close() {
-        httpClient.close()
+        closeable()
     }
 
     companion object {
         fun create(baseUrl: String, apiKey: String?): SharedGhostwriterAdapter {
-            val httpClient = HttpClient(OkHttp) {
-                install(HttpTimeout) {
-                    requestTimeoutMillis = 30_000
-                    connectTimeoutMillis = 15_000
-                    socketTimeoutMillis = 30_000
-                }
-                install(HttpRequestRetry) {
-                    maxRetries = 2
-                    retryOnServerErrors(maxRetries)
-                    retryIf { _, response -> response.status.value == 429 }
-                    retryOnExceptionIf { _, cause -> cause is IOException }
-                    exponentialDelay()
-                }
-                install(ContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true })
-                }
-            }
-
-            val apiClient = GhostwriterApiClient(
-                client = httpClient,
-                baseUrl = baseUrl,
-                apiKey = apiKey
+            val handle = GhostwriterClientHandle.create(baseUrl, apiKey)
+            return SharedGhostwriterAdapter(
+                closeable = { handle.close() },
+                client = handle.client
             )
-
-            return SharedGhostwriterAdapter(httpClient = httpClient, client = apiClient)
         }
 
         internal fun fromClient(httpClient: HttpClient, client: GhostwriterApiClient): SharedGhostwriterAdapter {
-            return SharedGhostwriterAdapter(httpClient = httpClient, client = client)
+            return SharedGhostwriterAdapter(
+                closeable = { httpClient.close() },
+                client = client
+            )
         }
     }
 }

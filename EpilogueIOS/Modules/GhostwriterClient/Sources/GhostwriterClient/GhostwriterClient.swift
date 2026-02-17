@@ -8,6 +8,9 @@
 
 import Foundation
 import OSLog
+#if canImport(EpilogueShared)
+import EpilogueShared
+#endif
 
 // MARK: - URLSession Metrics Delegate
 
@@ -82,6 +85,9 @@ public actor GhostwriterClient {
     private let encoder: JSONEncoder
     private let perfLogger = Logger(subsystem: "com.epilogue", category: "GhostwriterRequests")
     private let metricsDelegate: GhostwriterMetricsDelegate?
+#if canImport(EpilogueShared)
+    private let sharedHandle: GhostwriterClientHandle?
+#endif
     
     // MARK: - Initialization
     
@@ -97,7 +103,7 @@ public actor GhostwriterClient {
         #else
         return false
         #endif
-    }()) {
+    }(), useSharedClient: Bool = false) {
         // Ensure base URL includes /api/ path
         if baseURL.pathComponents.contains("api") {
             self.baseURL = baseURL
@@ -117,6 +123,17 @@ public actor GhostwriterClient {
         
         self.decoder = JSONDecoder()
         self.encoder = JSONEncoder()
+
+#if canImport(EpilogueShared)
+        if useSharedClient {
+            self.sharedHandle = GhostwriterClientHandle.companion.create(
+                baseUrl: self.baseURL.absoluteString,
+                apiKey: apiKey
+            )
+        } else {
+            self.sharedHandle = nil
+        }
+#endif
     }
     
     /// Convenience initializer from URL string
@@ -126,11 +143,11 @@ public actor GhostwriterClient {
         #else
         return false
         #endif
-    }()) throws {
+    }(), useSharedClient: Bool = false) throws {
         guard let url = URL(string: baseURLString) else {
             throw GhostwriterError.invalidURL(baseURLString)
         }
-        self.init(baseURL: url, apiKey: apiKey, enableMetrics: enableMetrics)
+        self.init(baseURL: url, apiKey: apiKey, enableMetrics: enableMetrics, useSharedClient: useSharedClient)
     }
     
     /// Get the last request's network metrics summary (only available when enableMetrics is true)
@@ -165,6 +182,19 @@ public actor GhostwriterClient {
     
     /// Check the health of the Ghostwriter server
     public func checkHealth() async throws -> HealthResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.getHealth()
+            return HealthResponse(
+                status: sharedResponse.status,
+                version: sharedResponse.version,
+                uptimeSeconds: sharedResponse.uptimeSeconds?.intValue,
+                lastSuccessfulDigest: sharedResponse.lastSuccessfulDigest,
+                aiProvider: sharedResponse.aiProvider,
+                aiModel: sharedResponse.aiModel
+            )
+        }
+#endif
         return try await get(path: "/health", authenticated: false)
     }
     
