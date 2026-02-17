@@ -103,7 +103,7 @@ public actor GhostwriterClient {
         #else
         return false
         #endif
-    }(), useSharedClient: Bool = false) {
+    }(), useSharedClient: Bool = true) {
         // Ensure base URL includes /api/ path
         if baseURL.pathComponents.contains("api") {
             self.baseURL = baseURL
@@ -143,7 +143,7 @@ public actor GhostwriterClient {
         #else
         return false
         #endif
-    }(), useSharedClient: Bool = false) throws {
+    }(), useSharedClient: Bool = true) throws {
         guard let url = URL(string: baseURLString) else {
             throw GhostwriterError.invalidURL(baseURLString)
         }
@@ -433,8 +433,12 @@ public actor GhostwriterClient {
     /// - Returns: List of digests
     public func listDigests(limit: Int = 20, offset: Int = 0, status: String? = nil) async throws -> [DigestResponse] {
 #if canImport(EpilogueShared)
-        if let sharedHandle, limit == 20, offset == 0, status == nil {
-            let digests = try await sharedHandle.client.listDigests()
+        if let sharedHandle {
+            let digests = try await sharedHandle.client.listDigestsFiltered(
+                limit: Int32(limit),
+                offset: Int32(offset),
+                status: status
+            )
             return digests.map { digest in
                 DigestResponse(
                     id: digest.id,

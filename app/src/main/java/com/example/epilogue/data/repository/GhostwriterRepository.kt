@@ -1,7 +1,6 @@
 package com.example.epilogue.data.repository
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.util.Log
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigUpdateRequest
@@ -104,9 +103,7 @@ class GhostwriterRepository @Inject constructor(
     }
 
     private fun shouldUseSharedClient(): Boolean {
-        val isDebuggable =
-            (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        return isDebuggable && settingsRepository.useSharedGhostwriterClient()
+        return settingsRepository.useSharedGhostwriterClient()
     }
 
     private fun getSharedAdapter(): SharedGhostwriterAdapter? {

@@ -93,6 +93,21 @@ class GhostwriterApiClient(
         return response.bodyOrThrow()
     }
 
+    suspend fun listDigestsFiltered(
+        limit: Int,
+        offset: Int,
+        status: String? = null
+    ): List<DigestResponse> {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("digests") }
+            authorize()
+            parameter("limit", limit)
+            parameter("offset", offset)
+            status?.let { parameter("status", it) }
+        }
+        return response.bodyOrThrow()
+    }
+
     suspend fun getLatestDigest(): DigestResponse {
         val response = client.get(apiBaseUrl) {
             url { appendPathSegments("digests", "latest") }
