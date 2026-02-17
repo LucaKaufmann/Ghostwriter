@@ -75,6 +75,13 @@ public final class GhostwriterMetricsDelegate: NSObject, URLSessionTaskDelegate,
 
 /// Client for interacting with the Ghostwriter backend API
 public actor GhostwriterClient {
+    public static let sharedClientEnabledDefaultsKey = "ghostwriter_use_shared_client"
+    public static var defaultUseSharedClient: Bool {
+        if let value = UserDefaults.standard.object(forKey: sharedClientEnabledDefaultsKey) as? Bool {
+            return value
+        }
+        return true
+    }
     
     // MARK: - Properties
     
@@ -103,7 +110,7 @@ public actor GhostwriterClient {
         #else
         return false
         #endif
-    }(), useSharedClient: Bool = true) {
+    }(), useSharedClient: Bool = GhostwriterClient.defaultUseSharedClient) {
         // Ensure base URL includes /api/ path
         if baseURL.pathComponents.contains("api") {
             self.baseURL = baseURL
@@ -143,7 +150,7 @@ public actor GhostwriterClient {
         #else
         return false
         #endif
-    }(), useSharedClient: Bool = true) throws {
+    }(), useSharedClient: Bool = GhostwriterClient.defaultUseSharedClient) throws {
         guard let url = URL(string: baseURLString) else {
             throw GhostwriterError.invalidURL(baseURLString)
         }
@@ -586,7 +593,7 @@ public actor GhostwriterClient {
                 finalURL: sharedResponse.finalUrl,
                 contentType: sharedResponse.contentType,
                 fetchedAt: sharedResponse.fetchedAt,
-                sizeBytes: Int(sharedResponse.sizeBytes),
+                sizeBytes: Int64(sharedResponse.sizeBytes),
                 html: sharedResponse.html
             )
         }
@@ -601,15 +608,8 @@ public actor GhostwriterClient {
 #if canImport(EpilogueShared)
         if let sharedHandle {
             let bytes = try await sharedHandle.client.downloadDigest(filename: filename)
-            let count = Int(bytes.size)
-            var data = Data(count: count)
-            data.withUnsafeMutableBytes { rawBuffer in
-                guard let destination = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
-                for index in 0..<count {
-                    destination[index] = UInt8(bitPattern: bytes.get(index: Int32(index)))
-                }
-            }
-            return data
+            let nsData = SharedBinaryBridge().byteArrayToNSData(bytes: bytes)
+            return nsData as Data
         }
 #endif
         return try await getData(path: "/digests/\(filename)")

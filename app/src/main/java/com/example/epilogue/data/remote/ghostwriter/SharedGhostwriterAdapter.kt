@@ -274,7 +274,8 @@ private fun SharedFeedResponse.toApp(): FeedResponse = FeedResponse(
     mode = mode,
     maxArticles = maxArticles,
     createdAt = createdAt,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
+    deletedAt = deletedAt
 )
 
 private fun SharedFeedTombstoneResponse.toApp(): FeedTombstoneResponse = FeedTombstoneResponse(
@@ -388,9 +389,11 @@ private fun SharedIntegrationStatus.toApp(): IntegrationStatus = IntegrationStat
 private fun SharedClientStatusResponse.toApp(): ClientStatusResponse = ClientStatusResponse(
     lastHeartbeatAt = lastHeartbeatAt,
     lastDownloadAt = lastDownloadAt,
+    lastFeedSyncAt = lastFeedSyncAt,
     autoDisableEnabled = autoDisableEnabled,
     autoDisableAfterDays = autoDisableAfterDays,
     schedulesAutoDisabled = schedulesAutoDisabled,
+    autoDisabledAt = autoDisabledAt,
     daysUntilAutoDisable = daysUntilAutoDisable
 )
 
