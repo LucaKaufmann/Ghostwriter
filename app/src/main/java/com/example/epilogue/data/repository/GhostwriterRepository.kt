@@ -567,6 +567,24 @@ class GhostwriterRepository @Inject constructor(
      * @return Success if deleted, Error otherwise
      */
     suspend fun deleteFeedByUrl(feedUrl: String): GhostwriterResult<Unit> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                shared.deleteFeedByUrl(feedUrl)
+                Log.i(TAG, "Deleted feed via shared client: $feedUrl")
+                GhostwriterResult.Success(Unit)
+            } catch (e: GhostwriterApiException.NotFound) {
+                // Feed doesn't exist on backend - treat as success
+                Log.w(TAG, "Feed not found on backend via shared client: $feedUrl")
+                GhostwriterResult.Success(Unit)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Delete feed failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Delete feed failed (shared)", e)
+                GhostwriterResult.Error("Delete failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
