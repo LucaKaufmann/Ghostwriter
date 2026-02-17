@@ -17,6 +17,7 @@ import com.example.epilogue.shared.ghostwriter.FeedTombstoneResponse as SharedFe
 import com.example.epilogue.shared.ghostwriter.HeartbeatResponse as SharedHeartbeatResponse
 import com.example.epilogue.shared.ghostwriter.IntegrationStatus as SharedIntegrationStatus
 import com.example.epilogue.shared.ghostwriter.ScheduleResponse as SharedScheduleResponse
+import com.example.epilogue.shared.ghostwriter.ScheduleUpdateRequest as SharedScheduleUpdateRequest
 import com.example.epilogue.shared.ghostwriter.SyncDigest as SharedSyncDigest
 import com.example.epilogue.shared.ghostwriter.SyncDigestsSection as SharedSyncDigestsSection
 import com.example.epilogue.shared.ghostwriter.SyncResponse as SharedSyncResponse
@@ -59,6 +60,13 @@ class SharedGhostwriterAdapter private constructor(
 
     suspend fun getSchedules(): List<ScheduleResponse> {
         return client.listSchedules().map { it.toApp() }
+    }
+
+    suspend fun updateSchedule(period: String, request: ScheduleUpdateRequest): ScheduleResponse {
+        return client.updateSchedule(
+            period = period,
+            request = request.toShared()
+        ).toApp()
     }
 
     fun close() {
@@ -218,6 +226,13 @@ private fun SharedHeartbeatResponse.toApp(): HeartbeatResponse = HeartbeatRespon
     receivedAt = receivedAt,
     schedulesActive = schedulesActive,
     message = message
+)
+
+private fun ScheduleUpdateRequest.toShared(): SharedScheduleUpdateRequest = SharedScheduleUpdateRequest(
+    hour = hour,
+    minute = minute,
+    enabled = enabled,
+    timezone = timezone
 )
 
 private fun ClientConfigUpdateRequest.toShared(): SharedClientConfigUpdateRequest = SharedClientConfigUpdateRequest(
