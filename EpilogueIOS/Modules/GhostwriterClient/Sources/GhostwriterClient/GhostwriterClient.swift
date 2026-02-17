@@ -569,6 +569,24 @@ public actor GhostwriterClient {
         digestId: String,
         articleId: String
     ) async throws -> DigestArticleSourceResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.getDigestArticleSource(
+                digestId: digestId,
+                articleId: articleId
+            )
+            return DigestArticleSourceResponse(
+                digestId: sharedResponse.digestId,
+                articleId: sharedResponse.articleId,
+                url: sharedResponse.url,
+                finalURL: sharedResponse.finalUrl,
+                contentType: sharedResponse.contentType,
+                fetchedAt: sharedResponse.fetchedAt,
+                sizeBytes: Int(sharedResponse.sizeBytes),
+                html: sharedResponse.html
+            )
+        }
+#endif
         return try await get(path: "/digests/\(digestId)/articles/\(articleId)/source")
     }
 
