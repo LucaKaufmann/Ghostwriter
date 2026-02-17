@@ -301,6 +301,48 @@ data class YouTubeResolveResponse(
 )
 
 @Serializable
+data class MediaItemSummaryResponse(
+    @SerialName("id") val id: String,
+    @SerialName("media_feed_id") val mediaFeedId: String,
+    @SerialName("title") val title: String,
+    @SerialName("author") val author: String? = null,
+    @SerialName("content_type") val contentType: String,
+    @SerialName("mode") val mode: String,
+    @SerialName("word_count") val wordCount: Int,
+    @SerialName("is_summary") val isSummary: Boolean,
+    @SerialName("ai_failed") val aiFailed: Boolean,
+    @SerialName("status") val status: String,
+    @SerialName("error_message") val errorMessage: String? = null,
+    @SerialName("consumed_at") val consumedAt: String? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("completed_at") val completedAt: String? = null
+)
+
+@Serializable
+data class MediaItemResponse(
+    @SerialName("id") val id: String,
+    @SerialName("media_feed_id") val mediaFeedId: String,
+    @SerialName("guid") val guid: String,
+    @SerialName("url") val url: String,
+    @SerialName("content_url") val contentUrl: String? = null,
+    @SerialName("title") val title: String,
+    @SerialName("author") val author: String? = null,
+    @SerialName("content") val content: String,
+    @SerialName("content_type") val contentType: String,
+    @SerialName("mode") val mode: String,
+    @SerialName("word_count") val wordCount: Int,
+    @SerialName("is_summary") val isSummary: Boolean,
+    @SerialName("ai_failed") val aiFailed: Boolean,
+    @SerialName("processing_ms") val processingMs: Int,
+    @SerialName("status") val status: String,
+    @SerialName("error_message") val errorMessage: String? = null,
+    @SerialName("consumed_at") val consumedAt: String? = null,
+    @SerialName("consumed_digest_id") val consumedDigestId: String? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("completed_at") val completedAt: String? = null
+)
+
+@Serializable
 data class ClientConfigResponse(
     @SerialName("min_word_count") val minWordCount: Int? = null,
     @SerialName("morning_hour") val morningHour: Int? = null,

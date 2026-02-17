@@ -353,6 +353,30 @@ class GhostwriterApiClient(
         return response.bodyOrThrow()
     }
 
+    suspend fun getAllPodcastItems(): List<MediaItemSummaryResponse> {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("media", "podcasts", "items", "all") }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun getAllYouTubeItems(): List<MediaItemSummaryResponse> {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("media", "youtube", "items", "all") }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun getMediaItem(id: String): MediaItemResponse {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("media", "items", id) }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
     private fun io.ktor.client.request.HttpRequestBuilder.authorize() {
         apiKey?.takeIf { it.isNotBlank() }?.let {
             header(HttpHeaders.Authorization, "Bearer $it")
