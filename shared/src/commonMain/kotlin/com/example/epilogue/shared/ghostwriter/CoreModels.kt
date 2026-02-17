@@ -90,6 +90,16 @@ data class DigestResponse(
 )
 
 @Serializable
+data class HealthResponse(
+    @SerialName("status") val status: String,
+    @SerialName("version") val version: String,
+    @SerialName("uptime_seconds") val uptimeSeconds: Int? = null,
+    @SerialName("last_successful_digest") val lastSuccessfulDigest: String? = null,
+    @SerialName("ai_provider") val aiProvider: String,
+    @SerialName("ai_model") val aiModel: String
+)
+
+@Serializable
 data class DigestArticleResponse(
     @SerialName("id") val id: String,
     @SerialName("title") val title: String,
