@@ -594,6 +594,20 @@ public actor GhostwriterClient {
     /// - Parameter filename: The EPUB filename
     /// - Returns: Raw EPUB data
     public func downloadDigest(filename: String) async throws -> Data {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let bytes = try await sharedHandle.client.downloadDigest(filename: filename)
+            let count = Int(bytes.size)
+            var data = Data(count: count)
+            data.withUnsafeMutableBytes { rawBuffer in
+                guard let destination = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
+                for index in 0..<count {
+                    destination[index] = UInt8(bitPattern: bytes.get(index: Int32(index)))
+                }
+            }
+            return data
+        }
+#endif
         return try await getData(path: "/digests/\(filename)")
     }
     
@@ -737,6 +751,63 @@ public actor GhostwriterClient {
     /// - Parameter request: The configuration update request
     /// - Returns: Updated configuration
     public func updateConfig(_ request: ClientConfigUpdateRequest) async throws -> ClientConfigResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedRequest = EpilogueShared.ClientConfigUpdateRequest(
+                minWordCount: request.minWordCount.map { KotlinInt(int: Int32($0)) },
+                morningHour: request.morningHour.map { KotlinInt(int: Int32($0)) },
+                morningMinute: request.morningMinute.map { KotlinInt(int: Int32($0)) },
+                noonHour: request.noonHour.map { KotlinInt(int: Int32($0)) },
+                noonMinute: request.noonMinute.map { KotlinInt(int: Int32($0)) },
+                eveningHour: request.eveningHour.map { KotlinInt(int: Int32($0)) },
+                eveningMinute: request.eveningMinute.map { KotlinInt(int: Int32($0)) },
+                timezone: request.timezone,
+                scheduleMorning: request.scheduleMorning,
+                scheduleNoon: request.scheduleNoon,
+                scheduleEvening: request.scheduleEvening,
+                includePodcastsInDigest: request.includePodcastsInDigest.map { KotlinBoolean(bool: $0) },
+                includeYoutubeInDigest: request.includeYoutubeInDigest.map { KotlinBoolean(bool: $0) },
+                coverEnabled: request.coverEnabled.map { KotlinBoolean(bool: $0) },
+                coverProvider: request.coverProvider,
+                coverQuality: request.coverQuality,
+                coverPrompt: request.coverPrompt,
+                coverOverlayEnabled: request.coverOverlayEnabled.map { KotlinBoolean(bool: $0) },
+                clientUpdatedAt: request.clientUpdatedAt
+            )
+            let sharedResponse = try await sharedHandle.client.updateConfig(request: sharedRequest)
+            return ClientConfigResponse(
+                minWordCount: sharedResponse.minWordCount.map { Int(truncating: $0) },
+                morningHour: sharedResponse.morningHour.map { Int(truncating: $0) },
+                morningMinute: sharedResponse.morningMinute.map { Int(truncating: $0) },
+                noonHour: sharedResponse.noonHour.map { Int(truncating: $0) },
+                noonMinute: sharedResponse.noonMinute.map { Int(truncating: $0) },
+                eveningHour: sharedResponse.eveningHour.map { Int(truncating: $0) },
+                eveningMinute: sharedResponse.eveningMinute.map { Int(truncating: $0) },
+                timezone: sharedResponse.timezone,
+                aiProvider: nil,
+                aiModel: nil,
+                scheduleMorning: sharedResponse.scheduleMorning,
+                scheduleNoon: sharedResponse.scheduleNoon,
+                scheduleEvening: sharedResponse.scheduleEvening,
+                whisperProvider: sharedResponse.whisperProvider,
+                whisperModel: sharedResponse.whisperModel,
+                whisperTimeoutMinutes: sharedResponse.whisperTimeoutMinutes.map { Int(truncating: $0) },
+                mediaProcessingIntervalHours: sharedResponse.mediaProcessingIntervalHours.map { Int(truncating: $0) },
+                includePodcastsInDigest: sharedResponse.includePodcastsInDigest?.boolValue,
+                includeYoutubeInDigest: sharedResponse.includeYoutubeInDigest?.boolValue,
+                coverEnabled: sharedResponse.coverEnabled?.boolValue,
+                coverProvider: sharedResponse.coverProvider,
+                coverQuality: sharedResponse.coverQuality,
+                coverPrompt: sharedResponse.coverPrompt,
+                coverOverlayEnabled: sharedResponse.coverOverlayEnabled?.boolValue,
+                coverOpenAIAPIKey: sharedResponse.coverOpenAiApiKey,
+                coverGeminiAPIKey: sharedResponse.coverGeminiApiKey,
+                updatedAt: sharedResponse.updatedAt,
+                wallabag: sharedResponse.wallabag.map { IntegrationStatus(enabled: $0.enabled, label: $0.label) },
+                newsletters: sharedResponse.newsletters.map { IntegrationStatus(enabled: $0.enabled, label: $0.label) }
+            )
+        }
+#endif
         return try await put(path: "/config", body: request)
     }
 
@@ -744,21 +815,69 @@ public actor GhostwriterClient {
 
     /// Preview Wallabag items without marking them as read.
     public func previewWallabag() async throws -> PreviewResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.previewWallabag()
+            return PreviewResponse(
+                status: sharedResponse.status,
+                count: Int(sharedResponse.count),
+                articles: sharedResponse.articles.map { article in
+                    PreviewArticleResponse(
+                        title: article.title,
+                        url: article.url,
+                        author: article.author,
+                        wordCount: article.wordCount.map { Int(truncating: $0) }
+                    )
+                },
+                detail: sharedResponse.detail
+            )
+        }
+#endif
         return try await post(path: "/config/wallabag/preview", body: EmptyRequest())
     }
 
     /// Preview newsletter items without marking them as read.
     public func previewNewsletters() async throws -> PreviewResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.previewNewsletters()
+            return PreviewResponse(
+                status: sharedResponse.status,
+                count: Int(sharedResponse.count),
+                articles: sharedResponse.articles.map { article in
+                    PreviewArticleResponse(
+                        title: article.title,
+                        url: article.url,
+                        author: article.author,
+                        wordCount: article.wordCount.map { Int(truncating: $0) }
+                    )
+                },
+                detail: sharedResponse.detail
+            )
+        }
+#endif
         return try await post(path: "/newsletters/preview", body: EmptyRequest())
     }
 
     /// Clear seen markers for Wallabag synthetic feed.
     public func clearWallabagSeen() async throws -> ClearSeenResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.clearWallabagSeen()
+            return ClearSeenResponse(cleared: Int(sharedResponse.cleared))
+        }
+#endif
         return try await post(path: "/config/wallabag/clear-seen", body: EmptyRequest())
     }
 
     /// Clear seen markers for newsletters synthetic feed.
     public func clearNewsletterSeen() async throws -> ClearSeenResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.clearNewsletterSeen()
+            return ClearSeenResponse(cleared: Int(sharedResponse.cleared))
+        }
+#endif
         return try await post(path: "/config/newsletters/clear-seen", body: EmptyRequest())
     }
 
@@ -771,11 +890,58 @@ public actor GhostwriterClient {
 
     /// List configured podcast feeds.
     public func getPodcastFeeds() async throws -> [MediaFeedResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedFeeds = try await sharedHandle.client.getPodcastFeeds()
+            return sharedFeeds.map { feed in
+                MediaFeedResponse(
+                    id: feed.id,
+                    feedType: feed.feedType,
+                    url: feed.url,
+                    resolvedFeedURL: feed.resolvedFeedUrl,
+                    title: feed.title,
+                    isActive: feed.isActive,
+                    mode: feed.mode,
+                    maxItems: Int(feed.maxItems),
+                    createdAt: feed.createdAt,
+                    updatedAt: feed.updatedAt,
+                    deletedAt: feed.deletedAt
+                )
+            }
+        }
+#endif
         return try await get(path: "/media/podcasts")
     }
 
     /// Create a podcast feed.
     public func createPodcastFeed(_ request: MediaFeedCreateRequest) async throws -> MediaFeedResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedRequest = EpilogueShared.MediaFeedCreateRequest(
+                feedType: request.feedType,
+                url: request.url,
+                resolvedFeedUrl: request.resolvedFeedURL,
+                title: request.title,
+                isActive: request.isActive,
+                mode: request.mode,
+                maxItems: Int32(request.maxItems)
+            )
+            let feed = try await sharedHandle.client.createPodcastFeed(request: sharedRequest)
+            return MediaFeedResponse(
+                id: feed.id,
+                feedType: feed.feedType,
+                url: feed.url,
+                resolvedFeedURL: feed.resolvedFeedUrl,
+                title: feed.title,
+                isActive: feed.isActive,
+                mode: feed.mode,
+                maxItems: Int(feed.maxItems),
+                createdAt: feed.createdAt,
+                updatedAt: feed.updatedAt,
+                deletedAt: feed.deletedAt
+            )
+        }
+#endif
         return try await post(path: "/media/podcasts", body: request)
     }
 
@@ -784,26 +950,113 @@ public actor GhostwriterClient {
         feedId: String,
         request: MediaFeedUpdateRequest
     ) async throws -> MediaFeedResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedRequest = EpilogueShared.MediaFeedUpdateRequest(
+                title: request.title,
+                isActive: request.isActive.map { KotlinBoolean(bool: $0) },
+                mode: request.mode,
+                maxItems: request.maxItems.map { KotlinInt(int: Int32($0)) }
+            )
+            let feed = try await sharedHandle.client.updatePodcastFeed(feedId: feedId, request: sharedRequest)
+            return MediaFeedResponse(
+                id: feed.id,
+                feedType: feed.feedType,
+                url: feed.url,
+                resolvedFeedURL: feed.resolvedFeedUrl,
+                title: feed.title,
+                isActive: feed.isActive,
+                mode: feed.mode,
+                maxItems: Int(feed.maxItems),
+                createdAt: feed.createdAt,
+                updatedAt: feed.updatedAt,
+                deletedAt: feed.deletedAt
+            )
+        }
+#endif
         return try await put(path: "/media/podcasts/\(feedId)", body: request)
     }
 
     /// Delete a podcast feed.
     public func deletePodcastFeed(feedId: String) async throws -> StatusMessageResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.deletePodcastFeed(feedId: feedId)
+            return StatusMessageResponse(status: sharedResponse.status, message: sharedResponse.message)
+        }
+#endif
         return try await delete(path: "/media/podcasts/\(feedId)")
     }
 
     /// List configured YouTube feeds.
     public func getYouTubeFeeds() async throws -> [MediaFeedResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedFeeds = try await sharedHandle.client.getYouTubeFeeds()
+            return sharedFeeds.map { feed in
+                MediaFeedResponse(
+                    id: feed.id,
+                    feedType: feed.feedType,
+                    url: feed.url,
+                    resolvedFeedURL: feed.resolvedFeedUrl,
+                    title: feed.title,
+                    isActive: feed.isActive,
+                    mode: feed.mode,
+                    maxItems: Int(feed.maxItems),
+                    createdAt: feed.createdAt,
+                    updatedAt: feed.updatedAt,
+                    deletedAt: feed.deletedAt
+                )
+            }
+        }
+#endif
         return try await get(path: "/media/youtube")
     }
 
     /// Resolve a YouTube channel URL to RSS feed URL.
     public func resolveYouTubeFeed(url: String) async throws -> YouTubeResolveResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.resolveYouTubeFeed(url: url)
+            return YouTubeResolveResponse(
+                rssFeedURL: sharedResponse.rssFeedUrl,
+                channelID: sharedResponse.channelId,
+                channelTitle: sharedResponse.channelTitle
+            )
+        }
+#endif
         return try await post(path: "/media/youtube/resolve", body: YouTubeResolveRequest(url: url))
     }
 
     /// Create a YouTube feed.
     public func createYouTubeFeed(_ request: MediaFeedCreateRequest) async throws -> MediaFeedResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedRequest = EpilogueShared.MediaFeedCreateRequest(
+                feedType: request.feedType,
+                url: request.url,
+                resolvedFeedUrl: request.resolvedFeedURL,
+                title: request.title,
+                isActive: request.isActive,
+                mode: request.mode,
+                maxItems: Int32(request.maxItems)
+            )
+            let feed = try await sharedHandle.client.createYouTubeFeed(request: sharedRequest)
+            return MediaFeedResponse(
+                id: feed.id,
+                feedType: feed.feedType,
+                url: feed.url,
+                resolvedFeedURL: feed.resolvedFeedUrl,
+                title: feed.title,
+                isActive: feed.isActive,
+                mode: feed.mode,
+                maxItems: Int(feed.maxItems),
+                createdAt: feed.createdAt,
+                updatedAt: feed.updatedAt,
+                deletedAt: feed.deletedAt
+            )
+        }
+#endif
         return try await post(path: "/media/youtube", body: request)
     }
 
@@ -812,36 +1065,161 @@ public actor GhostwriterClient {
         feedId: String,
         request: MediaFeedUpdateRequest
     ) async throws -> MediaFeedResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedRequest = EpilogueShared.MediaFeedUpdateRequest(
+                title: request.title,
+                isActive: request.isActive.map { KotlinBoolean(bool: $0) },
+                mode: request.mode,
+                maxItems: request.maxItems.map { KotlinInt(int: Int32($0)) }
+            )
+            let feed = try await sharedHandle.client.updateYouTubeFeed(feedId: feedId, request: sharedRequest)
+            return MediaFeedResponse(
+                id: feed.id,
+                feedType: feed.feedType,
+                url: feed.url,
+                resolvedFeedURL: feed.resolvedFeedUrl,
+                title: feed.title,
+                isActive: feed.isActive,
+                mode: feed.mode,
+                maxItems: Int(feed.maxItems),
+                createdAt: feed.createdAt,
+                updatedAt: feed.updatedAt,
+                deletedAt: feed.deletedAt
+            )
+        }
+#endif
         return try await put(path: "/media/youtube/\(feedId)", body: request)
     }
 
     /// Delete a YouTube feed.
     public func deleteYouTubeFeed(feedId: String) async throws -> StatusMessageResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.deleteYouTubeFeed(feedId: feedId)
+            return StatusMessageResponse(status: sharedResponse.status, message: sharedResponse.message)
+        }
+#endif
         return try await delete(path: "/media/youtube/\(feedId)")
     }
 
     /// List all podcast items (summary view).
     public func getAllPodcastItems() async throws -> [MediaItemSummaryResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let items = try await sharedHandle.client.getAllPodcastItems()
+            return items.map { item in
+                MediaItemSummaryResponse(
+                    id: item.id,
+                    mediaFeedID: item.mediaFeedId,
+                    title: item.title,
+                    author: item.author,
+                    contentType: item.contentType,
+                    mode: item.mode,
+                    wordCount: Int(item.wordCount),
+                    isSummary: item.isSummary,
+                    aiFailed: item.aiFailed,
+                    status: item.status,
+                    errorMessage: item.errorMessage,
+                    consumedAt: item.consumedAt,
+                    createdAt: item.createdAt,
+                    completedAt: item.completedAt
+                )
+            }
+        }
+#endif
         return try await get(path: "/media/podcasts/items/all")
     }
 
     /// List all YouTube items (summary view).
     public func getAllYouTubeItems() async throws -> [MediaItemSummaryResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let items = try await sharedHandle.client.getAllYouTubeItems()
+            return items.map { item in
+                MediaItemSummaryResponse(
+                    id: item.id,
+                    mediaFeedID: item.mediaFeedId,
+                    title: item.title,
+                    author: item.author,
+                    contentType: item.contentType,
+                    mode: item.mode,
+                    wordCount: Int(item.wordCount),
+                    isSummary: item.isSummary,
+                    aiFailed: item.aiFailed,
+                    status: item.status,
+                    errorMessage: item.errorMessage,
+                    consumedAt: item.consumedAt,
+                    createdAt: item.createdAt,
+                    completedAt: item.completedAt
+                )
+            }
+        }
+#endif
         return try await get(path: "/media/youtube/items/all")
     }
 
     /// Fetch a full media item by ID including transcript/content.
     public func getMediaItem(id: String) async throws -> MediaItemResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let item = try await sharedHandle.client.getMediaItem(id: id)
+            return MediaItemResponse(
+                id: item.id,
+                mediaFeedID: item.mediaFeedId,
+                guid: item.guid,
+                url: item.url,
+                contentURL: item.contentUrl,
+                title: item.title,
+                author: item.author,
+                content: item.content,
+                contentType: item.contentType,
+                mode: item.mode,
+                wordCount: Int(item.wordCount),
+                isSummary: item.isSummary,
+                aiFailed: item.aiFailed,
+                processingMs: Int(item.processingMs),
+                status: item.status,
+                errorMessage: item.errorMessage,
+                consumedAt: item.consumedAt,
+                consumedDigestID: item.consumedDigestId,
+                createdAt: item.createdAt,
+                completedAt: item.completedAt
+            )
+        }
+#endif
         return try await get(path: "/media/items/\(id)")
     }
 
     /// Get media processing status.
     public func getMediaProcessingStatus() async throws -> MediaProcessingStatusResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let status = try await sharedHandle.client.getMediaStatus()
+            return MediaProcessingStatusResponse(
+                isRunning: status.isRunning,
+                pendingCount: Int(status.pendingCount),
+                processingCount: Int(status.processingCount),
+                completedCount: Int(status.completedCount),
+                failedCount: Int(status.failedCount),
+                currentItemTitle: status.currentItemTitle,
+                currentItemContentType: status.currentItemContentType,
+                lastCompletedAt: status.lastCompletedAt,
+                nextRunAt: status.nextRunAt
+            )
+        }
+#endif
         return try await get(path: "/media/status")
     }
 
     /// Trigger media processing pipeline.
     public func triggerMediaProcessing() async throws -> MediaTriggerResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let response = try await sharedHandle.client.triggerMediaProcessing()
+            return MediaTriggerResponse(status: response.status, detail: response.detail)
+        }
+#endif
         return try await post(path: "/media/trigger", body: EmptyRequest())
     }
 
@@ -849,6 +1227,18 @@ public actor GhostwriterClient {
 
     /// List available server log files.
     public func getLogFiles() async throws -> [LogFileInfoResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let logs = try await sharedHandle.client.getLogFiles()
+            return logs.map { log in
+                LogFileInfoResponse(
+                    filename: log.filename,
+                    sizeBytes: Int64(log.sizeBytes),
+                    modifiedAt: log.modifiedAt
+                )
+            }
+        }
+#endif
         return try await get(path: "/logs")
     }
 
@@ -856,16 +1246,49 @@ public actor GhostwriterClient {
 
     /// List auth API tokens for current user (JWT required).
     public func listAuthTokens() async throws -> [AuthAPITokenResponse] {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let tokens = try await sharedHandle.client.listAuthTokens()
+            return tokens.map { token in
+                AuthAPITokenResponse(
+                    id: token.id,
+                    name: token.name,
+                    tokenPrefix: token.tokenPrefix,
+                    createdAt: token.createdAt,
+                    lastUsedAt: token.lastUsedAt,
+                    revokedAt: token.revokedAt
+                )
+            }
+        }
+#endif
         return try await get(path: "/auth/tokens")
     }
 
     /// Create a new auth API token (JWT required).
     public func createAuthToken(name: String) async throws -> AuthAPITokenCreateResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let token = try await sharedHandle.client.createAuthToken(name: name)
+            return AuthAPITokenCreateResponse(
+                id: token.id,
+                name: token.name,
+                token: token.token,
+                tokenPrefix: token.tokenPrefix,
+                createdAt: token.createdAt
+            )
+        }
+#endif
         return try await post(path: "/auth/tokens", body: AuthAPITokenCreateRequest(name: name))
     }
 
     /// Revoke an auth API token (JWT required).
     public func revokeAuthToken(id: String) async throws -> StatusMessageResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let response = try await sharedHandle.client.revokeAuthToken(id: id)
+            return StatusMessageResponse(status: response.status, message: response.message)
+        }
+#endif
         return try await delete(path: "/auth/tokens/\(id)")
     }
     
