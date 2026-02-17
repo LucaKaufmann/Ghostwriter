@@ -509,6 +509,24 @@ public actor GhostwriterClient {
     /// - Parameter id: The digest ID
     /// - Returns: Status including progress and ETA
     public func getDigestStatus(id: String) async throws -> DigestStatusResponse {
+#if canImport(EpilogueShared)
+        if let sharedHandle {
+            let sharedResponse = try await sharedHandle.client.getDigestStatus(digestId: id)
+            return DigestStatusResponse(
+                id: sharedResponse.id,
+                status: sharedResponse.status,
+                stage: sharedResponse.stage,
+                progress: DigestProgress(
+                    totalFeeds: Int(sharedResponse.progress.totalFeeds),
+                    feedsFetched: Int(sharedResponse.progress.feedsFetched),
+                    totalArticles: Int(sharedResponse.progress.totalArticles),
+                    articlesEnriched: Int(sharedResponse.progress.articlesEnriched)
+                ),
+                startedAt: sharedResponse.startedAt,
+                etaSeconds: sharedResponse.etaSeconds.map { Int(truncating: $0) }
+            )
+        }
+#endif
         return try await get(path: "/digests/\(id)/status")
     }
     
