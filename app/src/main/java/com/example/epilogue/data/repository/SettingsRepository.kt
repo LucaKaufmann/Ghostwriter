@@ -1,6 +1,7 @@
 package com.example.epilogue.data.repository
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -67,7 +68,6 @@ class SettingsRepository @Inject constructor(
         private const val DEFAULT_CUSTOM_EXPORT_ENABLED = false
         private const val DEFAULT_GHOSTWRITER_ENABLED = false
         private const val DEFAULT_GHOSTWRITER_DOWNLOAD_EPUBS_ON_SYNC = true
-        private const val DEFAULT_GHOSTWRITER_USE_SHARED_CLIENT = false
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -375,9 +375,10 @@ class SettingsRepository @Inject constructor(
      * Returns whether the app should use the KMP shared Ghostwriter client path.
      */
     fun useSharedGhostwriterClient(): Boolean {
+        val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         return prefs.getBoolean(
             KEY_GHOSTWRITER_USE_SHARED_CLIENT,
-            DEFAULT_GHOSTWRITER_USE_SHARED_CLIENT
+            isDebuggable
         )
     }
 
