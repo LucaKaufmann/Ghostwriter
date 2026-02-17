@@ -255,6 +255,52 @@ data class MediaTriggerResponse(
 )
 
 @Serializable
+data class MediaFeedResponse(
+    @SerialName("id") val id: String,
+    @SerialName("feed_type") val feedType: String,
+    @SerialName("url") val url: String,
+    @SerialName("resolved_feed_url") val resolvedFeedUrl: String? = null,
+    @SerialName("title") val title: String,
+    @SerialName("is_active") val isActive: Boolean,
+    @SerialName("mode") val mode: String,
+    @SerialName("max_items") val maxItems: Int,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("updated_at") val updatedAt: String,
+    @SerialName("deleted_at") val deletedAt: String? = null
+)
+
+@Serializable
+data class MediaFeedCreateRequest(
+    @SerialName("feed_type") val feedType: String,
+    @SerialName("url") val url: String,
+    @SerialName("resolved_feed_url") val resolvedFeedUrl: String? = null,
+    @SerialName("title") val title: String,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("mode") val mode: String = "raw",
+    @SerialName("max_items") val maxItems: Int = 5
+)
+
+@Serializable
+data class MediaFeedUpdateRequest(
+    @SerialName("title") val title: String? = null,
+    @SerialName("is_active") val isActive: Boolean? = null,
+    @SerialName("mode") val mode: String? = null,
+    @SerialName("max_items") val maxItems: Int? = null
+)
+
+@Serializable
+data class YouTubeResolveRequest(
+    @SerialName("url") val url: String
+)
+
+@Serializable
+data class YouTubeResolveResponse(
+    @SerialName("rss_feed_url") val rssFeedUrl: String,
+    @SerialName("channel_id") val channelId: String,
+    @SerialName("channel_title") val channelTitle: String? = null
+)
+
+@Serializable
 data class ClientConfigResponse(
     @SerialName("min_word_count") val minWordCount: Int? = null,
     @SerialName("morning_hour") val morningHour: Int? = null,

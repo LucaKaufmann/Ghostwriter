@@ -271,6 +271,88 @@ class GhostwriterApiClient(
         return response.bodyOrThrow()
     }
 
+    suspend fun getPodcastFeeds(): List<MediaFeedResponse> {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("media", "podcasts") }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun createPodcastFeed(request: MediaFeedCreateRequest): MediaFeedResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("media", "podcasts") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun updatePodcastFeed(feedId: String, request: MediaFeedUpdateRequest): MediaFeedResponse {
+        val response = client.put(apiBaseUrl) {
+            url { appendPathSegments("media", "podcasts", feedId) }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun deletePodcastFeed(feedId: String): StatusMessageResponse {
+        val response = client.delete(apiBaseUrl) {
+            url { appendPathSegments("media", "podcasts", feedId) }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun getYouTubeFeeds(): List<MediaFeedResponse> {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("media", "youtube") }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun resolveYouTubeFeed(url: String): YouTubeResolveResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("media", "youtube", "resolve") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(YouTubeResolveRequest(url))
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun createYouTubeFeed(request: MediaFeedCreateRequest): MediaFeedResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("media", "youtube") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun updateYouTubeFeed(feedId: String, request: MediaFeedUpdateRequest): MediaFeedResponse {
+        val response = client.put(apiBaseUrl) {
+            url { appendPathSegments("media", "youtube", feedId) }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun deleteYouTubeFeed(feedId: String): StatusMessageResponse {
+        val response = client.delete(apiBaseUrl) {
+            url { appendPathSegments("media", "youtube", feedId) }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
     private fun io.ktor.client.request.HttpRequestBuilder.authorize() {
         apiKey?.takeIf { it.isNotBlank() }?.let {
             header(HttpHeaders.Authorization, "Bearer $it")

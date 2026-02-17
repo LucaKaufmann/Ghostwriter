@@ -424,6 +424,87 @@ class SharedGhostwriterAdapterTest {
         adapter.close()
     }
 
+    @Test
+    fun getPodcastFeeds_mapsResponse() = runTest {
+        val payload = """
+            [
+              {
+                "id": "m1",
+                "feed_type": "podcast",
+                "url": "https://example.com/podcast.rss",
+                "resolved_feed_url": null,
+                "title": "Podcast",
+                "is_active": true,
+                "mode": "raw",
+                "max_items": 5,
+                "created_at": "2026-02-17T12:00:00",
+                "updated_at": "2026-02-17T12:30:00",
+                "deleted_at": null
+              }
+            ]
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getPodcastFeeds()
+        assertEquals(1, result.size)
+        assertEquals("podcast", result.first().feedType)
+        adapter.close()
+    }
+
+    @Test
+    fun createPodcastFeed_mapsResponse() = runTest {
+        val payload = """
+            {
+              "id": "m1",
+              "feed_type": "podcast",
+              "url": "https://example.com/podcast.rss",
+              "resolved_feed_url": null,
+              "title": "Podcast",
+              "is_active": true,
+              "mode": "raw",
+              "max_items": 5,
+              "created_at": "2026-02-17T12:00:00",
+              "updated_at": "2026-02-17T12:30:00",
+              "deleted_at": null
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.createPodcastFeed(
+            MediaFeedCreateRequest(feedType = "podcast", url = "https://example.com/podcast.rss", title = "Podcast")
+        )
+        assertEquals("m1", result.id)
+        assertEquals("Podcast", result.title)
+        adapter.close()
+    }
+
+    @Test
+    fun resolveYouTubeFeed_mapsResponse() = runTest {
+        val payload = """
+            {
+              "rss_feed_url": "https://www.youtube.com/feeds/videos.xml?channel_id=abc",
+              "channel_id": "abc",
+              "channel_title": "Channel"
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.resolveYouTubeFeed("https://youtube.com/@channel")
+        assertEquals("abc", result.channelId)
+        assertEquals("Channel", result.channelTitle)
+        adapter.close()
+    }
+
+    @Test
+    fun deleteYouTubeFeed_mapsStatusResponse() = runTest {
+        val payload = """{"status":"ok","message":"deleted"}"""
+        val adapter = adapterWithJson(payload)
+        val result = adapter.deleteYouTubeFeed("m2")
+        assertEquals("ok", result.status)
+        assertEquals("deleted", result.message)
+        adapter.close()
+    }
+
     private fun adapterWithJson(payload: String): SharedGhostwriterAdapter {
         val engine = MockEngine {
             respond(

@@ -20,6 +20,9 @@ import com.example.epilogue.shared.ghostwriter.FeedTombstoneResponse as SharedFe
 import com.example.epilogue.shared.ghostwriter.HeartbeatResponse as SharedHeartbeatResponse
 import com.example.epilogue.shared.ghostwriter.IntegrationStatus as SharedIntegrationStatus
 import com.example.epilogue.shared.ghostwriter.LogFileInfoResponse as SharedLogFileInfoResponse
+import com.example.epilogue.shared.ghostwriter.MediaFeedCreateRequest as SharedMediaFeedCreateRequest
+import com.example.epilogue.shared.ghostwriter.MediaFeedResponse as SharedMediaFeedResponse
+import com.example.epilogue.shared.ghostwriter.MediaFeedUpdateRequest as SharedMediaFeedUpdateRequest
 import com.example.epilogue.shared.ghostwriter.MediaProcessingStatusResponse as SharedMediaProcessingStatusResponse
 import com.example.epilogue.shared.ghostwriter.MediaTriggerResponse as SharedMediaTriggerResponse
 import com.example.epilogue.shared.ghostwriter.PreviewArticleResponse as SharedPreviewArticleResponse
@@ -30,6 +33,7 @@ import com.example.epilogue.shared.ghostwriter.StatusMessageResponse as SharedSt
 import com.example.epilogue.shared.ghostwriter.SyncDigest as SharedSyncDigest
 import com.example.epilogue.shared.ghostwriter.SyncDigestsSection as SharedSyncDigestsSection
 import com.example.epilogue.shared.ghostwriter.SyncResponse as SharedSyncResponse
+import com.example.epilogue.shared.ghostwriter.YouTubeResolveResponse as SharedYouTubeResolveResponse
 
 /**
  * Thin adapter around shared KMP GhostwriterApiClient.
@@ -116,6 +120,42 @@ class SharedGhostwriterAdapter private constructor(
 
     suspend fun triggerMediaProcessing(): MediaTriggerResponse {
         return client.triggerMediaProcessing().toApp()
+    }
+
+    suspend fun getPodcastFeeds(): List<MediaFeedResponse> {
+        return client.getPodcastFeeds().map { it.toApp() }
+    }
+
+    suspend fun createPodcastFeed(request: MediaFeedCreateRequest): MediaFeedResponse {
+        return client.createPodcastFeed(request.toShared()).toApp()
+    }
+
+    suspend fun updatePodcastFeed(feedId: String, request: MediaFeedUpdateRequest): MediaFeedResponse {
+        return client.updatePodcastFeed(feedId, request.toShared()).toApp()
+    }
+
+    suspend fun deletePodcastFeed(feedId: String): StatusMessageResponse {
+        return client.deletePodcastFeed(feedId).toApp()
+    }
+
+    suspend fun getYouTubeFeeds(): List<MediaFeedResponse> {
+        return client.getYouTubeFeeds().map { it.toApp() }
+    }
+
+    suspend fun resolveYouTubeFeed(url: String): YouTubeResolveResponse {
+        return client.resolveYouTubeFeed(url).toApp()
+    }
+
+    suspend fun createYouTubeFeed(request: MediaFeedCreateRequest): MediaFeedResponse {
+        return client.createYouTubeFeed(request.toShared()).toApp()
+    }
+
+    suspend fun updateYouTubeFeed(feedId: String, request: MediaFeedUpdateRequest): MediaFeedResponse {
+        return client.updateYouTubeFeed(feedId, request.toShared()).toApp()
+    }
+
+    suspend fun deleteYouTubeFeed(feedId: String): StatusMessageResponse {
+        return client.deleteYouTubeFeed(feedId).toApp()
     }
 
     fun close() {
@@ -345,6 +385,43 @@ private fun SharedMediaProcessingStatusResponse.toApp(): MediaProcessingStatusRe
 private fun SharedMediaTriggerResponse.toApp(): MediaTriggerResponse = MediaTriggerResponse(
     status = status,
     detail = detail
+)
+
+private fun SharedMediaFeedResponse.toApp(): MediaFeedResponse = MediaFeedResponse(
+    id = id,
+    feedType = feedType,
+    url = url,
+    resolvedFeedUrl = resolvedFeedUrl,
+    title = title,
+    isActive = isActive,
+    mode = mode,
+    maxItems = maxItems,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    deletedAt = deletedAt
+)
+
+private fun MediaFeedCreateRequest.toShared(): SharedMediaFeedCreateRequest = SharedMediaFeedCreateRequest(
+    feedType = feedType,
+    url = url,
+    resolvedFeedUrl = resolvedFeedUrl,
+    title = title,
+    isActive = isActive,
+    mode = mode,
+    maxItems = maxItems
+)
+
+private fun MediaFeedUpdateRequest.toShared(): SharedMediaFeedUpdateRequest = SharedMediaFeedUpdateRequest(
+    title = title,
+    isActive = isActive,
+    mode = mode,
+    maxItems = maxItems
+)
+
+private fun SharedYouTubeResolveResponse.toApp(): YouTubeResolveResponse = YouTubeResolveResponse(
+    rssFeedUrl = rssFeedUrl,
+    channelId = channelId,
+    channelTitle = channelTitle
 )
 
 private fun ClientConfigUpdateRequest.toShared(): SharedClientConfigUpdateRequest = SharedClientConfigUpdateRequest(
