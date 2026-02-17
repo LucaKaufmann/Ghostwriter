@@ -12,6 +12,7 @@ import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -646,6 +647,14 @@ class SharedGhostwriterAdapterTest {
     fun deleteFeedByUrl_completesOnSuccess() = runTest {
         val adapter = adapterWithJson("""{}""")
         adapter.deleteFeedByUrl("https://example.com/feed")
+        adapter.close()
+    }
+
+    @Test
+    fun downloadDigest_returnsRawBytes() = runTest {
+        val adapter = adapterWithJson("epub-bytes")
+        val bytes = adapter.downloadDigest("digest.epub")
+        assertArrayEquals("epub-bytes".toByteArray(), bytes)
         adapter.close()
     }
 

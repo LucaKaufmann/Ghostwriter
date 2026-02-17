@@ -98,6 +98,10 @@ class SharedGhostwriterAdapter private constructor(
         return client.listDigests().map { it.toApp() }
     }
 
+    suspend fun downloadDigest(filename: String): ByteArray {
+        return client.downloadDigest(filename)
+    }
+
     suspend fun updateConfig(request: ClientConfigUpdateRequest): ClientConfigResponse {
         return client.updateConfig(request.toShared()).toApp()
     }
