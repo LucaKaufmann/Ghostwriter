@@ -23,6 +23,8 @@ import com.example.epilogue.shared.ghostwriter.LogFileInfoResponse as SharedLogF
 import com.example.epilogue.shared.ghostwriter.MediaFeedCreateRequest as SharedMediaFeedCreateRequest
 import com.example.epilogue.shared.ghostwriter.MediaFeedResponse as SharedMediaFeedResponse
 import com.example.epilogue.shared.ghostwriter.MediaFeedUpdateRequest as SharedMediaFeedUpdateRequest
+import com.example.epilogue.shared.ghostwriter.MediaItemResponse as SharedMediaItemResponse
+import com.example.epilogue.shared.ghostwriter.MediaItemSummaryResponse as SharedMediaItemSummaryResponse
 import com.example.epilogue.shared.ghostwriter.MediaProcessingStatusResponse as SharedMediaProcessingStatusResponse
 import com.example.epilogue.shared.ghostwriter.MediaTriggerResponse as SharedMediaTriggerResponse
 import com.example.epilogue.shared.ghostwriter.PreviewArticleResponse as SharedPreviewArticleResponse
@@ -156,6 +158,18 @@ class SharedGhostwriterAdapter private constructor(
 
     suspend fun deleteYouTubeFeed(feedId: String): StatusMessageResponse {
         return client.deleteYouTubeFeed(feedId).toApp()
+    }
+
+    suspend fun getAllPodcastItems(): List<MediaItemSummaryResponse> {
+        return client.getAllPodcastItems().map { it.toApp() }
+    }
+
+    suspend fun getAllYouTubeItems(): List<MediaItemSummaryResponse> {
+        return client.getAllYouTubeItems().map { it.toApp() }
+    }
+
+    suspend fun getMediaItem(id: String): MediaItemResponse {
+        return client.getMediaItem(id).toApp()
     }
 
     fun close() {
@@ -422,6 +436,46 @@ private fun SharedYouTubeResolveResponse.toApp(): YouTubeResolveResponse = YouTu
     rssFeedUrl = rssFeedUrl,
     channelId = channelId,
     channelTitle = channelTitle
+)
+
+private fun SharedMediaItemSummaryResponse.toApp(): MediaItemSummaryResponse = MediaItemSummaryResponse(
+    id = id,
+    mediaFeedId = mediaFeedId,
+    title = title,
+    author = author,
+    contentType = contentType,
+    mode = mode,
+    wordCount = wordCount,
+    isSummary = isSummary,
+    aiFailed = aiFailed,
+    status = status,
+    errorMessage = errorMessage,
+    consumedAt = consumedAt,
+    createdAt = createdAt,
+    completedAt = completedAt
+)
+
+private fun SharedMediaItemResponse.toApp(): MediaItemResponse = MediaItemResponse(
+    id = id,
+    mediaFeedId = mediaFeedId,
+    guid = guid,
+    url = url,
+    contentUrl = contentUrl,
+    title = title,
+    author = author,
+    content = content,
+    contentType = contentType,
+    mode = mode,
+    wordCount = wordCount,
+    isSummary = isSummary,
+    aiFailed = aiFailed,
+    processingMs = processingMs,
+    status = status,
+    errorMessage = errorMessage,
+    consumedAt = consumedAt,
+    consumedDigestId = consumedDigestId,
+    createdAt = createdAt,
+    completedAt = completedAt
 )
 
 private fun ClientConfigUpdateRequest.toShared(): SharedClientConfigUpdateRequest = SharedClientConfigUpdateRequest(

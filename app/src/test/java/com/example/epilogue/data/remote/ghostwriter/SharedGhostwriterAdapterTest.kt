@@ -505,6 +505,103 @@ class SharedGhostwriterAdapterTest {
         adapter.close()
     }
 
+    @Test
+    fun getAllPodcastItems_mapsResponse() = runTest {
+        val payload = """
+            [
+              {
+                "id": "i1",
+                "media_feed_id": "m1",
+                "title": "Episode 1",
+                "author": "Host",
+                "content_type": "podcast",
+                "mode": "raw",
+                "word_count": 900,
+                "is_summary": false,
+                "ai_failed": false,
+                "status": "completed",
+                "error_message": null,
+                "consumed_at": null,
+                "created_at": "2026-02-17T12:00:00",
+                "completed_at": "2026-02-17T12:20:00"
+              }
+            ]
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getAllPodcastItems()
+        assertEquals(1, result.size)
+        assertEquals("i1", result.first().id)
+        assertEquals("m1", result.first().mediaFeedId)
+        adapter.close()
+    }
+
+    @Test
+    fun getAllYouTubeItems_mapsResponse() = runTest {
+        val payload = """
+            [
+              {
+                "id": "i2",
+                "media_feed_id": "y1",
+                "title": "Video 1",
+                "author": "Creator",
+                "content_type": "youtube",
+                "mode": "raw",
+                "word_count": 700,
+                "is_summary": false,
+                "ai_failed": false,
+                "status": "completed",
+                "error_message": null,
+                "consumed_at": null,
+                "created_at": "2026-02-17T12:00:00",
+                "completed_at": "2026-02-17T12:20:00"
+              }
+            ]
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getAllYouTubeItems()
+        assertEquals(1, result.size)
+        assertEquals("i2", result.first().id)
+        assertEquals("y1", result.first().mediaFeedId)
+        adapter.close()
+    }
+
+    @Test
+    fun getMediaItem_mapsResponse() = runTest {
+        val payload = """
+            {
+              "id": "i3",
+              "media_feed_id": "m1",
+              "guid": "guid-3",
+              "url": "https://example.com/item",
+              "content_url": null,
+              "title": "Item 3",
+              "author": "Author",
+              "content": "Body",
+              "content_type": "podcast",
+              "mode": "raw",
+              "word_count": 500,
+              "is_summary": false,
+              "ai_failed": false,
+              "processing_ms": 1234,
+              "status": "completed",
+              "error_message": null,
+              "consumed_at": null,
+              "consumed_digest_id": null,
+              "created_at": "2026-02-17T12:00:00",
+              "completed_at": "2026-02-17T12:20:00"
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getMediaItem("i3")
+        assertEquals("i3", result.id)
+        assertEquals("guid-3", result.guid)
+        assertEquals(1234, result.processingMs)
+        adapter.close()
+    }
+
     private fun adapterWithJson(payload: String): SharedGhostwriterAdapter {
         val engine = MockEngine {
             respond(

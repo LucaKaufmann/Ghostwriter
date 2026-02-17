@@ -1412,6 +1412,18 @@ class GhostwriterRepository @Inject constructor(
      * List all podcast media items.
      */
     suspend fun getAllPodcastItems(): GhostwriterResult<List<MediaItemSummaryResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getAllPodcastItems())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load podcast items (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get podcast items failed (shared)", e)
+                GhostwriterResult.Error("Failed to load podcast items: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1434,6 +1446,18 @@ class GhostwriterRepository @Inject constructor(
      * List all YouTube media items.
      */
     suspend fun getAllYouTubeItems(): GhostwriterResult<List<MediaItemSummaryResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getAllYouTubeItems())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load YouTube items (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get YouTube items failed (shared)", e)
+                GhostwriterResult.Error("Failed to load YouTube items: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1456,6 +1480,18 @@ class GhostwriterRepository @Inject constructor(
      * Get full media item details with transcript body.
      */
     suspend fun getMediaItem(itemId: String): GhostwriterResult<MediaItemResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getMediaItem(itemId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load media item (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get media item failed (shared)", e)
+                GhostwriterResult.Error("Failed to load media item: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
