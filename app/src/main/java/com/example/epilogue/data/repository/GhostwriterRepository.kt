@@ -1341,6 +1341,18 @@ class GhostwriterRepository @Inject constructor(
      * Get aggregate media processing status.
      */
     suspend fun getMediaStatus(): GhostwriterResult<MediaProcessingStatusResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getMediaStatus())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load media status (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get media status failed (shared)", e)
+                GhostwriterResult.Error("Failed to load media status: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1363,6 +1375,18 @@ class GhostwriterRepository @Inject constructor(
      * Trigger media processing pipeline.
      */
     suspend fun triggerMediaProcessing(): GhostwriterResult<MediaTriggerResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.triggerMediaProcessing())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to trigger media processing (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Trigger media processing failed (shared)", e)
+                GhostwriterResult.Error("Failed to trigger media processing: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {

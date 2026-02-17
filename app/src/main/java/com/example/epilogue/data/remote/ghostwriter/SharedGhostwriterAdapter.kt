@@ -20,6 +20,8 @@ import com.example.epilogue.shared.ghostwriter.FeedTombstoneResponse as SharedFe
 import com.example.epilogue.shared.ghostwriter.HeartbeatResponse as SharedHeartbeatResponse
 import com.example.epilogue.shared.ghostwriter.IntegrationStatus as SharedIntegrationStatus
 import com.example.epilogue.shared.ghostwriter.LogFileInfoResponse as SharedLogFileInfoResponse
+import com.example.epilogue.shared.ghostwriter.MediaProcessingStatusResponse as SharedMediaProcessingStatusResponse
+import com.example.epilogue.shared.ghostwriter.MediaTriggerResponse as SharedMediaTriggerResponse
 import com.example.epilogue.shared.ghostwriter.PreviewArticleResponse as SharedPreviewArticleResponse
 import com.example.epilogue.shared.ghostwriter.PreviewResponse as SharedPreviewResponse
 import com.example.epilogue.shared.ghostwriter.ScheduleResponse as SharedScheduleResponse
@@ -106,6 +108,14 @@ class SharedGhostwriterAdapter private constructor(
 
     suspend fun revokeAuthToken(id: String): StatusMessageResponse {
         return client.revokeAuthToken(id).toApp()
+    }
+
+    suspend fun getMediaStatus(): MediaProcessingStatusResponse {
+        return client.getMediaStatus().toApp()
+    }
+
+    suspend fun triggerMediaProcessing(): MediaTriggerResponse {
+        return client.triggerMediaProcessing().toApp()
     }
 
     fun close() {
@@ -318,6 +328,23 @@ private fun SharedAuthApiTokenCreateResponse.toApp(): AuthApiTokenCreateResponse
 private fun SharedStatusMessageResponse.toApp(): StatusMessageResponse = StatusMessageResponse(
     status = status,
     message = message
+)
+
+private fun SharedMediaProcessingStatusResponse.toApp(): MediaProcessingStatusResponse = MediaProcessingStatusResponse(
+    isRunning = isRunning,
+    pendingCount = pendingCount,
+    processingCount = processingCount,
+    completedCount = completedCount,
+    failedCount = failedCount,
+    currentItemTitle = currentItemTitle,
+    currentItemContentType = currentItemContentType,
+    lastCompletedAt = lastCompletedAt,
+    nextRunAt = nextRunAt
+)
+
+private fun SharedMediaTriggerResponse.toApp(): MediaTriggerResponse = MediaTriggerResponse(
+    status = status,
+    detail = detail
 )
 
 private fun ClientConfigUpdateRequest.toShared(): SharedClientConfigUpdateRequest = SharedClientConfigUpdateRequest(

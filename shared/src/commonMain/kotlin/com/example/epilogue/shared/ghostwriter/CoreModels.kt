@@ -236,6 +236,25 @@ data class StatusMessageResponse(
 )
 
 @Serializable
+data class MediaProcessingStatusResponse(
+    @SerialName("is_running") val isRunning: Boolean,
+    @SerialName("pending_count") val pendingCount: Int,
+    @SerialName("processing_count") val processingCount: Int,
+    @SerialName("completed_count") val completedCount: Int,
+    @SerialName("failed_count") val failedCount: Int,
+    @SerialName("current_item_title") val currentItemTitle: String? = null,
+    @SerialName("current_item_content_type") val currentItemContentType: String? = null,
+    @SerialName("last_completed_at") val lastCompletedAt: String? = null,
+    @SerialName("next_run_at") val nextRunAt: String? = null
+)
+
+@Serializable
+data class MediaTriggerResponse(
+    @SerialName("status") val status: String,
+    @SerialName("detail") val detail: String? = null
+)
+
+@Serializable
 data class ClientConfigResponse(
     @SerialName("min_word_count") val minWordCount: Int? = null,
     @SerialName("morning_hour") val morningHour: Int? = null,
