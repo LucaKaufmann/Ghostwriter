@@ -390,6 +390,40 @@ class SharedGhostwriterAdapterTest {
         adapter.close()
     }
 
+    @Test
+    fun getMediaStatus_mapsResponse() = runTest {
+        val payload = """
+            {
+              "is_running": true,
+              "pending_count": 4,
+              "processing_count": 1,
+              "completed_count": 20,
+              "failed_count": 0,
+              "current_item_title": "Episode 1",
+              "current_item_content_type": "podcast",
+              "last_completed_at": "2026-02-17T13:00:00",
+              "next_run_at": "2026-02-17T14:00:00"
+            }
+        """.trimIndent()
+
+        val adapter = adapterWithJson(payload)
+        val result = adapter.getMediaStatus()
+        assertEquals(true, result.isRunning)
+        assertEquals(4, result.pendingCount)
+        assertEquals("Episode 1", result.currentItemTitle)
+        adapter.close()
+    }
+
+    @Test
+    fun triggerMediaProcessing_mapsResponse() = runTest {
+        val payload = """{"status":"queued","detail":"started"}"""
+        val adapter = adapterWithJson(payload)
+        val result = adapter.triggerMediaProcessing()
+        assertEquals("queued", result.status)
+        assertEquals("started", result.detail)
+        adapter.close()
+    }
+
     private fun adapterWithJson(payload: String): SharedGhostwriterAdapter {
         val engine = MockEngine {
             respond(

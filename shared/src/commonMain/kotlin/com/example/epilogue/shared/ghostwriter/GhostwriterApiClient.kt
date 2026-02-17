@@ -253,6 +253,24 @@ class GhostwriterApiClient(
         return response.bodyOrThrow()
     }
 
+    suspend fun getMediaStatus(): MediaProcessingStatusResponse {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("media", "status") }
+            authorize()
+        }
+        return response.bodyOrThrow()
+    }
+
+    suspend fun triggerMediaProcessing(): MediaTriggerResponse {
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("media", "trigger") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(emptyMap<String, String>())
+        }
+        return response.bodyOrThrow()
+    }
+
     private fun io.ktor.client.request.HttpRequestBuilder.authorize() {
         apiKey?.takeIf { it.isNotBlank() }?.let {
             header(HttpHeaders.Authorization, "Bearer $it")
