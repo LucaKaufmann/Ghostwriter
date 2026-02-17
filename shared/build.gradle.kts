@@ -7,7 +7,13 @@ plugins {
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 
 kotlin {
-    androidTarget()
+    androidTarget {
+        compilations.all {
+            kotlinOptions {
+                jvmTarget = "17"
+            }
+        }
+    }
     val iosX64Target = iosX64()
     val iosArm64Target = iosArm64()
     val iosSimulatorArm64Target = iosSimulatorArm64()

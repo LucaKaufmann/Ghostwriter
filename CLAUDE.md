@@ -88,8 +88,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 ### iOS XCFramework
 ```bash
-./gradlew :shared:assembleEpilogueSharedDebugXCFramework    # Debug XCFramework
-./gradlew :shared:assembleEpilogueSharedReleaseXCFramework  # Release XCFramework
+./gradlew :shared:assembleEpilogueSharedXCFramework  # Both debug + release
 ```
 Output: `shared/build/XCFrameworks/{debug,release}/EpilogueShared.xcframework`
 
@@ -599,10 +598,20 @@ EpilogueIOS/
 
 **Build (requires Tuist):**
 
-The iOS build depends on the shared KMP XCFramework. Build it first if it doesn't exist:
+A Makefile automates the XCFramework prerequisite:
+```bash
+cd EpilogueIOS
+make setup                        # Build XCFramework + generate Xcode project
+make generate                     # Generate only (auto-builds XCFramework if missing)
+make build                        # Build via Tuist CLI
+make xcframework                  # Rebuild XCFramework only
+make clean                        # Remove XCFramework build artifacts
+```
+
+Or manually:
 ```bash
 # From repo root — build the XCFramework
-./gradlew :shared:assembleEpilogueSharedDebugXCFramework
+./gradlew :shared:assembleEpilogueSharedXCFramework
 
 # Then generate and build the iOS project
 cd EpilogueIOS
@@ -610,7 +619,7 @@ tuist generate                    # Generate Xcode project
 tuist build                       # Build via CLI
 ```
 
-The `GhostwriterClient` module references the XCFramework at `shared/build/XCFrameworks/debug/EpilogueShared.xcframework`. This path is configured in `EpilogueIOS/Modules/GhostwriterClient/Project.swift`.
+The `GhostwriterClient` module references the XCFramework at `shared/build/XCFrameworks/debug/EpilogueShared.xcframework` (configured in `EpilogueIOS/Modules/GhostwriterClient/Project.swift`). The Makefile automatically builds it when missing.
 
 **Key Patterns:**
 - SwiftData `@Model` classes for Feed, Digest, DigestArticle
