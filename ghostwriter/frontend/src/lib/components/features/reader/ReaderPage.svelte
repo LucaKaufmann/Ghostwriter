@@ -639,7 +639,7 @@
 									<div>
 										<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Transcript</p>
 										<article
-											class={`reader-prose prose prose-slate dark:prose-invert max-w-none prose-headings:scroll-mt-24 prose-a:break-words ${fontSizeClass} ${lineHeightClass}`}
+											class={`reader-prose prose prose-slate dark:prose-invert max-w-none prose-headings:scroll-mt-24 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:mt-8 prose-headings:mb-3 prose-p:my-3 prose-a:break-words ${fontSizeClass} ${lineHeightClass}`}
 										>
 											{@html fallbackHtml}
 										</article>
@@ -666,7 +666,7 @@
 								</div>
 							{:else if reader && !readerError}
 								<article
-									class={`reader-prose prose prose-slate dark:prose-invert max-w-none prose-headings:scroll-mt-24 prose-a:break-words ${fontSizeClass} ${lineHeightClass}`}
+									class={`reader-prose prose prose-slate dark:prose-invert max-w-none prose-headings:scroll-mt-24 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:mt-8 prose-headings:mb-3 prose-p:my-3 prose-a:break-words ${fontSizeClass} ${lineHeightClass}`}
 								>
 									{@html reader.contentHtml}
 								</article>
@@ -695,7 +695,7 @@
 												Digest content
 											</p>
 											<article
-												class={`reader-prose prose prose-slate dark:prose-invert max-w-none prose-headings:scroll-mt-24 prose-a:break-words ${fontSizeClass} ${lineHeightClass}`}
+												class={`reader-prose prose prose-slate dark:prose-invert max-w-none prose-headings:scroll-mt-24 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:mt-8 prose-headings:mb-3 prose-p:my-3 prose-a:break-words ${fontSizeClass} ${lineHeightClass}`}
 											>
 												{@html fallbackHtml}
 											</article>
