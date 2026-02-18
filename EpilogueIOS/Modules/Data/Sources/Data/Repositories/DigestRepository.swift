@@ -169,7 +169,7 @@ public final class DigestRepository: DigestRepositoryProtocol {
                 let article = DigestArticle(
                     title: articleData.title,
                     author: articleData.author ?? "",
-                    content: articleData.content,
+                    content: articleData.contentHTML ?? articleData.content,
                     originalUrl: articleData.url,
                     feedUrl: "", // Not provided by Ghostwriter API
                     feedName: articleData.feedTitle,

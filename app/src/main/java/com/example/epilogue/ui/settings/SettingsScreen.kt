@@ -59,6 +59,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.text.HtmlCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
@@ -1563,13 +1564,20 @@ fun GhostwriterInput(
             },
             text = {
                 Column {
+                    val transcriptSource = mediaItemDetail.contentHtml?.takeIf { it.isNotBlank() }
+                        ?: mediaItemDetail.content
+                    val transcriptText = remember(transcriptSource) {
+                        HtmlCompat.fromHtml(transcriptSource, HtmlCompat.FROM_HTML_MODE_LEGACY)
+                            .toString()
+                            .ifBlank { "(No transcript content available)" }
+                    }
                     Text(
                         text = "${mediaItemDetail.contentType.uppercase()} · ${mediaItemDetail.mode}",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = mediaItemDetail.content.ifBlank { "(No transcript content available)" },
+                        text = transcriptText,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
