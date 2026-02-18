@@ -83,6 +83,11 @@ class GhostwriterRepository @Inject constructor(
         data object NotConfigured : GhostwriterResult<Nothing>()
     }
 
+    enum class DigestDownloadFormat(val wireValue: String, val fileExtension: String) {
+        EPUB("epub", "epub"),
+        PDF("pdf", "pdf")
+    }
+
     /**
      * Get the API instance if Ghostwriter is configured.
      */
@@ -579,6 +584,62 @@ class GhostwriterRepository @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Download digest failed", e)
+            GhostwriterResult.Error("Download failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Download a digest by remote digest ID in the specified format.
+     * This supports both EPUB and PDF server-side formats.
+     */
+    suspend fun downloadDigestById(
+        digestId: String,
+        format: DigestDownloadFormat,
+        outputFilename: String
+    ): GhostwriterResult<File> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val bytes = shared.downloadDigestById(digestId = digestId, format = format.wireValue)
+                val documentsDir = File(context.getExternalFilesDir(null), "Epilogue")
+                if (!documentsDir.exists()) {
+                    documentsDir.mkdirs()
+                }
+                val outputFile = File(documentsDir, outputFilename)
+                outputFile.outputStream().use { output -> output.write(bytes) }
+                GhostwriterResult.Success(outputFile)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Download digest by id failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Download digest by id failed (shared)", e)
+                GhostwriterResult.Error("Download failed: ${e.message}")
+            }
+        }
+
+        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
+
+        try {
+            val response = api.downloadDigestById(getAuthHeader(), digestId, format.wireValue)
+            if (response.isSuccessful && response.body() != null) {
+                val documentsDir = File(context.getExternalFilesDir(null), "Epilogue")
+                if (!documentsDir.exists()) {
+                    documentsDir.mkdirs()
+                }
+                val outputFile = File(documentsDir, outputFilename)
+                response.body()!!.byteStream().use { input ->
+                    outputFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                GhostwriterResult.Success(outputFile)
+            } else {
+                GhostwriterResult.Error(
+                    message = "Download failed: ${response.message()}",
+                    code = response.code()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Download digest by id failed", e)
             GhostwriterResult.Error("Download failed: ${e.message}")
         }
     }

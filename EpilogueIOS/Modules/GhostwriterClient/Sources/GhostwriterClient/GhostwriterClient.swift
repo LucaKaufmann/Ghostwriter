@@ -241,6 +241,7 @@ public actor GhostwriterClient {
                     SyncDigest(
                         id: digest.id,
                         filename: digest.filename,
+                        availableFormats: digest.availableFormats,
                         period: digest.period,
                         status: digest.status,
                         stage: digest.stage,
@@ -450,6 +451,7 @@ public actor GhostwriterClient {
                 DigestResponse(
                     id: digest.id,
                     filename: digest.filename,
+                    availableFormats: digest.availableFormats,
                     period: digest.period,
                     status: digest.status,
                     stage: digest.stage,
@@ -482,6 +484,7 @@ public actor GhostwriterClient {
             return DigestResponse(
                 id: digest.id,
                 filename: digest.filename,
+                availableFormats: digest.availableFormats,
                 period: digest.period,
                 status: digest.status,
                 stage: digest.stage,
@@ -614,6 +617,12 @@ public actor GhostwriterClient {
 #endif
         return try await getData(path: "/digests/\(filename)")
     }
+
+    /// Download a digest by digest ID with format selection.
+    public func downloadDigestById(id: String, format: DigestFileFormat) async throws -> Data {
+        let query = [URLQueryItem(name: "format", value: format.rawValue)]
+        return try await getData(path: "/digests/\(id)/download", queryItems: query)
+    }
     
     // MARK: - Schedules
     
@@ -735,6 +744,8 @@ public actor GhostwriterClient {
                 mediaProcessingIntervalHours: sharedResponse.mediaProcessingIntervalHours.map { Int(truncating: $0) },
                 includePodcastsInDigest: sharedResponse.includePodcastsInDigest?.boolValue,
                 includeYoutubeInDigest: sharedResponse.includeYoutubeInDigest?.boolValue,
+                pdfEnabled: sharedResponse.pdfEnabled?.boolValue,
+                pdfPageSize: sharedResponse.pdfPageSize,
                 coverEnabled: sharedResponse.coverEnabled?.boolValue,
                 coverProvider: sharedResponse.coverProvider,
                 coverQuality: sharedResponse.coverQuality,
@@ -771,6 +782,8 @@ public actor GhostwriterClient {
                 scheduleEvening: request.scheduleEvening,
                 includePodcastsInDigest: request.includePodcastsInDigest.map { KotlinBoolean(bool: $0) },
                 includeYoutubeInDigest: request.includeYoutubeInDigest.map { KotlinBoolean(bool: $0) },
+                pdfEnabled: request.pdfEnabled.map { KotlinBoolean(bool: $0) },
+                pdfPageSize: request.pdfPageSize,
                 coverEnabled: request.coverEnabled.map { KotlinBoolean(bool: $0) },
                 coverProvider: request.coverProvider,
                 coverQuality: request.coverQuality,
@@ -799,6 +812,8 @@ public actor GhostwriterClient {
                 mediaProcessingIntervalHours: sharedResponse.mediaProcessingIntervalHours.map { Int(truncating: $0) },
                 includePodcastsInDigest: sharedResponse.includePodcastsInDigest?.boolValue,
                 includeYoutubeInDigest: sharedResponse.includeYoutubeInDigest?.boolValue,
+                pdfEnabled: sharedResponse.pdfEnabled?.boolValue,
+                pdfPageSize: sharedResponse.pdfPageSize,
                 coverEnabled: sharedResponse.coverEnabled?.boolValue,
                 coverProvider: sharedResponse.coverProvider,
                 coverQuality: sharedResponse.coverQuality,
@@ -1391,8 +1406,12 @@ public actor GhostwriterClient {
         return try await performRequest(request)
     }
     
-    private func getData(path: String, authenticated: Bool = true) async throws -> Data {
-        let url = try buildURL(path: path)
+    private func getData(
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        authenticated: Bool = true
+    ) async throws -> Data {
+        let url = try buildURL(path: path, queryItems: queryItems)
         let request = buildRequest(url: url, method: "GET", authenticated: authenticated)
         
         let start = ContinuousClock.now

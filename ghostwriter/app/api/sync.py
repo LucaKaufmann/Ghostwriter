@@ -15,6 +15,7 @@ from sqlmodel import Session, col, select
 
 from app.core.database import get_session
 from app.core.security import verify_api_key
+from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
 from app.api.config import ConfigResponse, get_or_create_config, _config_to_response
@@ -55,6 +56,7 @@ class SyncDigest(BaseModel):
     error_message: str | None
     created_at: datetime
     completed_at: datetime | None
+    available_formats: list[str] = ["epub"]
     articles: list[SyncDigestArticle]
 
 
@@ -138,6 +140,9 @@ async def combined_sync(
     t_feeds = time.perf_counter()
 
     # 3. Digests - only completed, excluding known IDs in SQL
+    config = session.exec(select(ClientConfig)).first()
+    pdf_enabled = bool(config.pdf_enabled) if config else False
+    available_formats = ["epub", "pdf"] if pdf_enabled else ["epub"]
     known_ids: set[str] = set()
     if digest_ids:
         known_ids = {id_str.strip() for id_str in digest_ids.split(",") if id_str.strip()}
@@ -189,6 +194,7 @@ async def combined_sync(
                 "error_message": digest.error_message,
                 "created_at": digest.created_at.isoformat(),
                 "completed_at": digest.completed_at.isoformat() if digest.completed_at else None,
+                "available_formats": available_formats,
                 "articles": articles_by_digest.get(digest.id, []),
             })
     t_articles = time.perf_counter()

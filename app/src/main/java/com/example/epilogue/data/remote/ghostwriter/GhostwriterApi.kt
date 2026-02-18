@@ -152,6 +152,17 @@ interface GhostwriterApi {
         @Path("filename") filename: String
     ): Response<ResponseBody>
 
+    /**
+     * Download a digest by ID with format selection (epub or pdf).
+     */
+    @Streaming
+    @GET("digests/{digestId}/download")
+    suspend fun downloadDigestById(
+        @Header("Authorization") authorization: String?,
+        @Path("digestId") digestId: String,
+        @Query("format") format: String
+    ): Response<ResponseBody>
+
     // ===== Schedules =====
 
     /**

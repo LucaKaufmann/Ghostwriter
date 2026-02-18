@@ -10,6 +10,11 @@ import Foundation
 
 // MARK: - Request Models
 
+public enum DigestFileFormat: String, Codable, Sendable {
+    case epub
+    case pdf
+}
+
 /// Request model for triggering a digest generation
 public struct DigestTriggerRequest: Codable, Sendable {
     public let period: String  // "morning", "noon", "evening", "manual"
@@ -79,6 +84,7 @@ public struct DigestStatusResponse: Codable, Sendable {
 public struct DigestResponse: Codable, Sendable, Identifiable {
     public let id: String
     public let filename: String
+    public let availableFormats: [String]?
     public let period: String
     public let status: String
     public let stage: String?
@@ -90,6 +96,7 @@ public struct DigestResponse: Codable, Sendable, Identifiable {
     
     enum CodingKeys: String, CodingKey {
         case id, filename, period, status, stage
+        case availableFormats = "available_formats"
         case articleCount = "article_count"
         case errorMessage = "error_message"
         case createdAt = "created_at"

@@ -21,7 +21,7 @@ class GhostwriterApiClientTest {
         baseUrl = "http://localhost:8080",
         apiKey = null,
         responseBody = """{"status":"ok","version":"1.0","uptime_seconds":1,"last_successful_digest":null,"ai_provider":"openai","ai_model":"gpt-5-nano"}"""
-    ) { client, capturedPath, capturedAuth, _, _, _ ->
+    ) { client, capturedPath, capturedAuth, _, _, _, _ ->
         client.getHealth()
         assertEquals("/api/health", capturedPath())
         assertNull(capturedAuth())
@@ -32,7 +32,7 @@ class GhostwriterApiClientTest {
         baseUrl = "http://localhost:8080/api",
         apiKey = "abc123",
         responseBody = ""
-    ) { client, capturedPath, capturedAuth, _, _, _ ->
+    ) { client, capturedPath, capturedAuth, _, _, _, _ ->
         client.deleteFeedByUrl("https://example.com/feed")
         assertEquals("/api/feeds/by-url/https://example.com/feed", capturedPath())
         assertEquals("Bearer abc123", capturedAuth())
@@ -43,7 +43,7 @@ class GhostwriterApiClientTest {
         baseUrl = "http://localhost:8080",
         apiKey = "abc123",
         responseBody = "epub-bytes"
-    ) { client, capturedPath, capturedAuth, _, _, _ ->
+    ) { client, capturedPath, capturedAuth, _, _, _, _ ->
         val bytes = client.downloadDigest("digest.epub")
         assertEquals("/api/digests/digest.epub", capturedPath())
         assertEquals("Bearer abc123", capturedAuth())
@@ -51,11 +51,24 @@ class GhostwriterApiClientTest {
     }
 
     @Test
+    fun downloadDigestById_usesFormatQueryParameter() = runClientTest(
+        baseUrl = "http://localhost:8080",
+        apiKey = "abc123",
+        responseBody = "pdf-bytes"
+    ) { client, capturedPath, capturedAuth, _, _, _, capturedFormat ->
+        val bytes = client.downloadDigestById("digest-123", DigestDownloadFormat.PDF)
+        assertEquals("/api/digests/digest-123/download", capturedPath())
+        assertEquals("Bearer abc123", capturedAuth())
+        assertEquals("pdf", capturedFormat())
+        assertContentEquals("pdf-bytes".toByteArray(), bytes)
+    }
+
+    @Test
     fun listDigestsFiltered_includesQueryParameters() = runClientTest(
         baseUrl = "http://localhost:8080",
         apiKey = "abc123",
         responseBody = "[]"
-    ) { client, capturedPath, capturedAuth, capturedLimit, capturedOffset, capturedStatus ->
+    ) { client, capturedPath, capturedAuth, capturedLimit, capturedOffset, capturedStatus, _ ->
         client.listDigestsFiltered(limit = 50, offset = 10, status = "completed")
         assertEquals("/api/digests", capturedPath())
         assertEquals("Bearer abc123", capturedAuth())
@@ -69,7 +82,7 @@ class GhostwriterApiClientTest {
         baseUrl = "http://localhost:8080",
         apiKey = "abc123",
         responseBody = "[]"
-    ) { client, capturedPath, capturedAuth, capturedLimit, capturedOffset, capturedStatus ->
+    ) { client, capturedPath, capturedAuth, capturedLimit, capturedOffset, capturedStatus, _ ->
         client.listDigests()
         assertEquals("/api/digests", capturedPath())
         assertEquals("Bearer abc123", capturedAuth())
@@ -88,7 +101,8 @@ class GhostwriterApiClientTest {
             capturedAuth: () -> String?,
             capturedLimit: () -> String?,
             capturedOffset: () -> String?,
-            capturedStatus: () -> String?
+            capturedStatus: () -> String?,
+            capturedFormat: () -> String?
         ) -> Unit
     ) {
         var lastPath: String? = null
@@ -96,6 +110,7 @@ class GhostwriterApiClientTest {
         var lastLimit: String? = null
         var lastOffset: String? = null
         var lastStatus: String? = null
+        var lastFormat: String? = null
 
         val engine = MockEngine { request ->
             lastPath = request.url.encodedPath
@@ -103,6 +118,7 @@ class GhostwriterApiClientTest {
             lastLimit = request.url.parameters["limit"]
             lastOffset = request.url.parameters["offset"]
             lastStatus = request.url.parameters["status"]
+            lastFormat = request.url.parameters["format"]
             respond(
                 content = responseBody,
                 status = HttpStatusCode.OK,
@@ -123,7 +139,8 @@ class GhostwriterApiClientTest {
                 { lastAuth },
                 { lastLimit },
                 { lastOffset },
-                { lastStatus }
+                { lastStatus },
+                { lastFormat }
             )
         }
         httpClient.close()

@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { api } from '$lib/api';
+	import { api, type Digest } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Progress } from '$lib/components/ui/progress';
 	import { formatUTCDate, parseUTC } from '$lib/utils/date';
-	import { downloadDigestFile, getDigestStatusBadgeVariant } from '$lib/utils/digest';
+	import { downloadDigestFileById, getDigestStatusBadgeVariant, type DigestFileFormat } from '$lib/utils/digest';
 	import { toast } from 'svelte-sonner';
 	import {
 		Activity,
@@ -85,6 +85,7 @@
 
 	// State
 	let triggering = $state(false);
+	let downloadPendingByKey = $state<Record<string, boolean>>({});
 
 	// Computed
 	const activeFeedsCount = $derived(feedsQuery.data?.filter((f) => f.is_active).length ?? 0);
@@ -155,12 +156,41 @@
 		return `in ${minutes}m`;
 	}
 
-	async function downloadDigest(filename: string) {
+	function fallbackFilename(digest: Digest, format: DigestFileFormat): string {
+		if (!digest.filename) return `${digest.id}.${format}`;
+		if (format === 'epub') return digest.filename;
+		if (digest.filename.includes('.')) {
+			return `${digest.filename.slice(0, digest.filename.lastIndexOf('.'))}.pdf`;
+		}
+		return `${digest.filename}.pdf`;
+	}
+
+	function supportsFormat(digest: Digest, format: DigestFileFormat): boolean {
+		const available = digest.available_formats;
+		if (!available || available.length === 0) {
+			return format === 'epub';
+		}
+		return available.includes(format);
+	}
+
+	function downloadKey(digest: Digest, format: DigestFileFormat): string {
+		return `${digest.id}:${format}`;
+	}
+
+	function isDownloadPending(digest: Digest, format: DigestFileFormat): boolean {
+		return !!downloadPendingByKey[downloadKey(digest, format)];
+	}
+
+	async function downloadDigest(digest: Digest, format: DigestFileFormat) {
+		const key = downloadKey(digest, format);
+		downloadPendingByKey = { ...downloadPendingByKey, [key]: true };
 		try {
-			await downloadDigestFile(filename);
+			await downloadDigestFileById(digest.id, format, fallbackFilename(digest, format));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Unknown error';
-			toast.error('Failed to download digest', { description: message });
+			toast.error(`Failed to download ${format.toUpperCase()}`, { description: message });
+		} finally {
+			downloadPendingByKey = { ...downloadPendingByKey, [key]: false };
 		}
 	}
 </script>
@@ -188,12 +218,28 @@
 					Generate Digest
 				{/if}
 			</Button>
-			{#if latestDigest?.filename}
-				<Button variant="outline" onclick={() => downloadDigest(latestDigest.filename!)}>
-					<Download class="mr-2 h-4 w-4" />
-					Download Latest
-				</Button>
-			{/if}
+				{#if latestDigest?.filename}
+					<Button variant="outline" onclick={() => downloadDigest(latestDigest, 'epub')} disabled={isDownloadPending(latestDigest, 'epub')}>
+						{#if isDownloadPending(latestDigest, 'epub')}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							Preparing...
+						{:else}
+							<Download class="mr-2 h-4 w-4" />
+							Latest EPUB
+						{/if}
+					</Button>
+					{#if supportsFormat(latestDigest, 'pdf')}
+						<Button variant="outline" onclick={() => downloadDigest(latestDigest, 'pdf')} disabled={isDownloadPending(latestDigest, 'pdf')}>
+							{#if isDownloadPending(latestDigest, 'pdf')}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								Preparing...
+							{:else}
+								<Download class="mr-2 h-4 w-4" />
+								Latest PDF
+							{/if}
+						</Button>
+					{/if}
+				{/if}
 		</div>
 	</div>
 
@@ -467,15 +513,26 @@
 								<Badge variant={getDigestStatusBadgeVariant(digest.status)}>
 									{digest.status}
 								</Badge>
-								{#if digest.filename && digest.status === 'completed'}
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => downloadDigest(digest.filename!)}
-									>
-										<Download class="h-4 w-4" />
-									</Button>
-								{/if}
+									{#if digest.filename && digest.status === 'completed'}
+										<Button
+											variant="ghost"
+											size="icon"
+											onclick={() => downloadDigest(digest, 'epub')}
+											title="Download EPUB"
+										>
+											<Download class="h-4 w-4" />
+										</Button>
+										{#if supportsFormat(digest, 'pdf')}
+											<Button
+												variant="ghost"
+												size="icon"
+												onclick={() => downloadDigest(digest, 'pdf')}
+												title="Download PDF"
+											>
+												<Download class="h-4 w-4" />
+											</Button>
+										{/if}
+									{/if}
 							</div>
 						</div>
 					{/each}

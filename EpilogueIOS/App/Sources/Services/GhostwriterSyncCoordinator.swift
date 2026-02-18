@@ -289,6 +289,14 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         )
     }
 
+    /// Download a PDF for an already-synced digest.
+    public func downloadDigestPdf(remoteId: String, filenameHint: String? = nil) async throws -> URL {
+        return try await digestSyncService.downloadDigestPdf(
+            remoteId: remoteId,
+            filenameHint: filenameHint
+        )
+    }
+
     /// Notify server when a feed is deleted locally
     public func notifyFeedDeleted(url: String) async throws {
         try await feedSyncService.notifyFeedDeleted(url: url)
@@ -312,5 +320,19 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     /// Get client status from server
     public func getClientStatus() async throws -> ClientStatusResponse {
         return try await heartbeatService.getClientStatus()
+    }
+
+    /// Returns whether PDF digest downloads are enabled on the server.
+    public func isPdfDownloadEnabled() async -> Bool {
+        do {
+            guard let url = try await settingsRepository.getGhostwriterURL() else { return false }
+            let apiKey = try await settingsRepository.getGhostwriterAPIKey()
+            let client = try GhostwriterClient(baseURLString: url, apiKey: apiKey)
+            let config = try await client.getConfig()
+            return config.pdfEnabled == true
+        } catch {
+            logger.warning("Failed to load PDF setting from server: \(error.localizedDescription)")
+            return false
+        }
     }
 }
