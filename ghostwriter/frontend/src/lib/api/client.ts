@@ -45,6 +45,8 @@ import type {
 	MediaProcessingRun,
 	YouTubeResolveResponse,
 	MediaTriggerResponse,
+	MediaRetryResponse,
+	RetryFailedMediaResponse,
 	FeedCheckResponse
 } from './types';
 
@@ -625,6 +627,21 @@ class ApiClient {
 
 	async getMediaItem(itemId: string): Promise<MediaItem> {
 		return this.request<MediaItem>(`/media/items/${itemId}`);
+	}
+
+	async retryMediaItem(itemId: string): Promise<MediaRetryResponse> {
+		return this.request<MediaRetryResponse>(`/media/items/${itemId}/retry`, {
+			method: 'POST'
+		});
+	}
+
+	async retryFailedMediaItems(contentType?: 'podcast' | 'youtube'): Promise<RetryFailedMediaResponse> {
+		return this.request<RetryFailedMediaResponse>('/media/items/retry-failed', {
+			method: 'POST',
+			body: JSON.stringify({
+				content_type: contentType ?? null
+			})
+		});
 	}
 
 	async triggerMediaProcessing(): Promise<MediaTriggerResponse> {

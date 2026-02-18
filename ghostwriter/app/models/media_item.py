@@ -80,6 +80,7 @@ class MediaItemRead(SQLModel):
     title: str
     author: str | None = None
     content: str = ""
+    content_html: str = ""
     content_type: str
     mode: str
     word_count: int
