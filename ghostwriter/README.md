@@ -56,6 +56,17 @@ export OLLAMA_BASE_URL=http://localhost:11434
 uvicorn app.main:app --reload --port 8080
 ```
 
+### PDF Rendering Dependencies
+
+Ghostwriter uses WeasyPrint for PDF rendering. In Docker this is preinstalled by the project `Dockerfile`.
+Python dependencies pin `pydyf` to a WeasyPrint-compatible range to avoid rendering regressions.
+
+For host-based local development (outside Docker), ensure these system libraries are installed:
+- `cairo`
+- `pango`
+- `gdk-pixbuf`
+- system fonts (for example DejaVu)
+
 ## API Reference
 
 ### Feeds
