@@ -238,7 +238,7 @@ struct HistoryView: View {
                     remoteId: remoteId,
                     filenameHint: filenameHint
                 )
-                UIApplication.shared.open(localURL)
+                await UIApplication.shared.open(localURL)
             } catch {
                 statusMessage = "PDF download failed: \(error.localizedDescription)"
             }
