@@ -51,17 +51,44 @@ struct HistoryView: View {
                                 }
                             }
                             .swipeActions(edge: .leading) {
-                                if let remoteId = digest.remoteId, !epubAvailable {
+                                if let remoteId = digest.remoteId {
                                     Button {
-                                        downloadDigest(digest, remoteId: remoteId)
+                                        downloadDigestPdf(digest, remoteId: remoteId)
                                     } label: {
                                         if downloadingDigestIDs.contains(digest.id) {
                                             Label("Downloading", systemImage: "hourglass")
                                         } else {
-                                            Label("Download", systemImage: "arrow.down.circle")
+                                            Label("PDF", systemImage: "doc.richtext")
                                         }
                                     }
-                                    .tint(.green)
+                                    .tint(.orange)
+
+                                    if !epubAvailable {
+                                        Button {
+                                            downloadDigest(digest, remoteId: remoteId)
+                                        } label: {
+                                            if downloadingDigestIDs.contains(digest.id) {
+                                                Label("Downloading", systemImage: "hourglass")
+                                            } else {
+                                                Label("EPUB", systemImage: "arrow.down.circle")
+                                            }
+                                        }
+                                        .tint(.green)
+                                    } else {
+                                        Button {
+                                            digestToShare = digest
+                                        } label: {
+                                            Label("Share", systemImage: "square.and.arrow.up")
+                                        }
+                                        .tint(.gray)
+
+                                        Button {
+                                            openInReader(digest)
+                                        } label: {
+                                            Label("Open", systemImage: "book")
+                                        }
+                                        .tint(.blue)
+                                    }
                                 } else {
                                     Button {
                                         digestToShare = digest
@@ -183,6 +210,31 @@ struct HistoryView: View {
                 try? modelContext.save()
             } catch {
                 statusMessage = "Download failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func downloadDigestPdf(_ digest: Digest, remoteId: String) {
+        guard !downloadingDigestIDs.contains(digest.id) else { return }
+        downloadingDigestIDs.insert(digest.id)
+
+        Task { @MainActor in
+            defer { downloadingDigestIDs.remove(digest.id) }
+
+            let filenameHint: String? = {
+                guard !digest.epubFilePath.isEmpty else { return nil }
+                let name = URL(fileURLWithPath: digest.epubFilePath).lastPathComponent
+                return name.hasSuffix(".epub") ? name : nil
+            }()
+
+            do {
+                let localURL = try await ghostwriterCoordinator.downloadDigestPdf(
+                    remoteId: remoteId,
+                    filenameHint: filenameHint
+                )
+                UIApplication.shared.open(localURL)
+            } catch {
+                statusMessage = "PDF download failed: \(error.localizedDescription)"
             }
         }
     }
