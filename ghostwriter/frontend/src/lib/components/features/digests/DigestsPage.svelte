@@ -44,6 +44,7 @@
 	let lastFilterSignature = $state('all:all');
 	let digestCoverUrls = $state<Record<string, string>>({});
 	let digestCoverErrors = $state<Record<string, boolean>>({});
+	let downloadPendingByKey = $state<Record<string, boolean>>({});
 	let coverLoadToken = 0;
 
 	const queryParams = $derived.by(() => ({
@@ -282,12 +283,24 @@
 		return available.includes(format);
 	}
 
+	function downloadKey(digest: Digest, format: DigestFileFormat): string {
+		return `${digest.id}:${format}`;
+	}
+
+	function isDownloadPending(digest: Digest, format: DigestFileFormat): boolean {
+		return !!downloadPendingByKey[downloadKey(digest, format)];
+	}
+
 	async function downloadDigest(digest: Digest, format: DigestFileFormat) {
+		const key = downloadKey(digest, format);
+		downloadPendingByKey = { ...downloadPendingByKey, [key]: true };
 		try {
 			await downloadDigestFileById(digest.id, format, fallbackFilename(digest, format));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Unknown error';
 			toast.error(`Failed to download ${format.toUpperCase()}`, { description: message });
+		} finally {
+			downloadPendingByKey = { ...downloadPendingByKey, [key]: false };
 		}
 	}
 </script>
@@ -572,14 +585,24 @@
 												</Button>
 											{/if}
 												{#if digest.filename}
-													<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')}>
-														<Download class="mr-2 h-4 w-4" />
-														EPUB
+													<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')} disabled={isDownloadPending(digest, 'epub')}>
+														{#if isDownloadPending(digest, 'epub')}
+															<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+															Preparing...
+														{:else}
+															<Download class="mr-2 h-4 w-4" />
+															EPUB
+														{/if}
 													</Button>
 													{#if supportsFormat(digest, 'pdf')}
-														<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
-															<Download class="mr-2 h-4 w-4" />
-															PDF
+														<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')} disabled={isDownloadPending(digest, 'pdf')}>
+															{#if isDownloadPending(digest, 'pdf')}
+																<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+																Preparing...
+															{:else}
+																<Download class="mr-2 h-4 w-4" />
+																PDF
+															{/if}
 														</Button>
 													{/if}
 													<Button
@@ -639,14 +662,24 @@
 									</Button>
 								{/if}
 									{#if digest.filename}
-										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')}>
-											<Download class="mr-2 h-4 w-4" />
-											EPUB
+										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')} disabled={isDownloadPending(digest, 'epub')}>
+											{#if isDownloadPending(digest, 'epub')}
+												<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+												Preparing...
+											{:else}
+												<Download class="mr-2 h-4 w-4" />
+												EPUB
+											{/if}
 										</Button>
 										{#if supportsFormat(digest, 'pdf')}
-											<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
-												<Download class="mr-2 h-4 w-4" />
-												PDF
+											<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')} disabled={isDownloadPending(digest, 'pdf')}>
+												{#if isDownloadPending(digest, 'pdf')}
+													<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+													Preparing...
+												{:else}
+													<Download class="mr-2 h-4 w-4" />
+													PDF
+												{/if}
 											</Button>
 										{/if}
 										<Button
@@ -695,14 +728,24 @@
 									</Button>
 								{/if}
 									{#if digest.filename}
-										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')}>
-											<Download class="mr-2 h-4 w-4" />
-											EPUB
+										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')} disabled={isDownloadPending(digest, 'epub')}>
+											{#if isDownloadPending(digest, 'epub')}
+												<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+												Preparing...
+											{:else}
+												<Download class="mr-2 h-4 w-4" />
+												EPUB
+											{/if}
 										</Button>
 										{#if supportsFormat(digest, 'pdf')}
-											<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
-												<Download class="mr-2 h-4 w-4" />
-												PDF
+											<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')} disabled={isDownloadPending(digest, 'pdf')}>
+												{#if isDownloadPending(digest, 'pdf')}
+													<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+													Preparing...
+												{:else}
+													<Download class="mr-2 h-4 w-4" />
+													PDF
+												{/if}
 											</Button>
 										{/if}
 										<Button

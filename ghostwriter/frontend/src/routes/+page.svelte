@@ -85,6 +85,7 @@
 
 	// State
 	let triggering = $state(false);
+	let downloadPendingByKey = $state<Record<string, boolean>>({});
 
 	// Computed
 	const activeFeedsCount = $derived(feedsQuery.data?.filter((f) => f.is_active).length ?? 0);
@@ -172,12 +173,24 @@
 		return available.includes(format);
 	}
 
+	function downloadKey(digest: Digest, format: DigestFileFormat): string {
+		return `${digest.id}:${format}`;
+	}
+
+	function isDownloadPending(digest: Digest, format: DigestFileFormat): boolean {
+		return !!downloadPendingByKey[downloadKey(digest, format)];
+	}
+
 	async function downloadDigest(digest: Digest, format: DigestFileFormat) {
+		const key = downloadKey(digest, format);
+		downloadPendingByKey = { ...downloadPendingByKey, [key]: true };
 		try {
 			await downloadDigestFileById(digest.id, format, fallbackFilename(digest, format));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Unknown error';
 			toast.error(`Failed to download ${format.toUpperCase()}`, { description: message });
+		} finally {
+			downloadPendingByKey = { ...downloadPendingByKey, [key]: false };
 		}
 	}
 </script>
@@ -206,14 +219,24 @@
 				{/if}
 			</Button>
 				{#if latestDigest?.filename}
-					<Button variant="outline" onclick={() => downloadDigest(latestDigest, 'epub')}>
-						<Download class="mr-2 h-4 w-4" />
-						Latest EPUB
+					<Button variant="outline" onclick={() => downloadDigest(latestDigest, 'epub')} disabled={isDownloadPending(latestDigest, 'epub')}>
+						{#if isDownloadPending(latestDigest, 'epub')}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							Preparing...
+						{:else}
+							<Download class="mr-2 h-4 w-4" />
+							Latest EPUB
+						{/if}
 					</Button>
 					{#if supportsFormat(latestDigest, 'pdf')}
-						<Button variant="outline" onclick={() => downloadDigest(latestDigest, 'pdf')}>
-							<Download class="mr-2 h-4 w-4" />
-							Latest PDF
+						<Button variant="outline" onclick={() => downloadDigest(latestDigest, 'pdf')} disabled={isDownloadPending(latestDigest, 'pdf')}>
+							{#if isDownloadPending(latestDigest, 'pdf')}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								Preparing...
+							{:else}
+								<Download class="mr-2 h-4 w-4" />
+								Latest PDF
+							{/if}
 						</Button>
 					{/if}
 				{/if}
