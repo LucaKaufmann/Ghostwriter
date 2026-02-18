@@ -13,7 +13,11 @@ import Domain
 struct FeedListView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
-    @Query(sort: \Feed.createdAt, order: .reverse) private var feeds: [Feed]
+    @Query(
+        filter: #Predicate<Feed> { !$0.url.starts(with: "synthetic://") },
+        sort: \Feed.createdAt,
+        order: .reverse
+    ) private var feeds: [Feed]
     @State private var showingAddFeed = false
     @State private var editingFeed: Feed?
 
