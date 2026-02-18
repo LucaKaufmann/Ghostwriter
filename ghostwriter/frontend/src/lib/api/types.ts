@@ -439,6 +439,7 @@ export interface MediaItem {
 	title: string;
 	author: string | null;
 	content: string;
+	content_html: string;
 	content_type: string;
 	mode: string;
 	word_count: number;
@@ -505,6 +506,17 @@ export interface YouTubeResolveResponse {
 export interface MediaTriggerResponse {
 	status: string;
 	detail: string | null;
+}
+
+export interface MediaRetryResponse {
+	status: string;
+	detail: string | null;
+	item_id: string | null;
+}
+
+export interface RetryFailedMediaResponse {
+	retried: number;
+	skipped: number;
 }
 
 // ============ API Error ============

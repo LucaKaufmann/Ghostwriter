@@ -58,6 +58,27 @@ def test_model_string_gemini():
     assert model == "gemini/gemini-1.5-flash"
 
 
+def test_transcript_length_guidance_short(llm_service):
+    """Short transcripts should get a shorter summary target."""
+    content = "word " * 1500
+    guidance = llm_service._transcript_length_guidance(content)
+    assert "350-500 words" in guidance
+
+
+def test_transcript_length_guidance_medium(llm_service):
+    """Mid-length transcripts should get a medium summary target."""
+    content = "word " * 5000
+    guidance = llm_service._transcript_length_guidance(content)
+    assert "500-750 words" in guidance
+
+
+def test_transcript_length_guidance_long(llm_service):
+    """Long transcripts should get a much longer summary target."""
+    content = "word " * 18000
+    guidance = llm_service._transcript_length_guidance(content)
+    assert "1,000-1,300 words" in guidance
+
+
 @pytest.mark.asyncio
 async def test_summarize_fallback(llm_service):
     """Test that summarize falls back to raw content on failure."""

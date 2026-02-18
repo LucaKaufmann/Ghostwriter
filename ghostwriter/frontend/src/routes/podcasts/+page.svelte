@@ -28,7 +28,8 @@
 		AlertCircle,
 		ChevronDown,
 		Timer,
-		Settings
+		Settings,
+		RotateCcw
 	} from 'lucide-svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 
@@ -112,6 +113,39 @@
 		}
 	}));
 
+	const retryItemMutation = createMutation(() => ({
+		mutationFn: (itemId: string) => api.retryMediaItem(itemId),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['podcast-items'] });
+			queryClient.invalidateQueries({ queryKey: ['media-status'] });
+			queryClient.invalidateQueries({ queryKey: ['media-runs'] });
+			toast.success('Transcript queued for next media processing run');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to queue transcript retry', { description: err.message });
+		},
+		onSettled: () => {
+			retryingItemId = null;
+		}
+	}));
+
+	const retryAllFailedMutation = createMutation(() => ({
+		mutationFn: () => api.retryFailedMediaItems('podcast'),
+		onSuccess: (result) => {
+			queryClient.invalidateQueries({ queryKey: ['podcast-items'] });
+			queryClient.invalidateQueries({ queryKey: ['media-status'] });
+			queryClient.invalidateQueries({ queryKey: ['media-runs'] });
+			toast.success(
+				result.retried > 0
+					? `${result.retried} failed transcript${result.retried === 1 ? '' : 's'} queued for next run`
+					: 'No failed transcripts to queue'
+			);
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to queue retries', { description: err.message });
+		}
+	}));
+
 	// State
 	let searchQuery = $state('');
 	let addDialogOpen = $state(false);
@@ -121,6 +155,7 @@
 	let updatingFeedId = $state<string | null>(null);
 	let activeTab = $state<'feeds' | 'items'>('feeds');
 	let runsExpanded = $state(false);
+	let retryingItemId = $state<string | null>(null);
 
 	// Form state
 	let formUrl = $state('');
@@ -193,6 +228,17 @@
 
 	function confirmDelete() {
 		if (feedToDelete) deleteFeedMutation.mutate(feedToDelete.id);
+	}
+
+	function handleRetryItem(itemId: string) {
+		if (retryItemMutation.isPending || retryAllFailedMutation.isPending) return;
+		retryingItemId = itemId;
+		retryItemMutation.mutate(itemId);
+	}
+
+	function handleRetryAllFailed() {
+		if (retryAllFailedMutation.isPending || retryItemMutation.isPending) return;
+		retryAllFailedMutation.mutate();
 	}
 
 	function parseUTC(dateStr: string): Date {
@@ -541,6 +587,29 @@
 								</div>
 							</div>
 						{/each}
+						{#if failedItems.length > 0}
+							<div class="p-4 bg-destructive/5 border-y border-destructive/20">
+								<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+									<p class="text-xs text-muted-foreground">
+										Failed transcripts are not retried automatically. Queue them for the next media processing run.
+									</p>
+									<Button
+										size="sm"
+										variant="outline"
+										onclick={handleRetryAllFailed}
+										disabled={retryAllFailedMutation.isPending || retryItemMutation.isPending}
+									>
+										{#if retryAllFailedMutation.isPending}
+											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+											Queueing...
+										{:else}
+											<RotateCcw class="mr-2 h-4 w-4" />
+											Retry All Failed
+										{/if}
+									</Button>
+								</div>
+							</div>
+						{/if}
 						{#each failedItems as item}
 							<div class="p-4">
 								<div class="flex items-start justify-between gap-2">
@@ -559,7 +628,22 @@
 											{/if}
 										{/if}
 									</div>
-									<Badge variant="destructive" class="text-xs flex-shrink-0">Failed</Badge>
+									<div class="flex flex-col items-end gap-2 flex-shrink-0">
+										<Badge variant="destructive" class="text-xs">Failed</Badge>
+										<Button
+											size="sm"
+											variant="outline"
+											onclick={() => handleRetryItem(item.id)}
+											disabled={retryAllFailedMutation.isPending || retryItemMutation.isPending}
+										>
+											{#if retryItemMutation.isPending && retryingItemId === item.id}
+												<Loader2 class="mr-2 h-3.5 w-3.5 animate-spin" />
+												Queueing...
+											{:else}
+												Retry
+											{/if}
+										</Button>
+									</div>
 								</div>
 							</div>
 						{/each}
