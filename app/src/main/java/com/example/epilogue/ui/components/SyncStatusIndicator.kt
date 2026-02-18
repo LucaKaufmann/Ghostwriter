@@ -1,6 +1,7 @@
 package com.example.epilogue.ui.components
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -14,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import com.example.epilogue.ui.LocalEinkMode
 
 @Composable
 fun SyncStatusIndicator(
@@ -23,6 +25,7 @@ fun SyncStatusIndicator(
     if (tags.isEmpty()) return
 
     val context = LocalContext.current
+    val einkMode = LocalEinkMode.current
     val workManager = remember(context) { WorkManager.getInstance(context) }
 
     val workInfos = tags.map { tag ->
@@ -39,10 +42,19 @@ fun SyncStatusIndicator(
 
     when {
         isRunning -> {
-            CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                modifier = modifier
-            )
+            if (einkMode) {
+                Icon(
+                    imageVector = Icons.Default.Sync,
+                    contentDescription = "Sync in progress",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = modifier
+                )
+            } else {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = modifier
+                )
+            }
         }
         hasFailed -> {
             Icon(
