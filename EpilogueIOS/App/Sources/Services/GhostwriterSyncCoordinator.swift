@@ -321,4 +321,18 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     public func getClientStatus() async throws -> ClientStatusResponse {
         return try await heartbeatService.getClientStatus()
     }
+
+    /// Returns whether PDF digest downloads are enabled on the server.
+    public func isPdfDownloadEnabled() async -> Bool {
+        do {
+            guard let url = try await settingsRepository.getGhostwriterURL() else { return false }
+            let apiKey = try await settingsRepository.getGhostwriterAPIKey()
+            let client = try GhostwriterClient(baseURLString: url, apiKey: apiKey)
+            let config = try await client.getConfig()
+            return config.pdfEnabled == true
+        } catch {
+            logger.warning("Failed to load PDF setting from server: \(error.localizedDescription)")
+            return false
+        }
+    }
 }

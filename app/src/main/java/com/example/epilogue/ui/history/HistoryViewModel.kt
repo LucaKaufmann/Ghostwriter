@@ -38,6 +38,9 @@ class HistoryViewModel @Inject constructor(
     private val epubExporter: EpubExporter,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
+    init {
+        refreshPdfAvailability()
+    }
 
     /**
      * All digests ordered by most recent first.
@@ -51,6 +54,19 @@ class HistoryViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(HistoryUiState())
     val uiState: StateFlow<HistoryUiState> = _uiState.asStateFlow()
+
+    private fun refreshPdfAvailability() {
+        viewModelScope.launch {
+            when (val configResult = ghostwriterRepository.getConfig()) {
+                is GhostwriterResult.Success -> {
+                    _uiState.update { it.copy(pdfDownloadsEnabled = configResult.data.pdfEnabled == true) }
+                }
+                is GhostwriterResult.Error, GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(pdfDownloadsEnabled = false) }
+                }
+            }
+        }
+    }
 
     /**
      * Show the delete confirmation dialog for a digest.
@@ -301,5 +317,6 @@ data class HistoryUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
     val downloadingDigestIds: Set<Long> = emptySet(),
+    val pdfDownloadsEnabled: Boolean = false,
     val error: String? = null
 )
