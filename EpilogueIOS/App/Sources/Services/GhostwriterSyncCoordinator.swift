@@ -195,6 +195,13 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                 logger.warning("Failed to process synced digests: \(error.localizedDescription)")
             }
 
+            // Apply schedule enabled states and times from server
+            do {
+                try await applySchedulesFromSync(syncResponse.schedules)
+            } catch {
+                logger.warning("Failed to apply synced schedules: \(error.localizedDescription)")
+            }
+
             logger.info("Combined sync completed: \(syncResponse.digests.newDigests.count) new digests")
             return true
         } catch {
@@ -334,5 +341,61 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
             logger.warning("Failed to load PDF setting from server: \(error.localizedDescription)")
             return false
         }
+    }
+
+    // MARK: - Schedule Sync
+
+    /// Apply schedule times and enabled states from server sync response
+    private func applySchedulesFromSync(_ schedules: [ScheduleResponse]) async throws {
+        var enabledPeriods: Set<DigestPeriod> = []
+        var morningHour = 7, morningMinute = 0
+        var noonHour = 12, noonMinute = 0
+        var eveningHour = 18, eveningMinute = 0
+        var timezone = "UTC"
+
+        for schedule in schedules {
+            let period: DigestPeriod?
+            switch schedule.period.lowercased() {
+            case "morning": period = .morning
+            case "noon": period = .noon
+            case "evening": period = .evening
+            default: period = nil
+            }
+
+            guard let period else { continue }
+
+            if schedule.enabled {
+                enabledPeriods.insert(period)
+            }
+
+            switch period {
+            case .morning:
+                morningHour = schedule.hour
+                morningMinute = schedule.minute
+            case .noon:
+                noonHour = schedule.hour
+                noonMinute = schedule.minute
+            case .evening:
+                eveningHour = schedule.hour
+                eveningMinute = schedule.minute
+            }
+            timezone = schedule.timezone
+        }
+
+        // Save enabled periods
+        try await settingsRepository.setEnabledPeriods(enabledPeriods)
+
+        // Save schedule times for display
+        try await settingsRepository.setGhostwriterSchedule(
+            morningHour: morningHour,
+            morningMinute: morningMinute,
+            noonHour: noonHour,
+            noonMinute: noonMinute,
+            eveningHour: eveningHour,
+            eveningMinute: eveningMinute,
+            timezone: timezone
+        )
+
+        logger.info("Applied schedules from sync: enabled=\(enabledPeriods.map { $0.rawValue })")
     }
 }

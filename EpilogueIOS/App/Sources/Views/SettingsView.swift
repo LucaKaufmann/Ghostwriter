@@ -31,6 +31,7 @@ struct SettingsView: View {
     @State private var exportFolderURL: URL?
     @State private var showExportPicker = false
     @State private var exportError: String?
+    @State private var serverSchedule: GhostwriterSchedule?
 
     var body: some View {
         NavigationStack {
@@ -119,7 +120,7 @@ struct SettingsView: View {
                                     .frame(width: 24)
                                 Text(period.displayName)
                                 Spacer()
-                                Text(period.displayTime)
+                                Text(displayTime(for: period))
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -295,6 +296,12 @@ struct SettingsView: View {
             .task {
                 await loadSettings()
             }
+            .onChange(of: ghostwriterCoordinator.isSyncing) { _, isSyncing in
+                // Reload settings after sync completes to pick up server values
+                if !isSyncing {
+                    Task { await loadSettings() }
+                }
+            }
             .fileImporter(
                 isPresented: $showExportPicker,
                 allowedContentTypes: [.folder],
@@ -330,11 +337,24 @@ struct SettingsView: View {
             showNotifications = try await settingsRepository.shouldShowNotifications()
             ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
             exportEnabled = try await settingsRepository.getCustomExportEnabled()
+            serverSchedule = try await settingsRepository.getGhostwriterSchedule()
             if let bookmark = try await settingsRepository.getCustomExportBookmark() {
                 exportFolderURL = try resolveExportBookmark(bookmark)
             }
         } catch {
             // Use defaults on error
+        }
+    }
+
+    /// Returns the display time for a period from server schedule, falling back to defaults
+    private func displayTime(for period: DigestPeriod) -> String {
+        guard let schedule = serverSchedule else {
+            return period.displayTime
+        }
+        switch period {
+        case .morning: return schedule.formattedMorning()
+        case .noon: return schedule.formattedNoon()
+        case .evening: return schedule.formattedEvening()
         }
     }
 
