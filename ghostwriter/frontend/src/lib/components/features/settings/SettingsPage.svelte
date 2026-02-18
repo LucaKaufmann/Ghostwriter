@@ -347,6 +347,9 @@
 	let whisperProvider = $state<'local' | 'openai' | 'auto'>('local');
 	let whisperTimeout = $state(30);
 	let whisperProviderInitialized = $state(false);
+	let pdfEnabled = $state(false);
+	let pdfPageSize = $state<'A4' | 'Letter' | 'A5'>('A4');
+	let pdfSettingsInitialized = $state(false);
 	let coverEnabled = $state(false);
 	let coverProvider = $state<'gpt-image-1' | 'nano-banana'>('gpt-image-1');
 	let coverQuality = $state<'low' | 'medium' | 'high'>('low');
@@ -386,6 +389,15 @@
 
 	$effect(() => {
 		const data = clientConfigQuery.data;
+		if (data && !pdfSettingsInitialized) {
+			pdfEnabled = data.pdf_enabled ?? false;
+			pdfPageSize = data.pdf_page_size ?? 'A4';
+			pdfSettingsInitialized = true;
+		}
+	});
+
+	$effect(() => {
+		const data = clientConfigQuery.data;
 		if (data && !coverSettingsInitialized) {
 			coverEnabled = data.cover_enabled ?? false;
 			coverProvider = (data.cover_provider as 'gpt-image-1' | 'nano-banana') ?? 'gpt-image-1';
@@ -406,6 +418,22 @@
 		const clamped = Math.max(1, Math.min(120, whisperTimeout));
 		whisperTimeout = clamped;
 		updateClientConfigMutation.mutate({ whisper_timeout_minutes: clamped });
+	}
+
+	function savePdfSettings() {
+		updateClientConfigMutation.mutate({
+			pdf_enabled: pdfEnabled,
+			pdf_page_size: pdfPageSize
+		});
+	}
+
+	function hasPdfSettingsChanged(): boolean {
+		const data = clientConfigQuery.data;
+		if (!data) return false;
+		return (
+			pdfEnabled !== (data.pdf_enabled ?? false) ||
+			pdfPageSize !== (data.pdf_page_size ?? 'A4')
+		);
 	}
 
 	function saveCoverSettings() {
@@ -737,6 +765,62 @@
 								<Label class="text-muted-foreground">Model</Label>
 								<p class="font-medium">{configQuery.data.ai_model}</p>
 							</div>
+						</div>
+					{/if}
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2">
+						<FileText class="h-5 w-5" />
+						PDF Digests
+					</Card.Title>
+					<Card.Description>
+						Enable PDF downloads and choose default page size.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					{#if clientConfigQuery.isPending}
+						<div class="space-y-3">
+							<Skeleton class="h-10 w-full" />
+							<Skeleton class="h-10 w-full" />
+						</div>
+					{:else if clientConfigQuery.data}
+						<div class="flex items-center justify-between rounded-lg border p-3">
+							<div>
+								<p class="font-medium">Enable PDF digest downloads</p>
+								<p class="text-sm text-muted-foreground">EPUB remains available regardless of this setting.</p>
+							</div>
+							<Switch checked={pdfEnabled} onCheckedChange={(checked) => (pdfEnabled = checked)} />
+						</div>
+						<div class="space-y-2">
+							<Label for="pdf-page-size">PDF page size</Label>
+							<select
+								id="pdf-page-size"
+								class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+								bind:value={pdfPageSize}
+								disabled={!pdfEnabled}
+							>
+								<option value="A4">A4</option>
+								<option value="Letter">Letter</option>
+								<option value="A5">A5</option>
+							</select>
+						</div>
+						<div class="flex items-center justify-between gap-3">
+							<p class="text-sm text-muted-foreground">Applies when generating new or uncached PDFs.</p>
+							<Button
+								size="sm"
+								onclick={savePdfSettings}
+								disabled={!hasPdfSettingsChanged() || updateClientConfigMutation.isPending}
+							>
+								{#if updateClientConfigMutation.isPending}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								{:else}
+									<Save class="mr-2 h-4 w-4" />
+								{/if}
+								Save
+							</Button>
 						</div>
 					{/if}
 				</Card.Content>
