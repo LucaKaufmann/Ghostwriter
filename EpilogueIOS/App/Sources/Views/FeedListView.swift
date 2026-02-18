@@ -13,11 +13,12 @@ import Domain
 struct FeedListView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
-    @Query(
-        filter: #Predicate<Feed> { !$0.url.starts(with: "synthetic://") },
-        sort: \Feed.createdAt,
-        order: .reverse
-    ) private var feeds: [Feed]
+    @Query(sort: \Feed.createdAt, order: .reverse) private var allFeeds: [Feed]
+    
+    /// Filter out synthetic feeds (SwiftData predicates don't support starts(with:))
+    private var feeds: [Feed] {
+        allFeeds.filter { !$0.url.hasPrefix("synthetic://") }
+    }
     @State private var showingAddFeed = false
     @State private var editingFeed: Feed?
 
