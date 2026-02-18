@@ -72,7 +72,8 @@ class SettingsViewModel @Inject constructor(
                 ghostwriterEnabled = settingsRepository.isGhostwriterEnabled(),
                 ghostwriterUrl = settingsRepository.getGhostwriterUrl() ?: "",
                 ghostwriterApiKey = settingsRepository.getGhostwriterApiKey() ?: "",
-                ghostwriterDownloadEpubsOnSync = settingsRepository.shouldDownloadGhostwriterEpubsOnSync()
+                ghostwriterDownloadEpubsOnSync = settingsRepository.shouldDownloadGhostwriterEpubsOnSync(),
+                serverSchedule = settingsRepository.getGhostwriterSchedule()
             )
         }
     }
@@ -1645,7 +1646,8 @@ data class SettingsUiState(
     val ghostwriterHealth: HealthResponse? = null,
     // Integration status
     val wallabagIntegration: IntegrationStatus? = null,
-    val newslettersIntegration: IntegrationStatus? = null
+    val newslettersIntegration: IntegrationStatus? = null,
+    val serverSchedule: SettingsRepository.GhostwriterSchedule? = null
 )
 
 data class MediaItemUi(
