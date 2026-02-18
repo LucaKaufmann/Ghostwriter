@@ -110,6 +110,8 @@ export interface ClientConfigResponse {
 	media_processing_interval_hours: number;
 	include_podcasts_in_digest: boolean;
 	include_youtube_in_digest: boolean;
+	pdf_enabled?: boolean;
+	pdf_page_size?: 'A4' | 'Letter' | 'A5';
 	cover_enabled: boolean;
 	cover_provider: 'gpt-image-1' | 'nano-banana';
 	cover_quality: 'low' | 'medium' | 'high';
@@ -138,6 +140,8 @@ export interface ClientConfigUpdate {
 	media_processing_interval_hours?: number;
 	include_podcasts_in_digest?: boolean;
 	include_youtube_in_digest?: boolean;
+	pdf_enabled?: boolean;
+	pdf_page_size?: 'A4' | 'Letter' | 'A5';
 	cover_enabled?: boolean;
 	cover_provider?: 'gpt-image-1' | 'nano-banana';
 	cover_quality?: 'low' | 'medium' | 'high';

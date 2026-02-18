@@ -80,7 +80,7 @@ class DigestRead(SQLModel):
     feeds_fetched: int = 0
     total_articles: int = 0
     articles_enriched: int = 0
-    available_formats: list[str] = Field(default_factory=lambda: ["epub", "pdf"])
+    available_formats: list[str] = Field(default_factory=lambda: ["epub"])
 
 
 class DigestStatus(SQLModel):
