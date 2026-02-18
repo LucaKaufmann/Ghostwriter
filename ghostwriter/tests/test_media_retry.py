@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlmodel import Session
@@ -54,6 +54,14 @@ def test_retry_single_failed_item_sets_pending_and_clears_error(client):
     """Retrying a failed item should queue it and clear failure state."""
     item = _create_media_item(content_type="podcast", status="failed")
 
+    stale_created_at = datetime.now(timezone.utc) - timedelta(hours=5)
+    with Session(engine) as session:
+        stale_item = session.get(MediaItem, item.id)
+        assert stale_item is not None
+        stale_item.created_at = stale_created_at
+        session.add(stale_item)
+        session.commit()
+
     response = client.post(f"/api/media/items/{item.id}/retry")
     assert response.status_code == 200
     payload = response.json()
@@ -67,6 +75,7 @@ def test_retry_single_failed_item_sets_pending_and_clears_error(client):
         assert refreshed.error_message is None
         assert refreshed.processing_ms == 0
         assert refreshed.completed_at is None
+        assert refreshed.created_at > stale_created_at.replace(tzinfo=None)
 
 
 def test_retry_single_non_failed_returns_409(client):

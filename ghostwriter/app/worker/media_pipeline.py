@@ -246,6 +246,8 @@ async def _process_pending_items(settings) -> tuple[int, int]:
 
             # Mark as processing
             item.status = "processing"
+            # created_at doubles as processing start for stale-lock detection.
+            item.created_at = datetime.now(timezone.utc)
             session.add(item)
             session.commit()
 
