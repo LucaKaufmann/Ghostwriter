@@ -142,6 +142,7 @@ class PdfGenerator:
         media_articles: list[ExtractedArticle] | None = None,
         cover_image: CoverImage | None = None,
         page_size: str = "A4",
+        output_filename: str | None = None,
     ) -> str:
         """Generate a PDF digest and return the output path."""
         if date is None:
@@ -155,7 +156,7 @@ class PdfGenerator:
         if media_articles:
             all_articles.extend(media_articles)
 
-        filename = f"{date.strftime('%Y-%m-%d')}_{period}.pdf"
+        filename = output_filename or f"{date.strftime('%Y-%m-%d')}_{period}.pdf"
         output_path = os.path.join(self.settings.output_dir, filename)
         os.makedirs(self.settings.output_dir, exist_ok=True)
 
