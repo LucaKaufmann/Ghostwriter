@@ -146,7 +146,7 @@ public struct DigestArticleSourceResponse: Codable, Sendable {
     public let finalURL: String
     public let contentType: String?
     public let fetchedAt: String
-    public let sizeBytes: Int
+    public let sizeBytes: Int64
     public let html: String
 
     enum CodingKeys: String, CodingKey {

@@ -33,9 +33,11 @@ import com.example.epilogue.data.remote.ghostwriter.PreviewResponse
 import com.example.epilogue.data.remote.ghostwriter.LogFileInfoResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleResponse
 import com.example.epilogue.data.remote.ghostwriter.ScheduleUpdateRequest
+import com.example.epilogue.data.remote.ghostwriter.SharedGhostwriterAdapter
 import com.example.epilogue.data.remote.ghostwriter.StatusMessageResponse
 import com.example.epilogue.data.remote.ghostwriter.YouTubeResolveRequest
 import com.example.epilogue.data.remote.ghostwriter.YouTubeResolveResponse
+import com.example.epilogue.shared.ghostwriter.GhostwriterApiException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -68,6 +70,10 @@ class GhostwriterRepository @Inject constructor(
         private const val TAG = "GhostwriterRepository"
     }
 
+    private var cachedSharedAdapter: SharedGhostwriterAdapter? = null
+    private var cachedSharedBaseUrl: String? = null
+    private var cachedSharedApiKey: String? = null
+
     /**
      * Result wrapper for Ghostwriter operations.
      */
@@ -96,6 +102,31 @@ class GhostwriterRepository @Inject constructor(
         return if (!apiKey.isNullOrBlank()) "Bearer $apiKey" else null
     }
 
+    private fun shouldUseSharedClient(): Boolean {
+        return settingsRepository.useSharedGhostwriterClient()
+    }
+
+    private fun getSharedAdapter(): SharedGhostwriterAdapter? {
+        val url = settingsRepository.getGhostwriterUrl()
+        if (url.isNullOrBlank() || !settingsRepository.isGhostwriterEnabled()) {
+            return null
+        }
+        val apiKey = settingsRepository.getGhostwriterApiKey()
+
+        if (cachedSharedAdapter != null &&
+            cachedSharedBaseUrl == url &&
+            cachedSharedApiKey == apiKey
+        ) {
+            return cachedSharedAdapter
+        }
+
+        cachedSharedAdapter?.close()
+        cachedSharedAdapter = SharedGhostwriterAdapter.create(url, apiKey)
+        cachedSharedBaseUrl = url
+        cachedSharedApiKey = apiKey
+        return cachedSharedAdapter
+    }
+
     /**
      * Check if Ghostwriter is configured and enabled.
      */
@@ -107,6 +138,18 @@ class GhostwriterRepository @Inject constructor(
      * Check the health of the Ghostwriter server.
      */
     suspend fun checkHealth(): GhostwriterResult<HealthResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.checkHealth())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Health check failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Health check failed (shared)", e)
+                GhostwriterResult.Error("Connection failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -130,6 +173,31 @@ class GhostwriterRepository @Inject constructor(
      * This performs a full sync - feeds not in the list will be deactivated on the server.
      */
     suspend fun syncFeeds(feeds: List<Feed>): GhostwriterResult<FeedSyncResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val realFeeds = feeds.filter { !it.url.startsWith("synthetic://") }
+                val requests = realFeeds.map { feed ->
+                    FeedSyncRequest(
+                        url = feed.url,
+                        title = feed.name,
+                        isActive = feed.isEnabled,
+                        mode = when (feed.mode) {
+                            ProcessingMode.BRIEFING -> "summarize"
+                            ProcessingMode.FIDELITY -> "raw"
+                        },
+                        maxArticles = if (feed.maxArticles > 0) feed.maxArticles else 10
+                    )
+                }
+                GhostwriterResult.Success(shared.syncFeeds(requests))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Feed sync failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Feed sync failed (shared)", e)
+                GhostwriterResult.Error("Sync failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -172,15 +240,25 @@ class GhostwriterRepository @Inject constructor(
      * @return Feed changes including updated feeds and tombstones for deleted feeds.
      */
     suspend fun getFeedChanges(since: Long?): GhostwriterResult<FeedChangesResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val sinceStr = since?.toGhostwriterTimestamp()
+                val response = shared.getFeedChanges(sinceStr)
+                Log.i(TAG, "Got feed changes via shared client: ${response.feeds.size} feeds, ${response.tombstones.size} tombstones")
+                GhostwriterResult.Success(response)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Get feed changes failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get feed changes failed (shared)", e)
+                GhostwriterResult.Error("Get feed changes failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
-            // Convert timestamp to ISO 8601 format for the API
-            val sinceStr = since?.let {
-                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-                sdf.timeZone = TimeZone.getTimeZone("UTC")
-                sdf.format(java.util.Date(it))
-            }
+            val sinceStr = since?.toGhostwriterTimestamp()
 
             val response = api.getFeedChanges(getAuthHeader(), sinceStr)
             if (response.isSuccessful && response.body() != null) {
@@ -206,6 +284,18 @@ class GhostwriterRepository @Inject constructor(
      * @return The digest ID if successful, or an error
      */
     suspend fun triggerDigest(period: String = "manual"): GhostwriterResult<DigestTriggerResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.triggerDigest(period))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Trigger failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Trigger digest failed (shared)", e)
+                GhostwriterResult.Error("Trigger failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -236,6 +326,18 @@ class GhostwriterRepository @Inject constructor(
      * Get the status of a running digest job.
      */
     suspend fun getDigestStatus(digestId: String): GhostwriterResult<DigestStatusResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getDigestStatus(digestId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Status check failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get digest status failed (shared)", e)
+                GhostwriterResult.Error("Status check failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -260,6 +362,18 @@ class GhostwriterRepository @Inject constructor(
      * Used for syncing article content to display in-app.
      */
     suspend fun getDigestArticles(digestId: String): GhostwriterResult<DigestArticlesResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getDigestArticles(digestId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get articles (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get digest articles failed (shared)", e)
+                GhostwriterResult.Error("Failed to get articles: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -292,6 +406,18 @@ class GhostwriterRepository @Inject constructor(
         digestId: String,
         articleId: String
     ): GhostwriterResult<DigestArticleSourceResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getDigestArticleSource(digestId, articleId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get article source (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get digest article source failed (shared)", e)
+                GhostwriterResult.Error("Failed to get article source: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -320,6 +446,18 @@ class GhostwriterRepository @Inject constructor(
      * Get the most recent completed digest.
      */
     suspend fun getLatestDigest(): GhostwriterResult<DigestResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getLatestDigest())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get latest digest (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get latest digest failed (shared)", e)
+                GhostwriterResult.Error("Failed to get latest digest: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -348,6 +486,18 @@ class GhostwriterRepository @Inject constructor(
      * List all available digests.
      */
     suspend fun listDigests(): GhostwriterResult<List<DigestResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.listDigests())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("List digests failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "List digests failed (shared)", e)
+                GhostwriterResult.Error("Failed to list digests: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -374,6 +524,32 @@ class GhostwriterRepository @Inject constructor(
      * @return The local file path if successful
      */
     suspend fun downloadDigest(filename: String): GhostwriterResult<File> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val bytes = shared.downloadDigest(filename)
+
+                // Save to the app's documents directory
+                val documentsDir = File(context.getExternalFilesDir(null), "Epilogue")
+                if (!documentsDir.exists()) {
+                    documentsDir.mkdirs()
+                }
+
+                val outputFile = File(documentsDir, filename)
+                outputFile.outputStream().use { output ->
+                    output.write(bytes)
+                }
+
+                Log.i(TAG, "Downloaded digest via shared client to: ${outputFile.absolutePath}")
+                GhostwriterResult.Success(outputFile)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Download digest failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Download digest failed (shared)", e)
+                GhostwriterResult.Error("Download failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -414,6 +590,24 @@ class GhostwriterRepository @Inject constructor(
      * @return Success if deleted, Error otherwise
      */
     suspend fun deleteFeedByUrl(feedUrl: String): GhostwriterResult<Unit> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                shared.deleteFeedByUrl(feedUrl)
+                Log.i(TAG, "Deleted feed via shared client: $feedUrl")
+                GhostwriterResult.Success(Unit)
+            } catch (e: GhostwriterApiException.NotFound) {
+                // Feed doesn't exist on backend - treat as success
+                Log.w(TAG, "Feed not found on backend via shared client: $feedUrl")
+                GhostwriterResult.Success(Unit)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Delete feed failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Delete feed failed (shared)", e)
+                GhostwriterResult.Error("Delete failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -444,6 +638,18 @@ class GhostwriterRepository @Inject constructor(
      * Get all schedule configurations.
      */
     suspend fun getSchedules(): GhostwriterResult<List<ScheduleResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getSchedules())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get schedules (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get schedules failed (shared)", e)
+                GhostwriterResult.Error("Failed to get schedules: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -477,6 +683,23 @@ class GhostwriterRepository @Inject constructor(
         hour: Int? = null,
         minute: Int? = null
     ): GhostwriterResult<ScheduleResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val request = ScheduleUpdateRequest(
+                    enabled = enabled,
+                    hour = hour,
+                    minute = minute
+                )
+                GhostwriterResult.Success(shared.updateSchedule(period.lowercase(), request))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to update schedule (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Update schedule failed (shared)", e)
+                GhostwriterResult.Error("Failed to update schedule: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -507,6 +730,18 @@ class GhostwriterRepository @Inject constructor(
      * This prevents auto-disable of schedules due to inactivity.
      */
     suspend fun sendHeartbeat(): GhostwriterResult<HeartbeatResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.sendHeartbeat())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Heartbeat failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Heartbeat failed (shared)", e)
+                GhostwriterResult.Error("Heartbeat failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -535,14 +770,26 @@ class GhostwriterRepository @Inject constructor(
      * @param knownDigestIds List of digest IDs the client already has, to exclude from response.
      */
     suspend fun performSync(feedSince: Long?, knownDigestIds: List<String>): GhostwriterResult<SyncResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val sinceStr = feedSince?.toGhostwriterTimestamp()
+                val digestIdsStr = if (knownDigestIds.isNotEmpty()) knownDigestIds.joinToString(",") else null
+                val response = shared.performSync(sinceStr, digestIdsStr)
+                Log.i(TAG, "Combined sync successful via shared client")
+                GhostwriterResult.Success(response)
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Combined sync failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Combined sync failed (shared)", e)
+                GhostwriterResult.Error("Combined sync failed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
-            val sinceStr = feedSince?.let {
-                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-                sdf.timeZone = TimeZone.getTimeZone("UTC")
-                sdf.format(java.util.Date(it))
-            }
+            val sinceStr = feedSince?.toGhostwriterTimestamp()
 
             val digestIdsStr = if (knownDigestIds.isNotEmpty()) {
                 knownDigestIds.joinToString(",")
@@ -568,6 +815,18 @@ class GhostwriterRepository @Inject constructor(
      * Get client status including activity tracking info.
      */
     suspend fun getClientStatus(): GhostwriterResult<ClientStatusResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getClientStatus())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get client status (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get client status failed (shared)", e)
+                GhostwriterResult.Error("Failed to get client status: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -592,6 +851,18 @@ class GhostwriterRepository @Inject constructor(
      * Used for syncing settings across devices on app startup.
      */
     suspend fun getConfig(): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getConfig())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to get config (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get config failed (shared)", e)
+                GhostwriterResult.Error("Failed to get config: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -655,6 +926,39 @@ class GhostwriterRepository @Inject constructor(
         coverOverlayEnabled: Boolean? = null,
         clientUpdatedAt: String? = null
     ): GhostwriterResult<ClientConfigResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val request = ClientConfigUpdateRequest(
+                    minWordCount = minWordCount,
+                    morningHour = morningHour,
+                    morningMinute = morningMinute,
+                    noonHour = noonHour,
+                    noonMinute = noonMinute,
+                    eveningHour = eveningHour,
+                    eveningMinute = eveningMinute,
+                    timezone = timezone,
+                    scheduleMorning = scheduleMorning,
+                    scheduleNoon = scheduleNoon,
+                    scheduleEvening = scheduleEvening,
+                    includePodcastsInDigest = includePodcastsInDigest,
+                    includeYoutubeInDigest = includeYoutubeInDigest,
+                    coverEnabled = coverEnabled,
+                    coverProvider = coverProvider,
+                    coverQuality = coverQuality,
+                    coverPrompt = coverPrompt,
+                    coverOverlayEnabled = coverOverlayEnabled,
+                    clientUpdatedAt = clientUpdatedAt
+                )
+                GhostwriterResult.Success(shared.updateConfig(request))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Update config failed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Update config failed (shared)", e)
+                GhostwriterResult.Error("Failed to update config: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -705,6 +1009,18 @@ class GhostwriterRepository @Inject constructor(
      * Preview Wallabag items without mutating read state.
      */
     suspend fun previewWallabag(): GhostwriterResult<PreviewResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.previewWallabag())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to preview Wallabag (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Preview Wallabag failed (shared)", e)
+                GhostwriterResult.Error("Failed to preview Wallabag: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -727,6 +1043,18 @@ class GhostwriterRepository @Inject constructor(
      * Preview newsletter items without mutating read state.
      */
     suspend fun previewNewsletters(): GhostwriterResult<PreviewResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.previewNewsletters())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to preview newsletters (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Preview newsletters failed (shared)", e)
+                GhostwriterResult.Error("Failed to preview newsletters: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -749,6 +1077,18 @@ class GhostwriterRepository @Inject constructor(
      * Clear seen markers for Wallabag synthetic feed.
      */
     suspend fun clearWallabagSeen(): GhostwriterResult<ClearSeenResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.clearWallabagSeen())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to clear Wallabag seen cache (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Clear Wallabag seen failed (shared)", e)
+                GhostwriterResult.Error("Failed to clear Wallabag seen cache: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -771,6 +1111,18 @@ class GhostwriterRepository @Inject constructor(
      * Clear seen markers for newsletters synthetic feed.
      */
     suspend fun clearNewsletterSeen(): GhostwriterResult<ClearSeenResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.clearNewsletterSeen())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to clear newsletter seen cache (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Clear newsletter seen failed (shared)", e)
+                GhostwriterResult.Error("Failed to clear newsletter seen cache: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -789,10 +1141,38 @@ class GhostwriterRepository @Inject constructor(
         }
     }
 
+    private fun Long.toGhostwriterTimestamp(): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(java.util.Date(this))
+    }
+
+    private fun sharedApiError(prefix: String, e: GhostwriterApiException): GhostwriterResult.Error {
+        return when (e) {
+            is GhostwriterApiException.Conflict -> GhostwriterResult.Error("$prefix: conflict", 409)
+            is GhostwriterApiException.Unauthorized -> GhostwriterResult.Error("$prefix: unauthorized", 401)
+            is GhostwriterApiException.NotFound -> GhostwriterResult.Error("$prefix: not found", 404)
+            is GhostwriterApiException.RateLimited -> GhostwriterResult.Error("$prefix: rate limited", 429)
+            is GhostwriterApiException.HttpError -> GhostwriterResult.Error("$prefix: http ${e.statusCode}", e.statusCode)
+        }
+    }
+
     /**
      * List configured podcast feeds.
      */
     suspend fun getPodcastFeeds(): GhostwriterResult<List<MediaFeedResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getPodcastFeeds())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load podcast feeds (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get podcast feeds failed (shared)", e)
+                GhostwriterResult.Error("Failed to load podcast feeds: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -821,6 +1201,26 @@ class GhostwriterRepository @Inject constructor(
         maxItems: Int = 5,
         isActive: Boolean = true
     ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val request = MediaFeedCreateRequest(
+                    feedType = "podcast",
+                    url = url,
+                    title = title,
+                    isActive = isActive,
+                    mode = mode,
+                    maxItems = maxItems
+                )
+                GhostwriterResult.Success(shared.createPodcastFeed(request))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to create podcast feed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Create podcast feed failed (shared)", e)
+                GhostwriterResult.Error("Failed to create podcast feed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -857,6 +1257,24 @@ class GhostwriterRepository @Inject constructor(
         mode: String? = null,
         maxItems: Int? = null
     ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val request = MediaFeedUpdateRequest(
+                    title = title,
+                    isActive = isActive,
+                    mode = mode,
+                    maxItems = maxItems
+                )
+                GhostwriterResult.Success(shared.updatePodcastFeed(feedId, request))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to update podcast feed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Update podcast feed failed (shared)", e)
+                GhostwriterResult.Error("Failed to update podcast feed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -885,6 +1303,18 @@ class GhostwriterRepository @Inject constructor(
      * Delete a podcast feed.
      */
     suspend fun deletePodcastFeed(feedId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.deletePodcastFeed(feedId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to delete podcast feed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Delete podcast feed failed (shared)", e)
+                GhostwriterResult.Error("Failed to delete podcast feed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -907,6 +1337,18 @@ class GhostwriterRepository @Inject constructor(
      * List configured YouTube feeds.
      */
     suspend fun getYouTubeFeeds(): GhostwriterResult<List<MediaFeedResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getYouTubeFeeds())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load YouTube feeds (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get YouTube feeds failed (shared)", e)
+                GhostwriterResult.Error("Failed to load YouTube feeds: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -929,6 +1371,18 @@ class GhostwriterRepository @Inject constructor(
      * Resolve a YouTube channel URL to RSS URL.
      */
     suspend fun resolveYouTubeFeed(url: String): GhostwriterResult<YouTubeResolveResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.resolveYouTubeFeed(url))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to resolve YouTube URL (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Resolve YouTube feed failed (shared)", e)
+                GhostwriterResult.Error("Failed to resolve YouTube URL: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -958,6 +1412,27 @@ class GhostwriterRepository @Inject constructor(
         maxItems: Int = 5,
         isActive: Boolean = true
     ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val request = MediaFeedCreateRequest(
+                    feedType = "youtube",
+                    url = url,
+                    resolvedFeedUrl = resolvedFeedUrl,
+                    title = title,
+                    isActive = isActive,
+                    mode = mode,
+                    maxItems = maxItems
+                )
+                GhostwriterResult.Success(shared.createYouTubeFeed(request))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to create YouTube feed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Create YouTube feed failed (shared)", e)
+                GhostwriterResult.Error("Failed to create YouTube feed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -995,6 +1470,24 @@ class GhostwriterRepository @Inject constructor(
         mode: String? = null,
         maxItems: Int? = null
     ): GhostwriterResult<MediaFeedResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                val request = MediaFeedUpdateRequest(
+                    title = title,
+                    isActive = isActive,
+                    mode = mode,
+                    maxItems = maxItems
+                )
+                GhostwriterResult.Success(shared.updateYouTubeFeed(feedId, request))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to update YouTube feed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Update YouTube feed failed (shared)", e)
+                GhostwriterResult.Error("Failed to update YouTube feed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1023,6 +1516,18 @@ class GhostwriterRepository @Inject constructor(
      * Delete a YouTube feed.
      */
     suspend fun deleteYouTubeFeed(feedId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.deleteYouTubeFeed(feedId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to delete YouTube feed (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Delete YouTube feed failed (shared)", e)
+                GhostwriterResult.Error("Failed to delete YouTube feed: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1045,6 +1550,18 @@ class GhostwriterRepository @Inject constructor(
      * List all podcast media items.
      */
     suspend fun getAllPodcastItems(): GhostwriterResult<List<MediaItemSummaryResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getAllPodcastItems())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load podcast items (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get podcast items failed (shared)", e)
+                GhostwriterResult.Error("Failed to load podcast items: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1067,6 +1584,18 @@ class GhostwriterRepository @Inject constructor(
      * List all YouTube media items.
      */
     suspend fun getAllYouTubeItems(): GhostwriterResult<List<MediaItemSummaryResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getAllYouTubeItems())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load YouTube items (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get YouTube items failed (shared)", e)
+                GhostwriterResult.Error("Failed to load YouTube items: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1089,6 +1618,18 @@ class GhostwriterRepository @Inject constructor(
      * Get full media item details with transcript body.
      */
     suspend fun getMediaItem(itemId: String): GhostwriterResult<MediaItemResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getMediaItem(itemId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load media item (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get media item failed (shared)", e)
+                GhostwriterResult.Error("Failed to load media item: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1111,6 +1652,18 @@ class GhostwriterRepository @Inject constructor(
      * Get aggregate media processing status.
      */
     suspend fun getMediaStatus(): GhostwriterResult<MediaProcessingStatusResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getMediaStatus())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to load media status (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get media status failed (shared)", e)
+                GhostwriterResult.Error("Failed to load media status: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1133,6 +1686,18 @@ class GhostwriterRepository @Inject constructor(
      * Trigger media processing pipeline.
      */
     suspend fun triggerMediaProcessing(): GhostwriterResult<MediaTriggerResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.triggerMediaProcessing())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to trigger media processing (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Trigger media processing failed (shared)", e)
+                GhostwriterResult.Error("Failed to trigger media processing: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1155,6 +1720,18 @@ class GhostwriterRepository @Inject constructor(
      * List available server logs.
      */
     suspend fun getLogFiles(): GhostwriterResult<List<LogFileInfoResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.getLogFiles())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to list log files (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Get log files failed (shared)", e)
+                GhostwriterResult.Error("Failed to list log files: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
 
         try {
@@ -1177,6 +1754,18 @@ class GhostwriterRepository @Inject constructor(
      * List auth API tokens for current JWT-authenticated user.
      */
     suspend fun listAuthTokens(): GhostwriterResult<List<AuthApiTokenResponse>> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.listAuthTokens())
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to list auth tokens (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "List auth tokens failed (shared)", e)
+                GhostwriterResult.Error("Failed to list auth tokens: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
         try {
             val response = api.listAuthTokens(getAuthHeader())
@@ -1198,6 +1787,18 @@ class GhostwriterRepository @Inject constructor(
      * Create a new auth API token for current JWT-authenticated user.
      */
     suspend fun createAuthToken(name: String): GhostwriterResult<AuthApiTokenCreateResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.createAuthToken(name))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to create auth token (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Create auth token failed (shared)", e)
+                GhostwriterResult.Error("Failed to create auth token: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
         try {
             val response = api.createAuthToken(getAuthHeader(), AuthApiTokenCreateRequest(name))
@@ -1219,6 +1820,18 @@ class GhostwriterRepository @Inject constructor(
      * Revoke an existing auth API token.
      */
     suspend fun revokeAuthToken(tokenId: String): GhostwriterResult<StatusMessageResponse> = withContext(Dispatchers.IO) {
+        if (shouldUseSharedClient()) {
+            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
+            return@withContext try {
+                GhostwriterResult.Success(shared.revokeAuthToken(tokenId))
+            } catch (e: GhostwriterApiException) {
+                sharedApiError("Failed to revoke auth token (shared)", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Revoke auth token failed (shared)", e)
+                GhostwriterResult.Error("Failed to revoke auth token: ${e.message}")
+            }
+        }
+
         val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
         try {
             val response = api.revokeAuthToken(getAuthHeader(), tokenId)
