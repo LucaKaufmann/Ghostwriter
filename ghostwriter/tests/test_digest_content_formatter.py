@@ -39,3 +39,19 @@ Risk sentiment improved across major indexes."""
     rendered = format_digest_content_to_html(text)
     assert "<h2>Market Overview</h2>" in rendered
     assert "<p>Risk sentiment improved across major indexes.</p>" in rendered
+
+
+def test_detects_embedded_chapter_lines_and_lists_without_blank_lines():
+    text = """This episode starts with context for the experiment.
+Season 2: AI co-founders and startup dynamics
+The team tests whether AI agents can run core startup roles.
+Memory, embodiment, and emergent behavior of AI agents
+- Persistent memory documents
+- Distinct role backstories
+Human-AI interaction, disclosure, and ethics
+Trust shifts when people discover they were interacting with AI."""
+    rendered = format_digest_content_to_html(text)
+    assert "<h3>Season 2: AI co-founders and startup dynamics</h3>" in rendered
+    assert "<h3>Memory, embodiment, and emergent behavior of AI agents</h3>" in rendered
+    assert "<h3>Human-AI interaction, disclosure, and ethics</h3>" in rendered
+    assert "<ul><li>Persistent memory documents</li><li>Distinct role backstories</li></ul>" in rendered
