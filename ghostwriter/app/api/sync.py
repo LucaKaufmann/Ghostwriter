@@ -55,6 +55,7 @@ class SyncDigest(BaseModel):
     error_message: str | None
     created_at: datetime
     completed_at: datetime | None
+    available_formats: list[str] = ["epub", "pdf"]
     articles: list[SyncDigestArticle]
 
 
@@ -189,6 +190,7 @@ async def combined_sync(
                 "error_message": digest.error_message,
                 "created_at": digest.created_at.isoformat(),
                 "completed_at": digest.completed_at.isoformat() if digest.completed_at else None,
+                "available_formats": ["epub", "pdf"],
                 "articles": articles_by_digest.get(digest.id, []),
             })
     t_articles = time.perf_counter()

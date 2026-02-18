@@ -40,6 +40,11 @@ def test_download_digest_by_id_epub(client) -> None:
     assert response.headers["content-type"] == "application/epub+zip"
     assert response.content == b"epub-bytes"
 
+    digests_response = client.get("/api/digests")
+    assert digests_response.status_code == 200
+    first_digest = digests_response.json()[0]
+    assert first_digest["available_formats"] == ["epub", "pdf"]
+
 
 def test_download_digest_by_id_pdf_generates_on_demand(client) -> None:
     output_dir = Path(os.environ["OUTPUT_DIR"])
