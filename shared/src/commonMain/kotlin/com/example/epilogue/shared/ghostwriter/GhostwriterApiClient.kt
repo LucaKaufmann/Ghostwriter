@@ -149,6 +149,16 @@ class GhostwriterApiClient(
         return response.body()
     }
 
+    suspend fun downloadDigestById(digestId: String, format: DigestDownloadFormat): ByteArray {
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("digests", digestId, "download") }
+            parameter("format", format.wireValue)
+            authorize()
+        }
+        response.requireSuccess()
+        return response.body()
+    }
+
     suspend fun listSchedules(): List<ScheduleResponse> {
         val response = client.get(apiBaseUrl) {
             url { appendPathSegments("schedules") }

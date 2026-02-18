@@ -57,6 +57,8 @@ class CoreModelsSerializationTest {
                 "evening_hour": 18,
                 "evening_minute": 0,
                 "timezone": "America/New_York",
+                "pdf_enabled": true,
+                "pdf_page_size": "Letter",
                 "updated_at": "2026-02-17T12:00:00"
               },
               "feeds": {
@@ -69,6 +71,7 @@ class CoreModelsSerializationTest {
                   {
                     "id": "digest-1",
                     "filename": "2026-02-17_morning.epub",
+                    "available_formats": ["epub", "pdf"],
                     "period": "morning",
                     "status": "completed",
                     "stage": null,
@@ -110,7 +113,10 @@ class CoreModelsSerializationTest {
         val response = json.decodeFromString<SyncResponse>(payload)
 
         assertEquals("America/New_York", response.config.timezone)
+        assertEquals(true, response.config.pdfEnabled)
+        assertEquals("Letter", response.config.pdfPageSize)
         assertEquals(1, response.digests.newDigests.size)
+        assertEquals(listOf("epub", "pdf"), response.digests.newDigests.first().availableFormats)
         assertEquals(1, response.digests.newDigests.first().articles.size)
         assertTrue(response.schedules.first().enabled)
     }
