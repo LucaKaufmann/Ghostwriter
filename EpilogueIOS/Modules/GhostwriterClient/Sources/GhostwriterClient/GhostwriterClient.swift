@@ -201,6 +201,8 @@ public actor GhostwriterClient {
                 mediaProcessingIntervalHours: sharedResponse.config.mediaProcessingIntervalHours.map { Int(truncating: $0) },
                 includePodcastsInDigest: sharedResponse.config.includePodcastsInDigest?.boolValue,
                 includeYoutubeInDigest: sharedResponse.config.includeYoutubeInDigest?.boolValue,
+                pdfEnabled: sharedResponse.config.pdfEnabled?.boolValue,
+                pdfPageSize: sharedResponse.config.pdfPageSize,
                 coverEnabled: sharedResponse.config.coverEnabled?.boolValue,
                 coverProvider: sharedResponse.config.coverProvider,
                 coverQuality: sharedResponse.config.coverQuality,
