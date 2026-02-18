@@ -65,6 +65,7 @@ import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
+import com.example.epilogue.data.repository.SettingsRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -193,6 +194,7 @@ fun SettingsScreen(
             SettingsSection(title = "Daily Schedule") {
                 PeriodSelection(
                     selectedPeriods = uiState.selectedPeriods,
+                    serverSchedule = uiState.serverSchedule,
                     onTogglePeriod = viewModel::togglePeriod
                 )
             }
@@ -463,8 +465,20 @@ fun ApiKeyInput(
 @Composable
 fun PeriodSelection(
     selectedPeriods: Set<DigestPeriod>,
+    serverSchedule: SettingsRepository.GhostwriterSchedule?,
     onTogglePeriod: (DigestPeriod, Boolean) -> Unit
 ) {
+    // Helper to get display time from server schedule or fallback to default
+    fun getDisplayTime(period: DigestPeriod): String {
+        return serverSchedule?.let { schedule ->
+            when (period) {
+                DigestPeriod.MORNING -> String.format("%d:%02d", schedule.morningHour, schedule.morningMinute)
+                DigestPeriod.NOON -> String.format("%d:%02d", schedule.noonHour, schedule.noonMinute)
+                DigestPeriod.EVENING -> String.format("%d:%02d", schedule.eveningHour, schedule.eveningMinute)
+            }
+        } ?: period.displayTime
+    }
+
     Column {
         Text(
             text = "Generate digests at:",
@@ -482,7 +496,7 @@ fun PeriodSelection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${period.name.lowercase().replaceFirstChar { it.uppercase() }} - ${period.displayTime}",
+                    text = "${period.name.lowercase().replaceFirstChar { it.uppercase() }} - ${getDisplayTime(period)}",
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Switch(
