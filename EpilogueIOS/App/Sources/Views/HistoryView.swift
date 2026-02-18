@@ -18,6 +18,7 @@ struct HistoryView: View {
     @State private var digestToDelete: Digest?
     @State private var digestToShare: Digest?
     @State private var downloadingDigestIDs: Set<UUID> = []
+    @State private var pdfDownloadsEnabled = false
     @State private var statusMessage: String?
 
     var body: some View {
@@ -52,16 +53,18 @@ struct HistoryView: View {
                             }
                             .swipeActions(edge: .leading) {
                                 if let remoteId = digest.remoteId {
-                                    Button {
-                                        downloadDigestPdf(digest, remoteId: remoteId)
-                                    } label: {
-                                        if downloadingDigestIDs.contains(digest.id) {
-                                            Label("Downloading", systemImage: "hourglass")
-                                        } else {
-                                            Label("PDF", systemImage: "doc.richtext")
+                                    if pdfDownloadsEnabled {
+                                        Button {
+                                            downloadDigestPdf(digest, remoteId: remoteId)
+                                        } label: {
+                                            if downloadingDigestIDs.contains(digest.id) {
+                                                Label("Downloading", systemImage: "hourglass")
+                                            } else {
+                                                Label("PDF", systemImage: "doc.richtext")
+                                            }
                                         }
+                                        .tint(.orange)
                                     }
-                                    .tint(.orange)
 
                                     if !epubAvailable {
                                         Button {
@@ -117,6 +120,9 @@ struct HistoryView: View {
             }
             .refreshable {
                 await ghostwriterCoordinator.performFullSyncIncludingDigests()
+            }
+            .task {
+                pdfDownloadsEnabled = await ghostwriterCoordinator.isPdfDownloadEnabled()
             }
             .alert("Delete Digest?", isPresented: Binding(
                 get: { digestToDelete != nil },
