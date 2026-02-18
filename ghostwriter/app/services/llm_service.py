@@ -101,13 +101,18 @@ Content guidance:
 - Lead with a one-sentence overview of what this episode/video covers.
 - Organize the summary by topics discussed, in the order they appear.
 - For each major topic, include 2-3 key points, arguments, or findings.
+- Add chapter-like section headlines for major topic shifts.
 - Preserve 2-4 short exact excerpts (max 25 words each) when there's a strong, memorable line. Italicize excerpts with *single asterisks*.
 - Note any notable disagreements, surprising claims, or actionable advice.
 - Omit sponsor messages, ads, calls-to-action, and boilerplate. Do not mention or acknowledge them.
 
-Length: Target around 3,000-4,000 characters. Use 5-8 short paragraphs.
+Length: {length_guidance}
 
 Formatting:
+- Output in Markdown with:
+  1) A short lead paragraph (no heading) as an overview.
+  2) 3-8 section headings as Markdown H2 (`## Heading`) for major topics.
+  3) 1-2 short paragraphs under each heading (2-4 sentences per paragraph).
 - Write in direct, factual language with a neutral tone.
 - Use short paragraphs. Bullet lists only when they improve scanability.
 - Keep compact: no extra blank lines between sentences.
@@ -130,6 +135,7 @@ You are summarizing part {part} of {total} of a long podcast or video transcript
 Requirements:
 - Extract key topics discussed, arguments made, and notable quotes.
 - Maximum 12 bullet points.
+- Include topic labels in bullets when possible so final reduce step can form section headings.
 - Omit sponsor messages, ads, and boilerplate entirely.
 - Keep it concise; avoid repetition.
 </instructions>
@@ -148,9 +154,13 @@ Content guidance:
 - Preserve any strong exact excerpts from the partials.
 - Note any notable disagreements, surprising claims, or actionable advice.
 
-Length: Target around 3,000-4,000 characters. Use 5-8 short paragraphs.
+Length: {length_guidance}
 
 Formatting:
+- Output in Markdown with:
+  1) A short lead paragraph (no heading) as an overview.
+  2) 3-8 section headings as Markdown H2 (`## Heading`) for major topics.
+  3) 1-2 short paragraphs under each heading (2-4 sentences per paragraph).
 - Write in direct, factual language with a neutral tone.
 - Keep compact: no extra blank lines.
 - Do not start with preambles like "Here's a summary".
@@ -164,6 +174,15 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
 
     DIRECT_SUMMARY_CHAR_LIMIT = 15000
     CHUNK_CHAR_LIMIT = 12000
+    _TRANSCRIPT_LENGTH_TIERS = (
+        (2500, "Target around 350-500 words (~2,100-3,000 characters). Use 4-6 short paragraphs."),
+        (7000, "Target around 500-750 words (~3,000-4,500 characters). Use 5-8 short paragraphs."),
+        (14000, "Target around 750-1,050 words (~4,500-6,300 characters). Use 6-10 short paragraphs."),
+        (
+            float("inf"),
+            "Target around 1,000-1,300 words (~6,000-7,800 characters). Use 8-12 short paragraphs.",
+        ),
+    )
 
     def __init__(self, settings: Settings | None = None) -> None:
         """
@@ -222,11 +241,14 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
         if retries is None:
             retries = self.settings.ai_max_retries
 
+        length_guidance = "Target around 800-1,200 characters. Use 2-3 short paragraphs."
+
         # Select prompts based on content type
         if content_type == "transcript":
             summarize_prompt = self.SUMMARIZE_TRANSCRIPT_PROMPT
             chunk_prompt = self.CHUNK_SUMMARIZE_TRANSCRIPT_PROMPT
             reduce_prompt_template = self.REDUCE_TRANSCRIPT_PROMPT
+            length_guidance = self._transcript_length_guidance(content)
         else:
             summarize_prompt = self.SUMMARIZE_PROMPT
             chunk_prompt = self.CHUNK_SUMMARIZE_PROMPT
@@ -246,7 +268,11 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
 
         model = self.settings.get_llm_model_string()
         if len(content) <= self.DIRECT_SUMMARY_CHAR_LIMIT:
-            prompt = summarize_prompt.format(context=context, content=content)
+            prompt = summarize_prompt.format(
+                context=context,
+                content=content,
+                length_guidance=length_guidance,
+            )
             direct_summary, direct_failed = await self._run_completion(
                 prompt, model, retries, system_prompt=self.SYSTEM_PROMPT
             )
@@ -276,7 +302,10 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
             partials.append(partial_summary)
 
         reduce_input = "\n\n".join(partials)
-        reduce_prompt = reduce_prompt_template.format(content=reduce_input)
+        reduce_prompt = reduce_prompt_template.format(
+            content=reduce_input,
+            length_guidance=length_guidance,
+        )
         final_summary, final_failed = await self._run_completion(
             reduce_prompt, model, retries, system_prompt=self.SYSTEM_PROMPT
         )
@@ -360,6 +389,15 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
             start = end
 
         return chunks
+
+    @classmethod
+    def _transcript_length_guidance(cls, content: str) -> str:
+        """Return transcript summary length target guidance based on source word count."""
+        word_count = len(content.split())
+        for max_words, guidance in cls._TRANSCRIPT_LENGTH_TIERS:
+            if word_count <= max_words:
+                return guidance
+        return cls._TRANSCRIPT_LENGTH_TIERS[-1][1]
 
     async def health_check(self) -> dict[str, Any]:
         """
