@@ -118,6 +118,7 @@ public struct DigestArticleResponse: Codable, Sendable, Identifiable {
     public let mode: String
     public let wordCount: Int
     public let content: String
+    public let contentHTML: String?
     public let author: String?
     public let feedTitle: String
     public let sortOrder: Int
@@ -125,6 +126,7 @@ public struct DigestArticleResponse: Codable, Sendable, Identifiable {
     
     enum CodingKeys: String, CodingKey {
         case id, title, url, mode, content, author
+        case contentHTML = "content_html"
         case wordCount = "word_count"
         case feedTitle = "feed_title"
         case sortOrder = "sort_order"
