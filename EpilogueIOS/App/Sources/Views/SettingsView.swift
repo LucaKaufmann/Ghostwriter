@@ -296,6 +296,12 @@ struct SettingsView: View {
             .task {
                 await loadSettings()
             }
+            .onChange(of: ghostwriterCoordinator.isSyncing) { _, isSyncing in
+                // Reload settings after sync completes to pick up server values
+                if !isSyncing {
+                    Task { await loadSettings() }
+                }
+            }
             .fileImporter(
                 isPresented: $showExportPicker,
                 allowedContentTypes: [.folder],
