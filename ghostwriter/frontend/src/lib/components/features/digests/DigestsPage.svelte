@@ -274,6 +274,14 @@
 		return `${digest.filename}.pdf`;
 	}
 
+	function supportsFormat(digest: Digest, format: DigestFileFormat): boolean {
+		const available = digest.available_formats;
+		if (!available || available.length === 0) {
+			return format === 'epub';
+		}
+		return available.includes(format);
+	}
+
 	async function downloadDigest(digest: Digest, format: DigestFileFormat) {
 		try {
 			await downloadDigestFileById(digest.id, format, fallbackFilename(digest, format));
@@ -568,10 +576,12 @@
 														<Download class="mr-2 h-4 w-4" />
 														EPUB
 													</Button>
-													<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
-														<Download class="mr-2 h-4 w-4" />
-														PDF
-													</Button>
+													{#if supportsFormat(digest, 'pdf')}
+														<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
+															<Download class="mr-2 h-4 w-4" />
+															PDF
+														</Button>
+													{/if}
 													<Button
 														size="sm"
 													variant="outline"
@@ -633,10 +643,12 @@
 											<Download class="mr-2 h-4 w-4" />
 											EPUB
 										</Button>
-										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
-											<Download class="mr-2 h-4 w-4" />
-											PDF
-										</Button>
+										{#if supportsFormat(digest, 'pdf')}
+											<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
+												<Download class="mr-2 h-4 w-4" />
+												PDF
+											</Button>
+										{/if}
 										<Button
 											size="sm"
 										variant="outline"
@@ -687,10 +699,12 @@
 											<Download class="mr-2 h-4 w-4" />
 											EPUB
 										</Button>
-										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
-											<Download class="mr-2 h-4 w-4" />
-											PDF
-										</Button>
+										{#if supportsFormat(digest, 'pdf')}
+											<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'pdf')}>
+												<Download class="mr-2 h-4 w-4" />
+												PDF
+											</Button>
+										{/if}
 										<Button
 										size="sm"
 										variant="outline"

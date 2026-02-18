@@ -164,6 +164,14 @@
 		return `${digest.filename}.pdf`;
 	}
 
+	function supportsFormat(digest: Digest, format: DigestFileFormat): boolean {
+		const available = digest.available_formats;
+		if (!available || available.length === 0) {
+			return format === 'epub';
+		}
+		return available.includes(format);
+	}
+
 	async function downloadDigest(digest: Digest, format: DigestFileFormat) {
 		try {
 			await downloadDigestFileById(digest.id, format, fallbackFilename(digest, format));
@@ -202,10 +210,12 @@
 						<Download class="mr-2 h-4 w-4" />
 						Latest EPUB
 					</Button>
-					<Button variant="outline" onclick={() => downloadDigest(latestDigest, 'pdf')}>
-						<Download class="mr-2 h-4 w-4" />
-						Latest PDF
-					</Button>
+					{#if supportsFormat(latestDigest, 'pdf')}
+						<Button variant="outline" onclick={() => downloadDigest(latestDigest, 'pdf')}>
+							<Download class="mr-2 h-4 w-4" />
+							Latest PDF
+						</Button>
+					{/if}
 				{/if}
 		</div>
 	</div>
@@ -489,15 +499,17 @@
 										>
 											<Download class="h-4 w-4" />
 										</Button>
-										<Button
-											variant="ghost"
-											size="icon"
-											onclick={() => downloadDigest(digest, 'pdf')}
-											title="Download PDF"
-										>
-											<Download class="h-4 w-4" />
-										</Button>
-								{/if}
+										{#if supportsFormat(digest, 'pdf')}
+											<Button
+												variant="ghost"
+												size="icon"
+												onclick={() => downloadDigest(digest, 'pdf')}
+												title="Download PDF"
+											>
+												<Download class="h-4 w-4" />
+											</Button>
+										{/if}
+									{/if}
 							</div>
 						</div>
 					{/each}

@@ -54,6 +54,14 @@ class ClientConfigBase(SQLModel):
         default=True,
         description="Include completed YouTube transcripts in digests",
     )
+    pdf_enabled: bool = Field(
+        default=False,
+        description="Enable PDF digest generation/download",
+    )
+    pdf_page_size: str = Field(
+        default="A4",
+        description="Default PDF page size: A4, Letter, or A5",
+    )
 
     # Cover generation
     cover_enabled: bool = Field(
@@ -132,6 +140,12 @@ class ClientConfigUpdate(SQLModel):
     include_youtube_in_digest: bool | None = Field(
         default=None, description="Include completed YouTube transcripts in digests"
     )
+    pdf_enabled: bool | None = Field(
+        default=None, description="Enable PDF digest generation/download"
+    )
+    pdf_page_size: str | None = Field(
+        default=None, description="Default PDF page size: A4, Letter, or A5"
+    )
     cover_enabled: bool | None = Field(
         default=None,
         description="Generate an AI cover image for each digest",
@@ -181,6 +195,8 @@ class ClientConfigRead(SQLModel):
     media_processing_interval_hours: int
     include_podcasts_in_digest: bool
     include_youtube_in_digest: bool
+    pdf_enabled: bool
+    pdf_page_size: str
     cover_enabled: bool
     cover_provider: str
     cover_quality: str

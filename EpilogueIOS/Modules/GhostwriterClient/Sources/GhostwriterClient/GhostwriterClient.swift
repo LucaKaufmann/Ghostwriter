@@ -241,6 +241,7 @@ public actor GhostwriterClient {
                     SyncDigest(
                         id: digest.id,
                         filename: digest.filename,
+                        availableFormats: nil,
                         period: digest.period,
                         status: digest.status,
                         stage: digest.stage,
@@ -450,6 +451,7 @@ public actor GhostwriterClient {
                 DigestResponse(
                     id: digest.id,
                     filename: digest.filename,
+                    availableFormats: nil,
                     period: digest.period,
                     status: digest.status,
                     stage: digest.stage,
@@ -482,6 +484,7 @@ public actor GhostwriterClient {
             return DigestResponse(
                 id: digest.id,
                 filename: digest.filename,
+                availableFormats: nil,
                 period: digest.period,
                 status: digest.status,
                 stage: digest.stage,
@@ -735,6 +738,8 @@ public actor GhostwriterClient {
                 mediaProcessingIntervalHours: sharedResponse.mediaProcessingIntervalHours.map { Int(truncating: $0) },
                 includePodcastsInDigest: sharedResponse.includePodcastsInDigest?.boolValue,
                 includeYoutubeInDigest: sharedResponse.includeYoutubeInDigest?.boolValue,
+                pdfEnabled: nil,
+                pdfPageSize: nil,
                 coverEnabled: sharedResponse.coverEnabled?.boolValue,
                 coverProvider: sharedResponse.coverProvider,
                 coverQuality: sharedResponse.coverQuality,
@@ -799,6 +804,8 @@ public actor GhostwriterClient {
                 mediaProcessingIntervalHours: sharedResponse.mediaProcessingIntervalHours.map { Int(truncating: $0) },
                 includePodcastsInDigest: sharedResponse.includePodcastsInDigest?.boolValue,
                 includeYoutubeInDigest: sharedResponse.includeYoutubeInDigest?.boolValue,
+                pdfEnabled: nil,
+                pdfPageSize: nil,
                 coverEnabled: sharedResponse.coverEnabled?.boolValue,
                 coverProvider: sharedResponse.coverProvider,
                 coverQuality: sharedResponse.coverQuality,

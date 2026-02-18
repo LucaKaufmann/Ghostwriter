@@ -59,6 +59,8 @@ class ConfigResponse(BaseModel):
     media_processing_interval_hours: int
     include_podcasts_in_digest: bool
     include_youtube_in_digest: bool
+    pdf_enabled: bool
+    pdf_page_size: str
     # Cover generation
     cover_enabled: bool
     cover_provider: str
@@ -101,6 +103,12 @@ class ConfigUpdateRequest(BaseModel):
     )
     include_youtube_in_digest: bool | None = Field(
         default=None, description="Include completed YouTube transcripts in digests"
+    )
+    pdf_enabled: bool | None = Field(
+        default=None, description="Enable PDF digest generation/download"
+    )
+    pdf_page_size: str | None = Field(
+        default=None, description="Default PDF page size: A4, Letter, or A5"
     )
     cover_enabled: bool | None = Field(
         default=None,
@@ -250,6 +258,8 @@ def _config_to_response(config: ClientConfig, session: Session | None = None) ->
         media_processing_interval_hours=config.media_processing_interval_hours,
         include_podcasts_in_digest=config.include_podcasts_in_digest,
         include_youtube_in_digest=config.include_youtube_in_digest,
+        pdf_enabled=config.pdf_enabled,
+        pdf_page_size=config.pdf_page_size,
         cover_enabled=config.cover_enabled,
         cover_provider=config.cover_provider,
         cover_quality=config.cover_quality,
@@ -493,6 +503,18 @@ async def update_config(
 
     if request.include_youtube_in_digest is not None:
         config.include_youtube_in_digest = request.include_youtube_in_digest
+
+    if request.pdf_enabled is not None:
+        config.pdf_enabled = request.pdf_enabled
+
+    if request.pdf_page_size is not None:
+        normalized_page_size = request.pdf_page_size.strip().upper()
+        if normalized_page_size not in ("A4", "LETTER", "A5"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="pdf_page_size must be 'A4', 'Letter', or 'A5'",
+            )
+        config.pdf_page_size = "Letter" if normalized_page_size == "LETTER" else normalized_page_size
 
     if request.media_processing_interval_hours is not None:
         config.media_processing_interval_hours = request.media_processing_interval_hours

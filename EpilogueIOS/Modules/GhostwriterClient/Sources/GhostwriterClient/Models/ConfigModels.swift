@@ -364,6 +364,8 @@ public struct ClientConfigResponse: Codable, Sendable {
     public let mediaProcessingIntervalHours: Int?
     public let includePodcastsInDigest: Bool?
     public let includeYoutubeInDigest: Bool?
+    public let pdfEnabled: Bool?
+    public let pdfPageSize: String?
     public let coverEnabled: Bool?
     public let coverProvider: String?
     public let coverQuality: String?
@@ -396,6 +398,8 @@ public struct ClientConfigResponse: Codable, Sendable {
         case mediaProcessingIntervalHours = "media_processing_interval_hours"
         case includePodcastsInDigest = "include_podcasts_in_digest"
         case includeYoutubeInDigest = "include_youtube_in_digest"
+        case pdfEnabled = "pdf_enabled"
+        case pdfPageSize = "pdf_page_size"
         case coverEnabled = "cover_enabled"
         case coverProvider = "cover_provider"
         case coverQuality = "cover_quality"
@@ -433,6 +437,8 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
     public let scheduleEvening: String?
     public let includePodcastsInDigest: Bool?
     public let includeYoutubeInDigest: Bool?
+    public let pdfEnabled: Bool?
+    public let pdfPageSize: String?
     public let coverEnabled: Bool?
     public let coverProvider: String?
     public let coverQuality: String?
@@ -454,6 +460,8 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         scheduleEvening: String? = nil,
         includePodcastsInDigest: Bool? = nil,
         includeYoutubeInDigest: Bool? = nil,
+        pdfEnabled: Bool? = nil,
+        pdfPageSize: String? = nil,
         coverEnabled: Bool? = nil,
         coverProvider: String? = nil,
         coverQuality: String? = nil,
@@ -474,6 +482,8 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         self.scheduleEvening = scheduleEvening
         self.includePodcastsInDigest = includePodcastsInDigest
         self.includeYoutubeInDigest = includeYoutubeInDigest
+        self.pdfEnabled = pdfEnabled
+        self.pdfPageSize = pdfPageSize
         self.coverEnabled = coverEnabled
         self.coverProvider = coverProvider
         self.coverQuality = coverQuality
@@ -496,6 +506,8 @@ public struct ClientConfigUpdateRequest: Codable, Sendable {
         case scheduleEvening = "schedule_evening"
         case includePodcastsInDigest = "include_podcasts_in_digest"
         case includeYoutubeInDigest = "include_youtube_in_digest"
+        case pdfEnabled = "pdf_enabled"
+        case pdfPageSize = "pdf_page_size"
         case coverEnabled = "cover_enabled"
         case coverProvider = "cover_provider"
         case coverQuality = "cover_quality"

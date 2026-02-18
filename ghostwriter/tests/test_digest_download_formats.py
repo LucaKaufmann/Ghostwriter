@@ -8,13 +8,24 @@ from pathlib import Path
 from uuid import uuid4
 
 from sqlmodel import Session
+from sqlmodel import delete as sql_delete
 
 from app.core.database import engine
+from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
 
 
+def _set_pdf_config(enabled: bool, page_size: str = "A4") -> None:
+    with Session(engine) as session:
+        session.exec(sql_delete(ClientConfig))
+        session.add(ClientConfig(pdf_enabled=enabled, pdf_page_size=page_size))
+        session.commit()
+
+
 def test_download_digest_by_id_epub(client) -> None:
+    _set_pdf_config(enabled=False)
+
     output_dir = Path(os.environ["OUTPUT_DIR"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -43,10 +54,12 @@ def test_download_digest_by_id_epub(client) -> None:
     digests_response = client.get("/api/digests")
     assert digests_response.status_code == 200
     first_digest = digests_response.json()[0]
-    assert first_digest["available_formats"] == ["epub", "pdf"]
+    assert first_digest["available_formats"] == ["epub"]
 
 
 def test_download_digest_by_id_pdf_generates_on_demand(client) -> None:
+    _set_pdf_config(enabled=True, page_size="A4")
+
     output_dir = Path(os.environ["OUTPUT_DIR"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
