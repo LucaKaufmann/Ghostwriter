@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import sqlalchemy as sa
 from sqlmodel import Session, select
 
@@ -19,6 +19,7 @@ from app.models.media_feed import (
 )
 from app.models.media_item import MediaItem, MediaItemRead, MediaItemSummary
 from app.models.media_processing_run import MediaProcessingRun, MediaProcessingRunRead
+from app.services.digest_content_formatter import format_digest_content_to_html
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -53,6 +54,24 @@ class MediaProcessingStatus(BaseModel):
 class MediaTriggerResponse(BaseModel):
     status: str
     detail: str | None = None
+
+
+class MediaRetryResponse(BaseModel):
+    status: str
+    detail: str | None = None
+    item_id: UUID | None = None
+
+
+class RetryFailedRequest(BaseModel):
+    content_type: str | None = Field(
+        default=None,
+        description="Optional filter: podcast or youtube",
+    )
+
+
+class RetryFailedResponse(BaseModel):
+    retried: int
+    skipped: int
 
 
 # ============ Podcast Feeds ============
@@ -301,7 +320,85 @@ async def get_media_item(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Media item not found",
         )
-    return item
+    item_data = item.model_dump()
+    item_data["content_html"] = format_digest_content_to_html(item.content)
+    return MediaItemRead(**item_data)
+
+
+@router.post(
+    "/items/{item_id}/retry",
+    response_model=MediaRetryResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def retry_media_item(
+    item_id: UUID,
+    session: Session = Depends(get_session),
+):
+    """Re-queue a failed media item for processing in the next run."""
+    item = session.get(MediaItem, item_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media item not found",
+        )
+
+    if item.status != "failed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only failed media items can be retried",
+        )
+
+    _requeue_item(item)
+    session.add(item)
+    session.commit()
+    logger.info("Retried media item %s (%s)", item.id, item.title)
+    return MediaRetryResponse(
+        status="queued",
+        detail="Media item queued for next media processing run",
+        item_id=item.id,
+    )
+
+
+@router.post(
+    "/items/retry-failed",
+    response_model=RetryFailedResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def retry_failed_media_items(
+    request: RetryFailedRequest,
+    session: Session = Depends(get_session),
+):
+    """Bulk re-queue failed media items for the next media processing run."""
+    if request.content_type is not None and request.content_type not in ("podcast", "youtube"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="content_type must be 'podcast' or 'youtube'",
+        )
+
+    query = select(MediaItem).where(MediaItem.status == "failed")
+    if request.content_type:
+        query = query.where(MediaItem.content_type == request.content_type)
+
+    failed_items = session.exec(query).all()
+    retried = 0
+    skipped = 0
+
+    for item in failed_items:
+        if item.status != "failed":
+            skipped += 1
+            continue
+        _requeue_item(item)
+        session.add(item)
+        retried += 1
+
+    session.commit()
+    logger.info(
+        "Retried failed media items: retried=%s skipped=%s content_type=%s",
+        retried,
+        skipped,
+        request.content_type or "all",
+    )
+    return RetryFailedResponse(retried=retried, skipped=skipped)
 
 
 @router.post(
@@ -512,3 +609,12 @@ def _ensure_feed_exists(feed_id: UUID, feed_type: str, session: Session) -> Medi
             detail="Feed not found",
         )
     return feed
+
+
+def _requeue_item(item: MediaItem) -> None:
+    """Reset a failed media item back to pending state."""
+    item.status = "pending"
+    item.created_at = datetime.now(timezone.utc)
+    item.error_message = None
+    item.processing_ms = 0
+    item.completed_at = None

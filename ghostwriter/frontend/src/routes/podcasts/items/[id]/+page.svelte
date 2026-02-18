@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { api } from '$lib/api/client';
@@ -15,6 +16,33 @@
 		queryFn: () => api.getMediaItem(itemId!),
 		enabled: !!itemId
 	}));
+
+	let sanitizedContentHtml = $state('');
+	let sanitizerPromise: Promise<any> | null = null;
+
+	async function getSanitizer(): Promise<any> {
+		if (!browser) return null;
+		if (!sanitizerPromise) {
+			sanitizerPromise = import('dompurify').then((module) => module.default);
+		}
+		return sanitizerPromise;
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		const item = itemQuery.data;
+		if (!item?.content_html) {
+			sanitizedContentHtml = '';
+			return;
+		}
+		void (async () => {
+			const DOMPurify = await getSanitizer();
+			sanitizedContentHtml = DOMPurify?.sanitize(item.content_html, {
+				USE_PROFILES: { html: true },
+				FORBID_ATTR: ['style', 'class', 'id']
+			}) ?? '';
+		})();
+	});
 
 	function parseUTC(dateStr: string): Date {
 		if (!dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
@@ -119,11 +147,7 @@
 			</Card.Header>
 			<Card.Content>
 				<div class="prose prose-sm max-w-none dark:prose-invert">
-					{#each item.content.split('\n\n') as paragraph}
-						{#if paragraph.trim()}
-							<p>{paragraph.trim()}</p>
-						{/if}
-					{/each}
+					{@html sanitizedContentHtml}
 				</div>
 				<div class="mt-6 pt-4 border-t">
 					<a
