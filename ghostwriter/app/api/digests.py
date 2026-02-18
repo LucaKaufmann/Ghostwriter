@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.core.security import verify_api_key
+from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle, DigestRead, DigestStatus
 from app.services.reader_service import (
     DocumentTooLargeError,
@@ -24,6 +25,8 @@ from app.services.reader_service import (
     fetch_html_document,
 )
 from app.services.digest_content_formatter import format_digest_content_to_html
+from app.services.content_processor import ExtractedArticle
+from app.services.pdf_generator import PdfGenerator
 from app.worker.bindery import generate_digest
 import logging
 
@@ -123,6 +126,45 @@ class DigestArticleSourceResponse(BaseModel):
     html: str
 
 
+def _available_formats(pdf_enabled: bool) -> list[str]:
+    return ["epub", "pdf"] if pdf_enabled else ["epub"]
+
+
+def _pdf_enabled(session: Session) -> bool:
+    config = session.exec(select(ClientConfig)).first()
+    return bool(config.pdf_enabled) if config else False
+
+
+def _pdf_page_size(session: Session) -> str:
+    config = session.exec(select(ClientConfig)).first()
+    if not config or not config.pdf_page_size:
+        return "A4"
+    value = config.pdf_page_size.strip()
+    if value in ("A4", "Letter", "A5"):
+        return value
+    return "A4"
+
+
+def _to_digest_read(digest: Digest, pdf_enabled: bool) -> DigestRead:
+    return DigestRead(
+        id=digest.id,
+        filename=digest.filename,
+        period=digest.period,
+        status=digest.status,
+        stage=digest.stage,
+        article_count=digest.article_count,
+        error_message=digest.error_message,
+        created_at=digest.created_at,
+        completed_at=digest.completed_at,
+        downloaded_at=digest.downloaded_at,
+        total_feeds=digest.total_feeds,
+        feeds_fetched=digest.feeds_fetched,
+        total_articles=digest.total_articles,
+        articles_enriched=digest.articles_enriched,
+        available_formats=_available_formats(pdf_enabled),
+    )
+
+
 @router.post("/trigger", response_model=TriggerResponse, dependencies=[Depends(verify_api_key)])
 async def trigger_digest(
     request: TriggerRequest,
@@ -161,7 +203,7 @@ async def list_digests(
     since: datetime | None = Query(default=None, description="Filter digests created after this datetime (UTC)"),
     status_filter: str | None = Query(default=None, alias="status", description="Filter by status (completed, failed, processing)"),
     period: str | None = Query(default=None, description="Filter by period (morning, noon, evening, manual)"),
-) -> list[Digest]:
+) -> list[DigestRead]:
     """
     List available digests.
 
@@ -184,7 +226,9 @@ async def list_digests(
         .offset(offset)
         .limit(limit)
     )
-    return list(session.exec(statement).all())
+    digests = list(session.exec(statement).all())
+    pdf_enabled = _pdf_enabled(session)
+    return [_to_digest_read(digest, pdf_enabled) for digest in digests]
 
 
 @router.get("/new", response_model=NewDigestsResponse, dependencies=[Depends(verify_api_key)])
@@ -214,17 +258,18 @@ async def get_new_digests(
     statement = statement.order_by(Digest.created_at.desc())
     digests = list(session.exec(statement).all())
 
+    pdf_enabled = _pdf_enabled(session)
     return NewDigestsResponse(
         has_new=len(digests) > 0,
         count=len(digests),
-        digests=digests,
+        digests=[_to_digest_read(digest, pdf_enabled) for digest in digests],
     )
 
 
 @router.get("/latest", response_model=DigestRead, dependencies=[Depends(verify_api_key)])
 async def get_latest_digest(
     session: Session = Depends(get_session),
-) -> Digest:
+) -> DigestRead:
     """
     Get the most recent completed digest.
 
@@ -244,7 +289,7 @@ async def get_latest_digest(
             detail="No completed digests found",
         )
 
-    return digest
+    return _to_digest_read(digest, _pdf_enabled(session))
 
 
 @router.get("/{digest_id}/status", response_model=DigestStatusResponse, dependencies=[Depends(verify_api_key)])
@@ -483,6 +528,119 @@ async def get_digest_cover(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Digest EPUB is invalid",
         ) from exc
+
+
+def _derive_pdf_filename(epub_filename: str) -> str:
+    if "." in epub_filename:
+        stem, _ = epub_filename.rsplit(".", 1)
+        return f"{stem}.pdf"
+    return f"{epub_filename}.pdf"
+
+
+def _load_digest_articles(session: Session, digest_id: UUID) -> list[DigestArticle]:
+    statement = (
+        select(DigestArticle)
+        .where(DigestArticle.digest_id == digest_id)
+        .order_by(DigestArticle.sort_order)
+    )
+    return list(session.exec(statement).all())
+
+
+def _to_extracted_articles(articles: list[DigestArticle]) -> list[ExtractedArticle]:
+    extracted: list[ExtractedArticle] = []
+    for article in articles:
+        extracted.append(
+            ExtractedArticle(
+                guid=str(article.id),
+                url=article.url,
+                title=article.title,
+                content=article.content,
+                author=article.author,
+                word_count=article.word_count,
+                is_summary=article.mode in ("summarized", "summarize"),
+                ai_failed=article.ai_failed,
+                processing_ms=article.processing_ms,
+                feed_title=article.feed_title,
+                content_type=article.content_type or "article",
+            )
+        )
+    return extracted
+
+
+@router.get("/{digest_id}/download", dependencies=[Depends(verify_api_key)])
+async def download_digest_by_id(
+    digest_id: UUID,
+    format: Literal["epub", "pdf"] = Query(default="epub"),
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
+) -> FileResponse:
+    """Download a digest by ID in EPUB or PDF format."""
+    digest = session.get(Digest, digest_id)
+    if not digest:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Digest not found",
+        )
+
+    if digest.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Digest is not completed yet",
+        )
+
+    target_filename = digest.filename
+    media_type = "application/epub+zip"
+
+    pdf_enabled = _pdf_enabled(session)
+
+    if format == "pdf":
+        if not pdf_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="PDF downloads are disabled in settings",
+            )
+
+        target_filename = _derive_pdf_filename(digest.filename)
+        media_type = "application/pdf"
+
+    file_path = os.path.join(settings.output_dir, target_filename)
+
+    if format == "pdf" and not os.path.exists(file_path):
+        articles = _load_digest_articles(session, digest_id)
+        if not articles:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Digest has no article content to render PDF",
+            )
+
+        pdf_generator = PdfGenerator(settings=settings)
+        pdf_generator.generate(
+            articles=_to_extracted_articles(articles),
+            period=digest.period,
+            date=digest.created_at,
+            page_size=_pdf_page_size(session),
+            output_filename=target_filename,
+        )
+
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Digest file not found",
+        )
+
+    from app.services import activity_tracker
+    activity_tracker.record_download()
+
+    if not digest.downloaded_at:
+        digest.downloaded_at = datetime.utcnow()
+        session.add(digest)
+        session.commit()
+
+    return FileResponse(
+        path=file_path,
+        filename=target_filename,
+        media_type=media_type,
+    )
 
 
 @router.get("/{filename}", dependencies=[Depends(verify_api_key)])

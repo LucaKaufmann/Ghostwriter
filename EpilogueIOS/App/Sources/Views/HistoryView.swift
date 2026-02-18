@@ -18,6 +18,7 @@ struct HistoryView: View {
     @State private var digestToDelete: Digest?
     @State private var digestToShare: Digest?
     @State private var downloadingDigestIDs: Set<UUID> = []
+    @State private var pdfDownloadsEnabled = false
     @State private var statusMessage: String?
 
     var body: some View {
@@ -51,17 +52,46 @@ struct HistoryView: View {
                                 }
                             }
                             .swipeActions(edge: .leading) {
-                                if let remoteId = digest.remoteId, !epubAvailable {
-                                    Button {
-                                        downloadDigest(digest, remoteId: remoteId)
-                                    } label: {
-                                        if downloadingDigestIDs.contains(digest.id) {
-                                            Label("Downloading", systemImage: "hourglass")
-                                        } else {
-                                            Label("Download", systemImage: "arrow.down.circle")
+                                if let remoteId = digest.remoteId {
+                                    if pdfDownloadsEnabled {
+                                        Button {
+                                            downloadDigestPdf(digest, remoteId: remoteId)
+                                        } label: {
+                                            if downloadingDigestIDs.contains(digest.id) {
+                                                Label("Downloading", systemImage: "hourglass")
+                                            } else {
+                                                Label("PDF", systemImage: "doc.richtext")
+                                            }
                                         }
+                                        .tint(.orange)
                                     }
-                                    .tint(.green)
+
+                                    if !epubAvailable {
+                                        Button {
+                                            downloadDigest(digest, remoteId: remoteId)
+                                        } label: {
+                                            if downloadingDigestIDs.contains(digest.id) {
+                                                Label("Downloading", systemImage: "hourglass")
+                                            } else {
+                                                Label("EPUB", systemImage: "arrow.down.circle")
+                                            }
+                                        }
+                                        .tint(.green)
+                                    } else {
+                                        Button {
+                                            digestToShare = digest
+                                        } label: {
+                                            Label("Share", systemImage: "square.and.arrow.up")
+                                        }
+                                        .tint(.gray)
+
+                                        Button {
+                                            openInReader(digest)
+                                        } label: {
+                                            Label("Open", systemImage: "book")
+                                        }
+                                        .tint(.blue)
+                                    }
                                 } else {
                                     Button {
                                         digestToShare = digest
@@ -90,6 +120,9 @@ struct HistoryView: View {
             }
             .refreshable {
                 await ghostwriterCoordinator.performFullSyncIncludingDigests()
+            }
+            .task {
+                pdfDownloadsEnabled = await ghostwriterCoordinator.isPdfDownloadEnabled()
             }
             .alert("Delete Digest?", isPresented: Binding(
                 get: { digestToDelete != nil },
@@ -183,6 +216,31 @@ struct HistoryView: View {
                 try? modelContext.save()
             } catch {
                 statusMessage = "Download failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func downloadDigestPdf(_ digest: Digest, remoteId: String) {
+        guard !downloadingDigestIDs.contains(digest.id) else { return }
+        downloadingDigestIDs.insert(digest.id)
+
+        Task { @MainActor in
+            defer { downloadingDigestIDs.remove(digest.id) }
+
+            let filenameHint: String? = {
+                guard !digest.epubFilePath.isEmpty else { return nil }
+                let name = URL(fileURLWithPath: digest.epubFilePath).lastPathComponent
+                return name.hasSuffix(".epub") ? name : nil
+            }()
+
+            do {
+                let localURL = try await ghostwriterCoordinator.downloadDigestPdf(
+                    remoteId: remoteId,
+                    filenameHint: filenameHint
+                )
+                UIApplication.shared.open(localURL)
+            } catch {
+                statusMessage = "PDF download failed: \(error.localizedDescription)"
             }
         }
     }

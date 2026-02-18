@@ -26,6 +26,7 @@ data class SyncDigestsSection(
 data class SyncDigest(
     @SerializedName("id") val id: String,
     @SerializedName("filename") val filename: String,
+    @SerializedName("available_formats") val availableFormats: List<String>? = null,
     @SerializedName("period") val period: String,
     @SerializedName("status") val status: String,
     @SerializedName("stage") val stage: String?,

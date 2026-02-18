@@ -98,6 +98,7 @@ final class GhostwriterClientTests: XCTestCase {
         {
             "id": "digest-123",
             "filename": "2026-01-26_morning.epub",
+            "available_formats": ["epub", "pdf"],
             "period": "morning",
             "status": "completed",
             "stage": null,
@@ -113,6 +114,7 @@ final class GhostwriterClientTests: XCTestCase {
         
         XCTAssertEqual(response.id, "digest-123")
         XCTAssertEqual(response.filename, "2026-01-26_morning.epub")
+        XCTAssertEqual(response.availableFormats ?? [], ["epub", "pdf"])
         XCTAssertEqual(response.period, "morning")
         XCTAssertEqual(response.status, "completed")
         XCTAssertEqual(response.articleCount, 15)
@@ -181,6 +183,8 @@ final class GhostwriterClientTests: XCTestCase {
             "evening_hour": 18,
             "evening_minute": 30,
             "timezone": "Europe/Helsinki",
+            "pdf_enabled": true,
+            "pdf_page_size": "A4",
             "updated_at": "2026-01-26T15:00:00"
         }
         """.data(using: .utf8)!
@@ -192,6 +196,8 @@ final class GhostwriterClientTests: XCTestCase {
         XCTAssertEqual(response.morningHour, 7)
         XCTAssertEqual(response.eveningMinute, 30)
         XCTAssertEqual(response.timezone, "Europe/Helsinki")
+        XCTAssertEqual(response.pdfEnabled, true)
+        XCTAssertEqual(response.pdfPageSize, "A4")
     }
     
     // MARK: - Error Tests

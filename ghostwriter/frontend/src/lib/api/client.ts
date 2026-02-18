@@ -444,6 +444,14 @@ class ApiClient {
 		return this.download(`/digests/${filename}`, filename);
 	}
 
+	downloadDigestById(
+		digestId: string,
+		format: 'epub' | 'pdf',
+		fallbackFilename: string
+	): Promise<{ blob: Blob; filename: string }> {
+		return this.download(`/digests/${digestId}/download?format=${format}`, fallbackFilename);
+	}
+
 	downloadDigestCover(digestId: string): Promise<{ blob: Blob; filename: string }> {
 		return this.download(`/digests/${digestId}/cover`, `${digestId}-cover.jpg`);
 	}
