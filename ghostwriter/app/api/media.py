@@ -614,6 +614,7 @@ def _ensure_feed_exists(feed_id: UUID, feed_type: str, session: Session) -> Medi
 def _requeue_item(item: MediaItem) -> None:
     """Reset a failed media item back to pending state."""
     item.status = "pending"
+    item.created_at = datetime.now(timezone.utc)
     item.error_message = None
     item.processing_ms = 0
     item.completed_at = None
