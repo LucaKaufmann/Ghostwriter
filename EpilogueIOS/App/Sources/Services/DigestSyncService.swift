@@ -222,6 +222,7 @@ public final class DigestSyncService {
                     mode: article.mode,
                     wordCount: article.wordCount,
                     content: article.content,
+                    contentHTML: article.contentHTML,
                     author: article.author,
                     feedTitle: article.feedTitle,
                     sortOrder: article.sortOrder
@@ -263,6 +264,7 @@ public final class DigestSyncService {
                     mode: article.mode,
                     wordCount: article.wordCount,
                     content: article.content,
+                    contentHTML: article.contentHTML,
                     author: article.author,
                     feedTitle: article.feedTitle,
                     sortOrder: article.sortOrder
@@ -458,6 +460,7 @@ public final class DigestSyncService {
                 mode: article.mode,
                 wordCount: article.wordCount,
                 content: article.content,
+                contentHTML: article.contentHTML,
                 author: article.author,
                 feedTitle: article.feedTitle,
                 sortOrder: article.sortOrder

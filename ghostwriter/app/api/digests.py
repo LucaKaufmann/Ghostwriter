@@ -406,6 +406,7 @@ async def get_digest_article_source(
     # For media content (podcasts, YouTube), return the stored digest content
     # directly instead of fetching upstream HTML which will fail for these URLs.
     if article.content_type in ("podcast", "youtube"):
+        formatted_html = format_digest_content_to_html(article.content)
         return DigestArticleSourceResponse(
             digest_id=digest_id,
             article_id=article_id,
@@ -413,8 +414,8 @@ async def get_digest_article_source(
             final_url=article.url,
             content_type=f"text/html; ghostwriter-{article.content_type}",
             fetched_at=datetime.utcnow(),
-            size_bytes=len(article.content.encode("utf-8")),
-            html=article.content,
+            size_bytes=len(formatted_html.encode("utf-8")),
+            html=formatted_html,
         )
 
     try:
@@ -433,6 +434,7 @@ async def get_digest_article_source(
         # Fall back to stored content if available (e.g. media articles
         # with content_type not yet set to podcast/youtube)
         if article.content:
+            formatted_html = format_digest_content_to_html(article.content)
             return DigestArticleSourceResponse(
                 digest_id=digest_id,
                 article_id=article_id,
@@ -440,8 +442,8 @@ async def get_digest_article_source(
                 final_url=article.url,
                 content_type="text/html; ghostwriter-fallback",
                 fetched_at=datetime.utcnow(),
-                size_bytes=len(article.content.encode("utf-8")),
-                html=article.content,
+                size_bytes=len(formatted_html.encode("utf-8")),
+                html=formatted_html,
             )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Upstream fetch failed")
 

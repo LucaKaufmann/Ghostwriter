@@ -242,6 +242,7 @@ public struct MediaItemResponse: Codable, Sendable {
     public let title: String
     public let author: String?
     public let content: String
+    public let contentHTML: String?
     public let contentType: String
     public let mode: String
     public let wordCount: Int
@@ -264,6 +265,7 @@ public struct MediaItemResponse: Codable, Sendable {
         case title
         case author
         case content
+        case contentHTML = "content_html"
         case contentType = "content_type"
         case mode
         case wordCount = "word_count"

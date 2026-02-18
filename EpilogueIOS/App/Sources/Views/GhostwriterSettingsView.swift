@@ -499,8 +499,16 @@ struct GhostwriterSettingsView: View {
                             Text("\(detail.contentType.uppercased()) • \(detail.mode)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text(detail.content.isEmpty ? "(No transcript content available)" : detail.content)
-                                .font(.body)
+                            HTMLContentView(
+                                htmlContent: {
+                                    let preferred = detail.contentHTML?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if let preferred, !preferred.isEmpty {
+                                        return preferred
+                                    }
+                                    let fallback = detail.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    return fallback.isEmpty ? "(No transcript content available)" : fallback
+                                }()
+                            )
                         }
                         .padding()
                     }
