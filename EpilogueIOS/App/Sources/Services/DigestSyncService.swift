@@ -324,11 +324,36 @@ public final class DigestSyncService {
             throw GhostwriterError.notConfigured
         }
 
-        let client = try await createClient()
-        let filename = try await resolveFilename(client: client, remoteId: remoteId, filenameHint: filenameHint)
-        let epubData = try await client.downloadDigest(filename: filename)
-        let localURL = try saveEPUB(data: epubData, filename: filename)
+        return try await downloadDigestFile(
+            remoteId: remoteId,
+            format: .epub,
+            filenameHint: filenameHint
+        )
+    }
 
+    /// Download a PDF for a previously synced digest.
+    public func downloadDigestPdf(remoteId: String, filenameHint: String? = nil) async throws -> URL {
+        guard try await settingsRepository.isGhostwriterConfigured() else {
+            throw GhostwriterError.notConfigured
+        }
+
+        return try await downloadDigestFile(
+            remoteId: remoteId,
+            format: .pdf,
+            filenameHint: filenameHint
+        )
+    }
+
+    private func downloadDigestFile(
+        remoteId: String,
+        format: DigestFileFormat,
+        filenameHint: String?
+    ) async throws -> URL {
+        let client = try await createClient()
+        let epubFilename = try await resolveFilename(client: client, remoteId: remoteId, filenameHint: filenameHint)
+        let targetFilename = convertedFilename(fromEpub: epubFilename, format: format)
+        let fileData = try await client.downloadDigestById(id: remoteId, format: format)
+        let localURL = try saveFile(data: fileData, filename: targetFilename)
         await CustomExportHelper.exportIfConfigured(
             fileURL: localURL,
             settingsRepository: settingsRepository
@@ -347,7 +372,7 @@ public final class DigestSyncService {
         return try GhostwriterClient(baseURLString: url, apiKey: apiKey)
     }
 
-    private func saveEPUB(data: Data, filename: String) throws -> URL {
+    private func saveFile(data: Data, filename: String) throws -> URL {
         let fileURL = digestsDirectory.appendingPathComponent(filename)
 
         // Remove existing file if present
@@ -359,8 +384,17 @@ public final class DigestSyncService {
         return fileURL
     }
 
+    private func saveEPUB(data: Data, filename: String) throws -> URL {
+        try saveFile(data: data, filename: filename)
+    }
+
     private func expectedEPUBURL(filename: String) -> URL {
         digestsDirectory.appendingPathComponent(filename)
+    }
+
+    private func convertedFilename(fromEpub filename: String, format: DigestFileFormat) -> String {
+        let stem = filename.replacingOccurrences(of: ".epub", with: "", options: [.caseInsensitive])
+        return "\(stem).\(format.rawValue)"
     }
 
     private func resolveFilename(client: GhostwriterClient, remoteId: String, filenameHint: String?) async throws -> String {

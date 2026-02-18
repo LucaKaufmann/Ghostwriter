@@ -167,6 +167,7 @@ fun HistoryScreen(
                             onDelete = { viewModel.showDeleteConfirmation(digest) },
                             onOpenExternal = { viewModel.openInExternalReader(digest) },
                             onDownload = { viewModel.downloadEpub(digest) },
+                            onDownloadPdf = { viewModel.downloadPdf(digest) },
                             isDownloading = uiState.downloadingDigestIds.contains(digest.id)
                         )
                     }
@@ -212,6 +213,7 @@ fun DigestHistoryItem(
     onDelete: () -> Unit,
     onOpenExternal: () -> Unit,
     onDownload: () -> Unit,
+    onDownloadPdf: () -> Unit,
     isDownloading: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -301,6 +303,14 @@ fun DigestHistoryItem(
 
             // Action buttons
             Row {
+                if (digest.isFromGhostwriter) {
+                    TextButton(
+                        onClick = onDownloadPdf,
+                        enabled = !isDownloading
+                    ) {
+                        Text(if (isDownloading) "Downloading..." else "PDF")
+                    }
+                }
                 if (digest.isFromGhostwriter && !epubExists) {
                     TextButton(
                         onClick = onDownload,

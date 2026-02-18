@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
+import com.example.epilogue.data.repository.GhostwriterRepository.DigestDownloadFormat
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.service.DigestScheduler
 import com.example.epilogue.service.EpubExporter
@@ -163,8 +164,8 @@ class HistoryViewModel @Inject constructor(
             return
         }
 
-        val filename = digest.epubFilePath.takeIf { it.isNotBlank() }?.let { File(it).name }
-        if (filename.isNullOrBlank()) {
+        val filename = deriveOutputFilename(digest, DigestDownloadFormat.EPUB)
+        if (filename == null) {
             _uiState.update { it.copy(error = "Missing digest filename for download") }
             return
         }
@@ -172,7 +173,14 @@ class HistoryViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(downloadingDigestIds = it.downloadingDigestIds + digest.id) }
 
-            when (val result = ghostwriterRepository.downloadDigest(filename)) {
+            val remoteId = digest.remoteId
+            if (remoteId == null) {
+                _uiState.update { it.copy(error = "Missing remote digest ID") }
+                _uiState.update { it.copy(downloadingDigestIds = it.downloadingDigestIds - digest.id) }
+                return@launch
+            }
+
+            when (val result = ghostwriterRepository.downloadDigestById(remoteId, DigestDownloadFormat.EPUB, filename)) {
                 is GhostwriterResult.Success -> {
                     val file = result.data
                     digestRepository.updateDigestEpubPath(digest.id, file.absolutePath)
@@ -196,6 +204,72 @@ class HistoryViewModel @Inject constructor(
             }
 
             _uiState.update { it.copy(downloadingDigestIds = it.downloadingDigestIds - digest.id) }
+        }
+    }
+
+    fun downloadPdf(digest: Digest) {
+        if (!digest.isFromGhostwriter) {
+            _uiState.update { it.copy(error = "Only Ghostwriter digests can be downloaded") }
+            return
+        }
+        if (_uiState.value.downloadingDigestIds.contains(digest.id)) {
+            return
+        }
+
+        val filename = deriveOutputFilename(digest, DigestDownloadFormat.PDF)
+        val remoteId = digest.remoteId
+        if (filename == null || remoteId == null) {
+            _uiState.update { it.copy(error = "Missing digest metadata for PDF download") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(downloadingDigestIds = it.downloadingDigestIds + digest.id) }
+
+            when (val result = ghostwriterRepository.downloadDigestById(remoteId, DigestDownloadFormat.PDF, filename)) {
+                is GhostwriterResult.Success -> {
+                    openDownloadedFile(
+                        file = result.data,
+                        mimeType = "application/pdf",
+                        missingAppMessage = "No app found to open PDF files"
+                    )
+                }
+                is GhostwriterResult.Error -> {
+                    _uiState.update { it.copy(error = "Download failed: ${result.message}") }
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    _uiState.update { it.copy(error = "Ghostwriter is not configured") }
+                }
+            }
+
+            _uiState.update { it.copy(downloadingDigestIds = it.downloadingDigestIds - digest.id) }
+        }
+    }
+
+    private fun deriveOutputFilename(digest: Digest, format: DigestDownloadFormat): String? {
+        val basename = digest.epubFilePath.takeIf { it.isNotBlank() }?.let { File(it).name }
+        if (basename.isNullOrBlank()) return null
+        val stem = basename.substringBeforeLast(".")
+        return "$stem.${format.fileExtension}"
+    }
+
+    private fun openDownloadedFile(file: File, mimeType: String, missingAppMessage: String) {
+        try {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            _uiState.update { it.copy(error = missingAppMessage) }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Failed to open file: ${e.message}") }
         }
     }
 
