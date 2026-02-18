@@ -80,6 +80,7 @@ data class DigestStatusResponse(
 data class DigestResponse(
     @SerialName("id") val id: String,
     @SerialName("filename") val filename: String,
+    @SerialName("available_formats") val availableFormats: List<String>? = null,
     @SerialName("period") val period: String,
     @SerialName("status") val status: String,
     @SerialName("stage") val stage: String? = null,
@@ -88,6 +89,11 @@ data class DigestResponse(
     @SerialName("created_at") val createdAt: String,
     @SerialName("completed_at") val completedAt: String? = null
 )
+
+enum class DigestDownloadFormat(val wireValue: String) {
+    EPUB("epub"),
+    PDF("pdf")
+}
 
 @Serializable
 data class HealthResponse(
@@ -361,6 +367,8 @@ data class ClientConfigResponse(
     @SerialName("media_processing_interval_hours") val mediaProcessingIntervalHours: Int? = null,
     @SerialName("include_podcasts_in_digest") val includePodcastsInDigest: Boolean? = null,
     @SerialName("include_youtube_in_digest") val includeYoutubeInDigest: Boolean? = null,
+    @SerialName("pdf_enabled") val pdfEnabled: Boolean? = null,
+    @SerialName("pdf_page_size") val pdfPageSize: String? = null,
     @SerialName("cover_enabled") val coverEnabled: Boolean? = null,
     @SerialName("cover_provider") val coverProvider: String? = null,
     @SerialName("cover_quality") val coverQuality: String? = null,
@@ -388,6 +396,8 @@ data class ClientConfigUpdateRequest(
     @SerialName("schedule_evening") val scheduleEvening: String? = null,
     @SerialName("include_podcasts_in_digest") val includePodcastsInDigest: Boolean? = null,
     @SerialName("include_youtube_in_digest") val includeYoutubeInDigest: Boolean? = null,
+    @SerialName("pdf_enabled") val pdfEnabled: Boolean? = null,
+    @SerialName("pdf_page_size") val pdfPageSize: String? = null,
     @SerialName("cover_enabled") val coverEnabled: Boolean? = null,
     @SerialName("cover_provider") val coverProvider: String? = null,
     @SerialName("cover_quality") val coverQuality: String? = null,
@@ -413,6 +423,7 @@ data class SyncDigestsSection(
 data class SyncDigest(
     @SerialName("id") val id: String,
     @SerialName("filename") val filename: String,
+    @SerialName("available_formats") val availableFormats: List<String>? = null,
     @SerialName("period") val period: String,
     @SerialName("status") val status: String,
     @SerialName("stage") val stage: String? = null,

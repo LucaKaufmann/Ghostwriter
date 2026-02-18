@@ -11,6 +11,7 @@ import com.example.epilogue.shared.ghostwriter.AuthApiTokenCreateResponse as Sha
 import com.example.epilogue.shared.ghostwriter.AuthApiTokenResponse as SharedAuthApiTokenResponse
 import com.example.epilogue.shared.ghostwriter.DigestArticleSourceResponse as SharedDigestArticleSourceResponse
 import com.example.epilogue.shared.ghostwriter.DigestArticlesResponse as SharedDigestArticlesResponse
+import com.example.epilogue.shared.ghostwriter.DigestDownloadFormat
 import com.example.epilogue.shared.ghostwriter.DigestProgress as SharedDigestProgress
 import com.example.epilogue.shared.ghostwriter.DigestStatusResponse as SharedDigestStatusResponse
 import com.example.epilogue.shared.ghostwriter.DigestTriggerRequest as SharedDigestTriggerRequest
@@ -97,6 +98,14 @@ class SharedGhostwriterAdapter private constructor(
 
     suspend fun downloadDigest(filename: String): ByteArray {
         return client.downloadDigest(filename)
+    }
+
+    suspend fun downloadDigestById(digestId: String, format: String): ByteArray {
+        val sharedFormat = when (format.lowercase()) {
+            "pdf" -> DigestDownloadFormat.PDF
+            else -> DigestDownloadFormat.EPUB
+        }
+        return client.downloadDigestById(digestId = digestId, format = sharedFormat)
     }
 
     suspend fun updateConfig(request: ClientConfigUpdateRequest): ClientConfigResponse {
@@ -250,7 +259,7 @@ private fun SharedSyncDigestsSection.toApp(): SyncDigestsSection = SyncDigestsSe
 private fun SharedSyncDigest.toApp(): SyncDigest = SyncDigest(
     id = id,
     filename = filename,
-    availableFormats = null,
+    availableFormats = availableFormats,
     period = period,
     status = status,
     stage = stage,
@@ -287,7 +296,7 @@ private fun SharedFeedTombstoneResponse.toApp(): FeedTombstoneResponse = FeedTom
 private fun SharedDigestResponse.toApp(): DigestResponse = DigestResponse(
     id = id,
     filename = filename,
-    availableFormats = null,
+    availableFormats = availableFormats,
     period = period,
     status = status,
     stage = stage,
@@ -371,8 +380,8 @@ private fun SharedClientConfigResponse.toApp(): ClientConfigResponse = ClientCon
     mediaProcessingIntervalHours = mediaProcessingIntervalHours,
     includePodcastsInDigest = includePodcastsInDigest,
     includeYoutubeInDigest = includeYoutubeInDigest,
-    pdfEnabled = null,
-    pdfPageSize = null,
+    pdfEnabled = pdfEnabled,
+    pdfPageSize = pdfPageSize,
     coverEnabled = coverEnabled,
     coverProvider = coverProvider,
     coverQuality = coverQuality,
@@ -599,6 +608,8 @@ private fun ClientConfigUpdateRequest.toShared(): SharedClientConfigUpdateReques
     scheduleEvening = scheduleEvening,
     includePodcastsInDigest = includePodcastsInDigest,
     includeYoutubeInDigest = includeYoutubeInDigest,
+    pdfEnabled = pdfEnabled,
+    pdfPageSize = pdfPageSize,
     coverEnabled = coverEnabled,
     coverProvider = coverProvider,
     coverQuality = coverQuality,
