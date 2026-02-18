@@ -25,6 +25,9 @@ kotlin {
             xcf.add(this)
             baseName = "EpilogueShared"
             isStatic = true
+            // iOS background tasks call into shared suspend APIs off-main.
+            // Disable the default ObjC-export suspend launch restriction.
+            binaryOption("objcExportSuspendFunctionLaunchThreadRestriction", "none")
         }
     }
 
