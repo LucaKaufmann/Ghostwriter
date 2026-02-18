@@ -34,7 +34,8 @@ data class FeedResponse(
     @SerializedName("mode") val mode: String,
     @SerializedName("max_articles") val maxArticles: Int,
     @SerializedName("created_at") val createdAt: String,
-    @SerializedName("updated_at") val updatedAt: String
+    @SerializedName("updated_at") val updatedAt: String,
+    @SerializedName("deleted_at") val deletedAt: String? = null
 )
 
 /**
@@ -131,9 +132,11 @@ data class ScheduleUpdateRequest(
 data class ClientStatusResponse(
     @SerializedName("last_heartbeat_at") val lastHeartbeatAt: String?,
     @SerializedName("last_download_at") val lastDownloadAt: String?,
+    @SerializedName("last_feed_sync_at") val lastFeedSyncAt: String? = null,
     @SerializedName("auto_disable_enabled") val autoDisableEnabled: Boolean,
     @SerializedName("auto_disable_after_days") val autoDisableAfterDays: Int,
     @SerializedName("schedules_auto_disabled") val schedulesAutoDisabled: Boolean,
+    @SerializedName("auto_disabled_at") val autoDisabledAt: String? = null,
     @SerializedName("days_until_auto_disable") val daysUntilAutoDisable: Int?
 )
 

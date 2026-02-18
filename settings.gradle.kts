@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Epilogue"
 include(":app")
+include(":shared")

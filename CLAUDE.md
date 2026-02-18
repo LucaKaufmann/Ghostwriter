@@ -60,7 +60,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Epilogue is an Android application that aggregates RSS/Atom feeds, Wallabag bookmarks, and Gmail newsletters, processes content through either full extraction or AI summarization, and compiles results into daily EPUB files for offline reading on e-ink devices (optimized for Onyx Boox Palma 2).
+Epilogue is a multiplatform application (Android + iOS) that aggregates RSS/Atom feeds, Wallabag bookmarks, and Gmail newsletters, processes content through either full extraction or AI summarization, and compiles results into daily EPUB files for offline reading on e-ink devices (optimized for Onyx Boox Palma 2). A Python FastAPI backend (Ghostwriter) handles remote digest generation, and a shared Kotlin Multiplatform (KMP) module provides a unified networking layer across Android and iOS.
 
 ## Build Commands
 
@@ -69,15 +69,28 @@ Epilogue is an Android application that aggregates RSS/Atom feeds, Wallabag book
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ```
 
+### Android + Shared Module
 ```bash
-./gradlew build              # Build the project
+./gradlew build              # Build entire project (app + shared)
 ./gradlew assembleDebug      # Build debug APK
 ./gradlew assembleRelease    # Build release APK
-./gradlew test               # Run unit tests
+./gradlew test               # Run all unit tests (app + shared)
 ./gradlew connectedAndroidTest  # Run instrumented tests
 ./gradlew lint               # Run lint checks
 ./gradlew clean              # Clean build artifacts
 ```
+
+### Shared KMP Module Only
+```bash
+./gradlew :shared:assemble   # Build shared module (all targets)
+./gradlew :shared:check      # Run shared module tests
+```
+
+### iOS XCFramework
+```bash
+./gradlew :shared:assembleEpilogueSharedXCFramework  # Both debug + release
+```
+Output: `shared/build/XCFrameworks/{debug,release}/EpilogueShared.xcframework`
 
 Run a single test:
 ```bash
@@ -105,17 +118,20 @@ For targeting a specific device (e.g., Palma 2), use `-s <device_id>`:
 
 ## Tech Stack
 
-- **Language:** Kotlin
-- **Min SDK:** Android 13+
-- **UI:** Jetpack Compose with Material 3
+- **Language:** Kotlin (Android + shared), Swift (iOS)
+- **Min SDK:** Android 13+ / iOS 18.0
+- **UI:** Jetpack Compose with Material 3 (Android), SwiftUI (iOS)
 - **Architecture:** MVVM with Clean Architecture
-- **DI:** Hilt
-- **Async:** Coroutines & Flow
-- **Database:** Room
-- **Background:** WorkManager
+- **Shared Layer:** Kotlin Multiplatform (KMP) for Ghostwriter networking
+- **DI:** Hilt (Android)
+- **Async:** Coroutines & Flow (Android + shared), Swift Concurrency (iOS)
+- **Database:** Room (Android), SwiftData (iOS)
+- **Background:** WorkManager (Android), BGTaskScheduler (iOS)
 
 ### Key Libraries
-- `Retrofit` + `OkHttp` (60s timeouts for slow scraping)
+- `Retrofit` + `OkHttp` (60s timeouts for slow scraping) - Android legacy networking
+- `Ktor` - shared KMP HTTP client (OkHttp engine on Android, Darwin/URLSession on iOS)
+- `kotlinx.serialization` - shared JSON serialization
 - `Readability4J` (net.dankito.readability4j) for article extraction
 - `Jsoup` for HTML parsing
 - `RSS-Parser` (com.prof18.rssparser) for feed parsing
@@ -123,12 +139,95 @@ For targeting a specific device (e.g., Palma 2), use `-s <device_id>`:
 
 ## Architecture
 
+### High-Level Overview
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
+│   Android App   │     │    iOS App       │     │  Ghostwriter Web │
+│  (Jetpack       │     │  (SwiftUI)       │     │  (SvelteKit)     │
+│   Compose)      │     │                  │     │                  │
+└────────┬────────┘     └────────┬─────────┘     └────────┬─────────┘
+         │                       │                         │
+         │  ┌────────────────────┴──────────┐              │
+         │  │                               │              │
+         ▼  ▼                               │              │
+┌─────────────────────┐                     │              │
+│   :shared (KMP)     │                     │              │
+│  ┌───────────────┐  │                     │              │
+│  │ Ghostwriter   │  │                     │              │
+│  │ ApiClient     │  │                     │              │
+│  │ (Ktor)        │  │                     │              │
+│  ├───────────────┤  │                     │              │
+│  │ Shared DTOs   │  │                     │              │
+│  │ (kotlinx.ser) │  │                     │              │
+│  └───────────────┘  │                     │              │
+└──────────┬──────────┘                     │              │
+           │                                │              │
+           ▼                                ▼              ▼
+    ┌──────────────────────────────────────────────────────────┐
+    │              Ghostwriter Backend (FastAPI)                │
+    │                  ghostwriter/                             │
+    └──────────────────────────────────────────────────────────┘
+```
+
+### Shared KMP Module (`shared/`)
+
+The `:shared` Gradle module contains Kotlin Multiplatform code that compiles to both an Android library and an iOS XCFramework (`EpilogueShared.xcframework`). It currently provides the Ghostwriter API client layer, giving both platforms identical networking behavior, error handling, and DTO serialization.
+
+```
+shared/
+├── build.gradle.kts                          # KMP plugin, targets, dependencies
+└── src/
+    ├── commonMain/kotlin/.../ghostwriter/
+    │   ├── CoreModels.kt                     # All Ghostwriter DTOs (@Serializable)
+    │   ├── GhostwriterApiClient.kt           # Ktor-based API client + error hierarchy
+    │   ├── GhostwriterClientHandle.kt        # Lifecycle wrapper (HttpClient + ApiClient)
+    │   └── PlatformHttpClient.kt             # expect fun createPlatformHttpClient()
+    ├── commonTest/kotlin/.../ghostwriter/
+    │   ├── CoreModelsSerializationTest.kt     # JSON wire-format round-trip tests
+    │   └── GhostwriterApiClientTest.kt        # URL construction, auth, query param tests
+    ├── androidMain/kotlin/.../ghostwriter/
+    │   └── PlatformHttpClient.android.kt      # actual impl: OkHttp engine
+    └── iosMain/kotlin/.../ghostwriter/
+        └── PlatformHttpClient.ios.kt          # actual impl: Darwin/URLSession engine
+```
+
+**Key classes:**
+
+- **`GhostwriterApiClient`** - Ktor-based HTTP client with methods for every Ghostwriter endpoint. Handles URL normalization (auto-appends `/api/`), auth headers, and maps HTTP errors to a `GhostwriterApiException` sealed hierarchy (Unauthorized, NotFound, Conflict, RateLimited, HttpError).
+- **`GhostwriterClientHandle`** - Owns the `HttpClient` + `GhostwriterApiClient` pair. Call `create(baseUrl, apiKey)` to instantiate and `close()` to dispose. This is the entry point for both platforms.
+- **`CoreModels.kt`** - All DTOs use `@Serializable` with `@SerialName` for snake_case wire format. These are the single source of truth for the Ghostwriter API contract.
+
+**Platform HTTP configuration** (both platforms):
+- 30s request timeout, 15s connect timeout
+- 2 retries with exponential backoff on server errors and 429
+- `ignoreUnknownKeys = true` for forward compatibility
+
+### How the Shared Module Integrates
+
+**Android** (`app/` depends on `:shared`):
+- `SharedGhostwriterAdapter` wraps the shared client and maps KMP DTOs to existing Android app DTOs via `.toApp()` extension functions
+- `GhostwriterRepository` checks `shouldUseSharedClient()` at the top of every method; if enabled, delegates to the adapter, otherwise falls back to the legacy Retrofit path
+- Feature flag: `SettingsRepository.useSharedGhostwriterClient()` (persisted in SharedPreferences)
+
+**iOS** (`EpilogueIOS/Modules/GhostwriterClient/` depends on `EpilogueShared.xcframework`):
+- `GhostwriterClient.swift` uses `#if canImport(EpilogueShared)` to conditionally delegate to the shared client
+- `GhostwriterClientHandle` is constructed in the initializer and each method maps shared KotlinInt/KotlinBoolean types back to Swift native types
+- Controlled by `useSharedClient: Bool` constructor parameter
+
+### Android App Structure
+
 ```
 app/
 ├── data/
 │   ├── local/          # Room entities, DAOs
-│   ├── remote/         # Retrofit services, OpenAI API
-│   └── repository/     # ArticleRepository
+│   ├── remote/
+│   │   └── ghostwriter/
+│   │       ├── GhostwriterApi.kt             # Retrofit interface (legacy)
+│   │       └── SharedGhostwriterAdapter.kt   # KMP shared client adapter
+│   └── repository/
+│       ├── GhostwriterRepository.kt          # Dual-path: shared client or Retrofit
+│       └── SettingsRepository.kt             # Feature flags incl. shared client toggle
 ├── domain/
 │   ├── model/          # Feed, ProcessedArticle
 │   └── usecase/        # FetchArticlesUseCase, GenerateEpubUseCase
@@ -476,6 +575,7 @@ The `EpilogueIOS/` directory contains an iOS client built with SwiftUI.
 - `FeedKit` - RSS/Atom parsing
 - `SwiftSoup` - HTML parsing and extraction
 - `ZIPFoundation` - EPUB generation
+- `EpilogueShared` - KMP shared Ghostwriter client (XCFramework)
 
 **Module Structure:**
 ```
@@ -491,20 +591,39 @@ EpilogueIOS/
 │   ├── ContentProcessing/        # FeedKit + SwiftSoup pipeline
 │   ├── AIServices/               # OpenAI (GPT-4o-mini) summarization
 │   ├── EPUBGeneration/           # EPUB 3.0 builder with e-ink CSS
-│   └── GhostwriterClient/       # Server sync client
+│   └── GhostwriterClient/       # Server sync client (delegates to shared KMP client)
 └── Tuist/
     └── Package.swift             # SPM dependencies
 ```
 
 **Build (requires Tuist):**
+
+A Makefile automates the XCFramework prerequisite:
 ```bash
+cd EpilogueIOS
+make setup                        # Build XCFramework + generate Xcode project
+make generate                     # Generate only (auto-builds XCFramework if missing)
+make build                        # Build via Tuist CLI
+make xcframework                  # Rebuild XCFramework only
+make clean                        # Remove XCFramework build artifacts
+```
+
+Or manually:
+```bash
+# From repo root — build the XCFramework
+./gradlew :shared:assembleEpilogueSharedXCFramework
+
+# Then generate and build the iOS project
 cd EpilogueIOS
 tuist generate                    # Generate Xcode project
 tuist build                       # Build via CLI
 ```
 
+The `GhostwriterClient` module references the XCFramework at `shared/build/XCFrameworks/debug/EpilogueShared.xcframework` (configured in `EpilogueIOS/Modules/GhostwriterClient/Project.swift`). The Makefile automatically builds it when missing.
+
 **Key Patterns:**
 - SwiftData `@Model` classes for Feed, Digest, DigestArticle
 - Background tasks via `BGTaskScheduler` for digest generation and Ghostwriter sync
 - `GhostwriterSyncCoordinator` orchestrates feed/digest/config sync with server
+- `GhostwriterClient` uses `#if canImport(EpilogueShared)` to route through shared KMP client when available
 - Keychain storage for API keys
