@@ -226,6 +226,7 @@ export interface Digest {
 	total_articles: number;
 	articles_enriched: number;
 	filename?: string | null;
+	available_formats?: string[];
 	created_at: string;
 	completed_at?: string | null;
 	downloaded_at?: string | null;
