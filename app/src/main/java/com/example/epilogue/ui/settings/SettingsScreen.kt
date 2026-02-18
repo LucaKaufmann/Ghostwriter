@@ -65,6 +65,7 @@ import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
+import com.example.epilogue.data.repository.SettingsRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -193,6 +194,7 @@ fun SettingsScreen(
             SettingsSection(title = "Daily Schedule") {
                 PeriodSelection(
                     selectedPeriods = uiState.selectedPeriods,
+                    serverSchedule = uiState.serverSchedule,
                     onTogglePeriod = viewModel::togglePeriod
                 )
             }
@@ -463,8 +465,20 @@ fun ApiKeyInput(
 @Composable
 fun PeriodSelection(
     selectedPeriods: Set<DigestPeriod>,
+    serverSchedule: SettingsRepository.GhostwriterSchedule?,
     onTogglePeriod: (DigestPeriod, Boolean) -> Unit
 ) {
+    // Helper to get display time from server schedule or fallback to default
+    fun getDisplayTime(period: DigestPeriod): String {
+        return serverSchedule?.let { schedule ->
+            when (period) {
+                DigestPeriod.MORNING -> String.format("%d:%02d", schedule.morningHour, schedule.morningMinute)
+                DigestPeriod.NOON -> String.format("%d:%02d", schedule.noonHour, schedule.noonMinute)
+                DigestPeriod.EVENING -> String.format("%d:%02d", schedule.eveningHour, schedule.eveningMinute)
+            }
+        } ?: period.displayTime
+    }
+
     Column {
         Text(
             text = "Generate digests at:",
@@ -482,7 +496,7 @@ fun PeriodSelection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${period.name.lowercase().replaceFirstChar { it.uppercase() }} - ${period.displayTime}",
+                    text = "${period.name.lowercase().replaceFirstChar { it.uppercase() }} - ${getDisplayTime(period)}",
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Switch(
@@ -1169,276 +1183,6 @@ fun GhostwriterInput(
                         ) {
                             Text("Clear Seen")
                         }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                Divider()
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "Media",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Text(
-                    text = "Feeds: $podcastFeedCount podcasts · $youtubeFeedCount YouTube",
-                    style = MaterialTheme.typography.bodySmall
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = newPodcastUrl,
-                    onValueChange = { newPodcastUrl = it },
-                    label = { Text("New Podcast Feed URL") },
-                    placeholder = { Text("https://example.com/podcast.rss") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            onCreatePodcastFeed(newPodcastUrl)
-                            newPodcastUrl = ""
-                        },
-                        enabled = !integrationActionRunning && newPodcastUrl.isNotBlank()
-                    ) {
-                        Text("Add Podcast")
-                    }
-                }
-
-                OutlinedTextField(
-                    value = newYoutubeUrl,
-                    onValueChange = { newYoutubeUrl = it },
-                    label = { Text("New YouTube Channel URL") },
-                    placeholder = { Text("https://youtube.com/@channel") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            onCreateYoutubeFeed(newYoutubeUrl)
-                            newYoutubeUrl = ""
-                        },
-                        enabled = !integrationActionRunning && newYoutubeUrl.isNotBlank()
-                    ) {
-                        Text("Add YouTube")
-                    }
-                }
-
-                if (podcastFeeds.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Podcast Feeds",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    podcastFeeds.forEach { feed ->
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = feed.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = feed.url,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { onToggleMediaFeedActive("podcast", feed.id, !feed.isActive) },
-                                enabled = !integrationActionRunning,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (feed.isActive) "Pause" else "Enable")
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    val nextMode = if (feed.mode == "summarize") "raw" else "summarize"
-                                    onUpdateMediaFeedMode("podcast", feed.id, nextMode)
-                                },
-                                enabled = !integrationActionRunning,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (feed.mode == "summarize") "Mode: Briefing" else "Mode: Raw")
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    val nextMax = if (feed.maxItems >= 20) 5 else feed.maxItems + 5
-                                    onUpdateMediaFeedMaxItems("podcast", feed.id, nextMax)
-                                },
-                                enabled = !integrationActionRunning,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Max ${feed.maxItems}")
-                            }
-                            OutlinedButton(
-                                onClick = { onDeleteMediaFeed("podcast", feed.id) },
-                                enabled = !integrationActionRunning,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Delete")
-                            }
-                        }
-                    }
-                }
-
-                if (youtubeFeeds.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "YouTube Feeds",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    youtubeFeeds.forEach { feed ->
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = feed.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = feed.url,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { onToggleMediaFeedActive("youtube", feed.id, !feed.isActive) },
-                                enabled = !integrationActionRunning,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (feed.isActive) "Pause" else "Enable")
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    val nextMode = if (feed.mode == "summarize") "raw" else "summarize"
-                                    onUpdateMediaFeedMode("youtube", feed.id, nextMode)
-                                },
-                                enabled = !integrationActionRunning,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (feed.mode == "summarize") "Mode: Briefing" else "Mode: Raw")
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    val nextMax = if (feed.maxItems >= 20) 5 else feed.maxItems + 5
-                                    onUpdateMediaFeedMaxItems("youtube", feed.id, nextMax)
-                                },
-                                enabled = !integrationActionRunning,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Max ${feed.maxItems}")
-                            }
-                            OutlinedButton(
-                                onClick = { onDeleteMediaFeed("youtube", feed.id) },
-                                enabled = !integrationActionRunning,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Delete")
-                            }
-                        }
-                    }
-                }
-
-                mediaStatus?.let { status ->
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Queue: ${status.pendingCount} pending, " +
-                            "${status.processingCount} processing, " +
-                            "${status.completedCount} completed, ${status.failedCount} failed",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    status.currentItemTitle?.let { title ->
-                        Text(
-                            text = "Current: $title",
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                if (recentMediaItems.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Recent Items",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    recentMediaItems.forEach { item ->
-                        val typeLabel = when (item.contentType.lowercase()) {
-                            "podcast" -> "Podcast"
-                            "youtube" -> "YouTube"
-                            else -> item.contentType
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "[$typeLabel • ${item.status}] ${item.title}",
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedButton(
-                                onClick = { onOpenMediaItemDetail(item.id) },
-                                enabled = !integrationActionRunning
-                            ) {
-                                Text("Open")
-                            }
-                        }
-                    }
-                }
-
-                if (mediaItemDetailLoading) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Loading transcript...",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onRefreshMediaStatus,
-                        enabled = !mediaRefreshing && !integrationActionRunning,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(if (mediaRefreshing) "Refreshing..." else "Refresh")
-                    }
-                    Button(
-                        onClick = onTriggerMediaProcessing,
-                        enabled = !mediaTriggering && !integrationActionRunning,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(if (mediaTriggering) "Triggering..." else "Trigger")
                     }
                 }
 
