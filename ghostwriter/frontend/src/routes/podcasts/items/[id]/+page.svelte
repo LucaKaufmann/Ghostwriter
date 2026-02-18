@@ -146,7 +146,7 @@
 				</div>
 			</Card.Header>
 			<Card.Content>
-				<div class="prose prose-sm max-w-none dark:prose-invert">
+				<div class="prose prose-sm max-w-none dark:prose-invert prose-headings:font-semibold prose-headings:tracking-tight prose-headings:mt-8 prose-headings:mb-3 prose-p:my-3 prose-p:leading-8">
 					{@html sanitizedContentHtml}
 				</div>
 				<div class="mt-6 pt-4 border-t">

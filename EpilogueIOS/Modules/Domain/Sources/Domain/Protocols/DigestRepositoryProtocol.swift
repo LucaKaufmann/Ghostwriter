@@ -68,6 +68,7 @@ public struct DigestArticleData: Sendable {
     public let mode: String
     public let wordCount: Int
     public let content: String
+    public let contentHTML: String?
     public let author: String?
     public let feedTitle: String
     public let sortOrder: Int
@@ -79,6 +80,7 @@ public struct DigestArticleData: Sendable {
         mode: String,
         wordCount: Int,
         content: String,
+        contentHTML: String? = nil,
         author: String?,
         feedTitle: String,
         sortOrder: Int
@@ -89,6 +91,7 @@ public struct DigestArticleData: Sendable {
         self.mode = mode
         self.wordCount = wordCount
         self.content = content
+        self.contentHTML = contentHTML
         self.author = author
         self.feedTitle = feedTitle
         self.sortOrder = sortOrder

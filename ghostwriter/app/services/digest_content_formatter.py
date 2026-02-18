@@ -52,27 +52,55 @@ def _render_text_block(block: str) -> list[str]:
     if not lines:
         return []
 
-    if _is_list_block(lines):
-        return [_render_list(lines)]
+    rendered: list[str] = []
+    paragraph_lines: list[str] = []
+    index = 0
 
-    heading = _parse_markdown_heading(lines[0])
-    if heading:
-        tag, text = heading
-        rendered = [f"<{tag}>{_inline_format(text)}</{tag}>"]
-        remainder = " ".join(lines[1:]).strip()
-        if remainder:
-            rendered.extend(_render_paragraphs(remainder))
-        return rendered
+    def flush_paragraph() -> None:
+        if not paragraph_lines:
+            return
+        merged = " ".join(paragraph_lines).strip()
+        paragraph_lines.clear()
+        if merged:
+            rendered.extend(_render_paragraphs(merged))
 
-    if _looks_like_inline_heading(lines[0]):
-        rendered = [f"<h3>{_inline_format(lines[0].rstrip(':').strip())}</h3>"]
-        remainder = " ".join(lines[1:]).strip()
-        if remainder:
-            rendered.extend(_render_paragraphs(remainder))
-        return rendered
+    while index < len(lines):
+        line = lines[index]
 
-    merged = " ".join(lines)
-    return _render_paragraphs(merged)
+        heading = _parse_markdown_heading(line)
+        if heading:
+            flush_paragraph()
+            tag, text = heading
+            rendered.append(f"<{tag}>{_inline_format(text)}</{tag}>")
+            index += 1
+            continue
+
+        if _looks_like_inline_heading(line):
+            flush_paragraph()
+            rendered.append(f"<h3>{_inline_format(line.rstrip(':').strip())}</h3>")
+            index += 1
+            continue
+
+        if _ORDERED_LIST_RE.match(line) or _UNORDERED_LIST_RE.match(line):
+            flush_paragraph()
+            ordered = bool(_ORDERED_LIST_RE.match(line))
+            list_lines: list[str] = []
+            while index < len(lines):
+                current = lines[index]
+                if ordered and not _ORDERED_LIST_RE.match(current):
+                    break
+                if not ordered and not _UNORDERED_LIST_RE.match(current):
+                    break
+                list_lines.append(current)
+                index += 1
+            rendered.append(_render_list(list_lines))
+            continue
+
+        paragraph_lines.append(line)
+        index += 1
+
+    flush_paragraph()
+    return rendered
 
 
 def _render_paragraphs(text: str) -> list[str]:
@@ -197,7 +225,15 @@ def _looks_like_inline_heading(line: str) -> bool:
 
     title_case_ratio = sum(1 for word in alpha_words if word[0].isupper()) / len(alpha_words)
     all_caps = normalized.isupper()
-    return candidate.endswith(":") or all_caps or title_case_ratio >= 0.65
+    has_numeric_section_prefix = bool(re.match(r"^[A-Za-z]+\s+\d+\s*:", normalized))
+    has_structural_punctuation = ":" in normalized or "," in normalized
+    return (
+        candidate.endswith(":")
+        or all_caps
+        or title_case_ratio >= 0.65
+        or has_numeric_section_prefix
+        or (has_structural_punctuation and len(words) <= 14)
+    )
 
 
 def _inline_format(text: str) -> str:

@@ -282,7 +282,7 @@ class DigestRepository @Inject constructor(
                     digestId = 0, // Will be set by transaction
                     title = article.title,
                     author = article.author ?: "",
-                    content = article.content,
+                    content = article.contentHtml?.takeIf { it.isNotBlank() } ?: article.content,
                     originalUrl = article.url,
                     isSummary = article.mode == "summarize" || article.mode == "summarized",
                     feedName = article.feedTitle,

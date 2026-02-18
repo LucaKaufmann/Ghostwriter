@@ -22,6 +22,7 @@ from app.api.config import ConfigResponse, get_or_create_config, _config_to_resp
 from app.api.feeds import FeedChangesResponse, FeedTombstone
 from app.api.schedules import ScheduleResponse, _schedule_to_response
 from app.core.logging import digest_logger
+from app.services.digest_content_formatter import format_digest_content_to_html
 from app.worker import scheduler as scheduler_module
 
 router = APIRouter()
@@ -37,6 +38,7 @@ class SyncDigestArticle(BaseModel):
     mode: str
     word_count: int
     content: str
+    content_html: str = ""
     author: str | None
     feed_title: str
     sort_order: int
@@ -176,6 +178,7 @@ async def combined_sync(
                 "mode": a.mode,
                 "word_count": a.word_count,
                 "content": a.content,
+                "content_html": format_digest_content_to_html(a.content),
                 "author": a.author,
                 "feed_title": a.feed_title,
                 "sort_order": a.sort_order,
