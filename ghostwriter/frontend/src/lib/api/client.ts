@@ -617,6 +617,10 @@ class ApiClient {
 		return this.request<DigestPodcastStatusResponse>(`/digests/${digestId}/podcast`);
 	}
 
+	downloadPodcastEpisode(episodeId: string): Promise<{ blob: Blob; filename: string }> {
+		return this.download(`/podcast/episodes/${episodeId}/download`, `podcast-${episodeId}.mp3`);
+	}
+
 	async uploadPodcastFeedArtwork(file: File): Promise<PodcastArtworkUploadResponse> {
 		const token = this.getToken();
 		const formData = new FormData();
