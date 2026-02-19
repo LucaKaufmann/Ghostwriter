@@ -150,6 +150,8 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert payload["enabled"] is False
     assert payload["schedule"] == "manual"
     assert payload["preferred_length_minutes"] == 15
+    assert payload["tts_provider"] == "openai"
+    assert payload["openai_tts_model"] == "tts-1"
 
     update = client.put(
         "/api/podcast/preferences",
@@ -161,6 +163,10 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
             "style": "formal",
             "boost_keywords": ["AI", "Swift", "AI"],
             "filter_keywords": ["crypto"],
+            "tts_provider": "elevenlabs",
+            "elevenlabs_model_id": "eleven_flash_v2_5",
+            "elevenlabs_output_format": "mp3_44100_128",
+            "elevenlabs_api_key": "xi-test-key",
             "host_a_voice": "nova",
             "host_b_voice": "echo",
             "podcast_feed_enabled": True,
@@ -175,6 +181,9 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert updated["schedule_time"] == "09:30"
     assert updated["schedule_day"] == "friday"
     assert updated["style"] == "formal"
+    assert updated["tts_provider"] == "elevenlabs"
+    assert updated["elevenlabs_model_id"] == "eleven_flash_v2_5"
+    assert updated["elevenlabs_output_format"] == "mp3_44100_128"
     assert updated["boost_keywords"] == ["AI", "Swift"]
     assert updated["podcast_feed_enabled"] is True
     assert updated["podcast_feed_title"] == "My Test Feed"
@@ -186,6 +195,13 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     )
     assert invalid.status_code == 400
     assert "schedule_time" in invalid.json()["detail"]
+
+    invalid_provider = client.put(
+        "/api/podcast/preferences",
+        json={"tts_provider": "unknown-provider"},
+        headers=auth_headers,
+    )
+    assert invalid_provider.status_code == 422
 
 
 def test_article_feedback_roundtrip(client, auth_headers):
