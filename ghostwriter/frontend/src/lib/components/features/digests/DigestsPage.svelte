@@ -36,6 +36,7 @@
 	const PODCAST_STATUS_POLL_MAX_BACKOFF_MS = 30000;
 	const ACTIVE_PODCAST_STATUSES = new Set(['pending', 'generating_script', 'generating_audio']);
 	type PodcastDigestStatus = {
+		episode_id?: string;
 		status: string;
 		error_message?: string | null;
 		download_url?: string | null;
@@ -54,6 +55,7 @@
 	let digestCoverUrls = $state<Record<string, string>>({});
 	let digestCoverErrors = $state<Record<string, boolean>>({});
 	let downloadPendingByKey = $state<Record<string, boolean>>({});
+	let podcastDownloadPendingByDigest = $state<Record<string, boolean>>({});
 	let podcastTriggerPendingByDigest = $state<Record<string, boolean>>({});
 	let podcastStatusByDigest = $state<Record<string, PodcastDigestStatus>>({});
 	let coverLoadToken = 0;
@@ -210,13 +212,14 @@
 	async function refreshPodcastStatuses(digestIds: string[], token: number) {
 		const results = await Promise.all(
 			digestIds.map(async (digestId) => {
-				try {
-					const data = await api.getDigestPodcastStatus(digestId);
-					return [digestId, {
-						status: data.episode.status,
-						error_message: data.episode.error_message,
-						download_url: data.episode.download_url
-					}] as const;
+					try {
+						const data = await api.getDigestPodcastStatus(digestId);
+						return [digestId, {
+							episode_id: data.episode.id,
+							status: data.episode.status,
+							error_message: data.episode.error_message,
+							download_url: data.episode.download_url
+						}] as const;
 				} catch (err) {
 					if (err instanceof ApiError && err.isNotFound) {
 						return [digestId, null] as const;
@@ -362,8 +365,12 @@
 		return podcastStatusByDigest[digestId]?.status === 'ready';
 	}
 
-	function getPodcastDownloadUrl(digestId: string): string | null {
-		return podcastStatusByDigest[digestId]?.download_url ?? null;
+	function getPodcastEpisodeId(digestId: string): string | null {
+		return podcastStatusByDigest[digestId]?.episode_id ?? null;
+	}
+
+	function isPodcastDownloadPending(digestId: string): boolean {
+		return !!podcastDownloadPendingByDigest[digestId];
 	}
 
 	function getPodcastStatusError(digestId: string): string | null {
@@ -505,6 +512,7 @@
 				podcastStatusByDigest = {
 					...podcastStatusByDigest,
 					[digest.id]: {
+						episode_id: getPodcastEpisodeId(digest.id) ?? undefined,
 						status: response.status
 					}
 				};
@@ -519,6 +527,42 @@
 		} finally {
 			podcastTriggerPendingByDigest = {
 				...podcastTriggerPendingByDigest,
+				[digest.id]: false
+			};
+		}
+	}
+
+	async function downloadPodcast(digest: Digest) {
+		const episodeId = getPodcastEpisodeId(digest.id);
+		if (!episodeId) {
+			toast.error('Podcast episode missing', {
+				description: 'Try refreshing and then downloading again.'
+			});
+			return;
+		}
+
+		podcastDownloadPendingByDigest = {
+			...podcastDownloadPendingByDigest,
+			[digest.id]: true
+		};
+		try {
+			const { blob, filename } = await api.downloadPodcastEpisode(episodeId);
+			const objectUrl = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = objectUrl;
+			anchor.download = filename;
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(objectUrl);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Unknown error';
+			toast.error('Failed to download podcast', {
+				description: message
+			});
+		} finally {
+			podcastDownloadPendingByDigest = {
+				...podcastDownloadPendingByDigest,
 				[digest.id]: false
 			};
 		}
@@ -804,16 +848,20 @@
 													Read
 												</Button>
 												{#if isPodcastReady(digest.id)}
-													<Button
-														size="sm"
-														variant="outline"
-														href={getPodcastDownloadUrl(digest.id) ?? undefined}
-														target="_blank"
-														rel="noopener noreferrer"
-													>
-														<Download class="mr-2 h-4 w-4" />
-														Download Podcast
-													</Button>
+														<Button
+															size="sm"
+															variant="outline"
+															onclick={() => downloadPodcast(digest)}
+															disabled={isPodcastDownloadPending(digest.id)}
+														>
+															{#if isPodcastDownloadPending(digest.id)}
+																<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+																Preparing...
+															{:else}
+																<Download class="mr-2 h-4 w-4" />
+																Download Podcast
+															{/if}
+														</Button>
 												{:else}
 													<Button
 														size="sm"
@@ -916,16 +964,20 @@
 										Read
 									</Button>
 									{#if isPodcastReady(digest.id)}
-										<Button
-											size="sm"
-											variant="outline"
-											href={getPodcastDownloadUrl(digest.id) ?? undefined}
-											target="_blank"
-											rel="noopener noreferrer"
-										>
-											<Download class="mr-2 h-4 w-4" />
-											Download Podcast
-										</Button>
+											<Button
+												size="sm"
+												variant="outline"
+												onclick={() => downloadPodcast(digest)}
+												disabled={isPodcastDownloadPending(digest.id)}
+											>
+												{#if isPodcastDownloadPending(digest.id)}
+													<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+													Preparing...
+												{:else}
+													<Download class="mr-2 h-4 w-4" />
+													Download Podcast
+												{/if}
+											</Button>
 									{:else}
 										<Button
 											size="sm"
@@ -1020,16 +1072,20 @@
 										Read
 									</Button>
 									{#if isPodcastReady(digest.id)}
-										<Button
-											size="sm"
-											variant="outline"
-											href={getPodcastDownloadUrl(digest.id) ?? undefined}
-											target="_blank"
-											rel="noopener noreferrer"
-										>
-											<Download class="mr-2 h-4 w-4" />
-											Download Podcast
-										</Button>
+											<Button
+												size="sm"
+												variant="outline"
+												onclick={() => downloadPodcast(digest)}
+												disabled={isPodcastDownloadPending(digest.id)}
+											>
+												{#if isPodcastDownloadPending(digest.id)}
+													<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+													Preparing...
+												{:else}
+													<Download class="mr-2 h-4 w-4" />
+													Download Podcast
+												{/if}
+											</Button>
 									{:else}
 										<Button
 											size="sm"
