@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { onDestroy } from 'svelte';
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Digest, type DigestPeriod, type DigestStatus } from '$lib/api';
+	import { api, ApiError, type Digest, type DigestPeriod, type DigestStatus } from '$lib/api';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -32,6 +32,7 @@
 
 	const queryClient = useQueryClient();
 	const PAGE_SIZE = 20;
+	const ACTIVE_PODCAST_STATUSES = new Set(['pending', 'generating_script', 'generating_audio']);
 
 	let limit = $state(PAGE_SIZE);
 	let statusFilter = $state<'all' | DigestStatus>('all');
@@ -46,7 +47,11 @@
 	let digestCoverUrls = $state<Record<string, string>>({});
 	let digestCoverErrors = $state<Record<string, boolean>>({});
 	let downloadPendingByKey = $state<Record<string, boolean>>({});
+	let podcastTriggerPendingByDigest = $state<Record<string, boolean>>({});
+	let podcastStatusByDigest = $state<Record<string, { status: string; error_message?: string | null }>>({});
 	let coverLoadToken = 0;
+	let podcastStatusLoadToken = 0;
+	let podcastStatusPollTimer: ReturnType<typeof setInterval> | null = null;
 
 	const queryParams = $derived.by(() => ({
 		limit,
@@ -93,16 +98,7 @@
 	}));
 
 	const triggerPodcastMutation = createMutation(() => ({
-		mutationFn: (digestId: string) => api.triggerDigestPodcast(digestId),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ['digests'] });
-			toast.success('Podcast generation queued');
-		},
-		onError: (err: Error) => {
-			toast.error('Failed to generate podcast', {
-				description: err.message ?? 'Unknown error'
-			});
-		}
+		mutationFn: (digestId: string) => api.triggerDigestPodcast(digestId)
 	}));
 
 	$effect(() => {
@@ -156,6 +152,24 @@
 	});
 
 	$effect(() => {
+		const nextIds = new Set(visibleDigests.map((digest) => digest.id));
+		for (const digestId of Object.keys(podcastStatusByDigest)) {
+			if (!nextIds.has(digestId)) {
+				const next = { ...podcastStatusByDigest };
+				delete next[digestId];
+				podcastStatusByDigest = next;
+			}
+		}
+		for (const digestId of Object.keys(podcastTriggerPendingByDigest)) {
+			if (!nextIds.has(digestId)) {
+				const next = { ...podcastTriggerPendingByDigest };
+				delete next[digestId];
+				podcastTriggerPendingByDigest = next;
+			}
+		}
+	});
+
+	$effect(() => {
 		const localToken = coverLoadToken + 1;
 		coverLoadToken = localToken;
 
@@ -184,9 +198,71 @@
 		void loadCovers();
 	});
 
+	async function refreshPodcastStatuses(digestIds: string[], token: number) {
+		const results = await Promise.all(
+			digestIds.map(async (digestId) => {
+				try {
+					const data = await api.getDigestPodcastStatus(digestId);
+					return [digestId, {
+						status: data.episode.status,
+						error_message: data.episode.error_message
+					}] as const;
+				} catch (err) {
+					if (err instanceof ApiError && err.isNotFound) {
+						return [digestId, null] as const;
+					}
+					return [digestId, podcastStatusByDigest[digestId] ?? null] as const;
+				}
+			})
+		);
+		if (podcastStatusLoadToken !== token) return;
+		const next = { ...podcastStatusByDigest };
+		for (const [digestId, status] of results) {
+			if (!status) {
+				delete next[digestId];
+			} else {
+				next[digestId] = status;
+			}
+		}
+		podcastStatusByDigest = next;
+	}
+
+	$effect(() => {
+		const digestIds = visibleDigests
+			.filter((digest) => digest.status === 'completed')
+			.map((digest) => digest.id);
+		const localToken = podcastStatusLoadToken + 1;
+		podcastStatusLoadToken = localToken;
+		if (!digestIds.length) {
+			if (podcastStatusPollTimer) {
+				clearInterval(podcastStatusPollTimer);
+				podcastStatusPollTimer = null;
+			}
+			return;
+		}
+
+		void refreshPodcastStatuses(digestIds, localToken);
+
+		const hasActive = digestIds.some((digestId) =>
+			ACTIVE_PODCAST_STATUSES.has(podcastStatusByDigest[digestId]?.status ?? '')
+		);
+		if (podcastStatusPollTimer) {
+			clearInterval(podcastStatusPollTimer);
+			podcastStatusPollTimer = null;
+		}
+		if (hasActive) {
+			podcastStatusPollTimer = setInterval(() => {
+				void refreshPodcastStatuses(digestIds, localToken);
+			}, 3000);
+		}
+	});
+
 	onDestroy(() => {
 		for (const url of Object.values(digestCoverUrls)) {
 			URL.revokeObjectURL(url);
+		}
+		if (podcastStatusPollTimer) {
+			clearInterval(podcastStatusPollTimer);
 		}
 	});
 
@@ -195,7 +271,37 @@
 	}
 
 	function canGeneratePodcast(digest: Digest): boolean {
-		return digest.status === 'completed';
+		if (digest.status !== 'completed') return false;
+		const currentStatus = podcastStatusByDigest[digest.id]?.status;
+		return !ACTIVE_PODCAST_STATUSES.has(currentStatus ?? '');
+	}
+
+	function isPodcastTriggerPending(digestId: string): boolean {
+		return !!podcastTriggerPendingByDigest[digestId];
+	}
+
+	function getPodcastStatusLabel(digestId: string): string | null {
+		const status = podcastStatusByDigest[digestId]?.status;
+		if (!status) return null;
+		if (status === 'pending') return 'Podcast queued';
+		if (status === 'generating_script') return 'Generating script';
+		if (status === 'generating_audio') return 'Generating audio';
+		if (status === 'ready') return 'Podcast ready';
+		if (status === 'failed') return 'Podcast failed';
+		return `Podcast ${status}`;
+	}
+
+	function isPodcastStatusActive(digestId: string): boolean {
+		const status = podcastStatusByDigest[digestId]?.status;
+		return ACTIVE_PODCAST_STATUSES.has(status ?? '');
+	}
+
+	function isPodcastStatusFailed(digestId: string): boolean {
+		return podcastStatusByDigest[digestId]?.status === 'failed';
+	}
+
+	function getPodcastStatusError(digestId: string): string | null {
+		return podcastStatusByDigest[digestId]?.error_message ?? null;
 	}
 
 	function formatDate(dateStr: string): string {
@@ -322,9 +428,33 @@
 		}
 	}
 
-	function triggerDigestPodcast(digest: Digest) {
+	async function triggerDigestPodcast(digest: Digest) {
 		if (!canGeneratePodcast(digest)) return;
-		triggerPodcastMutation.mutate(digest.id);
+		podcastTriggerPendingByDigest = {
+			...podcastTriggerPendingByDigest,
+			[digest.id]: true
+		};
+		try {
+			const response = await triggerPodcastMutation.mutateAsync(digest.id);
+			podcastStatusByDigest = {
+				...podcastStatusByDigest,
+				[digest.id]: {
+					status: response.status
+				}
+			};
+			queryClient.invalidateQueries({ queryKey: ['digests'] });
+			toast.success('Podcast generation queued');
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Unknown error';
+			toast.error('Failed to generate podcast', {
+				description: message
+			});
+		} finally {
+			podcastTriggerPendingByDigest = {
+				...podcastTriggerPendingByDigest,
+				[digest.id]: false
+			};
+		}
 	}
 </script>
 
@@ -610,16 +740,24 @@
 													size="sm"
 													variant="outline"
 													onclick={() => triggerDigestPodcast(digest)}
-													disabled={triggerPodcastMutation.isPending}
+													disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
 												>
-													{#if triggerPodcastMutation.isPending}
+													{#if isPodcastTriggerPending(digest.id)}
 														<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 														Queuing...
+													{:else if isPodcastStatusActive(digest.id)}
+														<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+														Generating...
 													{:else}
 														<Mic class="mr-2 h-4 w-4" />
 														Generate Podcast
 													{/if}
 												</Button>
+												{#if getPodcastStatusLabel(digest.id)}
+													<span class={`text-xs ${isPodcastStatusFailed(digest.id) ? 'text-destructive' : 'text-muted-foreground'}`}>
+														{getPodcastStatusLabel(digest.id)}
+													</span>
+												{/if}
 											{/if}
 												{#if digest.filename}
 													<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')} disabled={isDownloadPending(digest, 'epub')}>
@@ -701,16 +839,27 @@
 										size="sm"
 										variant="outline"
 										onclick={() => triggerDigestPodcast(digest)}
-										disabled={triggerPodcastMutation.isPending}
+										disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
 									>
-										{#if triggerPodcastMutation.isPending}
+										{#if isPodcastTriggerPending(digest.id)}
 											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 											Queuing...
+										{:else if isPodcastStatusActive(digest.id)}
+											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+											Generating...
 										{:else}
 											<Mic class="mr-2 h-4 w-4" />
 											Generate Podcast
 										{/if}
 									</Button>
+								{/if}
+								{#if getPodcastStatusLabel(digest.id)}
+									<p class={`text-xs ${isPodcastStatusFailed(digest.id) ? 'text-destructive' : 'text-muted-foreground'}`}>
+										{getPodcastStatusLabel(digest.id)}
+										{#if isPodcastStatusFailed(digest.id) && getPodcastStatusError(digest.id)}
+											: {getPodcastStatusError(digest.id)}
+										{/if}
+									</p>
 								{/if}
 									{#if digest.filename}
 										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')} disabled={isDownloadPending(digest, 'epub')}>
@@ -781,16 +930,24 @@
 										size="sm"
 										variant="outline"
 										onclick={() => triggerDigestPodcast(digest)}
-										disabled={triggerPodcastMutation.isPending}
+										disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
 									>
-										{#if triggerPodcastMutation.isPending}
+										{#if isPodcastTriggerPending(digest.id)}
 											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 											Queuing...
+										{:else if isPodcastStatusActive(digest.id)}
+											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+											Generating...
 										{:else}
 											<Mic class="mr-2 h-4 w-4" />
 											Podcast
 										{/if}
 									</Button>
+								{/if}
+								{#if getPodcastStatusLabel(digest.id)}
+									<p class={`w-full text-xs ${isPodcastStatusFailed(digest.id) ? 'text-destructive' : 'text-muted-foreground'}`}>
+										{getPodcastStatusLabel(digest.id)}
+									</p>
 								{/if}
 									{#if digest.filename}
 										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')} disabled={isDownloadPending(digest, 'epub')}>
