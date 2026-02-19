@@ -34,7 +34,9 @@
 		ChevronUp,
 		Plug,
 		TestTube2,
-		Search
+		Search,
+		Rss,
+		Upload
 	} from 'lucide-svelte';
 
 	const queryClient = useQueryClient();
@@ -68,6 +70,11 @@
 	const logFilesQuery = createQuery(() => ({
 		queryKey: ['log-files'],
 		queryFn: () => api.getLogFiles()
+	}));
+
+	const podcastFeedInfoQuery = createQuery(() => ({
+		queryKey: ['podcast-feed-info'],
+		queryFn: () => api.getPodcastFeedInfo()
 	}));
 
 	// Mutations
@@ -283,6 +290,19 @@
 		}
 	}));
 
+	const uploadPodcastArtworkMutation = createMutation(() => ({
+		mutationFn: (file: File) => api.uploadPodcastFeedArtwork(file),
+		onSuccess: (data) => {
+			queryClient.invalidateQueries({ queryKey: ['podcast-feed-info'] });
+			toast.success('Podcast artwork uploaded', {
+				description: `${data.width}x${data.height}`
+			});
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to upload podcast artwork', { description: err.message });
+		}
+	}));
+
 	// Preview state
 	let wallabagPreview = $state<PreviewResponse | null>(null);
 	let newsletterPreview = $state<PreviewResponse | null>(null);
@@ -359,6 +379,8 @@
 	let coverGeminiKey = $state('');
 	let coverSettingsInitialized = $state(false);
 	let manualCoverInput: HTMLInputElement | null = $state(null);
+	let podcastArtworkInput: HTMLInputElement | null = $state(null);
+	let copiedPodcastFeedUrl = $state(false);
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -475,6 +497,18 @@
 		const file = target.files?.[0];
 		if (!file) return;
 		uploadManualCoverMutation.mutate(file);
+		target.value = '';
+	}
+
+	function triggerPodcastArtworkUpload() {
+		podcastArtworkInput?.click();
+	}
+
+	function handlePodcastArtworkFileChange(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) return;
+		uploadPodcastArtworkMutation.mutate(file);
 		target.value = '';
 	}
 
@@ -630,6 +664,23 @@
 			setTimeout(() => (copiedNewToken = false), 2000);
 		} catch {
 			toast.error('Failed to copy token');
+		}
+	}
+
+	async function copyPodcastFeedUrl() {
+		const feedUrl = podcastFeedInfoQuery.data?.feed_url;
+		if (!feedUrl) return;
+		try {
+			if (navigator.clipboard && window.isSecureContext) {
+				await navigator.clipboard.writeText(feedUrl);
+			} else if (!copyToClipboard(feedUrl)) {
+				throw new Error('Copy failed');
+			}
+			copiedPodcastFeedUrl = true;
+			toast.success('Podcast feed URL copied');
+			setTimeout(() => (copiedPodcastFeedUrl = false), 2000);
+		} catch {
+			toast.error('Failed to copy podcast feed URL');
 		}
 	}
 
@@ -1038,6 +1089,98 @@
 							Save
 						</Button>
 					</div>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+
+		<Card.Root>
+			<Card.Header>
+				<Card.Title class="flex items-center gap-2">
+					<Rss class="h-5 w-5" />
+					Podcast RSS Feed
+				</Card.Title>
+				<Card.Description>
+					Copy your private podcast URL and upload artwork for podcast apps.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="space-y-4">
+				{#if podcastFeedInfoQuery.isPending}
+					<div class="space-y-3">
+						<Skeleton class="h-10 w-full" />
+						<Skeleton class="h-24 w-full" />
+					</div>
+				{:else if podcastFeedInfoQuery.data}
+					<div class="space-y-2">
+						<Label for="podcast-feed-url">Private feed URL</Label>
+						<div class="flex flex-col gap-2 sm:flex-row">
+							<Input
+								id="podcast-feed-url"
+								value={podcastFeedInfoQuery.data.feed_url}
+								readonly
+								class="font-mono text-xs"
+							/>
+							<Button
+								type="button"
+								variant="outline"
+								onclick={copyPodcastFeedUrl}
+								class="sm:w-auto"
+							>
+								{#if copiedPodcastFeedUrl}
+									<CheckCircle2 class="mr-2 h-4 w-4" />
+									Copied
+								{:else}
+									<Copy class="mr-2 h-4 w-4" />
+									Copy URL
+								{/if}
+							</Button>
+						</div>
+					</div>
+
+					<div class="rounded-lg border p-3">
+						<p class="text-sm font-medium">Artwork</p>
+						<p class="text-xs text-muted-foreground">
+							Upload square artwork (minimum 1400x1400) for Apple Podcasts and other players.
+						</p>
+						<div class="mt-3 flex items-center gap-2">
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								onclick={triggerPodcastArtworkUpload}
+								disabled={uploadPodcastArtworkMutation.isPending}
+							>
+								{#if uploadPodcastArtworkMutation.isPending}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+									Uploading...
+								{:else}
+									<Upload class="mr-2 h-4 w-4" />
+									Upload Artwork
+								{/if}
+							</Button>
+							<input
+								class="hidden"
+								type="file"
+								accept="image/*"
+								bind:this={podcastArtworkInput}
+								onchange={handlePodcastArtworkFileChange}
+							/>
+						</div>
+					</div>
+
+					<div class="rounded-lg border p-3">
+						<p class="text-sm font-medium">Setup instructions</p>
+						<ol class="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+							{#each podcastFeedInfoQuery.data.setup_instructions as step}
+								<li>{step}</li>
+							{/each}
+						</ol>
+					</div>
+
+					{#if !podcastFeedInfoQuery.data.feed_enabled}
+						<p class="text-xs text-amber-700">
+							Podcast feed is currently disabled. Enable it in podcast preferences API settings.
+						</p>
+					{/if}
 				{/if}
 			</Card.Content>
 		</Card.Root>
