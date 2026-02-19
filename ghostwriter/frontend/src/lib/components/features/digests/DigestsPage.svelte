@@ -33,6 +33,11 @@
 	const queryClient = useQueryClient();
 	const PAGE_SIZE = 20;
 	const ACTIVE_PODCAST_STATUSES = new Set(['pending', 'generating_script', 'generating_audio']);
+	type PodcastDigestStatus = {
+		status: string;
+		error_message?: string | null;
+		download_url?: string | null;
+	};
 
 	let limit = $state(PAGE_SIZE);
 	let statusFilter = $state<'all' | DigestStatus>('all');
@@ -48,7 +53,7 @@
 	let digestCoverErrors = $state<Record<string, boolean>>({});
 	let downloadPendingByKey = $state<Record<string, boolean>>({});
 	let podcastTriggerPendingByDigest = $state<Record<string, boolean>>({});
-	let podcastStatusByDigest = $state<Record<string, { status: string; error_message?: string | null }>>({});
+	let podcastStatusByDigest = $state<Record<string, PodcastDigestStatus>>({});
 	let coverLoadToken = 0;
 	let podcastStatusLoadToken = 0;
 	let podcastStatusPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -205,7 +210,8 @@
 					const data = await api.getDigestPodcastStatus(digestId);
 					return [digestId, {
 						status: data.episode.status,
-						error_message: data.episode.error_message
+						error_message: data.episode.error_message,
+						download_url: data.episode.download_url
 					}] as const;
 				} catch (err) {
 					if (err instanceof ApiError && err.isNotFound) {
@@ -273,7 +279,7 @@
 	function canGeneratePodcast(digest: Digest): boolean {
 		if (digest.status !== 'completed') return false;
 		const currentStatus = podcastStatusByDigest[digest.id]?.status;
-		return !ACTIVE_PODCAST_STATUSES.has(currentStatus ?? '');
+		return !ACTIVE_PODCAST_STATUSES.has(currentStatus ?? '') && currentStatus !== 'ready';
 	}
 
 	function isPodcastTriggerPending(digestId: string): boolean {
@@ -298,6 +304,14 @@
 
 	function isPodcastStatusFailed(digestId: string): boolean {
 		return podcastStatusByDigest[digestId]?.status === 'failed';
+	}
+
+	function isPodcastReady(digestId: string): boolean {
+		return podcastStatusByDigest[digestId]?.status === 'ready';
+	}
+
+	function getPodcastDownloadUrl(digestId: string): string | null {
+		return podcastStatusByDigest[digestId]?.download_url ?? null;
 	}
 
 	function getPodcastStatusError(digestId: string): string | null {
@@ -736,23 +750,36 @@
 													<Eye class="mr-2 h-4 w-4" />
 													Read
 												</Button>
-												<Button
-													size="sm"
-													variant="outline"
-													onclick={() => triggerDigestPodcast(digest)}
-													disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
-												>
-													{#if isPodcastTriggerPending(digest.id)}
-														<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-														Queuing...
-													{:else if isPodcastStatusActive(digest.id)}
-														<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-														Generating...
-													{:else}
-														<Mic class="mr-2 h-4 w-4" />
-														Generate Podcast
-													{/if}
-												</Button>
+												{#if isPodcastReady(digest.id)}
+													<Button
+														size="sm"
+														variant="outline"
+														href={getPodcastDownloadUrl(digest.id) ?? undefined}
+														target="_blank"
+														rel="noopener noreferrer"
+													>
+														<Download class="mr-2 h-4 w-4" />
+														Download Podcast
+													</Button>
+												{:else}
+													<Button
+														size="sm"
+														variant="outline"
+														onclick={() => triggerDigestPodcast(digest)}
+														disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
+													>
+														{#if isPodcastTriggerPending(digest.id)}
+															<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+															Queuing...
+														{:else if isPodcastStatusActive(digest.id)}
+															<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+															Generating...
+														{:else}
+															<Mic class="mr-2 h-4 w-4" />
+															Generate Podcast
+														{/if}
+													</Button>
+												{/if}
 												{#if getPodcastStatusLabel(digest.id)}
 													<span class={`text-xs ${isPodcastStatusFailed(digest.id) ? 'text-destructive' : 'text-muted-foreground'}`}>
 														{getPodcastStatusLabel(digest.id)}
@@ -835,23 +862,36 @@
 										<Eye class="mr-2 h-4 w-4" />
 										Read
 									</Button>
-									<Button
-										size="sm"
-										variant="outline"
-										onclick={() => triggerDigestPodcast(digest)}
-										disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
-									>
-										{#if isPodcastTriggerPending(digest.id)}
-											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-											Queuing...
-										{:else if isPodcastStatusActive(digest.id)}
-											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-											Generating...
-										{:else}
-											<Mic class="mr-2 h-4 w-4" />
-											Generate Podcast
-										{/if}
-									</Button>
+									{#if isPodcastReady(digest.id)}
+										<Button
+											size="sm"
+											variant="outline"
+											href={getPodcastDownloadUrl(digest.id) ?? undefined}
+											target="_blank"
+											rel="noopener noreferrer"
+										>
+											<Download class="mr-2 h-4 w-4" />
+											Download Podcast
+										</Button>
+									{:else}
+										<Button
+											size="sm"
+											variant="outline"
+											onclick={() => triggerDigestPodcast(digest)}
+											disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
+										>
+											{#if isPodcastTriggerPending(digest.id)}
+												<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+												Queuing...
+											{:else if isPodcastStatusActive(digest.id)}
+												<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+												Generating...
+											{:else}
+												<Mic class="mr-2 h-4 w-4" />
+												Generate Podcast
+											{/if}
+										</Button>
+									{/if}
 								{/if}
 								{#if getPodcastStatusLabel(digest.id)}
 									<p class={`text-xs ${isPodcastStatusFailed(digest.id) ? 'text-destructive' : 'text-muted-foreground'}`}>
@@ -926,23 +966,36 @@
 										<Eye class="mr-2 h-4 w-4" />
 										Read
 									</Button>
-									<Button
-										size="sm"
-										variant="outline"
-										onclick={() => triggerDigestPodcast(digest)}
-										disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
-									>
-										{#if isPodcastTriggerPending(digest.id)}
-											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-											Queuing...
-										{:else if isPodcastStatusActive(digest.id)}
-											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-											Generating...
-										{:else}
-											<Mic class="mr-2 h-4 w-4" />
-											Podcast
-										{/if}
-									</Button>
+									{#if isPodcastReady(digest.id)}
+										<Button
+											size="sm"
+											variant="outline"
+											href={getPodcastDownloadUrl(digest.id) ?? undefined}
+											target="_blank"
+											rel="noopener noreferrer"
+										>
+											<Download class="mr-2 h-4 w-4" />
+											Download Podcast
+										</Button>
+									{:else}
+										<Button
+											size="sm"
+											variant="outline"
+											onclick={() => triggerDigestPodcast(digest)}
+											disabled={isPodcastTriggerPending(digest.id) || !canGeneratePodcast(digest)}
+										>
+											{#if isPodcastTriggerPending(digest.id)}
+												<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+												Queuing...
+											{:else if isPodcastStatusActive(digest.id)}
+												<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+												Generating...
+											{:else}
+												<Mic class="mr-2 h-4 w-4" />
+												Podcast
+											{/if}
+										</Button>
+									{/if}
 								{/if}
 								{#if getPodcastStatusLabel(digest.id)}
 									<p class={`w-full text-xs ${isPodcastStatusFailed(digest.id) ? 'text-destructive' : 'text-muted-foreground'}`}>
