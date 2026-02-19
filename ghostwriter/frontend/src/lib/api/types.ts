@@ -545,7 +545,7 @@ export interface PodcastPreferencesResponse {
 	enabled: boolean;
 	schedule: 'daily' | 'weekly' | 'manual';
 	schedule_time: string;
-	schedule_day: string;
+	schedule_day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 	topic_weights: Record<string, number>;
 	boost_sources: string[];
 	boost_keywords: string[];
@@ -562,7 +562,23 @@ export interface PodcastPreferencesResponse {
 }
 
 export interface PodcastPreferencesUpdate {
+	enabled?: boolean;
+	schedule?: 'daily' | 'weekly' | 'manual';
+	schedule_time?: string;
+	schedule_day?: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+	preferred_length_minutes?: number;
+	style?: 'casual' | 'formal' | 'deep-dive';
+	host_a_voice?: string;
+	host_b_voice?: string;
 	podcast_feed_enabled?: boolean;
+	podcast_feed_title?: string;
+	podcast_feed_description?: string;
+}
+
+export interface PodcastTriggerResponse {
+	episode_id: string;
+	status: string;
+	message: string;
 }
 
 // ============ API Error ============
