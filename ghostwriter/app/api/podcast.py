@@ -7,6 +7,7 @@ from email.utils import format_datetime
 from pathlib import Path
 from typing import Iterator
 from uuid import UUID
+import logging
 import mimetypes
 import os
 import xml.etree.ElementTree as ET
@@ -14,6 +15,7 @@ import xml.etree.ElementTree as ET
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
@@ -26,6 +28,7 @@ from app.models.podcast_preferences import PodcastPreferencesRead, PodcastPrefer
 from app.services.podcast_service import podcast_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class PodcastEpisodeStatusRead(BaseModel):
@@ -399,9 +402,20 @@ async def get_digest_podcast_status(
     session: Session = Depends(get_session),
 ):
     """Get podcast generation status for a digest."""
-    episode = session.exec(
-        select(PodcastEpisode).where(PodcastEpisode.digest_id == digest_id)
-    ).first()
+    try:
+        episode = session.exec(
+            select(PodcastEpisode).where(PodcastEpisode.digest_id == digest_id)
+        ).first()
+    except SQLAlchemyTimeoutError as exc:
+        logger.warning(
+            "Podcast status check timed out waiting for DB connection",
+            extra={"digest_id": str(digest_id)},
+            exc_info=exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Podcast status temporarily unavailable. Please retry shortly.",
+        ) from exc
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found for digest")
     return DigestPodcastStatusResponse(
