@@ -581,6 +581,26 @@ export interface PodcastTriggerResponse {
 	message: string;
 }
 
+export interface PodcastEpisodeStatusResponse {
+	id: string;
+	digest_id: string;
+	status: string;
+	audio_size_bytes: number | null;
+	duration_seconds: number | null;
+	article_count: number;
+	generation_cost_cents: number | null;
+	error_message: string | null;
+	created_at: string;
+	completed_at: string | null;
+	stream_url: string | null;
+	download_url: string | null;
+}
+
+export interface DigestPodcastStatusResponse {
+	digest_id: string;
+	episode: PodcastEpisodeStatusResponse;
+}
+
 // ============ API Error ============
 
 export interface APIError {
