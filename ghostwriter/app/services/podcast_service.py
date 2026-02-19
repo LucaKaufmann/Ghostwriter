@@ -770,7 +770,12 @@ class PodcastDigestService:
                 if not selected_articles:
                     raise RuntimeError("No articles passed podcast scoring")
 
-                script = await self.generate_script(selected_articles, runtime_prefs)
+                script = await self.generate_script(
+                    selected_articles,
+                    runtime_prefs,
+                    episode_id=episode_id,
+                    digest_id=digest.id,
+                )
                 segments = self.parse_script_segments(script)
                 logger.info(
                     "Podcast script generation complete",
@@ -987,6 +992,9 @@ class PodcastDigestService:
         self,
         articles: list[DigestArticle],
         prefs: PodcastGenerationPreferences,
+        *,
+        episode_id: UUID | None = None,
+        digest_id: UUID | None = None,
     ) -> str:
         """Generate and validate podcast script from selected articles."""
         if not articles:
@@ -1010,6 +1018,28 @@ class PodcastDigestService:
         )
 
         model = self.settings.get_llm_model_string()
+        if episode_id is not None:
+            debug_dir = Path(self.settings.logs_dir) / "podcast_script_prompts"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            debug_path = debug_dir / f"{episode_id}.json"
+            self._write_script_prompt_debug(
+                debug_path,
+                {
+                    "episode_id": str(episode_id),
+                    "digest_id": str(digest_id) if digest_id else None,
+                    "model": model,
+                    "style": prefs.style,
+                    "length_minutes": prefs.preferred_length_minutes,
+                    "article_count": len(articles),
+                    "generated_at_utc": datetime.utcnow().isoformat() + "Z",
+                    "system_prompt": SCRIPT_SYSTEM_PROMPT,
+                    "user_prompt": prompt,
+                },
+            )
+            logger.info(
+                "Podcast script prompt debug saved",
+                extra={"episode_id": str(episode_id), "path": str(debug_path)},
+            )
         retries = 2
         for attempt in range(retries + 1):
             logger.info(
@@ -1049,6 +1079,14 @@ class PodcastDigestService:
                 await asyncio.sleep(0.5 * (attempt + 1))
 
         raise RuntimeError("Failed to generate valid podcast script")
+
+    @staticmethod
+    def _write_script_prompt_debug(path: Path, payload: dict[str, Any]) -> None:
+        """Persist one script-generation prompt payload for debugging."""
+        try:
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            logger.warning("Failed writing podcast script prompt debug file", exc_info=True)
 
     @staticmethod
     def _script_style_guidance(style: str) -> str:

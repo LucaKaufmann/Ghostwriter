@@ -321,7 +321,7 @@ async def test_run_episode_generation_uses_runtime_preference_snapshot(monkeypat
         episode = podcast_service.queue_episode_generation(session, digest_id=digest_id)
         episode_id = episode.id
 
-    async def _fake_generate_script(_articles, prefs):
+    async def _fake_generate_script(_articles, prefs, **_kwargs):
         assert isinstance(prefs, PodcastGenerationPreferences)
         return (
             "[HOST_A]: Intro\n"
