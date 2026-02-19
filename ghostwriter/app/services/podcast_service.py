@@ -156,6 +156,10 @@ class PodcastDigestService:
                 cleared += 1
             if cleared:
                 session.commit()
+                logger.warning(
+                    "Recovered stuck podcast episodes on startup",
+                    extra={"cleared_count": cleared},
+                )
         return cleared
 
     @staticmethod
@@ -299,6 +303,18 @@ class PodcastDigestService:
         session.add(prefs)
         session.commit()
         session.refresh(prefs)
+        logger.info(
+            "Podcast preferences updated",
+            extra={
+                "enabled": prefs.enabled,
+                "schedule": prefs.schedule,
+                "schedule_time": prefs.schedule_time,
+                "schedule_day": prefs.schedule_day,
+                "preferred_length_minutes": prefs.preferred_length_minutes,
+                "style": prefs.style,
+                "podcast_feed_enabled": prefs.podcast_feed_enabled,
+            },
+        )
         return prefs
 
     def get_preferences_by_feed_token(
@@ -397,11 +413,23 @@ class PodcastDigestService:
 
         if episode is not None:
             if episode.status in RUNNING_STATUSES:
+                logger.info(
+                    "Podcast generation already running for digest",
+                    extra={"digest_id": str(digest_id), "episode_id": str(episode.id), "status": episode.status},
+                )
                 return episode
             if episode.status == "ready" and not force:
+                logger.info(
+                    "Podcast already ready for digest; skipping queue",
+                    extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                )
                 return episode
             if episode.status in {"pending", "failed"} and not force:
                 if episode.status == "pending":
+                    logger.info(
+                        "Podcast generation already pending; ensuring worker task is scheduled",
+                        extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                    )
                     self._schedule_episode_task(episode.id)
                 return episode
 
@@ -426,6 +454,10 @@ class PodcastDigestService:
                 session.add(episode)
                 session.commit()
                 session.refresh(episode)
+                logger.info(
+                    "Podcast episode reset for forced regeneration",
+                    extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                )
                 self._schedule_episode_task(episode.id)
                 return episode
 
@@ -441,6 +473,10 @@ class PodcastDigestService:
         session.add(episode)
         session.commit()
         session.refresh(episode)
+        logger.info(
+            "Podcast episode queued",
+            extra={"digest_id": str(digest_id), "episode_id": str(episode.id), "force": force},
+        )
         self._schedule_episode_task(episode.id)
         return episode
 
@@ -450,10 +486,26 @@ class PodcastDigestService:
             user_id = self._resolve_user_id(session)
             prefs = self.get_or_create_preferences(session, user_id=user_id)
             if not prefs.enabled or prefs.schedule == "manual":
+                logger.debug(
+                    "Podcast auto-generation skipped: disabled or manual schedule",
+                    extra={
+                        "digest_id": str(digest_id),
+                        "enabled": prefs.enabled,
+                        "schedule": prefs.schedule,
+                    },
+                )
                 return None
 
             digest = session.get(Digest, digest_id)
             if digest is None or digest.status != "completed" or digest.completed_at is None:
+                logger.debug(
+                    "Podcast auto-generation skipped: digest not eligible",
+                    extra={
+                        "digest_id": str(digest_id),
+                        "digest_found": digest is not None,
+                        "digest_status": getattr(digest, "status", None),
+                    },
+                )
                 return None
 
             if not self._schedule_window_allows_generation(
@@ -461,6 +513,15 @@ class PodcastDigestService:
                 prefs=prefs,
                 completed_at=digest.completed_at,
             ):
+                logger.debug(
+                    "Podcast auto-generation skipped: schedule window not matched",
+                    extra={
+                        "digest_id": str(digest_id),
+                        "schedule": prefs.schedule,
+                        "schedule_time": prefs.schedule_time,
+                        "schedule_day": prefs.schedule_day,
+                    },
+                )
                 return None
 
             episode = self.queue_episode_generation(
@@ -468,6 +529,10 @@ class PodcastDigestService:
                 digest_id,
                 user_id=prefs.user_id,
                 force=False,
+            )
+            logger.info(
+                "Podcast auto-generation queued",
+                extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
             )
             return episode.id
 
@@ -529,6 +594,7 @@ class PodcastDigestService:
 
     def _schedule_episode_task(self, episode_id: UUID) -> None:
         """Schedule one podcast generation background task."""
+        logger.info("Scheduling podcast generation task", extra={"episode_id": str(episode_id)})
         task = asyncio.create_task(
             self._run_episode_generation(episode_id),
             name=f"podcast_episode_{episode_id}",
@@ -545,6 +611,10 @@ class PodcastDigestService:
                 return
             if episode.status in RUNNING_STATUSES:
                 return
+            logger.info(
+                "Podcast generation started",
+                extra={"episode_id": str(episode_id), "digest_id": str(episode.digest_id)},
+            )
             episode.status = "generating_script"
             episode.error_message = None
             episode.started_at = now
@@ -568,12 +638,29 @@ class PodcastDigestService:
                     prefs=prefs,
                     user_id=user_id,
                 )
+                logger.info(
+                    "Podcast article selection complete",
+                    extra={
+                        "episode_id": str(episode_id),
+                        "digest_id": str(digest.id),
+                        "selected_article_count": len(selected_articles),
+                    },
+                )
 
                 if not selected_articles:
                     raise RuntimeError("No articles passed podcast scoring")
 
                 script = await self.generate_script(selected_articles, prefs)
                 segments = self.parse_script_segments(script)
+                logger.info(
+                    "Podcast script generation complete",
+                    extra={
+                        "episode_id": str(episode_id),
+                        "digest_id": str(digest.id),
+                        "script_chars": len(script),
+                        "segment_count": len(segments),
+                    },
+                )
 
                 episode.script = script
                 episode.article_ids = [str(article.id) for article in selected_articles]
@@ -602,6 +689,17 @@ class PodcastDigestService:
                 episode.completed_at = datetime.utcnow()
                 session.add(episode)
                 session.commit()
+                logger.info(
+                    "Podcast generation completed",
+                    extra={
+                        "episode_id": str(episode_id),
+                        "digest_id": str(episode.digest_id),
+                        "audio_size_bytes": audio_result.audio_size_bytes,
+                        "duration_seconds": audio_result.duration_seconds,
+                        "article_count": episode.article_count,
+                        "generation_cost_cents": episode.generation_cost_cents,
+                    },
+                )
         except Exception as exc:
             logger.exception("Podcast episode generation failed: %s", exc)
             with Session(engine) as session:
@@ -628,6 +726,10 @@ class PodcastDigestService:
             .order_by(DigestArticle.sort_order.asc())
         ).all()
         if not articles:
+            logger.info(
+                "Podcast article selection found no digest articles",
+                extra={"digest_id": str(digest_id)},
+            )
             return []
 
         feedback_profile = self._build_feedback_profile(session, user_id=user_id)
@@ -643,11 +745,26 @@ class PodcastDigestService:
             scored.append((score, article.sort_order, article))
 
         if not scored:
+            logger.info(
+                "Podcast article selection scored no eligible articles",
+                extra={"digest_id": str(digest_id), "digest_article_count": len(articles)},
+            )
             return []
 
         scored.sort(key=lambda row: (-row[0], row[1]))
         target_count = max(8, min(20, prefs.preferred_length_minutes + 4))
-        return [row[2] for row in scored[:target_count]]
+        selected = [row[2] for row in scored[:target_count]]
+        logger.info(
+            "Podcast article selection summary",
+            extra={
+                "digest_id": str(digest_id),
+                "digest_article_count": len(articles),
+                "scored_article_count": len(scored),
+                "target_count": target_count,
+                "selected_count": len(selected),
+            },
+        )
+        return selected
 
     def _build_feedback_profile(
         self,
@@ -755,6 +872,15 @@ class PodcastDigestService:
         model = self.settings.get_llm_model_string()
         retries = 2
         for attempt in range(retries + 1):
+            logger.info(
+                "Generating podcast script attempt",
+                extra={
+                    "attempt": attempt + 1,
+                    "attempts_total": retries + 1,
+                    "article_count": len(articles),
+                    "model": model,
+                },
+            )
             script, failed = await self.llm_service._run_completion(
                 prompt,
                 model,
@@ -765,6 +891,13 @@ class PodcastDigestService:
                 continue
             try:
                 self.parse_script_segments(script)
+                logger.info(
+                    "Podcast script generated and validated",
+                    extra={
+                        "attempt": attempt + 1,
+                        "script_chars": len(script.strip()),
+                    },
+                )
                 return script.strip()
             except ValueError as exc:
                 logger.warning(
@@ -818,6 +951,14 @@ class PodcastDigestService:
         output_dir = Path(self.settings.output_dir) / "podcasts"
         output_dir.mkdir(parents=True, exist_ok=True)
         final_path = output_dir / f"{episode_id}.mp3"
+        logger.info(
+            "Podcast audio generation started",
+            extra={
+                "episode_id": str(episode_id),
+                "segment_count": len(segments),
+                "output_path": str(final_path),
+            },
+        )
 
         synthesized_chars = 0
         with tempfile.TemporaryDirectory(prefix="podcast_tts_") as tmpdir:
@@ -842,6 +983,16 @@ class PodcastDigestService:
 
         audio_size = final_path.stat().st_size
         duration = self._probe_audio_duration_seconds(final_path)
+        logger.info(
+            "Podcast audio generation complete",
+            extra={
+                "episode_id": str(episode_id),
+                "synthesized_segment_count": len(segment_paths),
+                "audio_size_bytes": audio_size,
+                "duration_seconds": duration,
+                "synthesized_chars": synthesized_chars,
+            },
+        )
         return AudioGenerationResult(
             audio_path=str(final_path),
             audio_size_bytes=audio_size,
