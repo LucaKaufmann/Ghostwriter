@@ -23,6 +23,7 @@
 		Loader2,
 		LayoutGrid,
 		List,
+		Mic,
 		Play,
 		RefreshCw,
 		Trash2
@@ -86,6 +87,19 @@
 		},
 		onError: (err: Error) => {
 			toast.error('Failed to delete digest', {
+				description: err.message ?? 'Unknown error'
+			});
+		}
+	}));
+
+	const triggerPodcastMutation = createMutation(() => ({
+		mutationFn: (digestId: string) => api.triggerDigestPodcast(digestId),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['digests'] });
+			toast.success('Podcast generation queued');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to generate podcast', {
 				description: err.message ?? 'Unknown error'
 			});
 		}
@@ -178,6 +192,10 @@
 
 	function openReader(digest: Digest) {
 		goto(`/digests/${digest.id}/read`);
+	}
+
+	function canGeneratePodcast(digest: Digest): boolean {
+		return digest.status === 'completed';
 	}
 
 	function formatDate(dateStr: string): string {
@@ -302,6 +320,11 @@
 		} finally {
 			downloadPendingByKey = { ...downloadPendingByKey, [key]: false };
 		}
+	}
+
+	function triggerDigestPodcast(digest: Digest) {
+		if (!canGeneratePodcast(digest)) return;
+		triggerPodcastMutation.mutate(digest.id);
 	}
 </script>
 
@@ -535,7 +558,7 @@
 								<Table.Head>Status</Table.Head>
 								<Table.Head>Articles</Table.Head>
 								<Table.Head>Duration</Table.Head>
-								<Table.Head class="w-[260px]">Actions</Table.Head>
+								<Table.Head class="w-[320px]">Actions</Table.Head>
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
@@ -582,6 +605,20 @@
 												<Button size="sm" variant="outline" onclick={() => openReader(digest)}>
 													<Eye class="mr-2 h-4 w-4" />
 													Read
+												</Button>
+												<Button
+													size="sm"
+													variant="outline"
+													onclick={() => triggerDigestPodcast(digest)}
+													disabled={triggerPodcastMutation.isPending}
+												>
+													{#if triggerPodcastMutation.isPending}
+														<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+														Queuing...
+													{:else}
+														<Mic class="mr-2 h-4 w-4" />
+														Generate Podcast
+													{/if}
 												</Button>
 											{/if}
 												{#if digest.filename}
@@ -660,6 +697,20 @@
 										<Eye class="mr-2 h-4 w-4" />
 										Read
 									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										onclick={() => triggerDigestPodcast(digest)}
+										disabled={triggerPodcastMutation.isPending}
+									>
+										{#if triggerPodcastMutation.isPending}
+											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+											Queuing...
+										{:else}
+											<Mic class="mr-2 h-4 w-4" />
+											Generate Podcast
+										{/if}
+									</Button>
 								{/if}
 									{#if digest.filename}
 										<Button size="sm" variant="outline" onclick={() => downloadDigest(digest, 'epub')} disabled={isDownloadPending(digest, 'epub')}>
@@ -725,6 +776,20 @@
 									<Button size="sm" variant="outline" onclick={() => openReader(digest)}>
 										<Eye class="mr-2 h-4 w-4" />
 										Read
+									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										onclick={() => triggerDigestPodcast(digest)}
+										disabled={triggerPodcastMutation.isPending}
+									>
+										{#if triggerPodcastMutation.isPending}
+											<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+											Queuing...
+										{:else}
+											<Mic class="mr-2 h-4 w-4" />
+											Podcast
+										{/if}
 									</Button>
 								{/if}
 									{#if digest.filename}
