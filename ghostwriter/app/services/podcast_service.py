@@ -492,7 +492,32 @@ class PodcastDigestService:
                         "Podcast generation already pending; ensuring worker task is scheduled",
                         extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
                     )
-                    self._schedule_episode_task(episode.id)
+                else:
+                    if episode.audio_path and os.path.exists(episode.audio_path):
+                        try:
+                            os.remove(episode.audio_path)
+                        except OSError:
+                            logger.warning("Failed deleting old podcast audio before retry", exc_info=True)
+                    episode.script = None
+                    episode.audio_path = None
+                    episode.audio_size_bytes = None
+                    episode.duration_seconds = None
+                    episode.generation_cost_cents = None
+                    episode.article_ids = []
+                    episode.article_count = 0
+                    episode.status = "pending"
+                    episode.error_message = None
+                    episode.started_at = None
+                    episode.completed_at = None
+                    episode.updated_at = now
+                    session.add(episode)
+                    session.commit()
+                    session.refresh(episode)
+                    logger.info(
+                        "Podcast failed episode re-queued",
+                        extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                    )
+                self._schedule_episode_task(episode.id)
                 return episode
 
             if force:
