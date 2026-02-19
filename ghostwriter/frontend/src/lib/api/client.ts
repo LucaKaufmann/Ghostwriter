@@ -49,7 +49,9 @@ import type {
 	RetryFailedMediaResponse,
 	FeedCheckResponse,
 	PodcastFeedInfoResponse,
-	PodcastArtworkUploadResponse
+	PodcastArtworkUploadResponse,
+	PodcastPreferencesResponse,
+	PodcastPreferencesUpdate
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -590,6 +592,17 @@ class ApiClient {
 
 	async getPodcastFeedInfo(): Promise<PodcastFeedInfoResponse> {
 		return this.request<PodcastFeedInfoResponse>('/podcast/feed/info');
+	}
+
+	async getPodcastPreferences(): Promise<PodcastPreferencesResponse> {
+		return this.request<PodcastPreferencesResponse>('/podcast/preferences');
+	}
+
+	async updatePodcastPreferences(data: PodcastPreferencesUpdate): Promise<PodcastPreferencesResponse> {
+		return this.request<PodcastPreferencesResponse>('/podcast/preferences', {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
 	}
 
 	async uploadPodcastFeedArtwork(file: File): Promise<PodcastArtworkUploadResponse> {

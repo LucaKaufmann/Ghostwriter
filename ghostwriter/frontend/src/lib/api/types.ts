@@ -541,6 +541,30 @@ export interface PodcastArtworkUploadResponse {
 	height: number;
 }
 
+export interface PodcastPreferencesResponse {
+	enabled: boolean;
+	schedule: 'daily' | 'weekly' | 'manual';
+	schedule_time: string;
+	schedule_day: string;
+	topic_weights: Record<string, number>;
+	boost_sources: string[];
+	boost_keywords: string[];
+	filter_keywords: string[];
+	preferred_length_minutes: number;
+	style: 'casual' | 'formal' | 'deep-dive';
+	host_a_voice: string;
+	host_b_voice: string;
+	podcast_feed_enabled: boolean;
+	podcast_feed_title: string;
+	podcast_feed_description: string;
+	podcast_feed_artwork_path: string | null;
+	updated_at: string;
+}
+
+export interface PodcastPreferencesUpdate {
+	podcast_feed_enabled?: boolean;
+}
+
 // ============ API Error ============
 
 export interface APIError {
