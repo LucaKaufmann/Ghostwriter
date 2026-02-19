@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -1106,12 +1107,27 @@ class PodcastDigestService:
         output_dir = Path(self.settings.output_dir) / "podcasts"
         output_dir.mkdir(parents=True, exist_ok=True)
         final_path = output_dir / f"{episode_id}.mp3"
+        debug_dir = Path(self.settings.logs_dir) / "podcast_tts_prompts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        debug_path = debug_dir / f"{episode_id}.jsonl"
+        debug_path.write_text("", encoding="utf-8")
         logger.info(
             "Podcast audio generation started",
             extra={
                 "episode_id": str(episode_id),
                 "segment_count": len(segments),
                 "output_path": str(final_path),
+                "tts_debug_path": str(debug_path),
+            },
+        )
+        self._append_tts_debug_entry(
+            debug_path,
+            {
+                "event": "audio_generation_started",
+                "episode_id": str(episode_id),
+                "segment_count": len(segments),
+                "provider": (prefs.tts_provider or "openai").strip().lower(),
+                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
             },
         )
 
@@ -1136,6 +1152,19 @@ class PodcastDigestService:
                     )
                     voice = preferred_voice.strip() or fallback
 
+                self._append_tts_debug_entry(
+                    debug_path,
+                    {
+                        "event": "tts_request",
+                        "segment_index": index,
+                        "speaker": segment.speaker,
+                        "voice": voice,
+                        "provider": provider,
+                        "text": segment.text,
+                        "text_chars": len(segment.text),
+                        "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                    },
+                )
                 audio_bytes = await self._synthesize_segment_with_retry(
                     text=segment.text,
                     voice=voice,
@@ -1144,19 +1173,62 @@ class PodcastDigestService:
                 )
                 if not audio_bytes:
                     logger.warning("Skipping TTS segment after retries: %s", segment.speaker)
+                    self._append_tts_debug_entry(
+                        debug_path,
+                        {
+                            "event": "tts_segment_failed",
+                            "segment_index": index,
+                            "speaker": segment.speaker,
+                            "voice": voice,
+                            "provider": provider,
+                            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                        },
+                    )
                     continue
                 path = Path(tmpdir) / f"segment_{index:04d}.mp3"
                 path.write_bytes(audio_bytes)
                 segment_paths.append(path)
                 synthesized_chars += len(segment.text)
+                self._append_tts_debug_entry(
+                    debug_path,
+                    {
+                        "event": "tts_segment_synthesized",
+                        "segment_index": index,
+                        "speaker": segment.speaker,
+                        "voice": voice,
+                        "provider": provider,
+                        "audio_bytes": len(audio_bytes),
+                        "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                    },
+                )
 
             if not segment_paths:
+                self._append_tts_debug_entry(
+                    debug_path,
+                    {
+                        "event": "audio_generation_failed",
+                        "reason": "TTS failed for all segments",
+                        "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                    },
+                )
                 raise RuntimeError("TTS failed for all segments")
 
             self._stitch_segments(segment_paths, final_path)
 
         audio_size = final_path.stat().st_size
         duration = self._probe_audio_duration_seconds(final_path)
+        self._append_tts_debug_entry(
+            debug_path,
+            {
+                "event": "audio_generation_completed",
+                "episode_id": str(episode_id),
+                "synthesized_segment_count": len(segment_paths),
+                "audio_size_bytes": audio_size,
+                "duration_seconds": duration,
+                "synthesized_chars": synthesized_chars,
+                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            },
+        )
         logger.info(
             "Podcast audio generation complete",
             extra={
@@ -1204,6 +1276,15 @@ class PodcastDigestService:
                     await asyncio.sleep(0.5 * (attempt + 1))
         logger.error("%s TTS failed after retries: %s", provider, last_error)
         return b""
+
+    @staticmethod
+    def _append_tts_debug_entry(path: Path, payload: dict[str, Any]) -> None:
+        """Append one JSONL entry to per-episode TTS debug trace."""
+        try:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            logger.warning("Failed writing podcast TTS debug entry", exc_info=True)
 
     async def _synthesize_segment(
         self,
