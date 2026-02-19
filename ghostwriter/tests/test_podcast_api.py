@@ -19,7 +19,11 @@ from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
 from app.models.user import User
-from app.services.podcast_service import podcast_service
+from app.services.podcast_service import (
+    AudioGenerationResult,
+    PodcastGenerationPreferences,
+    podcast_service,
+)
 
 
 def _create_digest_with_articles(
@@ -271,6 +275,51 @@ def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
         refreshed = session.get(PodcastEpisode, failed.id)
         assert refreshed is not None
         assert refreshed.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_run_episode_generation_uses_runtime_preference_snapshot(monkeypatch):
+    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    digest_id, _ = _create_digest_with_articles(article_count=2)
+
+    with Session(engine) as session:
+        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs.openai_api_key = "test-openai-key"
+        session.add(prefs)
+        session.commit()
+        episode = podcast_service.queue_episode_generation(session, digest_id=digest_id)
+        episode_id = episode.id
+
+    async def _fake_generate_script(_articles, prefs):
+        assert isinstance(prefs, PodcastGenerationPreferences)
+        return (
+            "[HOST_A]: Intro\n"
+            "[HOST_B]: Context\n"
+            "[HOST_A]: Story one\n"
+            "[HOST_B]: Story one context\n"
+            "[HOST_A]: Story two\n"
+            "[HOST_B]: Closing\n"
+        )
+
+    async def _fake_generate_audio(_episode_id, _segments, prefs):
+        assert isinstance(prefs, PodcastGenerationPreferences)
+        return AudioGenerationResult(
+            audio_path="/tmp/podcast-test.mp3",
+            audio_size_bytes=1234,
+            duration_seconds=42,
+            synthesized_chars=250,
+        )
+
+    monkeypatch.setattr(podcast_service, "generate_script", _fake_generate_script)
+    monkeypatch.setattr(podcast_service, "generate_audio", _fake_generate_audio)
+
+    await podcast_service._run_episode_generation(episode_id)
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, episode_id)
+        assert refreshed is not None
+        assert refreshed.status == "ready"
+        assert refreshed.error_message is None
 
 
 def test_stream_download_and_feed_with_token_auth(client, tmp_path):

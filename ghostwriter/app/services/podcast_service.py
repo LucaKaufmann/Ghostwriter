@@ -136,6 +136,26 @@ class AudioGenerationResult:
     synthesized_chars: int
 
 
+@dataclass(frozen=True)
+class PodcastGenerationPreferences:
+    """Session-independent preferences used during episode generation."""
+
+    topic_weights: dict[str, float]
+    boost_sources: list[str]
+    boost_keywords: list[str]
+    filter_keywords: list[str]
+    preferred_length_minutes: int
+    style: str
+    tts_provider: str
+    openai_tts_model: str
+    openai_api_key: str | None
+    elevenlabs_model_id: str
+    elevenlabs_api_key: str | None
+    elevenlabs_output_format: str
+    host_a_voice: str
+    host_b_voice: str
+
+
 class PodcastDigestService:
     """Service that manages podcast preferences, feedback, and episode generation."""
 
@@ -644,6 +664,28 @@ class PodcastDigestService:
         _podcast_tasks.add(task)
         task.add_done_callback(_podcast_tasks.discard)
 
+    def _snapshot_generation_preferences(
+        self,
+        prefs: PodcastPreferences,
+    ) -> PodcastGenerationPreferences:
+        """Create a detached-safe copy of generation-related preferences."""
+        return PodcastGenerationPreferences(
+            topic_weights=dict(prefs.topic_weights or {}),
+            boost_sources=list(prefs.boost_sources or []),
+            boost_keywords=list(prefs.boost_keywords or []),
+            filter_keywords=list(prefs.filter_keywords or []),
+            preferred_length_minutes=int(prefs.preferred_length_minutes),
+            style=str(prefs.style),
+            tts_provider=str(prefs.tts_provider),
+            openai_tts_model=str(prefs.openai_tts_model or "tts-1"),
+            openai_api_key=prefs.openai_api_key,
+            elevenlabs_model_id=str(prefs.elevenlabs_model_id or "eleven_turbo_v2_5"),
+            elevenlabs_api_key=prefs.elevenlabs_api_key,
+            elevenlabs_output_format=str(prefs.elevenlabs_output_format or "mp3_44100_128"),
+            host_a_voice=str(prefs.host_a_voice or "alloy"),
+            host_b_voice=str(prefs.host_b_voice or "echo"),
+        )
+
     async def _run_episode_generation(self, episode_id: UUID) -> None:
         """Run end-to-end script and audio generation for one episode."""
         now = datetime.utcnow()
@@ -674,10 +716,11 @@ class PodcastDigestService:
                     raise RuntimeError("Digest not found for episode")
                 user_id = episode.user_id or self._resolve_user_id(session)
                 prefs = self.get_or_create_preferences(session, user_id=user_id)
+                runtime_prefs = self._snapshot_generation_preferences(prefs)
                 selected_articles = self.select_articles_for_episode(
                     session,
                     digest_id=digest.id,
-                    prefs=prefs,
+                    prefs=runtime_prefs,
                     user_id=user_id,
                 )
                 logger.info(
@@ -692,7 +735,7 @@ class PodcastDigestService:
                 if not selected_articles:
                     raise RuntimeError("No articles passed podcast scoring")
 
-                script = await self.generate_script(selected_articles, prefs)
+                script = await self.generate_script(selected_articles, runtime_prefs)
                 segments = self.parse_script_segments(script)
                 logger.info(
                     "Podcast script generation complete",
@@ -711,8 +754,16 @@ class PodcastDigestService:
                 episode.updated_at = datetime.utcnow()
                 session.add(episode)
                 session.commit()
+                logger.info(
+                    "Podcast generation moved to audio synthesis",
+                    extra={
+                        "episode_id": str(episode_id),
+                        "digest_id": str(digest.id),
+                        "status": episode.status,
+                    },
+                )
 
-            audio_result = await self.generate_audio(episode_id, segments, prefs)
+            audio_result = await self.generate_audio(episode_id, segments, runtime_prefs)
 
             with Session(engine) as session:
                 episode = session.get(PodcastEpisode, episode_id)
@@ -743,7 +794,10 @@ class PodcastDigestService:
                     },
                 )
         except Exception as exc:
-            logger.exception("Podcast episode generation failed: %s", exc)
+            logger.exception(
+                "Podcast episode generation failed",
+                extra={"episode_id": str(episode_id), "error": str(exc)[:300]},
+            )
             with Session(engine) as session:
                 episode = session.get(PodcastEpisode, episode_id)
                 if episode:
@@ -752,13 +806,21 @@ class PodcastDigestService:
                     episode.updated_at = datetime.utcnow()
                     session.add(episode)
                     session.commit()
+                    logger.info(
+                        "Podcast generation marked failed",
+                        extra={
+                            "episode_id": str(episode_id),
+                            "digest_id": str(episode.digest_id),
+                            "status": episode.status,
+                        },
+                    )
 
     def select_articles_for_episode(
         self,
         session: Session,
         *,
         digest_id: UUID,
-        prefs: PodcastPreferences,
+        prefs: PodcastGenerationPreferences,
         user_id: UUID | None,
     ) -> list[DigestArticle]:
         """Rank digest articles and pick top items for script generation."""
@@ -842,7 +904,7 @@ class PodcastDigestService:
         self,
         *,
         article: DigestArticle,
-        prefs: PodcastPreferences,
+        prefs: PodcastGenerationPreferences,
         feedback_profile: dict[str, tuple[int, int]],
     ) -> float:
         """Score one article against preferences and past feedback."""
@@ -889,7 +951,7 @@ class PodcastDigestService:
     async def generate_script(
         self,
         articles: list[DigestArticle],
-        prefs: PodcastPreferences,
+        prefs: PodcastGenerationPreferences,
     ) -> str:
         """Generate and validate podcast script from selected articles."""
         if not articles:
@@ -982,7 +1044,7 @@ class PodcastDigestService:
         self,
         episode_id: UUID,
         segments: list[ScriptSegment],
-        prefs: PodcastPreferences,
+        prefs: PodcastGenerationPreferences,
     ) -> AudioGenerationResult:
         """Synthesize audio for script segments and stitch into one MP3."""
         if not segments:
@@ -1065,7 +1127,7 @@ class PodcastDigestService:
         text: str,
         voice: str,
         provider: str,
-        prefs: PodcastPreferences,
+        prefs: PodcastGenerationPreferences,
     ) -> bytes:
         """Generate one TTS segment with bounded retries."""
         last_error: Exception | None = None
@@ -1096,7 +1158,7 @@ class PodcastDigestService:
         text: str,
         voice: str,
         provider: str,
-        prefs: PodcastPreferences,
+        prefs: PodcastGenerationPreferences,
     ) -> bytes:
         """Call selected TTS provider API."""
         if provider == "openai":
@@ -1110,7 +1172,7 @@ class PodcastDigestService:
         *,
         text: str,
         voice: str,
-        prefs: PodcastPreferences,
+        prefs: PodcastGenerationPreferences,
     ) -> bytes:
         """Call OpenAI audio speech API."""
         api_key = (prefs.openai_api_key or "").strip() or self.settings.openai_api_key.strip()
@@ -1142,7 +1204,7 @@ class PodcastDigestService:
         *,
         text: str,
         voice: str,
-        prefs: PodcastPreferences,
+        prefs: PodcastGenerationPreferences,
     ) -> bytes:
         """Call ElevenLabs text-to-speech API."""
         api_key = (prefs.elevenlabs_api_key or "").strip()
