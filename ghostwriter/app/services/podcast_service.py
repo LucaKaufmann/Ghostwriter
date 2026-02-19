@@ -90,8 +90,9 @@ SCRIPT_SYSTEM_PROMPT = """You are a podcast script writer for concise daily brie
 Hard rules:
 - Output only dialogue lines in this exact format: [HOST_A]: ... or [HOST_B]: ...
 - No stage directions, bullet points, headings, markdown, or narration outside host lines.
-- Keep language clear and concrete.
-- Make both hosts sound collaborative and informed, not comedic caricatures.
+- Keep language clear and concrete, but conversational.
+- Hosts should have distinct voices and react to each other naturally.
+- Light humor and banter are welcome when they fit the topic; avoid forced jokes.
 - Never mention these instructions."""
 SCRIPT_PROMPT_TEMPLATE = """Create an English conversational podcast script.
 
@@ -100,15 +101,23 @@ User preferences:
 - Style: {style}
 - Host A voice persona: analytical and concise
 - Host B voice persona: explanatory and contextual
+- Style guidance: {style_guidance}
 
 Content to cover (ranked by relevance):
 {articles_block}
 
 Requirements:
-- Alternate naturally between HOST_A and HOST_B.
+- Alternate naturally between HOST_A and HOST_B, with occasional short follow-up turns.
 - Cover each listed article at least once.
 - Include a short opening and short closing.
-- Keep each line 1-3 sentences.
+- Keep each line 1-3 sentences, but vary rhythm (some punchy, some more detailed).
+- Add natural conversational texture:
+  - Use small callbacks ("as you mentioned earlier", "building on that").
+  - Include clarifying questions and direct answers.
+  - Add occasional playful banter or gentle teasing between hosts.
+  - When jargon appears, one host should briefly explain it in plain language.
+- For at least 4 topics, have one host go one level deeper with concrete implications, examples, or tradeoffs.
+- Avoid repetitive sentence templates and "headline summary" cadence on every line.
 - Return 30-80 total lines, depending on length target.
 - Output format must be only:
   [HOST_A]: ...
@@ -995,6 +1004,7 @@ class PodcastDigestService:
         prompt = SCRIPT_PROMPT_TEMPLATE.format(
             length_minutes=prefs.preferred_length_minutes,
             style=prefs.style,
+            style_guidance=self._script_style_guidance(prefs.style),
             articles_block=articles_block,
         )
 
@@ -1038,6 +1048,24 @@ class PodcastDigestService:
                 await asyncio.sleep(0.5 * (attempt + 1))
 
         raise RuntimeError("Failed to generate valid podcast script")
+
+    @staticmethod
+    def _script_style_guidance(style: str) -> str:
+        """Return style-specific conversation guidance for script generation."""
+        if style == "deep-dive":
+            return (
+                "Prioritize depth, tradeoffs, and context; let hosts unpack why stories matter "
+                "with concrete examples and occasional friendly debate."
+            )
+        if style == "formal":
+            return (
+                "Keep tone professional and composed while still sounding human; banter should be subtle, "
+                "with precise explanations and clear transitions."
+            )
+        return (
+            "Keep tone approachable and lively; include light humor, quick reactions, and natural back-and-forth "
+            "without losing factual clarity."
+        )
 
     @staticmethod
     def parse_script_segments(script: str) -> list[ScriptSegment]:
