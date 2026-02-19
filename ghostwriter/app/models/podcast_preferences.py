@@ -9,6 +9,7 @@ from sqlmodel import Field, SQLModel
 
 PodcastSchedule = Literal["daily", "weekly", "manual"]
 PodcastStyle = Literal["casual", "formal", "deep-dive"]
+PodcastTTSProvider = Literal["openai", "elevenlabs"]
 PodcastScheduleDay = Literal[
     "monday",
     "tuesday",
@@ -58,6 +59,15 @@ class PodcastPreferencesBase(SQLModel):
         default="casual",
         sa_column=Column(String, nullable=False, server_default="casual"),
     )
+    tts_provider: str = Field(
+        default="openai",
+        sa_column=Column(String, nullable=False, server_default="openai"),
+    )
+    openai_tts_model: str = Field(default="tts-1")
+    openai_api_key: str | None = Field(default=None)
+    elevenlabs_model_id: str = Field(default="eleven_turbo_v2_5")
+    elevenlabs_api_key: str | None = Field(default=None)
+    elevenlabs_output_format: str = Field(default="mp3_44100_128")
     host_a_voice: str = Field(default="alloy")
     host_b_voice: str = Field(default="echo")
 
@@ -93,6 +103,10 @@ class PodcastPreferencesRead(SQLModel):
     filter_keywords: list[str]
     preferred_length_minutes: int
     style: PodcastStyle
+    tts_provider: PodcastTTSProvider
+    openai_tts_model: str
+    elevenlabs_model_id: str
+    elevenlabs_output_format: str
     host_a_voice: str
     host_b_voice: str
     podcast_feed_enabled: bool
@@ -115,6 +129,12 @@ class PodcastPreferencesUpdate(SQLModel):
     filter_keywords: list[str] | None = None
     preferred_length_minutes: int | None = Field(default=None, ge=5, le=60)
     style: PodcastStyle | None = None
+    tts_provider: PodcastTTSProvider | None = None
+    openai_tts_model: str | None = None
+    openai_api_key: str | None = None
+    elevenlabs_model_id: str | None = None
+    elevenlabs_api_key: str | None = None
+    elevenlabs_output_format: str | None = None
     host_a_voice: str | None = None
     host_b_voice: str | None = None
     podcast_feed_enabled: bool | None = None

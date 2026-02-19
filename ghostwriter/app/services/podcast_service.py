@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 SCRIPT_STATUSES = {"pending", "generating_script", "generating_audio", "ready", "failed"}
 RUNNING_STATUSES = {"generating_script", "generating_audio"}
 SUPPORTED_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
+SUPPORTED_TTS_PROVIDERS = {"openai", "elevenlabs"}
 SCRIPT_LINE_RE = re.compile(r"^\[(HOST_A|HOST_B)\]:\s+(.+)$")
 SCHEDULE_DAY_TO_WEEKDAY = {
     "monday": 0,
@@ -83,6 +84,8 @@ TOPIC_KEYWORDS = {
         "minister",
     ),
 }
+ELEVENLABS_DEFAULT_HOST_A_VOICE = "21m00Tcm4TlvDq8ikWAM"
+ELEVENLABS_DEFAULT_HOST_B_VOICE = "AZnzlk1XvdvUeBnXmlld"
 SCRIPT_SYSTEM_PROMPT = """You are a podcast script writer for concise daily briefings.
 Hard rules:
 - Output only dialogue lines in this exact format: [HOST_A]: ... or [HOST_B]: ...
@@ -199,6 +202,14 @@ class PodcastDigestService:
             return normalized
         return fallback
 
+    @staticmethod
+    def _sanitize_optional_secret(value: str | None) -> str | None:
+        """Normalize optional secret fields, keeping None when empty."""
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned if cleaned else None
+
     def _resolve_user_id(self, session: Session) -> UUID | None:
         """Resolve the current singleton user ID if a user exists."""
         user = session.exec(select(User).order_by(User.created_at.asc())).first()
@@ -282,10 +293,37 @@ class PodcastDigestService:
             prefs.preferred_length_minutes = update.preferred_length_minutes
         if update.style is not None:
             prefs.style = update.style
+        if update.tts_provider is not None:
+            provider = update.tts_provider.strip().lower()
+            if provider not in SUPPORTED_TTS_PROVIDERS:
+                raise ValueError("tts_provider must be 'openai' or 'elevenlabs'")
+            prefs.tts_provider = provider
+        if update.openai_tts_model is not None:
+            prefs.openai_tts_model = update.openai_tts_model.strip() or "tts-1"
+        if update.openai_api_key is not None:
+            prefs.openai_api_key = self._sanitize_optional_secret(update.openai_api_key)
+        if update.elevenlabs_model_id is not None:
+            prefs.elevenlabs_model_id = (
+                update.elevenlabs_model_id.strip() or "eleven_turbo_v2_5"
+            )
+        if update.elevenlabs_api_key is not None:
+            prefs.elevenlabs_api_key = self._sanitize_optional_secret(update.elevenlabs_api_key)
+        if update.elevenlabs_output_format is not None:
+            prefs.elevenlabs_output_format = (
+                update.elevenlabs_output_format.strip() or "mp3_44100_128"
+            )
         if update.host_a_voice is not None:
-            prefs.host_a_voice = self._ensure_supported_voice(update.host_a_voice, "alloy")
+            voice_value = update.host_a_voice.strip()
+            if prefs.tts_provider == "openai":
+                prefs.host_a_voice = self._ensure_supported_voice(voice_value, "alloy")
+            else:
+                prefs.host_a_voice = voice_value or ELEVENLABS_DEFAULT_HOST_A_VOICE
         if update.host_b_voice is not None:
-            prefs.host_b_voice = self._ensure_supported_voice(update.host_b_voice, "echo")
+            voice_value = update.host_b_voice.strip()
+            if prefs.tts_provider == "openai":
+                prefs.host_b_voice = self._ensure_supported_voice(voice_value, "echo")
+            else:
+                prefs.host_b_voice = voice_value or ELEVENLABS_DEFAULT_HOST_B_VOICE
         if update.podcast_feed_enabled is not None:
             prefs.podcast_feed_enabled = update.podcast_feed_enabled
         if update.podcast_feed_title is not None:
@@ -312,6 +350,10 @@ class PodcastDigestService:
                 "schedule_day": prefs.schedule_day,
                 "preferred_length_minutes": prefs.preferred_length_minutes,
                 "style": prefs.style,
+                "tts_provider": prefs.tts_provider,
+                "openai_tts_model": prefs.openai_tts_model,
+                "elevenlabs_model_id": prefs.elevenlabs_model_id,
+                "elevenlabs_output_format": prefs.elevenlabs_output_format,
                 "podcast_feed_enabled": prefs.podcast_feed_enabled,
             },
         )
@@ -943,8 +985,6 @@ class PodcastDigestService:
         prefs: PodcastPreferences,
     ) -> AudioGenerationResult:
         """Synthesize audio for script segments and stitch into one MP3."""
-        if not self.settings.openai_api_key.strip():
-            raise RuntimeError("OpenAI API key is required for podcast audio generation")
         if not segments:
             raise RuntimeError("No script segments for audio generation")
 
@@ -963,11 +1003,30 @@ class PodcastDigestService:
         synthesized_chars = 0
         with tempfile.TemporaryDirectory(prefix="podcast_tts_") as tmpdir:
             segment_paths: list[Path] = []
+            provider = (prefs.tts_provider or "openai").strip().lower()
+            if provider not in SUPPORTED_TTS_PROVIDERS:
+                raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
             for index, segment in enumerate(segments, start=1):
-                fallback = "alloy" if segment.speaker == "HOST_A" else "echo"
-                preferred = prefs.host_a_voice if segment.speaker == "HOST_A" else prefs.host_b_voice
-                voice = self._ensure_supported_voice(preferred, fallback)
-                audio_bytes = await self._synthesize_segment_with_retry(segment.text, voice)
+                preferred_voice = (
+                    prefs.host_a_voice if segment.speaker == "HOST_A" else prefs.host_b_voice
+                )
+                if provider == "openai":
+                    fallback = "alloy" if segment.speaker == "HOST_A" else "echo"
+                    voice = self._ensure_supported_voice(preferred_voice, fallback)
+                else:
+                    fallback = (
+                        ELEVENLABS_DEFAULT_HOST_A_VOICE
+                        if segment.speaker == "HOST_A"
+                        else ELEVENLABS_DEFAULT_HOST_B_VOICE
+                    )
+                    voice = preferred_voice.strip() or fallback
+
+                audio_bytes = await self._synthesize_segment_with_retry(
+                    text=segment.text,
+                    voice=voice,
+                    provider=provider,
+                    prefs=prefs,
+                )
                 if not audio_bytes:
                     logger.warning("Skipping TTS segment after retries: %s", segment.speaker)
                     continue
@@ -1000,35 +1059,73 @@ class PodcastDigestService:
             synthesized_chars=synthesized_chars,
         )
 
-    async def _synthesize_segment_with_retry(self, text: str, voice: str) -> bytes:
+    async def _synthesize_segment_with_retry(
+        self,
+        *,
+        text: str,
+        voice: str,
+        provider: str,
+        prefs: PodcastPreferences,
+    ) -> bytes:
         """Generate one TTS segment with bounded retries."""
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                return await self._synthesize_segment(text, voice)
+                return await self._synthesize_segment(
+                    text=text,
+                    voice=voice,
+                    provider=provider,
+                    prefs=prefs,
+                )
             except Exception as exc:
                 last_error = exc
                 logger.warning(
-                    "OpenAI TTS segment failed (%s/3): %s",
+                    "%s TTS segment failed (%s/3): %s",
+                    provider,
                     attempt + 1,
                     exc,
                 )
                 if attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
-        logger.error("OpenAI TTS failed after retries: %s", last_error)
+        logger.error("%s TTS failed after retries: %s", provider, last_error)
         return b""
 
-    async def _synthesize_segment(self, text: str, voice: str) -> bytes:
+    async def _synthesize_segment(
+        self,
+        *,
+        text: str,
+        voice: str,
+        provider: str,
+        prefs: PodcastPreferences,
+    ) -> bytes:
+        """Call selected TTS provider API."""
+        if provider == "openai":
+            return await self._synthesize_segment_openai(text=text, voice=voice, prefs=prefs)
+        if provider == "elevenlabs":
+            return await self._synthesize_segment_elevenlabs(text=text, voice=voice, prefs=prefs)
+        raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
+
+    async def _synthesize_segment_openai(
+        self,
+        *,
+        text: str,
+        voice: str,
+        prefs: PodcastPreferences,
+    ) -> bytes:
         """Call OpenAI audio speech API."""
+        api_key = (prefs.openai_api_key or "").strip() or self.settings.openai_api_key.strip()
+        if not api_key:
+            raise RuntimeError("OpenAI API key is required for OpenAI podcast TTS")
+
         endpoint = "https://api.openai.com/v1/audio/speech"
         payload: dict[str, Any] = {
-            "model": "tts-1",
+            "model": (prefs.openai_tts_model or "tts-1").strip() or "tts-1",
             "voice": voice,
             "input": text,
             "response_format": "mp3",
         }
         headers = {
-            "Authorization": f"Bearer {self.settings.openai_api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         timeout = httpx.Timeout(120.0)
@@ -1037,6 +1134,47 @@ class PodcastDigestService:
             if response.status_code >= 400:
                 raise RuntimeError(
                     f"OpenAI TTS error {response.status_code}: {response.text[:200]}"
+                )
+            return response.content
+
+    async def _synthesize_segment_elevenlabs(
+        self,
+        *,
+        text: str,
+        voice: str,
+        prefs: PodcastPreferences,
+    ) -> bytes:
+        """Call ElevenLabs text-to-speech API."""
+        api_key = (prefs.elevenlabs_api_key or "").strip()
+        if not api_key:
+            raise RuntimeError("ElevenLabs API key is required for ElevenLabs podcast TTS")
+
+        model_id = (prefs.elevenlabs_model_id or "eleven_turbo_v2_5").strip()
+        output_format = (
+            (prefs.elevenlabs_output_format or "mp3_44100_128").strip()
+            or "mp3_44100_128"
+        )
+        endpoint = f"https://api.elevenlabs.io/v1/text-to-speech/{voice}"
+        payload: dict[str, Any] = {
+            "text": text,
+            "model_id": model_id,
+        }
+        headers = {
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
+        timeout = httpx.Timeout(120.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                endpoint,
+                params={"output_format": output_format},
+                json=payload,
+                headers=headers,
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"ElevenLabs TTS error {response.status_code}: {response.text[:200]}"
                 )
             return response.content
 
