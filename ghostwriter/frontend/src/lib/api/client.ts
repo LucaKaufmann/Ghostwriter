@@ -47,7 +47,9 @@ import type {
 	MediaTriggerResponse,
 	MediaRetryResponse,
 	RetryFailedMediaResponse,
-	FeedCheckResponse
+	FeedCheckResponse,
+	PodcastFeedInfoResponse,
+	PodcastArtworkUploadResponse
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -582,6 +584,37 @@ class ApiClient {
 
 	async getAllPodcastItems(): Promise<MediaItemSummary[]> {
 		return this.request<MediaItemSummary[]>('/media/podcasts/items/all');
+	}
+
+	// ============ Podcast Digests ============
+
+	async getPodcastFeedInfo(): Promise<PodcastFeedInfoResponse> {
+		return this.request<PodcastFeedInfoResponse>('/podcast/feed/info');
+	}
+
+	async uploadPodcastFeedArtwork(file: File): Promise<PodcastArtworkUploadResponse> {
+		const token = this.getToken();
+		const formData = new FormData();
+		formData.append('file', file);
+		const headers: Record<string, string> = {};
+		if (token) headers['Authorization'] = `Bearer ${token}`;
+
+		const response = await fetch(`${BASE_URL}/podcast/feed/artwork`, {
+			method: 'POST',
+			headers,
+			body: formData
+		});
+		if (!response.ok) {
+			let error: APIError;
+			try {
+				error = await response.json();
+			} catch {
+				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+			}
+			throw new ApiError(response.status, error);
+		}
+
+		return response.json();
 	}
 
 	// ============ Media: YouTube ============

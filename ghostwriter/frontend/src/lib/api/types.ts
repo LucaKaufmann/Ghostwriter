@@ -524,6 +524,23 @@ export interface RetryFailedMediaResponse {
 	skipped: number;
 }
 
+// ============ Podcast Digests ============
+
+export interface PodcastFeedInfoResponse {
+	feed_enabled: boolean;
+	feed_title: string;
+	feed_description: string;
+	feed_url: string;
+	setup_instructions: string[];
+}
+
+export interface PodcastArtworkUploadResponse {
+	status: string;
+	artwork_path: string;
+	width: number;
+	height: number;
+}
+
 // ============ API Error ============
 
 export interface APIError {
