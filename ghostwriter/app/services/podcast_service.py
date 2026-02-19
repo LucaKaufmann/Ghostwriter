@@ -87,6 +87,8 @@ TOPIC_KEYWORDS = {
 }
 ELEVENLABS_DEFAULT_HOST_A_VOICE = "21m00Tcm4TlvDq8ikWAM"
 ELEVENLABS_DEFAULT_HOST_B_VOICE = "AZnzlk1XvdvUeBnXmlld"
+SCRIPT_BRIEF_CHUNK_SIZE = 3
+SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
 SCRIPT_SYSTEM_PROMPT = """You are a podcast script writer for concise daily briefings.
 Hard rules:
 - Output only dialogue lines in this exact format: [HOST_A]: ... or [HOST_B]: ...
@@ -95,6 +97,54 @@ Hard rules:
 - Hosts should have distinct voices and react to each other naturally.
 - Light humor and banter are welcome when they fit the topic; avoid forced jokes.
 - Never mention these instructions."""
+SCRIPT_BRIEF_SYSTEM_PROMPT = """You create compact editorial briefs from source material.
+Hard rules:
+- Return valid JSON only.
+- JSON object shape: {"briefs":[...]}.
+- Each brief must include: index, title, summary, key_points, explainers, banter_hook.
+- key_points and explainers are arrays of short strings.
+- Do not invent facts that are not in provided content."""
+SCRIPT_BRIEF_PROMPT_TEMPLATE = """Create article briefs for podcast writing.
+
+User preferences:
+- Style: {style}
+- Style guidance: {style_guidance}
+
+Articles:
+{articles_block}
+
+Output JSON only with this shape:
+{{
+  "briefs": [
+    {{
+      "index": 1,
+      "title": "...",
+      "summary": "...",
+      "key_points": ["...", "..."],
+      "explainers": ["...", "..."],
+      "banter_hook": "..."
+    }}
+  ]
+}}"""
+SCRIPT_OUTLINE_SYSTEM_PROMPT = """You are planning a two-host podcast episode.
+Hard rules:
+- Output plain text outline only (no JSON, no markdown tables).
+- Keep it concrete and easy to turn into host dialogue."""
+SCRIPT_OUTLINE_PROMPT_TEMPLATE = """Create a concise episode outline for two hosts.
+
+User preferences:
+- Length target: about {length_minutes} minutes
+- Style: {style}
+- Style guidance: {style_guidance}
+
+Article briefs:
+{briefs_block}
+
+Requirements:
+- Provide 8-14 ordered outline beats.
+- Each beat should include: topic focus, which host leads, and one callback/depth angle.
+- Ensure all article indexes are covered at least once.
+- Include an opening and closing beat."""
 SCRIPT_PROMPT_TEMPLATE = """Create an English conversational podcast script.
 
 User preferences:
@@ -104,12 +154,15 @@ User preferences:
 - Host B voice persona: explanatory and contextual
 - Style guidance: {style_guidance}
 
-Content to cover (ranked by relevance):
-{articles_block}
+Episode outline:
+{outline_block}
+
+Article briefs to ground factual details:
+{briefs_block}
 
 Requirements:
 - Alternate naturally between HOST_A and HOST_B, with occasional short follow-up turns.
-- Cover each listed article at least once.
+- Cover each listed article brief index at least once.
 - Include a short opening and short closing.
 - Keep each line 1-3 sentences, but vary rhythm (some punchy, some more detailed).
 - Add natural conversational texture:
@@ -1000,31 +1053,68 @@ class PodcastDigestService:
         if not articles:
             raise RuntimeError("No articles available for script generation")
 
-        articles_block_lines: list[str] = []
-        for index, article in enumerate(articles, start=1):
-            clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:500]
-            articles_block_lines.append(
-                f"{index}. {article.title}\n"
-                f"Source: {article.feed_title}\n"
-                f"URL: {article.url}\n"
-                f"Key points: {clean_snippet}"
-            )
-        articles_block = "\n\n".join(articles_block_lines)
-        prompt = SCRIPT_PROMPT_TEMPLATE.format(
-            length_minutes=prefs.preferred_length_minutes,
-            style=prefs.style,
-            style_guidance=self._script_style_guidance(prefs.style),
-            articles_block=articles_block,
-        )
-
         model = self.settings.get_llm_model_string()
+        style_guidance = self._script_style_guidance(prefs.style)
+        debug_path: Path | None = None
         if episode_id is not None:
             debug_dir = Path(self.settings.logs_dir) / "podcast_script_prompts"
             debug_dir.mkdir(parents=True, exist_ok=True)
             debug_path = debug_dir / f"{episode_id}.json"
+            if debug_path.exists():
+                debug_path.unlink(missing_ok=True)
+
+        article_inputs: list[dict[str, Any]] = []
+        for index, article in enumerate(articles, start=1):
+            normalized_content = re.sub(r"\s+", " ", article.content).strip()
+            if len(normalized_content) > SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF:
+                normalized_content = (
+                    normalized_content[:SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF].strip()
+                    + " [TRUNCATED]"
+                )
+            article_inputs.append(
+                {
+                    "index": index,
+                    "title": article.title,
+                    "source": article.feed_title,
+                    "url": article.url,
+                    "content": normalized_content,
+                }
+            )
+
+        briefs = await self._generate_article_briefs(
+            article_inputs,
+            model=model,
+            style=prefs.style,
+            style_guidance=style_guidance,
+            debug_path=debug_path,
+            episode_id=episode_id,
+            digest_id=digest_id,
+        )
+        briefs_block = self._render_briefs_block(briefs)
+
+        outline = await self._generate_script_outline(
+            briefs_block=briefs_block,
+            model=model,
+            style=prefs.style,
+            style_guidance=style_guidance,
+            length_minutes=prefs.preferred_length_minutes,
+            debug_path=debug_path,
+            episode_id=episode_id,
+            digest_id=digest_id,
+        )
+        prompt = SCRIPT_PROMPT_TEMPLATE.format(
+            length_minutes=prefs.preferred_length_minutes,
+            style=prefs.style,
+            style_guidance=style_guidance,
+            outline_block=outline,
+            briefs_block=briefs_block,
+        )
+
+        if debug_path is not None:
             self._write_script_prompt_debug(
                 debug_path,
                 {
+                    "stage": "final_script",
                     "episode_id": str(episode_id),
                     "digest_id": str(digest_id) if digest_id else None,
                     "model": model,
@@ -1078,13 +1168,275 @@ class PodcastDigestService:
                 )
                 await asyncio.sleep(0.5 * (attempt + 1))
 
+        logger.warning("Chunked script generation failed; trying direct fallback prompt")
+        fallback_prompt = self._build_direct_script_prompt(
+            articles=articles,
+            length_minutes=prefs.preferred_length_minutes,
+            style=prefs.style,
+            style_guidance=style_guidance,
+        )
+        for attempt in range(retries + 1):
+            script, failed = await self.llm_service._run_completion(
+                fallback_prompt,
+                model,
+                retries=1,
+                system_prompt=SCRIPT_SYSTEM_PROMPT,
+            )
+            if failed or not script.strip():
+                continue
+            try:
+                self.parse_script_segments(script)
+                return script.strip()
+            except ValueError:
+                await asyncio.sleep(0.5 * (attempt + 1))
         raise RuntimeError("Failed to generate valid podcast script")
+
+    async def _generate_article_briefs(
+        self,
+        article_inputs: list[dict[str, Any]],
+        *,
+        model: str,
+        style: str,
+        style_guidance: str,
+        debug_path: Path | None,
+        episode_id: UUID | None,
+        digest_id: UUID | None,
+    ) -> list[dict[str, Any]]:
+        """Generate concise briefs from full article content using chunked prompts."""
+        indexed_briefs: dict[int, dict[str, Any]] = {}
+        chunks = [
+            article_inputs[i : i + SCRIPT_BRIEF_CHUNK_SIZE]
+            for i in range(0, len(article_inputs), SCRIPT_BRIEF_CHUNK_SIZE)
+        ]
+        for chunk_num, chunk in enumerate(chunks, start=1):
+            articles_block = "\n\n".join(
+                (
+                    f"Index: {item['index']}\n"
+                    f"Title: {item['title']}\n"
+                    f"Source: {item['source']}\n"
+                    f"URL: {item['url']}\n"
+                    f"Full content:\n{item['content']}"
+                )
+                for item in chunk
+            )
+            prompt = SCRIPT_BRIEF_PROMPT_TEMPLATE.format(
+                style=style,
+                style_guidance=style_guidance,
+                articles_block=articles_block,
+            )
+            if debug_path is not None:
+                self._write_script_prompt_debug(
+                    debug_path,
+                    {
+                        "stage": "brief_chunk",
+                        "chunk_index": chunk_num,
+                        "chunk_size": len(chunk),
+                        "episode_id": str(episode_id) if episode_id else None,
+                        "digest_id": str(digest_id) if digest_id else None,
+                        "model": model,
+                        "system_prompt": SCRIPT_BRIEF_SYSTEM_PROMPT,
+                        "user_prompt": prompt,
+                    },
+                )
+
+            parsed_briefs: list[dict[str, Any]] = []
+            for attempt in range(3):
+                completion, failed = await self.llm_service._run_completion(
+                    prompt,
+                    model,
+                    retries=1,
+                    system_prompt=SCRIPT_BRIEF_SYSTEM_PROMPT,
+                )
+                if failed or not completion.strip():
+                    await asyncio.sleep(0.3 * (attempt + 1))
+                    continue
+                parsed_briefs = self._parse_chunk_briefs_json(completion)
+                if parsed_briefs:
+                    break
+                await asyncio.sleep(0.3 * (attempt + 1))
+
+            if not parsed_briefs:
+                parsed_briefs = [self._fallback_brief(item) for item in chunk]
+
+            for brief in parsed_briefs:
+                index = int(brief["index"])
+                indexed_briefs[index] = brief
+
+            for item in chunk:
+                index = int(item["index"])
+                if index not in indexed_briefs:
+                    indexed_briefs[index] = self._fallback_brief(item)
+
+        return [indexed_briefs[idx] for idx in sorted(indexed_briefs)]
+
+    @staticmethod
+    def _parse_chunk_briefs_json(raw_text: str) -> list[dict[str, Any]]:
+        """Parse chunk brief JSON response and return normalized brief objects."""
+        start = raw_text.find("{")
+        end = raw_text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return []
+        try:
+            parsed = json.loads(raw_text[start : end + 1])
+        except json.JSONDecodeError:
+            return []
+        briefs = parsed.get("briefs")
+        if not isinstance(briefs, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for item in briefs:
+            if not isinstance(item, dict):
+                continue
+            try:
+                index = int(item.get("index"))
+            except Exception:
+                continue
+            title = str(item.get("title", "")).strip()
+            summary = str(item.get("summary", "")).strip()
+            key_points = [
+                str(point).strip()
+                for point in item.get("key_points", [])
+                if isinstance(point, str) and point.strip()
+            ][:4]
+            explainers = [
+                str(point).strip()
+                for point in item.get("explainers", [])
+                if isinstance(point, str) and point.strip()
+            ][:3]
+            banter_hook = str(item.get("banter_hook", "")).strip()
+            if not summary:
+                continue
+            normalized.append(
+                {
+                    "index": index,
+                    "title": title,
+                    "summary": summary,
+                    "key_points": key_points,
+                    "explainers": explainers,
+                    "banter_hook": banter_hook,
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _fallback_brief(article_input: dict[str, Any]) -> dict[str, Any]:
+        """Generate a deterministic fallback brief when JSON parsing fails."""
+        content = str(article_input.get("content", "")).strip()
+        summary = content[:420] if content else "No content summary available."
+        return {
+            "index": int(article_input["index"]),
+            "title": str(article_input.get("title", "")),
+            "summary": summary,
+            "key_points": [],
+            "explainers": [],
+            "banter_hook": "",
+        }
+
+    @staticmethod
+    def _render_briefs_block(briefs: list[dict[str, Any]]) -> str:
+        """Render brief objects into compact text for outline/final prompts."""
+        lines: list[str] = []
+        for brief in briefs:
+            key_points = "; ".join(brief.get("key_points") or [])
+            explainers = "; ".join(brief.get("explainers") or [])
+            lines.append(
+                f"[{brief['index']}] {brief.get('title','')}\n"
+                f"Summary: {brief.get('summary','')}\n"
+                f"Key points: {key_points}\n"
+                f"Explainers: {explainers}\n"
+                f"Banter hook: {brief.get('banter_hook','')}"
+            )
+        return "\n\n".join(lines)
+
+    async def _generate_script_outline(
+        self,
+        *,
+        briefs_block: str,
+        model: str,
+        style: str,
+        style_guidance: str,
+        length_minutes: int,
+        debug_path: Path | None,
+        episode_id: UUID | None,
+        digest_id: UUID | None,
+    ) -> str:
+        """Generate episode outline from chunked article briefs."""
+        prompt = SCRIPT_OUTLINE_PROMPT_TEMPLATE.format(
+            length_minutes=length_minutes,
+            style=style,
+            style_guidance=style_guidance,
+            briefs_block=briefs_block,
+        )
+        if debug_path is not None:
+            self._write_script_prompt_debug(
+                debug_path,
+                {
+                    "stage": "outline",
+                    "episode_id": str(episode_id) if episode_id else None,
+                    "digest_id": str(digest_id) if digest_id else None,
+                    "model": model,
+                    "system_prompt": SCRIPT_OUTLINE_SYSTEM_PROMPT,
+                    "user_prompt": prompt,
+                },
+            )
+
+        for attempt in range(3):
+            outline, failed = await self.llm_service._run_completion(
+                prompt,
+                model,
+                retries=1,
+                system_prompt=SCRIPT_OUTLINE_SYSTEM_PROMPT,
+            )
+            if not failed and outline.strip():
+                return outline.strip()
+            await asyncio.sleep(0.3 * (attempt + 1))
+        return "Opening -> cover top stories -> explain implications -> closing."
+
+    def _build_direct_script_prompt(
+        self,
+        *,
+        articles: list[DigestArticle],
+        length_minutes: int,
+        style: str,
+        style_guidance: str,
+    ) -> str:
+        """Build legacy one-shot prompt as fallback if chunked generation fails."""
+        articles_block_lines: list[str] = []
+        for index, article in enumerate(articles, start=1):
+            clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:500]
+            articles_block_lines.append(
+                f"{index}. {article.title}\n"
+                f"Source: {article.feed_title}\n"
+                f"URL: {article.url}\n"
+                f"Key points: {clean_snippet}"
+            )
+        articles_block = "\n\n".join(articles_block_lines)
+        return SCRIPT_PROMPT_TEMPLATE.format(
+            length_minutes=length_minutes,
+            style=style,
+            style_guidance=style_guidance,
+            outline_block="Use this source list directly as outline.",
+            briefs_block=articles_block,
+        )
 
     @staticmethod
     def _write_script_prompt_debug(path: Path, payload: dict[str, Any]) -> None:
         """Persist one script-generation prompt payload for debugging."""
         try:
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            existing_events: list[dict[str, Any]] = []
+            if path.exists():
+                try:
+                    current = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(current, dict) and isinstance(current.get("events"), list):
+                        existing_events = [event for event in current["events"] if isinstance(event, dict)]
+                except Exception:
+                    existing_events = []
+            existing_events.append(payload)
+            path.write_text(
+                json.dumps({"events": existing_events}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         except Exception:
             logger.warning("Failed writing podcast script prompt debug file", exc_info=True)
 
