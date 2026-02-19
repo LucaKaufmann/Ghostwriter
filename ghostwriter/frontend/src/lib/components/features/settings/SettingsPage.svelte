@@ -77,6 +77,11 @@
 		queryFn: () => api.getPodcastFeedInfo()
 	}));
 
+	const podcastPreferencesQuery = createQuery(() => ({
+		queryKey: ['podcast-preferences'],
+		queryFn: () => api.getPodcastPreferences()
+	}));
+
 	// Mutations
 	const updateScheduleMutation = createMutation(() => ({
 		mutationFn: ({ period, data }: { period: DigestPeriod; data: ScheduleUpdate }) =>
@@ -303,6 +308,20 @@
 		}
 	}));
 
+	const updatePodcastPreferencesMutation = createMutation(() => ({
+		mutationFn: (podcastFeedEnabled: boolean) =>
+			api.updatePodcastPreferences({ podcast_feed_enabled: podcastFeedEnabled }),
+		onSuccess: (data) => {
+			podcastFeedEnabled = data.podcast_feed_enabled;
+			queryClient.invalidateQueries({ queryKey: ['podcast-preferences'] });
+			queryClient.invalidateQueries({ queryKey: ['podcast-feed-info'] });
+			toast.success('Podcast feed settings updated');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to update podcast feed settings', { description: err.message });
+		}
+	}));
+
 	// Preview state
 	let wallabagPreview = $state<PreviewResponse | null>(null);
 	let newsletterPreview = $state<PreviewResponse | null>(null);
@@ -380,6 +399,8 @@
 	let coverSettingsInitialized = $state(false);
 	let manualCoverInput: HTMLInputElement | null = $state(null);
 	let podcastArtworkInput: HTMLInputElement | null = $state(null);
+	let podcastFeedEnabled = $state(false);
+	let podcastPreferencesInitialized = $state(false);
 	let copiedPodcastFeedUrl = $state(false);
 
 	$effect(() => {
@@ -429,6 +450,14 @@
 			coverOpenAIKey = data.cover_openai_api_key ?? '';
 			coverGeminiKey = data.cover_gemini_api_key ?? '';
 			coverSettingsInitialized = true;
+		}
+	});
+
+	$effect(() => {
+		const data = podcastPreferencesQuery.data;
+		if (data && !podcastPreferencesInitialized) {
+			podcastFeedEnabled = data.podcast_feed_enabled;
+			podcastPreferencesInitialized = true;
 		}
 	});
 
@@ -510,6 +539,16 @@
 		if (!file) return;
 		uploadPodcastArtworkMutation.mutate(file);
 		target.value = '';
+	}
+
+	function hasPodcastFeedSettingsChanged(): boolean {
+		const data = podcastPreferencesQuery.data;
+		if (!data) return false;
+		return podcastFeedEnabled !== data.podcast_feed_enabled;
+	}
+
+	function savePodcastFeedSettings() {
+		updatePodcastPreferencesMutation.mutate(podcastFeedEnabled);
 	}
 
 	function formatBytes(value: number): string {
@@ -1104,12 +1143,41 @@
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="space-y-4">
-				{#if podcastFeedInfoQuery.isPending}
+				{#if podcastFeedInfoQuery.isPending || podcastPreferencesQuery.isPending}
 					<div class="space-y-3">
 						<Skeleton class="h-10 w-full" />
 						<Skeleton class="h-24 w-full" />
 					</div>
-				{:else if podcastFeedInfoQuery.data}
+				{:else if podcastFeedInfoQuery.data && podcastPreferencesQuery.data}
+					<div class="rounded-lg border p-3">
+						<div class="flex items-center justify-between gap-3">
+							<div>
+								<p class="text-sm font-medium">Feed enabled</p>
+								<p class="text-xs text-muted-foreground">
+									Allow podcast apps to fetch new generated episodes from your private feed.
+								</p>
+							</div>
+							<Switch
+								checked={podcastFeedEnabled}
+								onCheckedChange={(checked) => (podcastFeedEnabled = checked)}
+							/>
+						</div>
+						<div class="mt-3 flex justify-end">
+							<Button
+								size="sm"
+								onclick={savePodcastFeedSettings}
+								disabled={!hasPodcastFeedSettingsChanged() || updatePodcastPreferencesMutation.isPending}
+							>
+								{#if updatePodcastPreferencesMutation.isPending}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								{:else}
+									<Save class="mr-2 h-4 w-4" />
+								{/if}
+								Save
+							</Button>
+						</div>
+					</div>
+
 					<div class="space-y-2">
 						<Label for="podcast-feed-url">Private feed URL</Label>
 						<div class="flex flex-col gap-2 sm:flex-row">
@@ -1176,9 +1244,9 @@
 						</ol>
 					</div>
 
-					{#if !podcastFeedInfoQuery.data.feed_enabled}
+					{#if !podcastFeedEnabled}
 						<p class="text-xs text-amber-700">
-							Podcast feed is currently disabled. Enable it in podcast preferences API settings.
+							Podcast feed is currently disabled.
 						</p>
 					{/if}
 				{/if}
