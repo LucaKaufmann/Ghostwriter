@@ -494,11 +494,35 @@ def configure_logging() -> None:
     """
     settings = get_settings()
 
-    # Configure standard Python logging
+    # Configure standard Python logging (console/stdout)
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper()),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+
+    # Also persist standard app logs (including podcast service logs) to ghostwriter.log.
+    # Keep this idempotent so repeated startup/init doesn't duplicate handlers.
+    os.makedirs(settings.logs_dir, exist_ok=True)
+    root_logger = logging.getLogger()
+    has_file_handler = any(
+        isinstance(handler, TimedRotatingFileHandler)
+        and getattr(handler, "baseFilename", "").endswith("ghostwriter.log")
+        for handler in root_logger.handlers
+    )
+    if not has_file_handler:
+        app_file_handler = TimedRotatingFileHandler(
+            os.path.join(settings.logs_dir, "ghostwriter.log"),
+            when="midnight",
+            interval=1,
+            backupCount=30,
+            utc=True,
+        )
+        app_file_handler.suffix = "%Y-%m-%d"
+        app_file_handler.namer = lambda name: name.replace(".log.", "-") + ".log"
+        app_file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        root_logger.addHandler(app_file_handler)
 
     # Configure digest activity logger
     digest_logger.configure()
