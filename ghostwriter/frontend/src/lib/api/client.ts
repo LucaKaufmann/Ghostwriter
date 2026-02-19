@@ -51,7 +51,8 @@ import type {
 	PodcastFeedInfoResponse,
 	PodcastArtworkUploadResponse,
 	PodcastPreferencesResponse,
-	PodcastPreferencesUpdate
+	PodcastPreferencesUpdate,
+	PodcastTriggerResponse
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -602,6 +603,12 @@ class ApiClient {
 		return this.request<PodcastPreferencesResponse>('/podcast/preferences', {
 			method: 'PUT',
 			body: JSON.stringify(data)
+		});
+	}
+
+	async triggerDigestPodcast(digestId: string): Promise<PodcastTriggerResponse> {
+		return this.request<PodcastTriggerResponse>(`/digests/${digestId}/podcast`, {
+			method: 'POST'
 		});
 	}
 

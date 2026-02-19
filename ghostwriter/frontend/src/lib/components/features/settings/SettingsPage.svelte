@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest, type PodcastPreferencesUpdate } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -309,16 +309,23 @@
 	}));
 
 	const updatePodcastPreferencesMutation = createMutation(() => ({
-		mutationFn: (podcastFeedEnabled: boolean) =>
-			api.updatePodcastPreferences({ podcast_feed_enabled: podcastFeedEnabled }),
+		mutationFn: (update: PodcastPreferencesUpdate) => api.updatePodcastPreferences(update),
 		onSuccess: (data) => {
+			podcastGenerationEnabled = data.enabled;
+			podcastSchedule = data.schedule;
+			podcastScheduleTime = data.schedule_time;
+			podcastScheduleDay = data.schedule_day;
+			podcastStyle = data.style;
+			podcastHostAVoice = data.host_a_voice;
+			podcastHostBVoice = data.host_b_voice;
+			podcastPreferredLengthMinutes = data.preferred_length_minutes;
 			podcastFeedEnabled = data.podcast_feed_enabled;
 			queryClient.invalidateQueries({ queryKey: ['podcast-preferences'] });
 			queryClient.invalidateQueries({ queryKey: ['podcast-feed-info'] });
-			toast.success('Podcast feed settings updated');
+			toast.success('Podcast settings updated');
 		},
 		onError: (err: Error) => {
-			toast.error('Failed to update podcast feed settings', { description: err.message });
+			toast.error('Failed to update podcast settings', { description: err.message });
 		}
 	}));
 
@@ -399,6 +406,14 @@
 	let coverSettingsInitialized = $state(false);
 	let manualCoverInput: HTMLInputElement | null = $state(null);
 	let podcastArtworkInput: HTMLInputElement | null = $state(null);
+	let podcastGenerationEnabled = $state(false);
+	let podcastSchedule = $state<'daily' | 'weekly' | 'manual'>('manual');
+	let podcastScheduleTime = $state('08:00');
+	let podcastScheduleDay = $state<'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'>('monday');
+	let podcastStyle = $state<'casual' | 'formal' | 'deep-dive'>('casual');
+	let podcastHostAVoice = $state('alloy');
+	let podcastHostBVoice = $state('echo');
+	let podcastPreferredLengthMinutes = $state(15);
 	let podcastFeedEnabled = $state(false);
 	let podcastPreferencesInitialized = $state(false);
 	let copiedPodcastFeedUrl = $state(false);
@@ -456,6 +471,14 @@
 	$effect(() => {
 		const data = podcastPreferencesQuery.data;
 		if (data && !podcastPreferencesInitialized) {
+			podcastGenerationEnabled = data.enabled;
+			podcastSchedule = data.schedule;
+			podcastScheduleTime = data.schedule_time;
+			podcastScheduleDay = data.schedule_day;
+			podcastStyle = data.style;
+			podcastHostAVoice = data.host_a_voice;
+			podcastHostBVoice = data.host_b_voice;
+			podcastPreferredLengthMinutes = data.preferred_length_minutes;
 			podcastFeedEnabled = data.podcast_feed_enabled;
 			podcastPreferencesInitialized = true;
 		}
@@ -541,6 +564,36 @@
 		target.value = '';
 	}
 
+	function hasPodcastGenerationSettingsChanged(): boolean {
+		const data = podcastPreferencesQuery.data;
+		if (!data) return false;
+		return (
+			podcastGenerationEnabled !== data.enabled ||
+			podcastSchedule !== data.schedule ||
+			podcastScheduleTime !== data.schedule_time ||
+			podcastScheduleDay !== data.schedule_day ||
+			podcastStyle !== data.style ||
+			podcastHostAVoice.trim() !== data.host_a_voice ||
+			podcastHostBVoice.trim() !== data.host_b_voice ||
+			podcastPreferredLengthMinutes !== data.preferred_length_minutes
+		);
+	}
+
+	function savePodcastGenerationSettings() {
+		const clampedMinutes = Math.max(5, Math.min(60, podcastPreferredLengthMinutes));
+		podcastPreferredLengthMinutes = clampedMinutes;
+		updatePodcastPreferencesMutation.mutate({
+			enabled: podcastGenerationEnabled,
+			schedule: podcastSchedule,
+			schedule_time: podcastScheduleTime,
+			schedule_day: podcastScheduleDay,
+			style: podcastStyle,
+			host_a_voice: podcastHostAVoice.trim(),
+			host_b_voice: podcastHostBVoice.trim(),
+			preferred_length_minutes: clampedMinutes
+		});
+	}
+
 	function hasPodcastFeedSettingsChanged(): boolean {
 		const data = podcastPreferencesQuery.data;
 		if (!data) return false;
@@ -548,7 +601,9 @@
 	}
 
 	function savePodcastFeedSettings() {
-		updatePodcastPreferencesMutation.mutate(podcastFeedEnabled);
+		updatePodcastPreferencesMutation.mutate({
+			podcast_feed_enabled: podcastFeedEnabled
+		});
 	}
 
 	function formatBytes(value: number): string {
@@ -1121,6 +1176,144 @@
 							disabled={!hasCoverSettingsChanged() || updateClientConfigMutation.isPending}
 						>
 							{#if updateClientConfigMutation.isPending}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							{:else}
+								<Save class="mr-2 h-4 w-4" />
+							{/if}
+							Save
+						</Button>
+					</div>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+
+		<Card.Root>
+			<Card.Header>
+				<Card.Title class="flex items-center gap-2">
+					<Rss class="h-5 w-5" />
+					Podcast Generation
+				</Card.Title>
+				<Card.Description>
+					Configure automatic digest podcast generation and voice style.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="space-y-4">
+				{#if podcastPreferencesQuery.isPending}
+					<div class="space-y-3">
+						<Skeleton class="h-10 w-full" />
+						<Skeleton class="h-10 w-full" />
+						<Skeleton class="h-10 w-full" />
+					</div>
+				{:else if podcastPreferencesQuery.data}
+					<div class="rounded-lg border p-3 space-y-3">
+						<div class="flex items-center justify-between gap-3">
+							<div>
+								<p class="text-sm font-medium">Enable podcast generation</p>
+								<p class="text-xs text-muted-foreground">
+									When enabled, digests can auto-generate podcast episodes based on your schedule.
+								</p>
+							</div>
+							<Switch
+								checked={podcastGenerationEnabled}
+								onCheckedChange={(checked) => (podcastGenerationEnabled = checked)}
+							/>
+						</div>
+					</div>
+
+					<div class="grid gap-4 md:grid-cols-2">
+						<div class="space-y-2">
+							<Label for="podcast-schedule">Schedule</Label>
+							<Select.Root
+								type="single"
+								name="podcast-schedule"
+								value={podcastSchedule}
+								onValueChange={(value) =>
+									(podcastSchedule = value as 'daily' | 'weekly' | 'manual')}
+							>
+								<Select.Trigger id="podcast-schedule">
+									<span class="capitalize">{podcastSchedule}</span>
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="manual">Manual only</Select.Item>
+									<Select.Item value="daily">Daily</Select.Item>
+									<Select.Item value="weekly">Weekly</Select.Item>
+								</Select.Content>
+							</Select.Root>
+						</div>
+
+						<div class="space-y-2">
+							<Label for="podcast-schedule-time">Schedule time</Label>
+							<Input id="podcast-schedule-time" type="time" bind:value={podcastScheduleTime} />
+						</div>
+
+						{#if podcastSchedule === 'weekly'}
+							<div class="space-y-2 md:col-span-2">
+								<Label for="podcast-schedule-day">Weekly day</Label>
+								<Select.Root
+									type="single"
+									name="podcast-schedule-day"
+									value={podcastScheduleDay}
+									onValueChange={(value) =>
+										(podcastScheduleDay = value as 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday')}
+								>
+									<Select.Trigger id="podcast-schedule-day">
+										<span class="capitalize">{podcastScheduleDay}</span>
+									</Select.Trigger>
+									<Select.Content>
+										<Select.Item value="monday">Monday</Select.Item>
+										<Select.Item value="tuesday">Tuesday</Select.Item>
+										<Select.Item value="wednesday">Wednesday</Select.Item>
+										<Select.Item value="thursday">Thursday</Select.Item>
+										<Select.Item value="friday">Friday</Select.Item>
+										<Select.Item value="saturday">Saturday</Select.Item>
+										<Select.Item value="sunday">Sunday</Select.Item>
+									</Select.Content>
+								</Select.Root>
+							</div>
+						{/if}
+					</div>
+
+					<div class="grid gap-4 md:grid-cols-2">
+						<div class="space-y-2">
+							<Label for="podcast-style">Style</Label>
+							<Select.Root
+								type="single"
+								name="podcast-style"
+								value={podcastStyle}
+								onValueChange={(value) =>
+									(podcastStyle = value as 'casual' | 'formal' | 'deep-dive')}
+							>
+								<Select.Trigger id="podcast-style">
+									<span class="capitalize">{podcastStyle}</span>
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="casual">Casual</Select.Item>
+									<Select.Item value="formal">Formal</Select.Item>
+									<Select.Item value="deep-dive">Deep-dive</Select.Item>
+								</Select.Content>
+							</Select.Root>
+						</div>
+						<div class="space-y-2">
+							<Label for="podcast-length">Preferred length (minutes)</Label>
+							<Input id="podcast-length" type="number" min="5" max="60" bind:value={podcastPreferredLengthMinutes} />
+						</div>
+						<div class="space-y-2">
+							<Label for="podcast-host-a">Host A voice</Label>
+							<Input id="podcast-host-a" bind:value={podcastHostAVoice} placeholder="alloy" />
+						</div>
+						<div class="space-y-2">
+							<Label for="podcast-host-b">Host B voice</Label>
+							<Input id="podcast-host-b" bind:value={podcastHostBVoice} placeholder="echo" />
+						</div>
+					</div>
+
+					<div class="flex justify-end">
+						<Button
+							size="sm"
+							onclick={savePodcastGenerationSettings}
+							disabled={!hasPodcastGenerationSettingsChanged() || updatePodcastPreferencesMutation.isPending}
+						>
+							{#if updatePodcastPreferencesMutation.isPending}
 								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 							{:else}
 								<Save class="mr-2 h-4 w-4" />
