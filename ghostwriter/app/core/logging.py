@@ -446,17 +446,20 @@ class DigestActivityLogger:
         digests_deleted: int = 0,
         articles_cleaned: int = 0,
         tombstones_cleaned: int = 0,
+        podcast_episodes_cleaned: int = 0,
     ) -> None:
         """Log daily maintenance completion."""
         self.info(
             f"Daily maintenance completed: {digests_deleted} digests deleted, "
-            f"{articles_cleaned} seen articles cleaned, {tombstones_cleaned} tombstones cleaned",
+            f"{articles_cleaned} seen articles cleaned, {tombstones_cleaned} tombstones cleaned, "
+            f"{podcast_episodes_cleaned} podcast episodes cleaned",
             component="maintenance",
             event="completed",
             context={
                 "digests_deleted": digests_deleted,
                 "articles_cleaned": articles_cleaned,
                 "tombstones_cleaned": tombstones_cleaned,
+                "podcast_episodes_cleaned": podcast_episodes_cleaned,
             },
         )
 

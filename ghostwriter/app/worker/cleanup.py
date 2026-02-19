@@ -11,6 +11,7 @@ from app.core.database import engine
 from app.core.logging import digest_logger
 from app.models.digest import Digest
 from app.models.feed import Feed
+from app.models.podcast_episode import PodcastEpisode
 from app.models.seen_article import SeenArticle
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,37 @@ async def cleanup_old_digests() -> int:
         session.commit()
 
     logger.info(f"Cleaned up {cleaned} old digests")
+    return cleaned
+
+
+async def cleanup_old_podcast_episodes() -> int:
+    """
+    Delete old podcast audio files and episode records.
+
+    Uses the same retention window as digests.
+
+    Returns:
+        Number of episodes cleaned up.
+    """
+    settings = get_settings()
+    cutoff = datetime.utcnow() - timedelta(days=settings.digest_retention_days)
+    cleaned = 0
+
+    with Session(engine) as session:
+        statement = select(PodcastEpisode).where(PodcastEpisode.created_at < cutoff)
+        for episode in session.exec(statement).all():
+            if episode.audio_path and os.path.exists(episode.audio_path):
+                try:
+                    os.remove(episode.audio_path)
+                    logger.info(f"Deleted podcast audio: {episode.audio_path}")
+                except OSError as e:
+                    logger.error(f"Failed to delete podcast audio {episode.audio_path}: {e}")
+            session.delete(episode)
+            cleaned += 1
+        session.commit()
+
+    if cleaned > 0:
+        logger.info(f"Cleaned up {cleaned} old podcast episodes")
     return cleaned
 
 
