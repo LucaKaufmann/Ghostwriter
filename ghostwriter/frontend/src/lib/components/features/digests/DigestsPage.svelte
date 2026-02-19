@@ -32,6 +32,8 @@
 
 	const queryClient = useQueryClient();
 	const PAGE_SIZE = 20;
+	const PODCAST_STATUS_POLL_INTERVAL_MS = 5000;
+	const PODCAST_STATUS_POLL_MAX_BACKOFF_MS = 30000;
 	const ACTIVE_PODCAST_STATUSES = new Set(['pending', 'generating_script', 'generating_audio']);
 	type PodcastDigestStatus = {
 		status: string;
@@ -56,7 +58,9 @@
 	let podcastStatusByDigest = $state<Record<string, PodcastDigestStatus>>({});
 	let coverLoadToken = 0;
 	let podcastStatusLoadToken = 0;
-	let podcastStatusPollTimer: ReturnType<typeof setInterval> | null = null;
+	let podcastStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
+	let podcastStatusPollInFlight = false;
+	let podcastStatusPollErrorStreak = 0;
 
 	const queryParams = $derived.by(() => ({
 		limit,
@@ -233,34 +237,82 @@
 		podcastStatusByDigest = next;
 	}
 
-	$effect(() => {
-		const digestIds = visibleDigests
+	function clearPodcastStatusPolling() {
+		if (podcastStatusPollTimer) {
+			clearTimeout(podcastStatusPollTimer);
+			podcastStatusPollTimer = null;
+		}
+	}
+
+	function getCompletedDigestIds(): string[] {
+		return visibleDigests
 			.filter((digest) => digest.status === 'completed')
 			.map((digest) => digest.id);
+	}
+
+	function getActivePodcastDigestIds(digestIds: string[]): string[] {
+		return digestIds.filter((digestId) =>
+			ACTIVE_PODCAST_STATUSES.has(podcastStatusByDigest[digestId]?.status ?? '')
+		);
+	}
+
+	async function pollPodcastStatuses(digestIds: string[], token: number) {
+		if (!digestIds.length || podcastStatusPollInFlight) return;
+		podcastStatusPollInFlight = true;
+		try {
+			await refreshPodcastStatuses(digestIds, token);
+			podcastStatusPollErrorStreak = 0;
+		} catch {
+			podcastStatusPollErrorStreak += 1;
+		} finally {
+			podcastStatusPollInFlight = false;
+		}
+	}
+
+	function schedulePodcastStatusPolling(token: number, delayMs: number) {
+		clearPodcastStatusPolling();
+		podcastStatusPollTimer = setTimeout(async () => {
+			if (token !== podcastStatusLoadToken) return;
+			const completedIds = getCompletedDigestIds();
+			const activeIds = getActivePodcastDigestIds(completedIds);
+			if (!activeIds.length) return;
+
+			await pollPodcastStatuses(activeIds, token);
+			if (token !== podcastStatusLoadToken) return;
+
+			const nextCompletedIds = getCompletedDigestIds();
+			const nextActiveIds = getActivePodcastDigestIds(nextCompletedIds);
+			if (!nextActiveIds.length) return;
+
+			const nextDelay =
+				podcastStatusPollErrorStreak > 0
+					? Math.min(
+							PODCAST_STATUS_POLL_MAX_BACKOFF_MS,
+							PODCAST_STATUS_POLL_INTERVAL_MS * (podcastStatusPollErrorStreak + 1)
+						)
+					: PODCAST_STATUS_POLL_INTERVAL_MS;
+			schedulePodcastStatusPolling(token, nextDelay);
+		}, delayMs);
+	}
+
+	$effect(() => {
+		const digestIds = getCompletedDigestIds();
 		const localToken = podcastStatusLoadToken + 1;
 		podcastStatusLoadToken = localToken;
 		if (!digestIds.length) {
-			if (podcastStatusPollTimer) {
-				clearInterval(podcastStatusPollTimer);
-				podcastStatusPollTimer = null;
-			}
+			clearPodcastStatusPolling();
 			return;
 		}
 
-		void refreshPodcastStatuses(digestIds, localToken);
-
-		const hasActive = digestIds.some((digestId) =>
-			ACTIVE_PODCAST_STATUSES.has(podcastStatusByDigest[digestId]?.status ?? '')
-		);
-		if (podcastStatusPollTimer) {
-			clearInterval(podcastStatusPollTimer);
-			podcastStatusPollTimer = null;
-		}
-		if (hasActive) {
-			podcastStatusPollTimer = setInterval(() => {
-				void refreshPodcastStatuses(digestIds, localToken);
-			}, 3000);
-		}
+		void refreshPodcastStatuses(digestIds, localToken).then(() => {
+			if (localToken !== podcastStatusLoadToken) return;
+			const activeIds = getActivePodcastDigestIds(getCompletedDigestIds());
+			if (!activeIds.length) {
+				clearPodcastStatusPolling();
+				return;
+			}
+			schedulePodcastStatusPolling(localToken, PODCAST_STATUS_POLL_INTERVAL_MS);
+		});
 	});
 
 	onDestroy(() => {
@@ -268,7 +320,7 @@
 			URL.revokeObjectURL(url);
 		}
 		if (podcastStatusPollTimer) {
-			clearInterval(podcastStatusPollTimer);
+			clearTimeout(podcastStatusPollTimer);
 		}
 	});
 
@@ -450,14 +502,15 @@
 		};
 		try {
 			const response = await triggerPodcastMutation.mutateAsync(digest.id);
-			podcastStatusByDigest = {
-				...podcastStatusByDigest,
-				[digest.id]: {
-					status: response.status
-				}
-			};
-			queryClient.invalidateQueries({ queryKey: ['digests'] });
-			toast.success('Podcast generation queued');
+				podcastStatusByDigest = {
+					...podcastStatusByDigest,
+					[digest.id]: {
+						status: response.status
+					}
+				};
+				schedulePodcastStatusPolling(podcastStatusLoadToken, 1000);
+				queryClient.invalidateQueries({ queryKey: ['digests'] });
+				toast.success('Podcast generation queued');
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Unknown error';
 			toast.error('Failed to generate podcast', {
