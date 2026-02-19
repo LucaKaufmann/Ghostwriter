@@ -316,10 +316,16 @@
 			podcastScheduleTime = data.schedule_time;
 			podcastScheduleDay = data.schedule_day;
 			podcastStyle = data.style;
+			podcastTTSProvider = data.tts_provider;
+			podcastOpenAITTSModel = data.openai_tts_model;
+			podcastElevenLabsModelId = data.elevenlabs_model_id;
+			podcastElevenLabsOutputFormat = data.elevenlabs_output_format;
 			podcastHostAVoice = data.host_a_voice;
 			podcastHostBVoice = data.host_b_voice;
 			podcastPreferredLengthMinutes = data.preferred_length_minutes;
 			podcastFeedEnabled = data.podcast_feed_enabled;
+			podcastOpenAIAPIKey = '';
+			podcastElevenLabsAPIKey = '';
 			queryClient.invalidateQueries({ queryKey: ['podcast-preferences'] });
 			queryClient.invalidateQueries({ queryKey: ['podcast-feed-info'] });
 			toast.success('Podcast settings updated');
@@ -411,6 +417,12 @@
 	let podcastScheduleTime = $state('08:00');
 	let podcastScheduleDay = $state<'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'>('monday');
 	let podcastStyle = $state<'casual' | 'formal' | 'deep-dive'>('casual');
+	let podcastTTSProvider = $state<'openai' | 'elevenlabs'>('openai');
+	let podcastOpenAITTSModel = $state('tts-1');
+	let podcastOpenAIAPIKey = $state('');
+	let podcastElevenLabsModelId = $state('eleven_turbo_v2_5');
+	let podcastElevenLabsOutputFormat = $state('mp3_44100_128');
+	let podcastElevenLabsAPIKey = $state('');
 	let podcastHostAVoice = $state('alloy');
 	let podcastHostBVoice = $state('echo');
 	let podcastPreferredLengthMinutes = $state(15);
@@ -476,6 +488,10 @@
 			podcastScheduleTime = data.schedule_time;
 			podcastScheduleDay = data.schedule_day;
 			podcastStyle = data.style;
+			podcastTTSProvider = data.tts_provider;
+			podcastOpenAITTSModel = data.openai_tts_model;
+			podcastElevenLabsModelId = data.elevenlabs_model_id;
+			podcastElevenLabsOutputFormat = data.elevenlabs_output_format;
 			podcastHostAVoice = data.host_a_voice;
 			podcastHostBVoice = data.host_b_voice;
 			podcastPreferredLengthMinutes = data.preferred_length_minutes;
@@ -573,25 +589,42 @@
 			podcastScheduleTime !== data.schedule_time ||
 			podcastScheduleDay !== data.schedule_day ||
 			podcastStyle !== data.style ||
+			podcastTTSProvider !== data.tts_provider ||
+			podcastOpenAITTSModel.trim() !== data.openai_tts_model ||
+			podcastElevenLabsModelId.trim() !== data.elevenlabs_model_id ||
+			podcastElevenLabsOutputFormat.trim() !== data.elevenlabs_output_format ||
 			podcastHostAVoice.trim() !== data.host_a_voice ||
 			podcastHostBVoice.trim() !== data.host_b_voice ||
-			podcastPreferredLengthMinutes !== data.preferred_length_minutes
+			podcastPreferredLengthMinutes !== data.preferred_length_minutes ||
+			podcastOpenAIAPIKey.trim().length > 0 ||
+			podcastElevenLabsAPIKey.trim().length > 0
 		);
 	}
 
 	function savePodcastGenerationSettings() {
 		const clampedMinutes = Math.max(5, Math.min(60, podcastPreferredLengthMinutes));
 		podcastPreferredLengthMinutes = clampedMinutes;
-		updatePodcastPreferencesMutation.mutate({
+		const update: PodcastPreferencesUpdate = {
 			enabled: podcastGenerationEnabled,
 			schedule: podcastSchedule,
 			schedule_time: podcastScheduleTime,
 			schedule_day: podcastScheduleDay,
 			style: podcastStyle,
+			tts_provider: podcastTTSProvider,
+			openai_tts_model: podcastOpenAITTSModel.trim(),
+			elevenlabs_model_id: podcastElevenLabsModelId.trim(),
+			elevenlabs_output_format: podcastElevenLabsOutputFormat.trim(),
 			host_a_voice: podcastHostAVoice.trim(),
 			host_b_voice: podcastHostBVoice.trim(),
 			preferred_length_minutes: clampedMinutes
-		});
+		};
+		if (podcastOpenAIAPIKey.trim()) {
+			update.openai_api_key = podcastOpenAIAPIKey.trim();
+		}
+		if (podcastElevenLabsAPIKey.trim()) {
+			update.elevenlabs_api_key = podcastElevenLabsAPIKey.trim();
+		}
+		updatePodcastPreferencesMutation.mutate(update);
 	}
 
 	function hasPodcastFeedSettingsChanged(): boolean {
@@ -1298,12 +1331,86 @@
 							<Input id="podcast-length" type="number" min="5" max="60" bind:value={podcastPreferredLengthMinutes} />
 						</div>
 						<div class="space-y-2">
+							<Label for="podcast-tts-provider">TTS provider</Label>
+							<Select.Root
+								type="single"
+								name="podcast-tts-provider"
+								value={podcastTTSProvider}
+								onValueChange={(value) =>
+									(podcastTTSProvider = value as 'openai' | 'elevenlabs')}
+							>
+								<Select.Trigger id="podcast-tts-provider">
+									<span class="capitalize">{podcastTTSProvider}</span>
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="openai">OpenAI</Select.Item>
+									<Select.Item value="elevenlabs">ElevenLabs</Select.Item>
+								</Select.Content>
+							</Select.Root>
+						</div>
+						{#if podcastTTSProvider === 'openai'}
+							<div class="space-y-2">
+								<Label for="podcast-openai-model">OpenAI TTS model</Label>
+								<Input
+									id="podcast-openai-model"
+									bind:value={podcastOpenAITTSModel}
+									placeholder="tts-1"
+								/>
+							</div>
+							<div class="space-y-2 md:col-span-2">
+								<Label for="podcast-openai-key">OpenAI API key override (optional)</Label>
+								<Input
+									id="podcast-openai-key"
+									type="password"
+									bind:value={podcastOpenAIAPIKey}
+									placeholder="sk-..."
+								/>
+								<p class="text-xs text-muted-foreground">
+									If blank, Ghostwriter uses the global OpenAI key from server config.
+								</p>
+							</div>
+						{:else}
+							<div class="space-y-2">
+								<Label for="podcast-elevenlabs-model">ElevenLabs model</Label>
+								<Input
+									id="podcast-elevenlabs-model"
+									bind:value={podcastElevenLabsModelId}
+									placeholder="eleven_turbo_v2_5"
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="podcast-elevenlabs-format">ElevenLabs output format</Label>
+								<Input
+									id="podcast-elevenlabs-format"
+									bind:value={podcastElevenLabsOutputFormat}
+									placeholder="mp3_44100_128"
+								/>
+							</div>
+							<div class="space-y-2 md:col-span-2">
+								<Label for="podcast-elevenlabs-key">ElevenLabs API key</Label>
+								<Input
+									id="podcast-elevenlabs-key"
+									type="password"
+									bind:value={podcastElevenLabsAPIKey}
+									placeholder="xi-..."
+								/>
+							</div>
+						{/if}
+						<div class="space-y-2">
 							<Label for="podcast-host-a">Host A voice</Label>
-							<Input id="podcast-host-a" bind:value={podcastHostAVoice} placeholder="alloy" />
+							<Input
+								id="podcast-host-a"
+								bind:value={podcastHostAVoice}
+								placeholder={podcastTTSProvider === 'openai' ? 'alloy' : 'ElevenLabs voice ID'}
+							/>
 						</div>
 						<div class="space-y-2">
 							<Label for="podcast-host-b">Host B voice</Label>
-							<Input id="podcast-host-b" bind:value={podcastHostBVoice} placeholder="echo" />
+							<Input
+								id="podcast-host-b"
+								bind:value={podcastHostBVoice}
+								placeholder={podcastTTSProvider === 'openai' ? 'echo' : 'ElevenLabs voice ID'}
+							/>
 						</div>
 					</div>
 

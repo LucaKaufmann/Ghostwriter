@@ -552,6 +552,10 @@ export interface PodcastPreferencesResponse {
 	filter_keywords: string[];
 	preferred_length_minutes: number;
 	style: 'casual' | 'formal' | 'deep-dive';
+	tts_provider: 'openai' | 'elevenlabs';
+	openai_tts_model: string;
+	elevenlabs_model_id: string;
+	elevenlabs_output_format: string;
 	host_a_voice: string;
 	host_b_voice: string;
 	podcast_feed_enabled: boolean;
@@ -568,6 +572,12 @@ export interface PodcastPreferencesUpdate {
 	schedule_day?: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 	preferred_length_minutes?: number;
 	style?: 'casual' | 'formal' | 'deep-dive';
+	tts_provider?: 'openai' | 'elevenlabs';
+	openai_tts_model?: string;
+	openai_api_key?: string;
+	elevenlabs_model_id?: string;
+	elevenlabs_api_key?: string;
+	elevenlabs_output_format?: string;
 	host_a_voice?: string;
 	host_b_voice?: string;
 	podcast_feed_enabled?: boolean;
