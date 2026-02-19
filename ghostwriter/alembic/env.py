@@ -25,6 +25,9 @@ from app.models.wallabag_config import WallabagConfig  # noqa: F401, E402
 from app.models.media_feed import MediaFeed  # noqa: F401, E402
 from app.models.media_item import MediaItem  # noqa: F401, E402
 from app.models.manual_cover import ManualCover  # noqa: F401, E402
+from app.models.podcast_preferences import PodcastPreferences  # noqa: F401, E402
+from app.models.article_feedback import ArticleFeedback  # noqa: F401, E402
+from app.models.podcast_episode import PodcastEpisode  # noqa: F401, E402
 
 # this is the Alembic Config object
 config = context.config
