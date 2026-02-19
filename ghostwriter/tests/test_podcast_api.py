@@ -277,6 +277,37 @@ def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
         assert refreshed.status == "pending"
 
 
+def test_trigger_digest_podcast_requeues_failed_episode(client, monkeypatch, auth_headers):
+    scheduled: list[UUID] = []
+    monkeypatch.setattr(
+        podcast_service,
+        "_schedule_episode_task",
+        lambda episode_id: scheduled.append(episode_id),
+    )
+    digest_id, article_ids = _create_digest_with_articles(article_count=2)
+    failed = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="failed",
+    )
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=auth_headers)
+    assert trigger.status_code == 200
+    payload = trigger.json()
+    assert payload["episode_id"] == str(failed.id)
+    assert payload["status"] == "pending"
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, failed.id)
+        assert refreshed is not None
+        assert refreshed.status == "pending"
+        assert refreshed.error_message is None
+        assert refreshed.started_at is None
+        assert refreshed.completed_at is None
+
+    assert scheduled == [failed.id]
+
+
 @pytest.mark.asyncio
 async def test_run_episode_generation_uses_runtime_preference_snapshot(monkeypatch):
     monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
