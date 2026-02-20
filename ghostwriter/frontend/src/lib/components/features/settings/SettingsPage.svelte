@@ -426,6 +426,8 @@
 	let podcastHostAVoice = $state('alloy');
 	let podcastHostBVoice = $state('echo');
 	let podcastPreferredLengthMinutes = $state(15);
+	let podcastScriptModel = $state('');
+	let podcastScriptTimeoutSeconds = $state(60);
 	let podcastFeedEnabled = $state(false);
 	let podcastPreferencesInitialized = $state(false);
 	let copiedPodcastFeedUrl = $state(false);
@@ -495,6 +497,8 @@
 			podcastHostAVoice = data.host_a_voice;
 			podcastHostBVoice = data.host_b_voice;
 			podcastPreferredLengthMinutes = data.preferred_length_minutes;
+			podcastScriptModel = data.script_model ?? '';
+			podcastScriptTimeoutSeconds = data.script_timeout_seconds;
 			podcastFeedEnabled = data.podcast_feed_enabled;
 			podcastPreferencesInitialized = true;
 		}
@@ -596,6 +600,8 @@
 			podcastHostAVoice.trim() !== data.host_a_voice ||
 			podcastHostBVoice.trim() !== data.host_b_voice ||
 			podcastPreferredLengthMinutes !== data.preferred_length_minutes ||
+			podcastScriptModel.trim() !== (data.script_model ?? '') ||
+			podcastScriptTimeoutSeconds !== data.script_timeout_seconds ||
 			podcastOpenAIAPIKey.trim().length > 0 ||
 			podcastElevenLabsAPIKey.trim().length > 0
 		);
@@ -603,13 +609,17 @@
 
 	function savePodcastGenerationSettings() {
 		const clampedMinutes = Math.max(5, Math.min(60, podcastPreferredLengthMinutes));
+		const clampedTimeout = Math.max(30, Math.min(600, podcastScriptTimeoutSeconds));
 		podcastPreferredLengthMinutes = clampedMinutes;
+		podcastScriptTimeoutSeconds = clampedTimeout;
 		const update: PodcastPreferencesUpdate = {
 			enabled: podcastGenerationEnabled,
 			schedule: podcastSchedule,
 			schedule_time: podcastScheduleTime,
 			schedule_day: podcastScheduleDay,
 			style: podcastStyle,
+			script_model: podcastScriptModel.trim(),
+			script_timeout_seconds: clampedTimeout,
 			tts_provider: podcastTTSProvider,
 			openai_tts_model: podcastOpenAITTSModel.trim(),
 			elevenlabs_model_id: podcastElevenLabsModelId.trim(),
@@ -1329,6 +1339,14 @@
 						<div class="space-y-2">
 							<Label for="podcast-length">Preferred length (minutes)</Label>
 							<Input id="podcast-length" type="number" min="5" max="60" bind:value={podcastPreferredLengthMinutes} />
+						</div>
+						<div class="space-y-2">
+							<Label for="podcast-script-timeout">Script timeout (seconds)</Label>
+							<Input id="podcast-script-timeout" type="number" min="30" max="600" bind:value={podcastScriptTimeoutSeconds} />
+						</div>
+						<div class="space-y-2 md:col-span-2">
+							<Label for="podcast-script-model">Script model override (optional)</Label>
+							<Input id="podcast-script-model" bind:value={podcastScriptModel} placeholder="e.g. gpt-4.1-mini (blank uses global model)" />
 						</div>
 						<div class="space-y-2">
 							<Label for="podcast-tts-provider">TTS provider</Label>
