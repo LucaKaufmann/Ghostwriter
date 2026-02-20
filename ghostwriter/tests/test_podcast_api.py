@@ -10,9 +10,11 @@ import xml.etree.ElementTree as ET
 
 import pytest
 from PIL import Image
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.auth import generate_api_token, get_token_prefix, hash_api_token
+from app.core.config import get_settings
 from app.core.database import engine
 from app.models.api_token import APIToken
 from app.models.digest import Digest, DigestArticle
@@ -372,7 +374,10 @@ async def test_run_episode_generation_uses_runtime_preference_snapshot(monkeypat
 
 def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     digest_id, article_ids = _create_digest_with_articles(article_count=2)
-    audio_path = tmp_path / "episode.mp3"
+    settings = get_settings()
+    podcasts_dir = Path(settings.output_dir) / "podcasts"
+    podcasts_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = podcasts_dir / f"episode-{uuid4()}.mp3"
     audio_path.write_bytes(b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     episode = _create_episode(
         digest_id=digest_id,
@@ -423,6 +428,53 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     guid = items[0].find("guid")
     assert guid is not None
     assert guid.attrib.get("isPermaLink") == "false"
+
+
+def test_stream_and_download_reject_paths_outside_podcast_output_dir(client, tmp_path):
+    digest_id, article_ids = _create_digest_with_articles(article_count=1)
+    outside_audio = tmp_path / "outside.mp3"
+    outside_audio.write_bytes(b"outside-audio")
+    episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=outside_audio,
+    )
+
+    with Session(engine) as session:
+        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs.podcast_feed_enabled = True
+        prefs.podcast_feed_token = "feed_token_path_guard"
+        session.add(prefs)
+        session.commit()
+
+    stream = client.get(
+        f"/api/podcast/episodes/{episode.id}/stream?token=feed_token_path_guard",
+    )
+    assert stream.status_code == 403
+
+    download = client.get(
+        f"/api/podcast/episodes/{episode.id}/download?token=feed_token_path_guard",
+    )
+    assert download.status_code == 403
+
+
+def test_feed_artwork_rejects_paths_outside_podcast_artwork_dir(client):
+    outside_artwork = Path("/tmp/ghostwriter_outside_artwork.jpg")
+    outside_artwork.write_bytes(b"not-an-image-but-path-guard-test")
+    try:
+        with Session(engine) as session:
+            prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+            prefs.podcast_feed_enabled = True
+            prefs.podcast_feed_token = "feed_token_bad_artwork_path"
+            prefs.podcast_feed_artwork_path = str(outside_artwork)
+            session.add(prefs)
+            session.commit()
+
+        artwork = client.get("/api/podcast/feed/artwork?token=feed_token_bad_artwork_path")
+        assert artwork.status_code == 403
+    finally:
+        outside_artwork.unlink(missing_ok=True)
 
 
 def test_feed_uses_configured_public_base_url(client, auth_headers):
@@ -537,6 +589,73 @@ def test_eleven_v3_prompt_guidance_includes_sparse_audio_tag_rules():
     assert "one tag every 4-8 lines" in guidance
     assert "Do not overuse tags" in guidance
     assert "Keep tags sparse and intentional" in system_prompt
+
+
+def test_queue_episode_generation_handles_integrity_race(monkeypatch):
+    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    digest_id, _ = _create_digest_with_articles(article_count=1)
+
+    with Session(engine) as session:
+        call_count = {"value": 0}
+        original_commit = session.commit
+
+        def _racy_commit() -> None:
+            call_count["value"] += 1
+            if call_count["value"] == 1:
+                now = datetime.utcnow()
+                with Session(engine) as competing_session:
+                    competing_episode = PodcastEpisode(
+                        digest_id=digest_id,
+                        user_id=None,
+                        status="pending",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    competing_session.add(competing_episode)
+                    competing_session.commit()
+                raise IntegrityError("INSERT", {}, Exception("duplicate digest_id"))
+            original_commit()
+
+        monkeypatch.setattr(session, "commit", _racy_commit)
+        episode = podcast_service.queue_episode_generation(session, digest_id=digest_id)
+
+    with Session(engine) as session:
+        rows = session.exec(select(PodcastEpisode).where(PodcastEpisode.digest_id == digest_id)).all()
+        assert len(rows) == 1
+        assert episode.id == rows[0].id
+
+
+def test_schedule_episode_task_uses_main_loop_when_called_without_running_loop(monkeypatch):
+    scheduled: dict[str, object] = {}
+
+    class _ClosedLoop:
+        def is_closed(self) -> bool:
+            return False
+
+    def _fake_run_coroutine_threadsafe(coro, loop):
+        scheduled["loop"] = loop
+        scheduled["coroutine"] = coro
+
+        class _Future:
+            def add_done_callback(self, fn):
+                scheduled["done_callback"] = fn
+
+        return _Future()
+
+    monkeypatch.setattr(
+        "app.services.podcast_service.asyncio.get_running_loop",
+        lambda: (_ for _ in ()).throw(RuntimeError("no running loop")),
+    )
+    monkeypatch.setattr(
+        "app.services.podcast_service.asyncio.run_coroutine_threadsafe",
+        _fake_run_coroutine_threadsafe,
+    )
+
+    podcast_service.set_event_loop(_ClosedLoop())
+    podcast_service._schedule_episode_task(uuid4())
+
+    assert "coroutine" in scheduled
+    assert "loop" in scheduled
 
 
 @pytest.mark.asyncio
