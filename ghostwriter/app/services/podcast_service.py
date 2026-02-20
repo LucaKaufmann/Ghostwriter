@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -296,6 +297,19 @@ class PodcastDigestService:
         cleaned = value.strip()
         return cleaned if cleaned else None
 
+    @staticmethod
+    def _sanitize_public_base_url(value: str | None) -> str | None:
+        """Normalize optional public feed URL; blank values become None."""
+        if value is None:
+            return None
+        cleaned = value.strip().rstrip("/")
+        if not cleaned:
+            return None
+        parsed = urlparse(cleaned)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("podcast_feed_base_url must be an absolute http(s) URL")
+        return cleaned
+
     def _resolve_user_id(self, session: Session) -> UUID | None:
         """Resolve the current singleton user ID if a user exists."""
         user = session.exec(select(User).order_by(User.created_at.asc())).first()
@@ -424,6 +438,10 @@ class PodcastDigestService:
             prefs.podcast_feed_description = (
                 cleaned if cleaned else "AI-generated audio digest of your RSS feeds"
             )
+        if update.podcast_feed_base_url is not None:
+            prefs.podcast_feed_base_url = self._sanitize_public_base_url(
+                update.podcast_feed_base_url
+            )
 
         if not prefs.podcast_feed_token:
             prefs.podcast_feed_token = self._generate_feed_token()
@@ -448,6 +466,7 @@ class PodcastDigestService:
                 "elevenlabs_model_id": prefs.elevenlabs_model_id,
                 "elevenlabs_output_format": prefs.elevenlabs_output_format,
                 "podcast_feed_enabled": prefs.podcast_feed_enabled,
+                "podcast_feed_base_url": prefs.podcast_feed_base_url,
             },
         )
         return prefs

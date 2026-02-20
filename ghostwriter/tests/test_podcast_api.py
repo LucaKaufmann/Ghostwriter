@@ -13,7 +13,6 @@ from PIL import Image
 from sqlmodel import Session, select
 
 from app.core.auth import generate_api_token, get_token_prefix, hash_api_token
-from app.core.config import get_settings
 from app.core.database import engine
 from app.models.api_token import APIToken
 from app.models.digest import Digest, DigestArticle
@@ -159,6 +158,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert payload["script_timeout_seconds"] == 60
     assert payload["tts_provider"] == "openai"
     assert payload["openai_tts_model"] == "tts-1"
+    assert payload["podcast_feed_base_url"] is None
 
     update = client.put(
         "/api/podcast/preferences",
@@ -180,6 +180,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
             "host_b_voice": "echo",
             "podcast_feed_enabled": True,
             "podcast_feed_title": "My Test Feed",
+            "podcast_feed_base_url": "https://podcasts.example.com",
         },
         headers=auth_headers,
     )
@@ -198,6 +199,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert updated["boost_keywords"] == ["AI", "Swift"]
     assert updated["podcast_feed_enabled"] is True
     assert updated["podcast_feed_title"] == "My Test Feed"
+    assert updated["podcast_feed_base_url"] == "https://podcasts.example.com"
 
     invalid = client.put(
         "/api/podcast/preferences",
@@ -213,6 +215,14 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
         headers=auth_headers,
     )
     assert invalid_provider.status_code == 422
+
+    invalid_feed_base_url = client.put(
+        "/api/podcast/preferences",
+        json={"podcast_feed_base_url": "not-a-url"},
+        headers=auth_headers,
+    )
+    assert invalid_feed_base_url.status_code == 400
+    assert "podcast_feed_base_url" in invalid_feed_base_url.json()["detail"]
 
 
 def test_article_feedback_roundtrip(client, auth_headers):
@@ -377,6 +387,7 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
         prefs.podcast_feed_enabled = True
         prefs.podcast_feed_title = "Feed Title"
         prefs.podcast_feed_description = "Feed Description"
+        prefs.podcast_feed_base_url = None
         prefs.podcast_feed_token = "feed_token_123456"
         prefs.updated_at = datetime.utcnow()
         session.add(prefs)
@@ -414,7 +425,7 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     assert guid.attrib.get("isPermaLink") == "false"
 
 
-def test_feed_uses_configured_public_base_url(client, auth_headers, monkeypatch):
+def test_feed_uses_configured_public_base_url(client, auth_headers):
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
     _create_episode(digest_id=digest_id, article_ids=article_ids, status="ready")
 
@@ -422,28 +433,23 @@ def test_feed_uses_configured_public_base_url(client, auth_headers, monkeypatch)
         prefs = podcast_service.get_or_create_preferences(session, user_id=None)
         prefs.podcast_feed_enabled = True
         prefs.podcast_feed_token = "feed_token_public_url"
+        prefs.podcast_feed_base_url = "https://podcasts.example.com"
         session.add(prefs)
         session.commit()
 
-    settings = get_settings()
-    original_base_url = settings.podcast_public_base_url
-    settings.podcast_public_base_url = "https://podcasts.example.com"
-    try:
-        feed = client.get("/api/podcast/feed.xml?token=feed_token_public_url")
-        assert feed.status_code == 200
-        root = ET.fromstring(feed.content)
-        assert root.findtext("./channel/link") == "https://podcasts.example.com"
-        enclosure = root.find("./channel/item/enclosure")
-        assert enclosure is not None
-        assert enclosure.attrib["url"].startswith("https://podcasts.example.com/")
+    feed = client.get("/api/podcast/feed.xml?token=feed_token_public_url")
+    assert feed.status_code == 200
+    root = ET.fromstring(feed.content)
+    assert root.findtext("./channel/link") == "https://podcasts.example.com"
+    enclosure = root.find("./channel/item/enclosure")
+    assert enclosure is not None
+    assert enclosure.attrib["url"].startswith("https://podcasts.example.com/")
 
-        info = client.get("/api/podcast/feed/info", headers=auth_headers)
-        assert info.status_code == 200
-        assert info.json()["feed_url"].startswith(
-            "https://podcasts.example.com/api/podcast/feed.xml?token="
-        )
-    finally:
-        settings.podcast_public_base_url = original_base_url
+    info = client.get("/api/podcast/feed/info", headers=auth_headers)
+    assert info.status_code == 200
+    assert info.json()["feed_url"].startswith(
+        "https://podcasts.example.com/api/podcast/feed.xml?token="
+    )
 
 
 def test_feed_artwork_upload_and_serve(client, auth_headers):

@@ -324,6 +324,7 @@
 			podcastHostBVoice = data.host_b_voice;
 			podcastPreferredLengthMinutes = data.preferred_length_minutes;
 			podcastFeedEnabled = data.podcast_feed_enabled;
+			podcastFeedBaseUrl = data.podcast_feed_base_url ?? '';
 			podcastOpenAIAPIKey = '';
 			podcastElevenLabsAPIKey = '';
 			queryClient.invalidateQueries({ queryKey: ['podcast-preferences'] });
@@ -429,6 +430,7 @@
 	let podcastScriptModel = $state('');
 	let podcastScriptTimeoutSeconds = $state(60);
 	let podcastFeedEnabled = $state(false);
+	let podcastFeedBaseUrl = $state('');
 	let podcastPreferencesInitialized = $state(false);
 	let copiedPodcastFeedUrl = $state(false);
 	const OPENAI_VOICE_OPTIONS = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
@@ -507,6 +509,7 @@
 			podcastScriptModel = data.script_model ?? '';
 			podcastScriptTimeoutSeconds = data.script_timeout_seconds;
 			podcastFeedEnabled = data.podcast_feed_enabled;
+			podcastFeedBaseUrl = data.podcast_feed_base_url ?? '';
 			podcastPreferencesInitialized = true;
 		}
 	});
@@ -673,12 +676,16 @@
 	function hasPodcastFeedSettingsChanged(): boolean {
 		const data = podcastPreferencesQuery.data;
 		if (!data) return false;
-		return podcastFeedEnabled !== data.podcast_feed_enabled;
+		return (
+			podcastFeedEnabled !== data.podcast_feed_enabled ||
+			podcastFeedBaseUrl.trim() !== (data.podcast_feed_base_url ?? '')
+		);
 	}
 
 	function savePodcastFeedSettings() {
 		updatePodcastPreferencesMutation.mutate({
-			podcast_feed_enabled: podcastFeedEnabled
+			podcast_feed_enabled: podcastFeedEnabled,
+			podcast_feed_base_url: podcastFeedBaseUrl.trim()
 		});
 	}
 
@@ -1586,6 +1593,17 @@
 								checked={podcastFeedEnabled}
 								onCheckedChange={(checked) => (podcastFeedEnabled = checked)}
 							/>
+						</div>
+						<div class="mt-3 space-y-2">
+							<Label for="podcast-feed-base-url">Public base URL (optional)</Label>
+							<Input
+								id="podcast-feed-base-url"
+								bind:value={podcastFeedBaseUrl}
+								placeholder="https://podcasts.example.com"
+							/>
+							<p class="text-xs text-muted-foreground">
+								Use a URL reachable by your podcast app. Leave blank to use the current server host.
+							</p>
 						</div>
 						<div class="mt-3 flex justify-end">
 							<Button

@@ -78,6 +78,7 @@ class PodcastPreferencesBase(SQLModel):
     podcast_feed_description: str = Field(
         default="AI-generated audio digest of your RSS feeds"
     )
+    podcast_feed_base_url: str | None = Field(default=None)
     podcast_feed_artwork_path: str | None = Field(default=None)
     podcast_feed_token: str = Field(default="")
 
@@ -116,6 +117,7 @@ class PodcastPreferencesRead(SQLModel):
     podcast_feed_enabled: bool
     podcast_feed_title: str
     podcast_feed_description: str
+    podcast_feed_base_url: str | None = None
     podcast_feed_artwork_path: str | None = None
     updated_at: datetime
 
@@ -146,3 +148,4 @@ class PodcastPreferencesUpdate(SQLModel):
     podcast_feed_enabled: bool | None = None
     podcast_feed_title: str | None = None
     podcast_feed_description: str | None = None
+    podcast_feed_base_url: str | None = None

@@ -31,8 +31,11 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _podcast_base_url(request: Request) -> str:
+def _podcast_base_url(request: Request, preferred_base_url: str | None = None) -> str:
     """Resolve absolute base URL used in podcast feed and enclosure links."""
+    configured = (preferred_base_url or "").strip()
+    if configured:
+        return configured.rstrip("/")
     settings = get_settings()
     configured = (settings.podcast_public_base_url or "").strip()
     if configured:
@@ -277,6 +280,7 @@ async def get_podcast_preferences(session: Session = Depends(get_session)):
         podcast_feed_enabled=prefs.podcast_feed_enabled,
         podcast_feed_title=prefs.podcast_feed_title,
         podcast_feed_description=prefs.podcast_feed_description,
+        podcast_feed_base_url=prefs.podcast_feed_base_url,
         podcast_feed_artwork_path=prefs.podcast_feed_artwork_path,
         updated_at=prefs.updated_at,
     )
@@ -319,6 +323,7 @@ async def update_podcast_preferences(
         podcast_feed_enabled=prefs.podcast_feed_enabled,
         podcast_feed_title=prefs.podcast_feed_title,
         podcast_feed_description=prefs.podcast_feed_description,
+        podcast_feed_base_url=prefs.podcast_feed_base_url,
         podcast_feed_artwork_path=prefs.podcast_feed_artwork_path,
         updated_at=prefs.updated_at,
     )
@@ -620,7 +625,7 @@ async def get_podcast_feed_xml(
     if not prefs.podcast_feed_enabled:
         raise HTTPException(status_code=404, detail="Podcast feed is disabled")
 
-    base_url = _podcast_base_url(request)
+    base_url = _podcast_base_url(request, prefs.podcast_feed_base_url)
     episodes = session.exec(
         select(PodcastEpisode)
         .where(PodcastEpisode.status == "ready")
@@ -699,9 +704,9 @@ async def get_podcast_feed_info(
     session: Session = Depends(get_session),
 ):
     """Return feed URL and setup instructions for podcast apps."""
-    base_url = _podcast_base_url(request)
     user_id = podcast_service.resolve_user_id(session)
     prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+    base_url = _podcast_base_url(request, prefs.podcast_feed_base_url)
     feed_url = f"{base_url}/api/podcast/feed.xml?token={prefs.podcast_feed_token}"
 
     return PodcastFeedInfoResponse(
