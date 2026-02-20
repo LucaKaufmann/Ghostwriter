@@ -64,8 +64,11 @@ def upgrade() -> None:
         )
 
     # Drop old digest_id column via table rebuild
+    # Must drop the index first — SQLite batch alter tries to recreate all
+    # existing indexes on the rebuilt table, which fails if the column is gone.
     if "digest_id" in existing:
         with op.batch_alter_table("podcast_episodes") as batch_op:
+            batch_op.drop_index("ix_podcast_episodes_digest_id")
             batch_op.drop_column("digest_id")
 
 
