@@ -563,6 +563,7 @@ export interface PodcastPreferencesResponse {
 	podcast_feed_enabled: boolean;
 	podcast_feed_title: string;
 	podcast_feed_description: string;
+	podcast_feed_base_url: string | null;
 	podcast_feed_artwork_path: string | null;
 	updated_at: string;
 }
@@ -587,6 +588,7 @@ export interface PodcastPreferencesUpdate {
 	podcast_feed_enabled?: boolean;
 	podcast_feed_title?: string;
 	podcast_feed_description?: string;
+	podcast_feed_base_url?: string;
 }
 
 export interface PodcastTriggerResponse {
