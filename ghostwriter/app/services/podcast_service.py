@@ -9,8 +9,8 @@ import os
 import re
 import secrets
 import shutil
-import subprocess
 import tempfile
+from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -20,6 +20,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
@@ -180,7 +181,7 @@ Requirements:
   [HOST_B]: ...
 """
 
-_podcast_tasks: set[asyncio.Task[None]] = set()
+_podcast_tasks: set[asyncio.Task[None] | Future[None]] = set()
 
 
 @dataclass
@@ -229,6 +230,11 @@ class PodcastDigestService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.llm_service = LLMService(self.settings)
+        self._main_loop: asyncio.AbstractEventLoop | None = None
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Set the main application event loop for cross-thread task scheduling."""
+        self._main_loop = loop
 
     def recover_stuck_episodes(self) -> int:
         """Mark in-progress podcast episodes as failed during startup recovery."""
@@ -650,7 +656,21 @@ class PodcastDigestService:
             updated_at=now,
         )
         session.add(episode)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            # Another request may have inserted the episode after our initial existence check.
+            session.rollback()
+            existing = session.exec(
+                select(PodcastEpisode).where(PodcastEpisode.digest_id == digest_id)
+            ).first()
+            if existing is not None:
+                logger.info(
+                    "Podcast episode already created by concurrent request",
+                    extra={"digest_id": str(digest_id), "episode_id": str(existing.id)},
+                )
+                return existing
+            raise
         session.refresh(episode)
         logger.info(
             "Podcast episode queued",
@@ -774,12 +794,27 @@ class PodcastDigestService:
     def _schedule_episode_task(self, episode_id: UUID) -> None:
         """Schedule one podcast generation background task."""
         logger.info("Scheduling podcast generation task", extra={"episode_id": str(episode_id)})
-        task = asyncio.create_task(
-            self._run_episode_generation(episode_id),
-            name=f"podcast_episode_{episode_id}",
-        )
-        _podcast_tasks.add(task)
-        task.add_done_callback(_podcast_tasks.discard)
+        coroutine = self._run_episode_generation(episode_id)
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is not None:
+            task = running_loop.create_task(
+                coroutine,
+                name=f"podcast_episode_{episode_id}",
+            )
+            _podcast_tasks.add(task)
+            task.add_done_callback(_podcast_tasks.discard)
+            return
+
+        if self._main_loop is None or self._main_loop.is_closed():
+            raise RuntimeError("Podcast generation scheduler loop unavailable")
+
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._main_loop)
+        _podcast_tasks.add(future)
+        future.add_done_callback(_podcast_tasks.discard)
 
     def _snapshot_generation_preferences(
         self,
@@ -1727,10 +1762,10 @@ class PodcastDigestService:
                 )
                 raise RuntimeError("TTS failed for all segments")
 
-            self._stitch_segments(segment_paths, final_path)
+            await self._stitch_segments(segment_paths, final_path)
 
         audio_size = final_path.stat().st_size
-        duration = self._probe_audio_duration_seconds(final_path)
+        duration = await self._probe_audio_duration_seconds(final_path)
         self._append_tts_debug_entry(
             debug_path,
             {
@@ -2031,7 +2066,7 @@ class PodcastDigestService:
 
         return re.sub(r"\s+", " ", normalized).strip()
 
-    def _stitch_segments(self, segment_paths: list[Path], output_path: Path) -> None:
+    async def _stitch_segments(self, segment_paths: list[Path], output_path: Path) -> None:
         """Stitch MP3 segments with short silence padding using ffmpeg."""
         if len(segment_paths) == 1:
             shutil.copyfile(segment_paths[0], output_path)
@@ -2053,7 +2088,7 @@ class PodcastDigestService:
                 "0.3",
                 str(silence_path),
             ]
-            self._run_subprocess(silence_cmd, "failed to generate silence padding")
+            await self._run_subprocess(silence_cmd, "failed to generate silence padding")
 
             concat_lines: list[str] = []
             for index, segment_path in enumerate(segment_paths):
@@ -2077,7 +2112,7 @@ class PodcastDigestService:
                 "96k",
                 str(output_path),
             ]
-            self._run_subprocess(stitch_cmd, "failed to stitch podcast audio")
+            await self._run_subprocess(stitch_cmd, "failed to stitch podcast audio")
 
     @staticmethod
     def _ffmpeg_quote(path: Path) -> str:
@@ -2085,40 +2120,38 @@ class PodcastDigestService:
         return str(path).replace("'", "'\\''")
 
     @staticmethod
-    def _run_subprocess(cmd: list[str], error_prefix: str) -> None:
+    async def _run_subprocess(cmd: list[str], error_prefix: str) -> None:
         """Run subprocess command and raise a concise RuntimeError on failure."""
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
+        _, stderr_bytes = await process.communicate()
+        if process.returncode != 0:
+            stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"{error_prefix}: {stderr[:300]}")
 
     @staticmethod
-    def _probe_audio_duration_seconds(path: Path) -> int | None:
+    async def _probe_audio_duration_seconds(path: Path) -> int | None:
         """Get MP3 duration in whole seconds via ffprobe."""
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        process = await asyncio.create_subprocess_exec(
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if result.returncode != 0:
+        stdout_bytes, _ = await process.communicate()
+        if process.returncode != 0:
             return None
         try:
-            return max(0, int(float((result.stdout or "").strip())))
+            return max(0, int(float(stdout_bytes.decode("utf-8", errors="replace").strip())))
         except ValueError:
             return None
 

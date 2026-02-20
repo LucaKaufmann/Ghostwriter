@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -129,6 +130,7 @@ async def lifespan(app: FastAPI):
             "Cleared stuck podcast episodes on startup",
             extra={"count": recovered_episodes},
         )
+    podcast_service.set_event_loop(asyncio.get_running_loop())
 
     # Track startup time
     set_startup_time(datetime.utcnow())

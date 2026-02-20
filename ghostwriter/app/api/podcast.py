@@ -29,6 +29,7 @@ from app.services.podcast_service import podcast_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+MAX_ARTWORK_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 def _podcast_base_url(request: Request, preferred_base_url: str | None = None) -> str:
@@ -208,6 +209,21 @@ def _read_range(path: Path, start: int, end: int, chunk_size: int = 64 * 1024) -
                 break
             remaining -= len(data)
             yield data
+
+
+def _validated_child_path(path: Path, *, allowed_parent: Path, not_found_detail: str) -> Path:
+    """Resolve and validate file path remains inside an expected parent directory."""
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail=not_found_detail) from exc
+
+    parent_resolved = allowed_parent.resolve()
+    try:
+        resolved.relative_to(parent_resolved)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid media file path") from exc
+    return resolved
 
 
 async def _authorize_standard_or_feed_token(
@@ -520,21 +536,29 @@ async def delete_podcast_episode(
     session: Session = Depends(get_session),
 ):
     """Delete one podcast episode and local audio artifact."""
+    settings = get_settings()
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
 
+    audio_path: Path | None = None
     if episode.audio_path and os.path.exists(episode.audio_path):
+        audio_path = _validated_child_path(
+            Path(episode.audio_path),
+            allowed_parent=Path(settings.output_dir) / "podcasts",
+            not_found_detail="Audio file not found",
+        )
+
+    session.delete(episode)
+    session.commit()
+    if audio_path is not None:
         try:
-            os.remove(episode.audio_path)
+            os.remove(audio_path)
         except OSError as exc:
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to delete audio file: {exc}",
             ) from exc
-
-    session.delete(episode)
-    session.commit()
     return {"status": "deleted"}
 
 
@@ -547,6 +571,7 @@ async def stream_podcast_episode(
 ):
     """Stream podcast MP3 with byte-range support."""
     await _authorize_standard_or_feed_token(request, session, token)
+    settings = get_settings()
 
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
@@ -556,7 +581,11 @@ async def stream_podcast_episode(
     if not episode.audio_path or not os.path.exists(episode.audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
 
-    audio_path = Path(episode.audio_path)
+    audio_path = _validated_child_path(
+        Path(episode.audio_path),
+        allowed_parent=Path(settings.output_dir) / "podcasts",
+        not_found_detail="Audio file not found",
+    )
     file_size = audio_path.stat().st_size
     range_header = request.headers.get("range")
     requested_range = _parse_range(range_header, file_size)
@@ -596,6 +625,7 @@ async def download_podcast_episode(
 ):
     """Download podcast MP3 file."""
     await _authorize_standard_or_feed_token(request, session, token)
+    settings = get_settings()
 
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
@@ -605,8 +635,14 @@ async def download_podcast_episode(
     if not episode.audio_path or not os.path.exists(episode.audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
 
+    audio_path = _validated_child_path(
+        Path(episode.audio_path),
+        allowed_parent=Path(settings.output_dir) / "podcasts",
+        not_found_detail="Audio file not found",
+    )
+
     return FileResponse(
-        episode.audio_path,
+        audio_path,
         media_type="audio/mpeg",
         filename=f"podcast-{episode_id}.mp3",
     )
@@ -728,14 +764,17 @@ async def get_podcast_feed_artwork(
     session: Session = Depends(get_session),
 ):
     """Serve uploaded feed artwork for authenticated feed clients."""
+    settings = get_settings()
     prefs = podcast_service.get_preferences_by_feed_token(session, token)
     if prefs is None:
         raise HTTPException(status_code=401, detail="Invalid feed token")
     if not prefs.podcast_feed_artwork_path:
         raise HTTPException(status_code=404, detail="Feed artwork not configured")
-    artwork_path = Path(prefs.podcast_feed_artwork_path)
-    if not artwork_path.exists():
-        raise HTTPException(status_code=404, detail="Feed artwork not found")
+    artwork_path = _validated_child_path(
+        Path(prefs.podcast_feed_artwork_path),
+        allowed_parent=Path(settings.data_dir) / "podcast_artwork",
+        not_found_detail="Feed artwork not found",
+    )
     media_type = mimetypes.guess_type(str(artwork_path))[0] or "image/jpeg"
     return FileResponse(artwork_path, media_type=media_type)
 
@@ -761,6 +800,8 @@ async def upload_podcast_feed_artwork(
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Artwork file is empty")
+    if len(data) > MAX_ARTWORK_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Artwork file exceeds 10MB limit")
 
     try:
         from io import BytesIO
