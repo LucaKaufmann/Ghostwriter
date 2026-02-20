@@ -2183,7 +2183,7 @@
 								Clear History
 							</Button>
 						{:else}
-							<a href="/newsletters" class="text-sm text-primary hover:underline">
+							<a href="/sources/newsletters" class="text-sm text-primary hover:underline">
 								Configure
 							</a>
 						{/if}
