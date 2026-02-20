@@ -1293,7 +1293,7 @@
 							<div>
 								<p class="text-sm font-medium">Enable podcast generation</p>
 								<p class="text-xs text-muted-foreground">
-									When enabled, digests can auto-generate podcast episodes based on your schedule.
+									When enabled, podcast episodes will be generated on the configured schedule.
 								</p>
 							</div>
 							<Switch

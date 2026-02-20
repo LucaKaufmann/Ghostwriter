@@ -26,7 +26,6 @@ from app.services.llm_service import LLMService
 from app.services.media_processor import MediaProcessor
 from app.services.markdown_utils import markdown_to_html_basic
 from app.services.newsletter_service import NewsletterService
-from app.services.podcast_service import podcast_service
 from app.services.wallabag_service import WallabagService
 
 logger = logging.getLogger(__name__)
@@ -1000,23 +999,6 @@ class BinderyPipeline:
             duration_seconds=duration,
             epub_path=epub_path,
         )
-
-        # Evaluate podcast automation after a digest is completed.
-        try:
-            auto_episode_id = podcast_service.maybe_auto_generate_for_digest(self.digest_id)
-            if auto_episode_id:
-                logger.info(
-                    "Auto-triggered podcast episode generation",
-                    extra={
-                        "digest_id": str(self.digest_id),
-                        "episode_id": str(auto_episode_id),
-                    },
-                )
-        except Exception:
-            logger.exception(
-                "Podcast auto-generation check failed for digest %s",
-                self.digest_id,
-            )
 
     async def _fail(self, error: str) -> None:
         """Mark digest as failed."""

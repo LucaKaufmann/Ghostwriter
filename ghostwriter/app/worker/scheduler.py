@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import pytz
@@ -76,6 +76,9 @@ def setup_scheduler() -> None:
 
     # Set up media processing interval job
     _setup_media_processing_job()
+
+    # Set up independent podcast generation job
+    _setup_podcast_job()
 
     scheduler.start()
     logger.info("Scheduler started")
@@ -501,6 +504,108 @@ def update_media_processing_interval(hours: int) -> None:
         event="media_interval_updated",
         context={"interval_hours": hours},
     )
+
+
+def _setup_podcast_job() -> None:
+    """Set up the independent podcast generation cron job from preferences."""
+    from app.models.podcast_preferences import PodcastPreferences
+
+    with Session(engine) as session:
+        prefs = session.exec(
+            select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
+        ).first()
+
+    if prefs is None or not prefs.enabled or prefs.schedule == "manual":
+        logger.info("Podcast scheduler: no active schedule configured")
+        return
+
+    _apply_podcast_schedule(prefs)
+
+
+def _apply_podcast_schedule(prefs: Any) -> None:
+    """Add or replace the podcast_generation APScheduler job from preferences."""
+    from app.services.podcast_service import PodcastDigestService
+
+    hour, minute = PodcastDigestService._parse_schedule_time(prefs.schedule_time)
+
+    # Resolve timezone
+    with Session(engine) as session:
+        config = session.exec(select(ClientConfig)).first()
+        tz_name = config.timezone if config and config.timezone else get_settings().timezone
+
+    try:
+        tz = pytz.timezone(tz_name)
+    except pytz.exceptions.UnknownTimeZoneError:
+        logger.warning("Podcast scheduler: unknown timezone '%s', using UTC", tz_name)
+        tz = pytz.UTC
+
+    if prefs.schedule == "daily":
+        trigger = CronTrigger(hour=hour, minute=minute, timezone=tz)
+    elif prefs.schedule == "weekly":
+        day_of_week = {
+            "monday": "mon", "tuesday": "tue", "wednesday": "wed",
+            "thursday": "thu", "friday": "fri", "saturday": "sat", "sunday": "sun",
+        }.get(prefs.schedule_day, "mon")
+        trigger = CronTrigger(day_of_week=day_of_week, hour=hour, minute=minute, timezone=tz)
+    else:
+        return
+
+    scheduler.add_job(
+        _scheduled_podcast,
+        trigger,
+        id="podcast_generation",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+    logger.info(
+        "Podcast generation scheduled: %s at %02d:%02d (%s)",
+        prefs.schedule,
+        hour,
+        minute,
+        tz_name,
+    )
+
+
+async def _scheduled_podcast() -> None:
+    """Execute a scheduled podcast generation."""
+    from app.services.podcast_service import podcast_service
+
+    logger.info("Running scheduled podcast generation")
+    try:
+        episode_id = podcast_service.generate_scheduled_episode()
+        if episode_id:
+            logger.info("Scheduled podcast episode queued: %s", episode_id)
+        else:
+            logger.info("Scheduled podcast generation skipped (no eligible digests or dedup)")
+    except Exception as e:
+        logger.exception("Scheduled podcast generation failed: %s", e)
+
+
+def update_podcast_schedule() -> None:
+    """Reconfigure the podcast APScheduler job based on current preferences.
+
+    Call this after updating podcast preferences via the API.
+    """
+    from app.models.podcast_preferences import PodcastPreferences
+
+    if not scheduler.running:
+        return
+
+    with Session(engine) as session:
+        prefs = session.exec(
+            select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
+        ).first()
+
+    if prefs is None or not prefs.enabled or prefs.schedule == "manual":
+        # Remove the job if it exists
+        try:
+            scheduler.remove_job("podcast_generation")
+            logger.info("Podcast generation job removed (disabled or manual)")
+        except Exception:
+            pass
+        return
+
+    _apply_podcast_schedule(prefs)
 
 
 def shutdown_scheduler() -> None:

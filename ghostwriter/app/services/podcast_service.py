@@ -20,7 +20,6 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
@@ -559,89 +558,64 @@ class PodcastDigestService:
         user_id: UUID | None = None,
         force: bool = False,
     ) -> PodcastEpisode:
-        """Queue podcast generation for a digest and schedule a background task."""
+        """Queue podcast generation for a single digest (manual trigger)."""
         digest = session.get(Digest, digest_id)
         if digest is None:
             raise ValueError("Digest not found")
         if digest.status != "completed":
             raise ValueError("Digest must be completed before podcast generation")
 
+        digest_id_str = str(digest_id)
         now = datetime.utcnow()
-        episode = session.exec(
-            select(PodcastEpisode).where(PodcastEpisode.digest_id == digest_id)
-        ).first()
+
+        # Check for existing episode that contains this digest
+        all_episodes = session.exec(
+            select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
+        ).all()
+        episode = next(
+            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),
+            None,
+        )
 
         if episode is not None:
             if episode.status in RUNNING_STATUSES:
                 logger.info(
                     "Podcast generation already running for digest",
-                    extra={"digest_id": str(digest_id), "episode_id": str(episode.id), "status": episode.status},
+                    extra={"digest_id": digest_id_str, "episode_id": str(episode.id), "status": episode.status},
                 )
                 return episode
             if episode.status == "ready" and not force:
                 logger.info(
                     "Podcast already ready for digest; skipping queue",
-                    extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                    extra={"digest_id": digest_id_str, "episode_id": str(episode.id)},
                 )
                 return episode
             if episode.status in {"pending", "failed"} and not force:
                 if episode.status == "pending":
                     logger.info(
                         "Podcast generation already pending; ensuring worker task is scheduled",
-                        extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                        extra={"digest_id": digest_id_str, "episode_id": str(episode.id)},
                     )
                 else:
-                    if episode.audio_path and os.path.exists(episode.audio_path):
-                        try:
-                            os.remove(episode.audio_path)
-                        except OSError:
-                            logger.warning("Failed deleting old podcast audio before retry", exc_info=True)
-                    episode.script = None
-                    episode.audio_path = None
-                    episode.audio_size_bytes = None
-                    episode.duration_seconds = None
-                    episode.generation_cost_cents = None
-                    episode.article_ids = []
-                    episode.article_count = 0
-                    episode.status = "pending"
-                    episode.error_message = None
-                    episode.started_at = None
-                    episode.completed_at = None
-                    episode.updated_at = now
+                    self._reset_episode(episode, now)
                     session.add(episode)
                     session.commit()
                     session.refresh(episode)
                     logger.info(
                         "Podcast failed episode re-queued",
-                        extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                        extra={"digest_id": digest_id_str, "episode_id": str(episode.id)},
                     )
                 self._schedule_episode_task(episode.id)
                 return episode
 
             if force:
-                if episode.audio_path and os.path.exists(episode.audio_path):
-                    try:
-                        os.remove(episode.audio_path)
-                    except OSError:
-                        logger.warning("Failed deleting old podcast audio for retry", exc_info=True)
-                episode.script = None
-                episode.audio_path = None
-                episode.audio_size_bytes = None
-                episode.duration_seconds = None
-                episode.generation_cost_cents = None
-                episode.article_ids = []
-                episode.article_count = 0
-                episode.status = "pending"
-                episode.error_message = None
-                episode.started_at = None
-                episode.completed_at = None
-                episode.updated_at = now
+                self._reset_episode(episode, now)
                 session.add(episode)
                 session.commit()
                 session.refresh(episode)
                 logger.info(
                     "Podcast episode reset for forced regeneration",
-                    extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                    extra={"digest_id": digest_id_str, "episode_id": str(episode.id)},
                 )
                 self._schedule_episode_task(episode.id)
                 return episode
@@ -649,89 +623,155 @@ class PodcastDigestService:
             return episode
 
         episode = PodcastEpisode(
-            digest_id=digest_id,
+            digest_ids=[digest_id_str],
+            trigger="manual",
             user_id=user_id,
             status="pending",
             created_at=now,
             updated_at=now,
         )
         session.add(episode)
-        try:
-            session.commit()
-        except IntegrityError:
-            # Another request may have inserted the episode after our initial existence check.
-            session.rollback()
-            existing = session.exec(
-                select(PodcastEpisode).where(PodcastEpisode.digest_id == digest_id)
-            ).first()
-            if existing is not None:
-                logger.info(
-                    "Podcast episode already created by concurrent request",
-                    extra={"digest_id": str(digest_id), "episode_id": str(existing.id)},
-                )
-                return existing
-            raise
+        session.commit()
         session.refresh(episode)
         logger.info(
             "Podcast episode queued",
-            extra={"digest_id": str(digest_id), "episode_id": str(episode.id), "force": force},
+            extra={"digest_id": digest_id_str, "episode_id": str(episode.id), "force": force},
         )
         self._schedule_episode_task(episode.id)
         return episode
 
-    def maybe_auto_generate_for_digest(self, digest_id: UUID) -> UUID | None:
-        """Run schedule checks and auto-generate a podcast episode when eligible."""
+    def queue_multi_digest_episode(
+        self,
+        session: Session,
+        digest_ids: list[UUID],
+        *,
+        user_id: UUID | None = None,
+    ) -> PodcastEpisode:
+        """Create a scheduled podcast episode from multiple digests."""
+        now = datetime.utcnow()
+        episode = PodcastEpisode(
+            digest_ids=[str(d) for d in digest_ids],
+            trigger="scheduled",
+            user_id=user_id,
+            status="pending",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(episode)
+        session.commit()
+        session.refresh(episode)
+        logger.info(
+            "Multi-digest podcast episode queued",
+            extra={
+                "episode_id": str(episode.id),
+                "digest_count": len(digest_ids),
+                "digest_ids": [str(d) for d in digest_ids],
+            },
+        )
+        self._schedule_episode_task(episode.id)
+        return episode
+
+    @staticmethod
+    def _reset_episode(episode: PodcastEpisode, now: datetime) -> None:
+        """Reset episode fields for re-generation."""
+        if episode.audio_path and os.path.exists(episode.audio_path):
+            try:
+                os.remove(episode.audio_path)
+            except OSError:
+                logger.warning("Failed deleting old podcast audio before retry", exc_info=True)
+        episode.script = None
+        episode.audio_path = None
+        episode.audio_size_bytes = None
+        episode.duration_seconds = None
+        episode.generation_cost_cents = None
+        episode.article_ids = []
+        episode.article_count = 0
+        episode.status = "pending"
+        episode.error_message = None
+        episode.started_at = None
+        episode.completed_at = None
+        episode.updated_at = now
+
+    def generate_scheduled_episode(self) -> UUID | None:
+        """Generate a podcast episode from recent digests based on schedule config.
+
+        Called by the independent podcast APScheduler job.
+        Returns the episode ID if queued, or None if skipped.
+        """
         with Session(engine) as session:
             user_id = self._resolve_user_id(session)
             prefs = self.get_or_create_preferences(session, user_id=user_id)
             if not prefs.enabled or prefs.schedule == "manual":
                 logger.debug(
-                    "Podcast auto-generation skipped: disabled or manual schedule",
-                    extra={
-                        "digest_id": str(digest_id),
-                        "enabled": prefs.enabled,
-                        "schedule": prefs.schedule,
-                    },
+                    "Scheduled podcast generation skipped: disabled or manual",
+                    extra={"enabled": prefs.enabled, "schedule": prefs.schedule},
                 )
                 return None
 
-            digest = session.get(Digest, digest_id)
-            if digest is None or digest.status != "completed" or digest.completed_at is None:
-                logger.debug(
-                    "Podcast auto-generation skipped: digest not eligible",
-                    extra={
-                        "digest_id": str(digest_id),
-                        "digest_found": digest is not None,
-                        "digest_status": getattr(digest, "status", None),
-                    },
-                )
+            tz = self._resolve_timezone(session)
+            now_local = datetime.now(tz)
+
+            # Determine the time window for collecting digests
+            if prefs.schedule == "daily":
+                start_local = datetime.combine(now_local.date(), time.min, tzinfo=tz)
+                end_local = start_local + timedelta(days=1)
+            elif prefs.schedule == "weekly":
+                days_back = now_local.weekday()  # Monday=0
+                week_start_date = now_local.date() - timedelta(days=days_back)
+                start_local = datetime.combine(week_start_date, time.min, tzinfo=tz)
+                end_local = start_local + timedelta(days=7)
+            else:
                 return None
 
-            if not self._schedule_window_allows_generation(
-                session,
-                prefs=prefs,
-                completed_at=digest.completed_at,
-            ):
-                logger.debug(
-                    "Podcast auto-generation skipped: schedule window not matched",
-                    extra={
-                        "digest_id": str(digest_id),
-                        "schedule": prefs.schedule,
-                        "schedule_time": prefs.schedule_time,
-                        "schedule_day": prefs.schedule_day,
-                    },
-                )
-                return None
+            start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+            end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
 
-            episode = self.queue_episode_generation(
-                session,
-                digest_id,
-                user_id=prefs.user_id,
-                force=False,
+            # Deduplicate: skip if a non-failed episode already exists for this window
+            existing_statement = select(PodcastEpisode).where(
+                PodcastEpisode.created_at >= start_utc,
+                PodcastEpisode.created_at < end_utc,
+                PodcastEpisode.status != "failed",
+                PodcastEpisode.trigger == "scheduled",
             )
+            if session.exec(existing_statement).first() is not None:
+                logger.info(
+                    "Scheduled podcast generation skipped: episode already exists for window",
+                    extra={"window_start": start_utc.isoformat(), "window_end": end_utc.isoformat()},
+                )
+                return None
+
+            # Find completed digests in the time window
+            digests = session.exec(
+                select(Digest).where(
+                    Digest.status == "completed",
+                    Digest.created_at >= start_utc,
+                    Digest.created_at < end_utc,
+                )
+            ).all()
+
+            if not digests:
+                logger.info(
+                    "Scheduled podcast generation skipped: no completed digests in window",
+                    extra={"window_start": start_utc.isoformat(), "window_end": end_utc.isoformat()},
+                )
+                return None
+
+            digest_ids = [d.id for d in digests]
             logger.info(
-                "Podcast auto-generation queued",
-                extra={"digest_id": str(digest_id), "episode_id": str(episode.id)},
+                "Scheduled podcast generation starting",
+                extra={
+                    "schedule": prefs.schedule,
+                    "digest_count": len(digest_ids),
+                    "digest_ids": [str(d) for d in digest_ids],
+                    "window_start": start_utc.isoformat(),
+                    "window_end": end_utc.isoformat(),
+                },
+            )
+
+            episode = self.queue_multi_digest_episode(
+                session,
+                digest_ids,
+                user_id=prefs.user_id,
             )
             return episode.id
 
@@ -744,52 +784,6 @@ class PodcastDigestService:
         except Exception:
             logger.warning("Invalid timezone '%s', using UTC", timezone_name)
             return ZoneInfo("UTC")
-
-    def _schedule_window_allows_generation(
-        self,
-        session: Session,
-        *,
-        prefs: PodcastPreferences,
-        completed_at: datetime,
-    ) -> bool:
-        """Check if digest completion matches user schedule and dedupe window."""
-        tz = self._resolve_timezone(session)
-        scheduled_hour, scheduled_minute = self._parse_schedule_time(prefs.schedule_time)
-        completed_local = completed_at.replace(tzinfo=timezone.utc).astimezone(tz)
-
-        if (completed_local.hour, completed_local.minute) < (
-            scheduled_hour,
-            scheduled_minute,
-        ):
-            return False
-
-        if prefs.schedule == "daily":
-            start_local = datetime.combine(completed_local.date(), time.min, tzinfo=tz)
-            end_local = start_local + timedelta(days=1)
-        elif prefs.schedule == "weekly":
-            expected_weekday = SCHEDULE_DAY_TO_WEEKDAY.get(prefs.schedule_day, 0)
-            if completed_local.weekday() != expected_weekday:
-                return False
-            week_start_date = completed_local.date() - timedelta(days=completed_local.weekday())
-            start_local = datetime.combine(week_start_date, time.min, tzinfo=tz)
-            end_local = start_local + timedelta(days=7)
-        else:
-            return False
-
-        start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
-        end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
-
-        existing_statement = select(PodcastEpisode).where(
-            PodcastEpisode.created_at >= start_utc,
-            PodcastEpisode.created_at < end_utc,
-            PodcastEpisode.status != "failed",
-        )
-        if prefs.user_id is None:
-            existing_statement = existing_statement.where(PodcastEpisode.user_id == None)  # noqa: E711
-        else:
-            existing_statement = existing_statement.where(PodcastEpisode.user_id == prefs.user_id)
-        existing = session.exec(existing_statement).first()
-        return existing is None
 
     def _schedule_episode_task(self, episode_id: UUID) -> None:
         """Schedule one podcast generation background task."""
@@ -853,7 +847,7 @@ class PodcastDigestService:
                 return
             logger.info(
                 "Podcast generation started",
-                extra={"episode_id": str(episode_id), "digest_id": str(episode.digest_id)},
+                extra={"episode_id": str(episode_id), "digest_ids": episode.digest_ids},
             )
             episode.status = "generating_script"
             episode.error_message = None
@@ -867,15 +861,28 @@ class PodcastDigestService:
                 episode = session.get(PodcastEpisode, episode_id)
                 if episode is None:
                     return
-                digest = session.get(Digest, episode.digest_id)
-                if digest is None:
-                    raise RuntimeError("Digest not found for episode")
+
+                # Resolve digest UUIDs from the episode
+                episode_digest_ids: list[UUID] = []
+                for raw in (episode.digest_ids or []):
+                    try:
+                        episode_digest_ids.append(UUID(raw))
+                    except ValueError:
+                        continue
+                if not episode_digest_ids:
+                    raise RuntimeError("No digest IDs on episode")
+
+                # Verify at least one digest exists
+                first_digest = session.get(Digest, episode_digest_ids[0])
+                if first_digest is None:
+                    raise RuntimeError("Primary digest not found for episode")
+
                 user_id = episode.user_id or self._resolve_user_id(session)
                 prefs = self.get_or_create_preferences(session, user_id=user_id)
                 runtime_prefs = self._snapshot_generation_preferences(prefs)
                 selected_articles = self.select_articles_for_episode(
                     session,
-                    digest_id=digest.id,
+                    digest_ids=episode_digest_ids,
                     prefs=runtime_prefs,
                     user_id=user_id,
                 )
@@ -883,7 +890,7 @@ class PodcastDigestService:
                     "Podcast article selection complete",
                     extra={
                         "episode_id": str(episode_id),
-                        "digest_id": str(digest.id),
+                        "digest_ids": [str(d) for d in episode_digest_ids],
                         "selected_article_count": len(selected_articles),
                     },
                 )
@@ -895,14 +902,14 @@ class PodcastDigestService:
                     selected_articles,
                     runtime_prefs,
                     episode_id=episode_id,
-                    digest_id=digest.id,
+                    digest_id=episode_digest_ids[0],
                 )
                 segments = self.parse_script_segments(script)
                 logger.info(
                     "Podcast script generation complete",
                     extra={
                         "episode_id": str(episode_id),
-                        "digest_id": str(digest.id),
+                        "digest_ids": [str(d) for d in episode_digest_ids],
                         "script_chars": len(script),
                         "segment_count": len(segments),
                     },
@@ -919,7 +926,7 @@ class PodcastDigestService:
                     "Podcast generation moved to audio synthesis",
                     extra={
                         "episode_id": str(episode_id),
-                        "digest_id": str(digest.id),
+                        "digest_ids": [str(d) for d in episode_digest_ids],
                         "status": episode.status,
                     },
                 )
@@ -947,7 +954,7 @@ class PodcastDigestService:
                     "Podcast generation completed",
                     extra={
                         "episode_id": str(episode_id),
-                        "digest_id": str(episode.digest_id),
+                        "digest_ids": episode.digest_ids,
                         "audio_size_bytes": audio_result.audio_size_bytes,
                         "duration_seconds": audio_result.duration_seconds,
                         "article_count": episode.article_count,
@@ -971,7 +978,7 @@ class PodcastDigestService:
                         "Podcast generation marked failed",
                         extra={
                             "episode_id": str(episode_id),
-                            "digest_id": str(episode.digest_id),
+                            "digest_ids": episode.digest_ids,
                             "status": episode.status,
                         },
                     )
@@ -980,26 +987,37 @@ class PodcastDigestService:
         self,
         session: Session,
         *,
-        digest_id: UUID,
+        digest_ids: list[UUID],
         prefs: PodcastGenerationPreferences,
         user_id: UUID | None,
     ) -> list[DigestArticle]:
-        """Rank digest articles and pick top items for script generation."""
+        """Rank articles from one or more digests and pick top items for script generation."""
         articles = session.exec(
             select(DigestArticle)
-            .where(DigestArticle.digest_id == digest_id)
+            .where(DigestArticle.digest_id.in_(digest_ids))
             .order_by(DigestArticle.sort_order.asc())
         ).all()
         if not articles:
             logger.info(
                 "Podcast article selection found no digest articles",
-                extra={"digest_id": str(digest_id)},
+                extra={"digest_ids": [str(d) for d in digest_ids]},
             )
             return []
 
+        # Deduplicate articles by URL across digests
+        seen_urls: set[str] = set()
+        unique_articles: list[DigestArticle] = []
+        for article in articles:
+            url_key = (article.url or "").strip().lower()
+            if url_key and url_key in seen_urls:
+                continue
+            if url_key:
+                seen_urls.add(url_key)
+            unique_articles.append(article)
+
         feedback_profile = self._build_feedback_profile(session, user_id=user_id)
         scored: list[tuple[float, int, DigestArticle]] = []
-        for article in articles:
+        for article in unique_articles:
             score = self.score_article(
                 article=article,
                 prefs=prefs,
@@ -1012,7 +1030,7 @@ class PodcastDigestService:
         if not scored:
             logger.info(
                 "Podcast article selection scored no eligible articles",
-                extra={"digest_id": str(digest_id), "digest_article_count": len(articles)},
+                extra={"digest_ids": [str(d) for d in digest_ids], "digest_article_count": len(unique_articles)},
             )
             return []
 
@@ -1022,8 +1040,9 @@ class PodcastDigestService:
         logger.info(
             "Podcast article selection summary",
             extra={
-                "digest_id": str(digest_id),
-                "digest_article_count": len(articles),
+                "digest_ids": [str(d) for d in digest_ids],
+                "total_article_count": len(articles),
+                "unique_article_count": len(unique_articles),
                 "scored_article_count": len(scored),
                 "target_count": target_count,
                 "selected_count": len(selected),

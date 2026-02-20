@@ -10,7 +10,6 @@ import xml.etree.ElementTree as ET
 
 import pytest
 from PIL import Image
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.auth import generate_api_token, get_token_prefix, hash_api_token
@@ -100,10 +99,12 @@ def _create_episode(
     article_ids: list[UUID],
     status: str,
     audio_path: Path | None = None,
+    trigger: str = "manual",
 ) -> PodcastEpisode:
     now = datetime.utcnow()
     episode = PodcastEpisode(
-        digest_id=digest_id,
+        digest_ids=[str(digest_id)],
+        trigger=trigger,
         user_id=None,
         script="[HOST_A]: Intro\n[HOST_B]: Reply\n[HOST_A]: Outro\n[HOST_B]: End\n"
         "[HOST_A]: Next\n[HOST_B]: Done",
@@ -539,10 +540,9 @@ def test_feed_artwork_upload_and_serve(client, auth_headers):
     assert "feed.xml?token=" in info_payload["feed_url"]
 
 
-def test_auto_generation_schedule_trigger(monkeypatch):
+def test_scheduled_podcast_generation(monkeypatch):
     monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
-    completed_at = datetime(2099, 1, 10, 12, 0, 0)
-    digest_id, _ = _create_digest_with_articles(article_count=2, completed_at=completed_at)
+    digest_id, _ = _create_digest_with_articles(article_count=2)
 
     with Session(engine) as session:
         prefs = podcast_service.get_or_create_preferences(session, user_id=None)
@@ -553,13 +553,14 @@ def test_auto_generation_schedule_trigger(monkeypatch):
         session.add(prefs)
         session.commit()
 
-    episode_id = podcast_service.maybe_auto_generate_for_digest(digest_id)
+    episode_id = podcast_service.generate_scheduled_episode()
     assert episode_id is not None
 
     with Session(engine) as session:
         episode = session.get(PodcastEpisode, UUID(str(episode_id)))
         assert episode is not None
-        assert episode.digest_id == digest_id
+        assert str(digest_id) in episode.digest_ids
+        assert episode.trigger == "scheduled"
         assert episode.status == "pending"
 
 
@@ -591,38 +592,19 @@ def test_eleven_v3_prompt_guidance_includes_sparse_audio_tag_rules():
     assert "Keep tags sparse and intentional" in system_prompt
 
 
-def test_queue_episode_generation_handles_integrity_race(monkeypatch):
+def test_queue_episode_generation_finds_existing_episode(monkeypatch):
     monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
-    digest_id, _ = _create_digest_with_articles(article_count=1)
+    digest_id, article_ids = _create_digest_with_articles(article_count=1)
+
+    # Pre-create an episode for this digest
+    existing = _create_episode(digest_id=digest_id, article_ids=article_ids, status="ready")
 
     with Session(engine) as session:
-        call_count = {"value": 0}
-        original_commit = session.commit
-
-        def _racy_commit() -> None:
-            call_count["value"] += 1
-            if call_count["value"] == 1:
-                now = datetime.utcnow()
-                with Session(engine) as competing_session:
-                    competing_episode = PodcastEpisode(
-                        digest_id=digest_id,
-                        user_id=None,
-                        status="pending",
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    competing_session.add(competing_episode)
-                    competing_session.commit()
-                raise IntegrityError("INSERT", {}, Exception("duplicate digest_id"))
-            original_commit()
-
-        monkeypatch.setattr(session, "commit", _racy_commit)
+        # Should find and return the existing episode instead of creating a new one
         episode = podcast_service.queue_episode_generation(session, digest_id=digest_id)
 
-    with Session(engine) as session:
-        rows = session.exec(select(PodcastEpisode).where(PodcastEpisode.digest_id == digest_id)).all()
-        assert len(rows) == 1
-        assert episode.id == rows[0].id
+    assert episode.id == existing.id
+    assert str(digest_id) in episode.digest_ids
 
 
 def test_schedule_episode_task_uses_main_loop_when_called_without_running_loop(monkeypatch):
