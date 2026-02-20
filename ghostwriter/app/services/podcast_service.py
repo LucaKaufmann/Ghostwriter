@@ -1496,6 +1496,8 @@ class PodcastDigestService:
                 [
                     "- Avoid ultra-short lines; most turns should be substantial enough for stable prosody.",
                     "- Use punctuation and conversational cadence cues instead of SSML tags.",
+                    "- Optional inline audio tags are allowed inside host lines (for example [laughs], [sighs], [whispers]).",
+                    "- Keep tags sparse and intentional; avoid tag-heavy delivery.",
                 ]
             )
         return SCRIPT_SYSTEM_PROMPT + "\n" + "\n".join(extra)
@@ -1514,7 +1516,11 @@ class PodcastDigestService:
             return (
                 "Optimize for Eleven v3 natural dialogue: keep most lines around 12-40 words, "
                 "avoid ultra-short one-liners, vary pacing with punctuation, use occasional conversational "
-                "asides, and ensure numbers/dates/currency/abbreviations are spoken naturally."
+                "asides, and ensure numbers/dates/currency/abbreviations are spoken naturally. "
+                "Use sparse inline audio/emotion tags within host lines (e.g. [laughs], [sighs], [whispers], "
+                "[excited], [thoughtful]) only where they add realism. Do not overuse tags: target about one "
+                "tag every 4-8 lines, never more than one tag in a line, and avoid repeating the same tag in "
+                "adjacent turns."
             )
         return (
             "Optimize for ElevenLabs TTS clarity: expand symbols, dates, times, currency, and abbreviations "
