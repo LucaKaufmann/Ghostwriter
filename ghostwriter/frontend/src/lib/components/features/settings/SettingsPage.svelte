@@ -1483,10 +1483,11 @@
 									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsOutputFormat = 'mp3_44100_128')}>
 										Use mp3_44100_128
 									</Button>
-									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsOutputFormat = 'mp3_44100_192')}>
-										Use mp3_44100_192
-									</Button>
 								</div>
+								<p class="text-xs text-muted-foreground">
+									Recommended: <code>mp3_44100_128</code>. Some higher-bitrate formats (like <code>mp3_44100_192</code>)
+									require higher ElevenLabs subscription tiers.
+								</p>
 							</div>
 							<div class="space-y-2 md:col-span-2">
 								<Label for="podcast-elevenlabs-key">ElevenLabs API key</Label>
