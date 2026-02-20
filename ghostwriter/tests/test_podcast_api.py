@@ -524,6 +524,21 @@ def test_elevenlabs_tts_normalization_for_spoken_delivery():
     assert "example dot com" in normalized
 
 
+def test_eleven_v3_prompt_guidance_includes_sparse_audio_tag_rules():
+    guidance = podcast_service._tts_script_delivery_guidance(
+        provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+    )
+    system_prompt = podcast_service._script_system_prompt_for_tts(
+        provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+    )
+    assert "audio/emotion tags" in guidance
+    assert "one tag every 4-8 lines" in guidance
+    assert "Do not overuse tags" in guidance
+    assert "Keep tags sparse and intentional" in system_prompt
+
+
 @pytest.mark.asyncio
 async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(monkeypatch):
     captured: dict[str, object] = {}
