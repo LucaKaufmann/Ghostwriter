@@ -153,6 +153,7 @@ User preferences:
 - Host A voice persona: analytical and concise
 - Host B voice persona: explanatory and contextual
 - Style guidance: {style_guidance}
+- TTS delivery guidance: {tts_delivery_guidance}
 
 Episode outline:
 {outline_block}
@@ -1069,6 +1070,14 @@ class PodcastDigestService:
         model = (prefs.script_model or "").strip() or self.settings.get_llm_model_string()
         timeout_seconds = max(30, min(600, int(prefs.script_timeout_seconds)))
         style_guidance = self._script_style_guidance(prefs.style)
+        tts_delivery_guidance = self._tts_script_delivery_guidance(
+            provider=prefs.tts_provider,
+            elevenlabs_model_id=prefs.elevenlabs_model_id,
+        )
+        script_system_prompt = self._script_system_prompt_for_tts(
+            provider=prefs.tts_provider,
+            elevenlabs_model_id=prefs.elevenlabs_model_id,
+        )
         debug_path: Path | None = None
         if episode_id is not None:
             debug_dir = Path(self.settings.logs_dir) / "podcast_script_prompts"
@@ -1122,6 +1131,7 @@ class PodcastDigestService:
             length_minutes=prefs.preferred_length_minutes,
             style=prefs.style,
             style_guidance=style_guidance,
+            tts_delivery_guidance=tts_delivery_guidance,
             outline_block=outline,
             briefs_block=briefs_block,
         )
@@ -1139,7 +1149,7 @@ class PodcastDigestService:
                     "article_count": len(articles),
                     "timeout_seconds": timeout_seconds,
                     "generated_at_utc": datetime.utcnow().isoformat() + "Z",
-                    "system_prompt": SCRIPT_SYSTEM_PROMPT,
+                    "system_prompt": script_system_prompt,
                     "user_prompt": prompt,
                 },
             )
@@ -1163,7 +1173,7 @@ class PodcastDigestService:
                 prompt,
                 model,
                 retries=1,
-                system_prompt=SCRIPT_SYSTEM_PROMPT,
+                system_prompt=script_system_prompt,
                 timeout_seconds=timeout_seconds,
             )
             if failed or not script.strip():
@@ -1193,13 +1203,14 @@ class PodcastDigestService:
             length_minutes=prefs.preferred_length_minutes,
             style=prefs.style,
             style_guidance=style_guidance,
+            tts_delivery_guidance=tts_delivery_guidance,
         )
         for attempt in range(retries + 1):
             script, failed = await self.llm_service._run_completion(
                 fallback_prompt,
                 model,
                 retries=1,
-                system_prompt=SCRIPT_SYSTEM_PROMPT,
+                system_prompt=script_system_prompt,
                 timeout_seconds=timeout_seconds,
             )
             if failed or not script.strip():
@@ -1424,6 +1435,7 @@ class PodcastDigestService:
         length_minutes: int,
         style: str,
         style_guidance: str,
+        tts_delivery_guidance: str,
     ) -> str:
         """Build legacy one-shot prompt as fallback if chunked generation fails."""
         articles_block_lines: list[str] = []
@@ -1440,8 +1452,54 @@ class PodcastDigestService:
             length_minutes=length_minutes,
             style=style,
             style_guidance=style_guidance,
+            tts_delivery_guidance=tts_delivery_guidance,
             outline_block="Use this source list directly as outline.",
             briefs_block=articles_block,
+        )
+
+    @staticmethod
+    def _script_system_prompt_for_tts(*, provider: str, elevenlabs_model_id: str) -> str:
+        """Return system prompt with provider-specific spoken-delivery constraints."""
+        normalized_provider = (provider or "openai").strip().lower()
+        if normalized_provider != "elevenlabs":
+            return SCRIPT_SYSTEM_PROMPT
+
+        model_id = (elevenlabs_model_id or "").strip().lower()
+        extra = [
+            "Additional spoken-delivery rules for ElevenLabs:",
+            "- Write text that sounds natural when spoken out loud, not read silently.",
+            "- Expand abbreviations, symbols, URLs, and shorthand when practical.",
+            "- Use contractions and occasional short interjections to keep rhythm human.",
+            "- Avoid overly dense clauses or robotic repeated sentence templates.",
+        ]
+        if model_id == "eleven_v3":
+            extra.extend(
+                [
+                    "- Avoid ultra-short lines; most turns should be substantial enough for stable prosody.",
+                    "- Use punctuation and conversational cadence cues instead of SSML tags.",
+                ]
+            )
+        return SCRIPT_SYSTEM_PROMPT + "\n" + "\n".join(extra)
+
+    @staticmethod
+    def _tts_script_delivery_guidance(*, provider: str, elevenlabs_model_id: str) -> str:
+        """Return prompt guidance that improves natural TTS delivery for selected provider."""
+        normalized_provider = (provider or "openai").strip().lower()
+        if normalized_provider != "elevenlabs":
+            return (
+                "Keep delivery clean and spoken. Avoid awkward punctuation chains and spell out only when needed."
+            )
+
+        model_id = (elevenlabs_model_id or "").strip().lower()
+        if model_id == "eleven_v3":
+            return (
+                "Optimize for Eleven v3 natural dialogue: keep most lines around 12-40 words, "
+                "avoid ultra-short one-liners, vary pacing with punctuation, use occasional conversational "
+                "asides, and ensure numbers/dates/currency/abbreviations are spoken naturally."
+            )
+        return (
+            "Optimize for ElevenLabs TTS clarity: expand symbols, dates, times, currency, and abbreviations "
+            "into spoken forms where needed; keep sentence rhythm varied and conversational."
         )
 
     @staticmethod
@@ -1551,7 +1609,16 @@ class PodcastDigestService:
             provider = (prefs.tts_provider or "openai").strip().lower()
             if provider not in SUPPORTED_TTS_PROVIDERS:
                 raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
+            normalized_segment_texts = [
+                self._normalize_tts_segment_text(
+                    segment.text,
+                    provider=provider,
+                    elevenlabs_model_id=prefs.elevenlabs_model_id,
+                )
+                for segment in segments
+            ]
             for index, segment in enumerate(segments, start=1):
+                normalized_text = normalized_segment_texts[index - 1]
                 preferred_voice = (
                     prefs.host_a_voice if segment.speaker == "HOST_A" else prefs.host_b_voice
                 )
@@ -1575,15 +1642,23 @@ class PodcastDigestService:
                         "voice": voice,
                         "provider": provider,
                         "text": segment.text,
+                        "normalized_text": normalized_text,
                         "text_chars": len(segment.text),
+                        "normalized_text_chars": len(normalized_text),
                         "timestamp_utc": datetime.utcnow().isoformat() + "Z",
                     },
                 )
                 audio_bytes = await self._synthesize_segment_with_retry(
-                    text=segment.text,
+                    text=normalized_text,
                     voice=voice,
                     provider=provider,
                     prefs=prefs,
+                    previous_text=(
+                        normalized_segment_texts[index - 2] if index > 1 else None
+                    ),
+                    next_text=(
+                        normalized_segment_texts[index] if index < len(normalized_segment_texts) else None
+                    ),
                 )
                 if not audio_bytes:
                     logger.warning("Skipping TTS segment after retries: %s", segment.speaker)
@@ -1667,6 +1742,8 @@ class PodcastDigestService:
         voice: str,
         provider: str,
         prefs: PodcastGenerationPreferences,
+        previous_text: str | None = None,
+        next_text: str | None = None,
     ) -> bytes:
         """Generate one TTS segment with bounded retries."""
         last_error: Exception | None = None
@@ -1677,6 +1754,8 @@ class PodcastDigestService:
                     voice=voice,
                     provider=provider,
                     prefs=prefs,
+                    previous_text=previous_text,
+                    next_text=next_text,
                 )
             except Exception as exc:
                 last_error = exc
@@ -1707,12 +1786,20 @@ class PodcastDigestService:
         voice: str,
         provider: str,
         prefs: PodcastGenerationPreferences,
+        previous_text: str | None = None,
+        next_text: str | None = None,
     ) -> bytes:
         """Call selected TTS provider API."""
         if provider == "openai":
             return await self._synthesize_segment_openai(text=text, voice=voice, prefs=prefs)
         if provider == "elevenlabs":
-            return await self._synthesize_segment_elevenlabs(text=text, voice=voice, prefs=prefs)
+            return await self._synthesize_segment_elevenlabs(
+                text=text,
+                voice=voice,
+                prefs=prefs,
+                previous_text=previous_text,
+                next_text=next_text,
+            )
         raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
 
     async def _synthesize_segment_openai(
@@ -1753,6 +1840,8 @@ class PodcastDigestService:
         text: str,
         voice: str,
         prefs: PodcastGenerationPreferences,
+        previous_text: str | None = None,
+        next_text: str | None = None,
     ) -> bytes:
         """Call ElevenLabs text-to-speech API."""
         api_key = (prefs.elevenlabs_api_key or "").strip()
@@ -1768,7 +1857,12 @@ class PodcastDigestService:
         payload: dict[str, Any] = {
             "text": text,
             "model_id": model_id,
+            "apply_text_normalization": self._elevenlabs_text_normalization_mode(model_id),
         }
+        if previous_text:
+            payload["previous_text"] = previous_text[:800]
+        if next_text:
+            payload["next_text"] = next_text[:800]
         headers = {
             "xi-api-key": api_key,
             "Content-Type": "application/json",
@@ -1787,6 +1881,124 @@ class PodcastDigestService:
                     f"ElevenLabs TTS error {response.status_code}: {response.text[:200]}"
                 )
             return response.content
+
+    @staticmethod
+    def _elevenlabs_text_normalization_mode(model_id: str) -> str:
+        """Return safe normalization mode supported by chosen ElevenLabs model."""
+        normalized = (model_id or "").strip().lower()
+        # Keep broad compatibility for non-v3 models.
+        if normalized != "eleven_v3":
+            return "auto"
+        return "on"
+
+    @staticmethod
+    def _normalize_tts_segment_text(
+        text: str,
+        *,
+        provider: str,
+        elevenlabs_model_id: str | None = None,
+    ) -> str:
+        """Normalize script lines into more speakable text for TTS engines."""
+        normalized = re.sub(r"\s+", " ", (text or "")).strip()
+        if not normalized:
+            return normalized
+
+        normalized = normalized.replace("&", " and ")
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+
+        if provider.strip().lower() != "elevenlabs":
+            return normalized
+
+        # Light-weight spoken-form normalization guided by ElevenLabs best practices.
+        replacements = {
+            r"\bDr\.": "Doctor",
+            r"\bMr\.": "Mister",
+            r"\bMrs\.": "Missus",
+            r"\bMs\.": "Miss",
+            r"\bProf\.": "Professor",
+            r"\bAve\.": "Avenue",
+            r"\bBlvd\.": "Boulevard",
+            r"\bvs\.": "versus",
+            r"\be\.g\.": "for example",
+            r"\bi\.e\.": "that is",
+        }
+        for pattern, value in replacements.items():
+            normalized = re.sub(pattern, value, normalized, flags=re.IGNORECASE)
+
+        # Expand common symbol usage.
+        normalized = re.sub(r"(\d)\s*%\b", r"\1 percent", normalized)
+        normalized = re.sub(r"\bCtrl\s*\+\s*([A-Za-z])\b", r"control \1", normalized)
+
+        # Convert simple ISO dates to spoken-friendly month/day/year.
+        def _replace_iso_date(match: re.Match[str]) -> str:
+            raw = match.group(0)
+            try:
+                parsed = datetime.strptime(raw, "%Y-%m-%d")
+                return parsed.strftime("%B %d, %Y").replace(" 0", " ")
+            except ValueError:
+                return raw
+
+        normalized = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", _replace_iso_date, normalized)
+
+        # Convert 24h time to 12h spoken form when obvious.
+        def _replace_time(match: re.Match[str]) -> str:
+            raw = match.group(0)
+            try:
+                parsed = datetime.strptime(raw, "%H:%M")
+                spoken = parsed.strftime("%I:%M %p").lstrip("0")
+                return spoken
+            except ValueError:
+                return raw
+
+        normalized = re.sub(r"\b([01]?\d|2[0-3]):[0-5]\d\b", _replace_time, normalized)
+
+        # Expand simple monetary amounts for clearer readout.
+        def _replace_dollars(match: re.Match[str]) -> str:
+            raw_amount = match.group(1).replace(",", "")
+            try:
+                amount = float(raw_amount)
+            except ValueError:
+                return match.group(0)
+            dollars = int(amount)
+            cents = int(round((amount - dollars) * 100))
+            if cents:
+                return f"{dollars} dollars and {cents} cents"
+            return f"{dollars} dollars"
+
+        normalized = re.sub(r"\$(\d[\d,]*(?:\.\d{1,2})?)", _replace_dollars, normalized)
+
+        # Make URLs and domains easier to pronounce.
+        normalized = re.sub(
+            r"https?://([A-Za-z0-9.-]+)(/[^\s]*)?",
+            lambda m: (
+                f"{m.group(1).replace('.', ' dot ')}"
+                + (
+                    f" slash {m.group(2).strip('/').replace('/', ' slash ')}"
+                    if m.group(2)
+                    else ""
+                )
+            ),
+            normalized,
+        )
+        normalized = re.sub(
+            r"\b([A-Za-z0-9-]+\.[A-Za-z]{2,})(/[^\s]*)?\b",
+            lambda m: (
+                f"{m.group(1).replace('.', ' dot ')}"
+                + (
+                    f" slash {m.group(2).strip('/').replace('/', ' slash ')}"
+                    if m.group(2)
+                    else ""
+                )
+            ),
+            normalized,
+        )
+
+        # v3 behaves better with richer turns; avoid ultra-short fragments.
+        model_id = (elevenlabs_model_id or "").strip().lower()
+        if model_id == "eleven_v3" and len(normalized) < 18 and not normalized.endswith("."):
+            normalized += "."
+
+        return re.sub(r"\s+", " ", normalized).strip()
 
     def _stitch_segments(self, segment_paths: list[Path], output_path: Path) -> None:
         """Stitch MP3 segments with short silence padding using ffmpeg."""
