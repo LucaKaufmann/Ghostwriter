@@ -322,6 +322,7 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
         retries: int,
         *,
         system_prompt: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> tuple[str, bool]:
         """Run one LLM completion with retries, returning (output, failed)."""
         call_id = str(uuid4())
@@ -333,7 +334,7 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "timeout": self.settings.ai_timeout_seconds,
+            "timeout": timeout_seconds or self.settings.ai_timeout_seconds,
         }
 
         if self.settings.ai_provider == "ollama":
@@ -344,13 +345,14 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
             kwargs["api_key"] = self.settings.openai_api_key
 
         logger.info(
-            "LLM call started | call_id=%s provider=%s model=%s retries=%s prompt_chars=%s system_prompt_chars=%s started_at=%s",
+            "LLM call started | call_id=%s provider=%s model=%s retries=%s prompt_chars=%s system_prompt_chars=%s timeout_seconds=%s started_at=%s",
             call_id,
             self.settings.ai_provider,
             model,
             retries,
             len(prompt),
             len(system_prompt or ""),
+            timeout_seconds or self.settings.ai_timeout_seconds,
             datetime.utcnow().isoformat() + "Z",
         )
         logger.info(

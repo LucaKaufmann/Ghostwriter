@@ -55,6 +55,8 @@ class PodcastPreferencesBase(SQLModel):
     )
 
     preferred_length_minutes: int = Field(default=15, ge=5, le=60)
+    script_model: str | None = Field(default=None)
+    script_timeout_seconds: int = Field(default=60, ge=30, le=600)
     style: str = Field(
         default="casual",
         sa_column=Column(String, nullable=False, server_default="casual"),
@@ -102,6 +104,8 @@ class PodcastPreferencesRead(SQLModel):
     boost_keywords: list[str]
     filter_keywords: list[str]
     preferred_length_minutes: int
+    script_model: str | None = None
+    script_timeout_seconds: int
     style: PodcastStyle
     tts_provider: PodcastTTSProvider
     openai_tts_model: str
@@ -128,6 +132,8 @@ class PodcastPreferencesUpdate(SQLModel):
     boost_keywords: list[str] | None = None
     filter_keywords: list[str] | None = None
     preferred_length_minutes: int | None = Field(default=None, ge=5, le=60)
+    script_model: str | None = None
+    script_timeout_seconds: int | None = Field(default=None, ge=30, le=600)
     style: PodcastStyle | None = None
     tts_provider: PodcastTTSProvider | None = None
     openai_tts_model: str | None = None

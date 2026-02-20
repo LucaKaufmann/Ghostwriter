@@ -154,6 +154,8 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert payload["enabled"] is False
     assert payload["schedule"] == "manual"
     assert payload["preferred_length_minutes"] == 15
+    assert payload["script_model"] is None
+    assert payload["script_timeout_seconds"] == 60
     assert payload["tts_provider"] == "openai"
     assert payload["openai_tts_model"] == "tts-1"
 
@@ -165,6 +167,8 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
             "schedule_time": "09:30",
             "schedule_day": "friday",
             "style": "formal",
+            "script_model": "gpt-4.1-mini",
+            "script_timeout_seconds": 180,
             "boost_keywords": ["AI", "Swift", "AI"],
             "filter_keywords": ["crypto"],
             "tts_provider": "elevenlabs",
@@ -185,6 +189,8 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert updated["schedule_time"] == "09:30"
     assert updated["schedule_day"] == "friday"
     assert updated["style"] == "formal"
+    assert updated["script_model"] == "gpt-4.1-mini"
+    assert updated["script_timeout_seconds"] == 180
     assert updated["tts_provider"] == "elevenlabs"
     assert updated["elevenlabs_model_id"] == "eleven_flash_v2_5"
     assert updated["elevenlabs_output_format"] == "mp3_44100_128"

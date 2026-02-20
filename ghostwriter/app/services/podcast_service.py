@@ -208,6 +208,8 @@ class PodcastGenerationPreferences:
     boost_keywords: list[str]
     filter_keywords: list[str]
     preferred_length_minutes: int
+    script_model: str | None
+    script_timeout_seconds: int
     style: str
     tts_provider: str
     openai_tts_model: str
@@ -374,6 +376,11 @@ class PodcastDigestService:
             prefs.filter_keywords = self._sanitize_string_list(update.filter_keywords)
         if update.preferred_length_minutes is not None:
             prefs.preferred_length_minutes = update.preferred_length_minutes
+        if update.script_model is not None:
+            cleaned_model = update.script_model.strip()
+            prefs.script_model = cleaned_model or None
+        if update.script_timeout_seconds is not None:
+            prefs.script_timeout_seconds = update.script_timeout_seconds
         if update.style is not None:
             prefs.style = update.style
         if update.tts_provider is not None:
@@ -432,6 +439,8 @@ class PodcastDigestService:
                 "schedule_time": prefs.schedule_time,
                 "schedule_day": prefs.schedule_day,
                 "preferred_length_minutes": prefs.preferred_length_minutes,
+                "script_model": prefs.script_model,
+                "script_timeout_seconds": prefs.script_timeout_seconds,
                 "style": prefs.style,
                 "tts_provider": prefs.tts_provider,
                 "openai_tts_model": prefs.openai_tts_model,
@@ -763,6 +772,10 @@ class PodcastDigestService:
             boost_keywords=list(prefs.boost_keywords or []),
             filter_keywords=list(prefs.filter_keywords or []),
             preferred_length_minutes=int(prefs.preferred_length_minutes),
+            script_model=(prefs.script_model or "").strip() or None,
+            script_timeout_seconds=max(
+                30, min(600, int(prefs.script_timeout_seconds or 60))
+            ),
             style=str(prefs.style),
             tts_provider=str(prefs.tts_provider),
             openai_tts_model=str(prefs.openai_tts_model or "tts-1"),
@@ -1053,7 +1066,8 @@ class PodcastDigestService:
         if not articles:
             raise RuntimeError("No articles available for script generation")
 
-        model = self.settings.get_llm_model_string()
+        model = (prefs.script_model or "").strip() or self.settings.get_llm_model_string()
+        timeout_seconds = max(30, min(600, int(prefs.script_timeout_seconds)))
         style_guidance = self._script_style_guidance(prefs.style)
         debug_path: Path | None = None
         if episode_id is not None:
@@ -1084,6 +1098,7 @@ class PodcastDigestService:
         briefs = await self._generate_article_briefs(
             article_inputs,
             model=model,
+            timeout_seconds=timeout_seconds,
             style=prefs.style,
             style_guidance=style_guidance,
             debug_path=debug_path,
@@ -1095,6 +1110,7 @@ class PodcastDigestService:
         outline = await self._generate_script_outline(
             briefs_block=briefs_block,
             model=model,
+            timeout_seconds=timeout_seconds,
             style=prefs.style,
             style_guidance=style_guidance,
             length_minutes=prefs.preferred_length_minutes,
@@ -1121,6 +1137,7 @@ class PodcastDigestService:
                     "style": prefs.style,
                     "length_minutes": prefs.preferred_length_minutes,
                     "article_count": len(articles),
+                    "timeout_seconds": timeout_seconds,
                     "generated_at_utc": datetime.utcnow().isoformat() + "Z",
                     "system_prompt": SCRIPT_SYSTEM_PROMPT,
                     "user_prompt": prompt,
@@ -1139,6 +1156,7 @@ class PodcastDigestService:
                     "attempts_total": retries + 1,
                     "article_count": len(articles),
                     "model": model,
+                    "timeout_seconds": timeout_seconds,
                 },
             )
             script, failed = await self.llm_service._run_completion(
@@ -1146,6 +1164,7 @@ class PodcastDigestService:
                 model,
                 retries=1,
                 system_prompt=SCRIPT_SYSTEM_PROMPT,
+                timeout_seconds=timeout_seconds,
             )
             if failed or not script.strip():
                 continue
@@ -1181,6 +1200,7 @@ class PodcastDigestService:
                 model,
                 retries=1,
                 system_prompt=SCRIPT_SYSTEM_PROMPT,
+                timeout_seconds=timeout_seconds,
             )
             if failed or not script.strip():
                 continue
@@ -1196,6 +1216,7 @@ class PodcastDigestService:
         article_inputs: list[dict[str, Any]],
         *,
         model: str,
+        timeout_seconds: int,
         style: str,
         style_guidance: str,
         debug_path: Path | None,
@@ -1246,6 +1267,7 @@ class PodcastDigestService:
                     model,
                     retries=1,
                     system_prompt=SCRIPT_BRIEF_SYSTEM_PROMPT,
+                    timeout_seconds=timeout_seconds,
                 )
                 if failed or not completion.strip():
                     await asyncio.sleep(0.3 * (attempt + 1))
@@ -1354,6 +1376,7 @@ class PodcastDigestService:
         *,
         briefs_block: str,
         model: str,
+        timeout_seconds: int,
         style: str,
         style_guidance: str,
         length_minutes: int,
@@ -1387,6 +1410,7 @@ class PodcastDigestService:
                 model,
                 retries=1,
                 system_prompt=SCRIPT_OUTLINE_SYSTEM_PROMPT,
+                timeout_seconds=timeout_seconds,
             )
             if not failed and outline.strip():
                 return outline.strip()

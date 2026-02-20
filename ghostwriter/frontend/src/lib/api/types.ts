@@ -551,6 +551,8 @@ export interface PodcastPreferencesResponse {
 	boost_keywords: string[];
 	filter_keywords: string[];
 	preferred_length_minutes: number;
+	script_model: string | null;
+	script_timeout_seconds: number;
 	style: 'casual' | 'formal' | 'deep-dive';
 	tts_provider: 'openai' | 'elevenlabs';
 	openai_tts_model: string;
@@ -571,6 +573,8 @@ export interface PodcastPreferencesUpdate {
 	schedule_time?: string;
 	schedule_day?: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 	preferred_length_minutes?: number;
+	script_model?: string;
+	script_timeout_seconds?: number;
 	style?: 'casual' | 'formal' | 'deep-dive';
 	tts_provider?: 'openai' | 'elevenlabs';
 	openai_tts_model?: string;
