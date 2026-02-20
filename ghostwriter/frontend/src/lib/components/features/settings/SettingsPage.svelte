@@ -431,6 +431,13 @@
 	let podcastFeedEnabled = $state(false);
 	let podcastPreferencesInitialized = $state(false);
 	let copiedPodcastFeedUrl = $state(false);
+	const OPENAI_VOICE_OPTIONS = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
+	const ELEVENLABS_VOICE_PRESETS = [
+		{ label: 'Chris', id: 'iP95p4xoKVk53GoZ742B' },
+		{ label: 'Matilda', id: 'XrExE9yKIg1WjnnlVkGX' },
+		{ label: 'George', id: 'JBFqnCBsd6RMkjVDRZzb' },
+		{ label: 'Bella', id: 'hpp4J3VqNfWAUOO0d1Us' }
+	] as const;
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -635,6 +642,32 @@
 			update.elevenlabs_api_key = podcastElevenLabsAPIKey.trim();
 		}
 		updatePodcastPreferencesMutation.mutate(update);
+	}
+
+	function applyPodcastVoicePreset(preset: 'openai-default' | 'openai-alt' | 'eleven-default' | 'eleven-alt') {
+		if (preset === 'openai-default') {
+			podcastHostAVoice = 'alloy';
+			podcastHostBVoice = 'echo';
+			return;
+		}
+		if (preset === 'openai-alt') {
+			podcastHostAVoice = 'nova';
+			podcastHostBVoice = 'fable';
+			return;
+		}
+		if (preset === 'eleven-default') {
+			podcastHostAVoice = 'iP95p4xoKVk53GoZ742B';
+			podcastHostBVoice = 'XrExE9yKIg1WjnnlVkGX';
+			return;
+		}
+		podcastHostAVoice = 'JBFqnCBsd6RMkjVDRZzb';
+		podcastHostBVoice = 'hpp4J3VqNfWAUOO0d1Us';
+	}
+
+	function swapPodcastVoices() {
+		const currentA = podcastHostAVoice;
+		podcastHostAVoice = podcastHostBVoice;
+		podcastHostBVoice = currentA;
 	}
 
 	function hasPodcastFeedSettingsChanged(): boolean {
@@ -1365,6 +1398,9 @@
 									<Select.Item value="elevenlabs">ElevenLabs</Select.Item>
 								</Select.Content>
 							</Select.Root>
+							<p class="text-xs text-muted-foreground">
+								Provider-specific fields and presets appear below.
+							</p>
 						</div>
 						{#if podcastTTSProvider === 'openai'}
 							<div class="space-y-2">
@@ -1374,6 +1410,14 @@
 									bind:value={podcastOpenAITTSModel}
 									placeholder="tts-1"
 								/>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastOpenAITTSModel = 'tts-1')}>
+										Use tts-1
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastOpenAITTSModel = 'tts-1-hd')}>
+										Use tts-1-hd
+									</Button>
+								</div>
 							</div>
 							<div class="space-y-2 md:col-span-2">
 								<Label for="podcast-openai-key">OpenAI API key override (optional)</Label>
@@ -1387,6 +1431,20 @@
 									If blank, Ghostwriter uses the global OpenAI key from server config.
 								</p>
 							</div>
+							<div class="space-y-2 md:col-span-2 rounded-lg border p-3">
+								<p class="text-sm font-medium">OpenAI voice presets</p>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-default')}>
+										Default: Alloy + Echo
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-alt')}>
+										Alt: Nova + Fable
+									</Button>
+								</div>
+								<p class="text-xs text-muted-foreground">
+									Supported OpenAI voices: {OPENAI_VOICE_OPTIONS.join(', ')}.
+								</p>
+							</div>
 						{:else}
 							<div class="space-y-2">
 								<Label for="podcast-elevenlabs-model">ElevenLabs model</Label>
@@ -1395,6 +1453,17 @@
 									bind:value={podcastElevenLabsModelId}
 									placeholder="eleven_turbo_v2_5"
 								/>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsModelId = 'eleven_turbo_v2_5')}>
+										Use Turbo v2.5
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsModelId = 'eleven_v3')}>
+										Use v3
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsModelId = 'eleven_multilingual_v2')}>
+										Use Multilingual v2
+									</Button>
+								</div>
 							</div>
 							<div class="space-y-2">
 								<Label for="podcast-elevenlabs-format">ElevenLabs output format</Label>
@@ -1403,6 +1472,14 @@
 									bind:value={podcastElevenLabsOutputFormat}
 									placeholder="mp3_44100_128"
 								/>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsOutputFormat = 'mp3_44100_128')}>
+										Use mp3_44100_128
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsOutputFormat = 'mp3_44100_192')}>
+										Use mp3_44100_192
+									</Button>
+								</div>
 							</div>
 							<div class="space-y-2 md:col-span-2">
 								<Label for="podcast-elevenlabs-key">ElevenLabs API key</Label>
@@ -1412,6 +1489,25 @@
 									bind:value={podcastElevenLabsAPIKey}
 									placeholder="xi-..."
 								/>
+								<p class="text-xs text-muted-foreground">
+									Voice fields require ElevenLabs voice IDs (not voice names).
+								</p>
+							</div>
+							<div class="space-y-2 md:col-span-2 rounded-lg border p-3">
+								<p class="text-sm font-medium">ElevenLabs voice pair presets</p>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-default')}>
+										Chris + Matilda
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-alt')}>
+										George + Bella
+									</Button>
+								</div>
+								<div class="mt-2 text-xs text-muted-foreground">
+									{#each ELEVENLABS_VOICE_PRESETS as preset}
+										<div>{preset.label}: {preset.id}</div>
+									{/each}
+								</div>
 							</div>
 						{/if}
 						<div class="space-y-2">
@@ -1421,6 +1517,9 @@
 								bind:value={podcastHostAVoice}
 								placeholder={podcastTTSProvider === 'openai' ? 'alloy' : 'ElevenLabs voice ID'}
 							/>
+							<p class="text-xs text-muted-foreground">
+								{podcastTTSProvider === 'openai' ? 'Use one of the OpenAI voice names.' : 'Paste the ElevenLabs voice ID for Host A.'}
+							</p>
 						</div>
 						<div class="space-y-2">
 							<Label for="podcast-host-b">Host B voice</Label>
@@ -1429,6 +1528,14 @@
 								bind:value={podcastHostBVoice}
 								placeholder={podcastTTSProvider === 'openai' ? 'echo' : 'ElevenLabs voice ID'}
 							/>
+							<div class="flex items-center justify-between gap-2">
+								<p class="text-xs text-muted-foreground">
+									{podcastTTSProvider === 'openai' ? 'Use one of the OpenAI voice names.' : 'Paste the ElevenLabs voice ID for Host B.'}
+								</p>
+								<Button type="button" size="sm" variant="ghost" onclick={swapPodcastVoices}>
+									Swap voices
+								</Button>
+							</div>
 						</div>
 					</div>
 
