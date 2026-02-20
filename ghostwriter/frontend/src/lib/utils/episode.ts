@@ -45,6 +45,14 @@ export function formatDuration(seconds: number): string {
 	return `${minutes}m ${secs}s`;
 }
 
+export function formatPlayerTime(totalSeconds: number): string {
+	const h = Math.floor(totalSeconds / 3600);
+	const m = Math.floor((totalSeconds % 3600) / 60);
+	const s = Math.floor(totalSeconds % 60);
+	const ss = s.toString().padStart(2, '0');
+	return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
 export function formatCost(cents: number): string {
 	return `$${(cents / 100).toFixed(2)}`;
 }

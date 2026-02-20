@@ -15,6 +15,7 @@
 		formatDuration,
 		formatCost
 	} from '$lib/utils/episode';
+	import { AudioPlayer } from '$lib/components/ui/audio-player';
 	import {
 		ArrowLeft,
 		Calendar,
@@ -210,9 +211,7 @@
 					<Card.Title class="text-base">Audio</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
-					<audio controls class="w-full" src={episode.stream_url} preload="metadata">
-						Your browser does not support the audio element.
-					</audio>
+					<AudioPlayer episodeId={episode.id} durationHint={episode.duration_seconds} />
 					<div class="flex items-center gap-2">
 						<Button variant="outline" onclick={() => handleDownload(episode)} disabled={downloadPending}>
 							{#if downloadPending}
