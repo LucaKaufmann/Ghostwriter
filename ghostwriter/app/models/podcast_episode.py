@@ -3,14 +3,21 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Column, Index, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Column, Index, String, Text
 from sqlmodel import Field, SQLModel
 
 
 class PodcastEpisodeBase(SQLModel):
     """Base podcast episode fields."""
 
-    digest_id: UUID = Field(foreign_key="digests.id", index=True)
+    digest_ids: list[str] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False, server_default="[]"),
+    )
+    trigger: str = Field(
+        default="manual",
+        sa_column=Column(String, nullable=False, server_default="manual"),
+    )
     user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
     script: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     audio_path: str | None = Field(default=None)
@@ -34,7 +41,6 @@ class PodcastEpisode(PodcastEpisodeBase, table=True):
 
     __tablename__ = "podcast_episodes"
     __table_args__ = (
-        UniqueConstraint("digest_id", name="uq_podcast_episodes_digest_id"),
         Index("ix_podcast_episodes_status", "status"),
     )
 
@@ -49,7 +55,8 @@ class PodcastEpisodeSummaryRead(SQLModel):
     """Schema for listing podcast episodes."""
 
     id: UUID
-    digest_id: UUID
+    digest_ids: list[str]
+    trigger: str = "manual"
     status: str
     audio_size_bytes: int | None = None
     duration_seconds: int | None = None

@@ -593,13 +593,15 @@ export interface PodcastPreferencesUpdate {
 
 export interface PodcastTriggerResponse {
 	episode_id: string;
+	digest_ids: string[];
 	status: string;
 	message: string;
 }
 
 export interface PodcastEpisodeStatusResponse {
 	id: string;
-	digest_id: string;
+	digest_ids: string[];
+	trigger: string;
 	status: string;
 	audio_size_bytes: number | null;
 	duration_seconds: number | null;

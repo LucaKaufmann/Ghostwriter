@@ -48,7 +48,8 @@ class PodcastEpisodeStatusRead(BaseModel):
     """Episode status payload with downloadable URLs."""
 
     id: UUID
-    digest_id: UUID
+    digest_ids: list[str]
+    trigger: str = "manual"
     status: str
     audio_size_bytes: int | None = None
     duration_seconds: int | None = None
@@ -73,6 +74,7 @@ class PodcastTriggerResponse(BaseModel):
     """Response for manual/automatic trigger endpoints."""
 
     episode_id: UUID
+    digest_ids: list[str]
     status: str
     message: str
 
@@ -119,7 +121,8 @@ def _build_episode_status(
     base_url = _podcast_base_url(request)
     return PodcastEpisodeStatusRead(
         id=episode.id,
-        digest_id=episode.digest_id,
+        digest_ids=episode.digest_ids or [],
+        trigger=episode.trigger or "manual",
         status=episode.status,
         audio_size_bytes=episode.audio_size_bytes,
         duration_seconds=episode.duration_seconds,
@@ -312,11 +315,17 @@ async def update_podcast_preferences(
     session: Session = Depends(get_session),
 ):
     """Update podcast preferences."""
+    from app.worker.scheduler import update_podcast_schedule
+
     user_id = podcast_service.resolve_user_id(session)
     try:
         prefs = podcast_service.update_preferences(session, update, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Sync the independent podcast APScheduler job
+    update_podcast_schedule()
+
     return PodcastPreferencesRead(
         enabled=prefs.enabled,
         schedule=prefs.schedule,
@@ -421,8 +430,41 @@ async def trigger_digest_podcast(
 
     return PodcastTriggerResponse(
         episode_id=episode.id,
+        digest_ids=episode.digest_ids or [],
         status=episode.status,
         message="Podcast generation queued",
+    )
+
+
+@router.post(
+    "/podcast/episodes/generate",
+    response_model=PodcastTriggerResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def generate_podcast_now(
+    session: Session = Depends(get_session),
+):
+    """Manually trigger podcast generation using the time-window approach (same as scheduled)."""
+    try:
+        episode_id = podcast_service.generate_scheduled_episode()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+
+    if episode_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No eligible digests found or episode already exists for current window",
+        )
+
+    episode = session.get(PodcastEpisode, episode_id)
+    if episode is None:
+        raise HTTPException(status_code=500, detail="Episode created but not found")
+
+    return PodcastTriggerResponse(
+        episode_id=episode.id,
+        digest_ids=episode.digest_ids or [],
+        status=episode.status,
+        message="Podcast generation queued from recent digests",
     )
 
 
@@ -437,10 +479,16 @@ async def get_digest_podcast_status(
     session: Session = Depends(get_session),
 ):
     """Get podcast generation status for a digest."""
+    digest_id_str = str(digest_id)
     try:
-        episode = session.exec(
-            select(PodcastEpisode).where(PodcastEpisode.digest_id == digest_id)
-        ).first()
+        # Find episodes that contain this digest_id in their digest_ids JSON array
+        all_episodes = session.exec(
+            select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
+        ).all()
+        episode = next(
+            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),
+            None,
+        )
     except SQLAlchemyTimeoutError as exc:
         logger.warning(
             "Podcast status check timed out waiting for DB connection",
@@ -475,14 +523,21 @@ async def retry_podcast_episode(
     if episode.status != "failed":
         raise HTTPException(status_code=409, detail="Only failed episodes can be retried")
 
+    digest_ids = episode.digest_ids or []
+    if not digest_ids:
+        raise HTTPException(status_code=409, detail="Episode has no associated digests")
+
+    # Retry using the first digest for single-digest episodes
+    first_digest_id = UUID(digest_ids[0])
     retried = podcast_service.queue_episode_generation(
         session,
-        digest_id=episode.digest_id,
+        digest_id=first_digest_id,
         user_id=episode.user_id,
         force=True,
     )
     return PodcastTriggerResponse(
         episode_id=retried.id,
+        digest_ids=retried.digest_ids or [],
         status=retried.status,
         message="Podcast episode retry queued",
     )
@@ -701,7 +756,15 @@ async def get_podcast_feed_xml(
         item = ET.SubElement(channel, "item")
         created = episode.completed_at or episode.created_at
         created_local = created.date().isoformat()
-        ET.SubElement(item, "title").text = f"Digest Podcast - {created_local}"
+
+        # Build title: include digest count for multi-digest episodes
+        digest_count = len(episode.digest_ids or [])
+        if digest_count > 1:
+            ET.SubElement(item, "title").text = (
+                f"Digest Podcast - {created_local} ({digest_count} digests)"
+            )
+        else:
+            ET.SubElement(item, "title").text = f"Digest Podcast - {created_local}"
 
         article_titles = [article.title for article in _resolve_episode_articles(session, episode)]
         if article_titles:
