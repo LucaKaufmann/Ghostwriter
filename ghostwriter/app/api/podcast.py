@@ -31,6 +31,15 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _podcast_base_url(request: Request) -> str:
+    """Resolve absolute base URL used in podcast feed and enclosure links."""
+    settings = get_settings()
+    configured = (settings.podcast_public_base_url or "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
 class PodcastEpisodeStatusRead(BaseModel):
     """Episode status payload with downloadable URLs."""
 
@@ -103,6 +112,7 @@ def _build_episode_status(
         stream_url = f"/api/podcast/episodes/{episode.id}/stream"
         download_url = f"/api/podcast/episodes/{episode.id}/download"
 
+    base_url = _podcast_base_url(request)
     return PodcastEpisodeStatusRead(
         id=episode.id,
         digest_id=episode.digest_id,
@@ -114,8 +124,8 @@ def _build_episode_status(
         error_message=episode.error_message,
         created_at=episode.created_at,
         completed_at=episode.completed_at,
-        stream_url=str(request.base_url).rstrip("/") + stream_url,
-        download_url=str(request.base_url).rstrip("/") + download_url,
+        stream_url=base_url + stream_url,
+        download_url=base_url + download_url,
     )
 
 
@@ -610,6 +620,7 @@ async def get_podcast_feed_xml(
     if not prefs.podcast_feed_enabled:
         raise HTTPException(status_code=404, detail="Podcast feed is disabled")
 
+    base_url = _podcast_base_url(request)
     episodes = session.exec(
         select(PodcastEpisode)
         .where(PodcastEpisode.status == "ready")
@@ -631,18 +642,18 @@ async def get_podcast_feed_xml(
     channel = ET.SubElement(rss, "channel")
     ET.SubElement(channel, "title").text = prefs.podcast_feed_title
     ET.SubElement(channel, "description").text = prefs.podcast_feed_description
-    ET.SubElement(channel, "link").text = str(request.base_url).rstrip("/")
+    ET.SubElement(channel, "itunes:subtitle").text = prefs.podcast_feed_description
+    ET.SubElement(channel, "link").text = base_url
     ET.SubElement(channel, "language").text = "en-us"
     ET.SubElement(channel, "itunes:author").text = "Ghostwriter"
     ET.SubElement(channel, "itunes:explicit").text = "false"
     ET.SubElement(channel, "itunes:category", {"text": "Technology"})
+    if episodes:
+        newest = episodes[0].completed_at or episodes[0].created_at
+        ET.SubElement(channel, "lastBuildDate").text = _to_rfc2822(newest)
 
     if prefs.podcast_feed_artwork_path and os.path.exists(prefs.podcast_feed_artwork_path):
-        image_url = (
-            str(request.base_url).rstrip("/")
-            + "/api/podcast/feed/artwork"
-            + f"?token={token}"
-        )
+        image_url = base_url + "/api/podcast/feed/artwork" + f"?token={token}"
         ET.SubElement(channel, "itunes:image", {"href": image_url})
 
     for index, episode in enumerate(episodes, start=1):
@@ -658,10 +669,7 @@ async def get_podcast_feed_xml(
             ET.SubElement(item, "description").text = "AI-generated digest podcast episode"
 
         ET.SubElement(item, "pubDate").text = _to_rfc2822(created)
-        enclosure_url = (
-            str(request.base_url).rstrip("/")
-            + f"/api/podcast/episodes/{episode.id}/download?token={token}"
-        )
+        enclosure_url = base_url + f"/api/podcast/episodes/{episode.id}/download?token={token}"
         ET.SubElement(
             item,
             "enclosure",
@@ -673,7 +681,9 @@ async def get_podcast_feed_xml(
         )
         ET.SubElement(item, "itunes:duration").text = _format_duration(episode.duration_seconds)
         ET.SubElement(item, "itunes:episode").text = str(index)
-        ET.SubElement(item, "guid").text = f"podcast-episode-{episode.id}"
+        ET.SubElement(item, "guid", {"isPermaLink": "false"}).text = (
+            f"podcast-episode-{episode.id}"
+        )
 
     xml_bytes = ET.tostring(rss, encoding="utf-8", xml_declaration=True)
     return Response(content=xml_bytes, media_type="application/rss+xml; charset=utf-8")
@@ -689,9 +699,9 @@ async def get_podcast_feed_info(
     session: Session = Depends(get_session),
 ):
     """Return feed URL and setup instructions for podcast apps."""
+    base_url = _podcast_base_url(request)
     user_id = podcast_service.resolve_user_id(session)
     prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
-    base_url = str(request.base_url).rstrip("/")
     feed_url = f"{base_url}/api/podcast/feed.xml?token={prefs.podcast_feed_token}"
 
     return PodcastFeedInfoResponse(

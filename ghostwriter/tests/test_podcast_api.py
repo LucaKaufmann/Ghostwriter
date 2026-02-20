@@ -13,6 +13,7 @@ from PIL import Image
 from sqlmodel import Session, select
 
 from app.core.auth import generate_api_token, get_token_prefix, hash_api_token
+from app.core.config import get_settings
 from app.core.database import engine
 from app.models.api_token import APIToken
 from app.models.digest import Digest, DigestArticle
@@ -398,12 +399,51 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     assert feed.status_code == 200
     assert "application/rss+xml" in feed.headers["content-type"]
     root = ET.fromstring(feed.content)
+    channel = root.find("./channel")
+    assert channel is not None
+    assert channel.findtext("link") == "http://testserver"
+    assert channel.findtext("lastBuildDate")
     items = root.findall("./channel/item")
     assert items
     enclosure = items[0].find("enclosure")
     assert enclosure is not None
     assert str(episode.id) in enclosure.attrib["url"]
     assert "token=feed_token_123456" in enclosure.attrib["url"]
+    guid = items[0].find("guid")
+    assert guid is not None
+    assert guid.attrib.get("isPermaLink") == "false"
+
+
+def test_feed_uses_configured_public_base_url(client, auth_headers, monkeypatch):
+    digest_id, article_ids = _create_digest_with_articles(article_count=1)
+    _create_episode(digest_id=digest_id, article_ids=article_ids, status="ready")
+
+    with Session(engine) as session:
+        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs.podcast_feed_enabled = True
+        prefs.podcast_feed_token = "feed_token_public_url"
+        session.add(prefs)
+        session.commit()
+
+    settings = get_settings()
+    original_base_url = settings.podcast_public_base_url
+    settings.podcast_public_base_url = "https://podcasts.example.com"
+    try:
+        feed = client.get("/api/podcast/feed.xml?token=feed_token_public_url")
+        assert feed.status_code == 200
+        root = ET.fromstring(feed.content)
+        assert root.findtext("./channel/link") == "https://podcasts.example.com"
+        enclosure = root.find("./channel/item/enclosure")
+        assert enclosure is not None
+        assert enclosure.attrib["url"].startswith("https://podcasts.example.com/")
+
+        info = client.get("/api/podcast/feed/info", headers=auth_headers)
+        assert info.status_code == 200
+        assert info.json()["feed_url"].startswith(
+            "https://podcasts.example.com/api/podcast/feed.xml?token="
+        )
+    finally:
+        settings.podcast_public_base_url = original_base_url
 
 
 def test_feed_artwork_upload_and_serve(client, auth_headers):
