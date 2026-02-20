@@ -623,6 +623,14 @@ class ApiClient {
 		return this.download(`/podcast/episodes/${episodeId}/download`, `podcast-${episodeId}.mp3`);
 	}
 
+	async streamPodcastEpisode(episodeId: string): Promise<string> {
+		const { blob } = await this.download(
+			`/podcast/episodes/${episodeId}/download`,
+			`podcast-${episodeId}.mp3`
+		);
+		return URL.createObjectURL(blob);
+	}
+
 	// ============ Podcast Episodes ============
 
 	async getPodcastEpisodes(): Promise<PodcastEpisodeStatusResponse[]> {
