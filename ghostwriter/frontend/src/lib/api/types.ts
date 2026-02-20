@@ -619,6 +619,19 @@ export interface DigestPodcastStatusResponse {
 	episode: PodcastEpisodeStatusResponse;
 }
 
+export interface PodcastEpisodeArticle {
+	id: string;
+	title: string;
+	url: string;
+	feed_title: string;
+}
+
+export interface PodcastEpisodeDetailResponse extends PodcastEpisodeStatusResponse {
+	script: string | null;
+	article_ids: string[];
+	articles: PodcastEpisodeArticle[];
+}
+
 // ============ API Error ============
 
 export interface APIError {

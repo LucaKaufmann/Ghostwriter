@@ -53,6 +53,8 @@ import type {
 	PodcastPreferencesResponse,
 	PodcastPreferencesUpdate,
 	PodcastTriggerResponse,
+	PodcastEpisodeStatusResponse,
+	PodcastEpisodeDetailResponse,
 	DigestPodcastStatusResponse
 } from './types';
 
@@ -619,6 +621,32 @@ class ApiClient {
 
 	downloadPodcastEpisode(episodeId: string): Promise<{ blob: Blob; filename: string }> {
 		return this.download(`/podcast/episodes/${episodeId}/download`, `podcast-${episodeId}.mp3`);
+	}
+
+	// ============ Podcast Episodes ============
+
+	async getPodcastEpisodes(): Promise<PodcastEpisodeStatusResponse[]> {
+		return this.request<PodcastEpisodeStatusResponse[]>('/podcast/episodes');
+	}
+
+	async getPodcastEpisode(id: string): Promise<PodcastEpisodeDetailResponse> {
+		return this.request<PodcastEpisodeDetailResponse>(`/podcast/episodes/${id}`);
+	}
+
+	async deletePodcastEpisode(id: string): Promise<{ status: string }> {
+		return this.request(`/podcast/episodes/${id}`, { method: 'DELETE' });
+	}
+
+	async retryPodcastEpisode(id: string): Promise<PodcastTriggerResponse> {
+		return this.request<PodcastTriggerResponse>(`/podcast/episodes/${id}/retry`, {
+			method: 'POST'
+		});
+	}
+
+	async generateScheduledEpisode(): Promise<PodcastTriggerResponse> {
+		return this.request<PodcastTriggerResponse>('/podcast/episodes/generate', {
+			method: 'POST'
+		});
 	}
 
 	async uploadPodcastFeedArtwork(file: File): Promise<PodcastArtworkUploadResponse> {
