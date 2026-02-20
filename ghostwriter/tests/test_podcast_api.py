@@ -583,5 +583,64 @@ async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(monk
     payload = captured["json"]
     assert isinstance(payload, dict)
     assert payload["apply_text_normalization"] == "on"
+    assert "previous_text" not in payload
+    assert "next_text" not in payload
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_non_v3_synthesis_includes_context(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+        content = b"audio-bytes"
+        text = ""
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            captured["json"] = json
+            return _Response()
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+
+    prefs = PodcastGenerationPreferences(
+        topic_weights={"general": 1.0},
+        boost_sources=[],
+        boost_keywords=[],
+        filter_keywords=[],
+        preferred_length_minutes=15,
+        script_model=None,
+        script_timeout_seconds=60,
+        style="casual",
+        tts_provider="elevenlabs",
+        openai_tts_model="tts-1",
+        openai_api_key=None,
+        elevenlabs_model_id="eleven_turbo_v2_5",
+        elevenlabs_api_key="xi-test-key",
+        elevenlabs_output_format="mp3_44100_128",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    await podcast_service._synthesize_segment_elevenlabs(
+        text="Current line",
+        voice="voice_a",
+        prefs=prefs,
+        previous_text="Previous context line",
+        next_text="Next context line",
+    )
+
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["apply_text_normalization"] == "auto"
     assert payload["previous_text"] == "Previous context line"
     assert payload["next_text"] == "Next context line"

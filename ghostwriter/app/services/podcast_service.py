@@ -1878,10 +1878,11 @@ class PodcastDigestService:
             "model_id": model_id,
             "apply_text_normalization": self._elevenlabs_text_normalization_mode(model_id),
         }
-        if previous_text:
-            payload["previous_text"] = previous_text[:800]
-        if next_text:
-            payload["next_text"] = next_text[:800]
+        if self._elevenlabs_supports_context_window(model_id):
+            if previous_text:
+                payload["previous_text"] = previous_text[:800]
+            if next_text:
+                payload["next_text"] = next_text[:800]
         headers = {
             "xi-api-key": api_key,
             "Content-Type": "application/json",
@@ -1909,6 +1910,11 @@ class PodcastDigestService:
         if normalized != "eleven_v3":
             return "auto"
         return "on"
+
+    @staticmethod
+    def _elevenlabs_supports_context_window(model_id: str) -> bool:
+        """Whether previous/next text context parameters are supported."""
+        return (model_id or "").strip().lower() != "eleven_v3"
 
     @staticmethod
     def _normalize_tts_segment_text(
