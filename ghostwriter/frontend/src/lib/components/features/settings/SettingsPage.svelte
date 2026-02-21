@@ -322,6 +322,7 @@
 			podcastElevenLabsOutputFormat = data.elevenlabs_output_format;
 			podcastHostAVoice = data.host_a_voice;
 			podcastHostBVoice = data.host_b_voice;
+			podcastHostCount = data.host_count;
 			podcastPreferredLengthMinutes = data.preferred_length_minutes;
 			podcastFeedEnabled = data.podcast_feed_enabled;
 			podcastFeedBaseUrl = data.podcast_feed_base_url ?? '';
@@ -424,6 +425,7 @@
 	let podcastElevenLabsModelId = $state('eleven_turbo_v2_5');
 	let podcastElevenLabsOutputFormat = $state('mp3_44100_128');
 	let podcastElevenLabsAPIKey = $state('');
+	let podcastHostCount = $state<1 | 2>(2);
 	let podcastHostAVoice = $state('alloy');
 	let podcastHostBVoice = $state('echo');
 	let podcastPreferredLengthMinutes = $state(15);
@@ -505,6 +507,7 @@
 			podcastElevenLabsOutputFormat = data.elevenlabs_output_format;
 			podcastHostAVoice = data.host_a_voice;
 			podcastHostBVoice = data.host_b_voice;
+			podcastHostCount = data.host_count;
 			podcastPreferredLengthMinutes = data.preferred_length_minutes;
 			podcastScriptModel = data.script_model ?? '';
 			podcastScriptTimeoutSeconds = data.script_timeout_seconds;
@@ -609,6 +612,7 @@
 			podcastElevenLabsOutputFormat.trim() !== data.elevenlabs_output_format ||
 			podcastHostAVoice.trim() !== data.host_a_voice ||
 			podcastHostBVoice.trim() !== data.host_b_voice ||
+			podcastHostCount !== data.host_count ||
 			podcastPreferredLengthMinutes !== data.preferred_length_minutes ||
 			podcastScriptModel.trim() !== (data.script_model ?? '') ||
 			podcastScriptTimeoutSeconds !== data.script_timeout_seconds ||
@@ -636,6 +640,7 @@
 			elevenlabs_output_format: podcastElevenLabsOutputFormat.trim(),
 			host_a_voice: podcastHostAVoice.trim(),
 			host_b_voice: podcastHostBVoice.trim(),
+			host_count: podcastHostCount,
 			preferred_length_minutes: clampedMinutes
 		};
 		if (podcastOpenAIAPIKey.trim()) {
@@ -1388,6 +1393,32 @@
 							<Label for="podcast-script-model">Script model override (optional)</Label>
 							<Input id="podcast-script-model" bind:value={podcastScriptModel} placeholder="e.g. gpt-4.1-mini (blank uses global model)" />
 						</div>
+						<div class="space-y-2 md:col-span-2">
+							<Label>Host format</Label>
+							<div class="flex gap-2">
+								<Button
+									type="button"
+									size="sm"
+									variant={podcastHostCount === 1 ? 'default' : 'outline'}
+									onclick={() => (podcastHostCount = 1)}
+								>
+									Solo
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant={podcastHostCount === 2 ? 'default' : 'outline'}
+									onclick={() => (podcastHostCount = 2)}
+								>
+									Duo
+								</Button>
+							</div>
+							<p class="text-xs text-muted-foreground">
+								{podcastHostCount === 1
+									? 'Single narrator monologue — one voice, flowing paragraphs.'
+									: 'Two-host conversation — alternating dialogue between Host A and Host B.'}
+							</p>
+						</div>
 						<div class="space-y-2">
 							<Label for="podcast-tts-provider">TTS provider</Label>
 							<Select.Root
@@ -1441,12 +1472,20 @@
 							<div class="space-y-2 md:col-span-2 rounded-lg border p-3">
 								<p class="text-sm font-medium">OpenAI voice presets</p>
 								<div class="flex flex-wrap gap-2">
-									<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-default')}>
-										Default: Alloy + Echo
-									</Button>
-									<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-alt')}>
-										Alt: Nova + Fable
-									</Button>
+									{#if podcastHostCount === 1}
+										{#each OPENAI_VOICE_OPTIONS as voice}
+											<Button type="button" size="sm" variant="outline" onclick={() => (podcastHostAVoice = voice)}>
+												{voice.charAt(0).toUpperCase() + voice.slice(1)}
+											</Button>
+										{/each}
+									{:else}
+										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-default')}>
+											Default: Alloy + Echo
+										</Button>
+										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-alt')}>
+											Alt: Nova + Fable
+										</Button>
+									{/if}
 								</div>
 								<p class="text-xs text-muted-foreground">
 									Supported OpenAI voices: {OPENAI_VOICE_OPTIONS.join(', ')}.
@@ -1502,14 +1541,22 @@
 								</p>
 							</div>
 							<div class="space-y-2 md:col-span-2 rounded-lg border p-3">
-								<p class="text-sm font-medium">ElevenLabs voice pair presets</p>
+								<p class="text-sm font-medium">{podcastHostCount === 1 ? 'ElevenLabs voice presets' : 'ElevenLabs voice pair presets'}</p>
 								<div class="flex flex-wrap gap-2">
-									<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-default')}>
-										Chris + Matilda
-									</Button>
-									<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-alt')}>
-										George + Bella
-									</Button>
+									{#if podcastHostCount === 1}
+										{#each ELEVENLABS_VOICE_PRESETS as preset}
+											<Button type="button" size="sm" variant="outline" onclick={() => (podcastHostAVoice = preset.id)}>
+												{preset.label}
+											</Button>
+										{/each}
+									{:else}
+										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-default')}>
+											Chris + Matilda
+										</Button>
+										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-alt')}>
+											George + Bella
+										</Button>
+									{/if}
 								</div>
 								<div class="mt-2 text-xs text-muted-foreground">
 									{#each ELEVENLABS_VOICE_PRESETS as preset}
@@ -1519,32 +1566,34 @@
 							</div>
 						{/if}
 						<div class="space-y-2">
-							<Label for="podcast-host-a">Host A voice</Label>
+							<Label for="podcast-host-a">{podcastHostCount === 1 ? 'Voice' : 'Host A voice'}</Label>
 							<Input
 								id="podcast-host-a"
 								bind:value={podcastHostAVoice}
 								placeholder={podcastTTSProvider === 'openai' ? 'alloy' : 'ElevenLabs voice ID'}
 							/>
 							<p class="text-xs text-muted-foreground">
-								{podcastTTSProvider === 'openai' ? 'Use one of the OpenAI voice names.' : 'Paste the ElevenLabs voice ID for Host A.'}
+								{podcastTTSProvider === 'openai' ? 'Use one of the OpenAI voice names.' : 'Paste the ElevenLabs voice ID.'}
 							</p>
 						</div>
-						<div class="space-y-2">
-							<Label for="podcast-host-b">Host B voice</Label>
-							<Input
-								id="podcast-host-b"
-								bind:value={podcastHostBVoice}
-								placeholder={podcastTTSProvider === 'openai' ? 'echo' : 'ElevenLabs voice ID'}
-							/>
-							<div class="flex items-center justify-between gap-2">
-								<p class="text-xs text-muted-foreground">
-									{podcastTTSProvider === 'openai' ? 'Use one of the OpenAI voice names.' : 'Paste the ElevenLabs voice ID for Host B.'}
-								</p>
-								<Button type="button" size="sm" variant="ghost" onclick={swapPodcastVoices}>
-									Swap voices
-								</Button>
+						{#if podcastHostCount === 2}
+							<div class="space-y-2">
+								<Label for="podcast-host-b">Host B voice</Label>
+								<Input
+									id="podcast-host-b"
+									bind:value={podcastHostBVoice}
+									placeholder={podcastTTSProvider === 'openai' ? 'echo' : 'ElevenLabs voice ID'}
+								/>
+								<div class="flex items-center justify-between gap-2">
+									<p class="text-xs text-muted-foreground">
+										{podcastTTSProvider === 'openai' ? 'Use one of the OpenAI voice names.' : 'Paste the ElevenLabs voice ID for Host B.'}
+									</p>
+									<Button type="button" size="sm" variant="ghost" onclick={swapPodcastVoices}>
+										Swap voices
+									</Button>
+								</div>
 							</div>
-						</div>
+						{/if}
 					</div>
 
 					<div class="flex justify-end">

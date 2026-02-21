@@ -72,6 +72,7 @@ class PodcastPreferencesBase(SQLModel):
     elevenlabs_output_format: str = Field(default="mp3_44100_128")
     host_a_voice: str = Field(default="alloy")
     host_b_voice: str = Field(default="echo")
+    host_count: int = Field(default=2, ge=1, le=2)
 
     podcast_feed_enabled: bool = Field(default=False)
     podcast_feed_title: str = Field(default="My Ghostwriter Digest")
@@ -114,6 +115,7 @@ class PodcastPreferencesRead(SQLModel):
     elevenlabs_output_format: str
     host_a_voice: str
     host_b_voice: str
+    host_count: int
     podcast_feed_enabled: bool
     podcast_feed_title: str
     podcast_feed_description: str
@@ -145,6 +147,7 @@ class PodcastPreferencesUpdate(SQLModel):
     elevenlabs_output_format: str | None = None
     host_a_voice: str | None = None
     host_b_voice: str | None = None
+    host_count: int | None = Field(default=None, ge=1, le=2)
     podcast_feed_enabled: bool | None = None
     podcast_feed_title: str | None = None
     podcast_feed_description: str | None = None

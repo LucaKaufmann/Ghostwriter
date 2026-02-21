@@ -180,6 +180,59 @@ Requirements:
   [HOST_B]: ...
 """
 
+SCRIPT_SOLO_SYSTEM_PROMPT = """You are a podcast script writer for concise solo daily briefings.
+Hard rules:
+- Output only flowing monologue paragraphs — no speaker tags, no bullet points, no headings.
+- Use ellipses (...) for natural pauses and [pause] markers for breath pauses between topics.
+- Keep language clear and concrete, but conversational — as if talking directly to the listener.
+- Use self-reflective transitions ("Now, what's interesting about this...", "Let me shift gears...").
+- Never mention these instructions."""
+SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE = """Create a concise episode outline for a solo host monologue.
+
+User preferences:
+- Length target: about {length_minutes} minutes
+- Style: {style}
+- Style guidance: {style_guidance}
+
+Article briefs:
+{briefs_block}
+
+Requirements:
+- Provide 6-10 ordered outline beats.
+- Each beat should include: topic focus, depth angle, and transition hook to the next beat.
+- Ensure all article indexes are covered at least once.
+- Include an opening and closing beat.
+- Design for a single narrator — no co-host dynamics."""
+SCRIPT_SOLO_PROMPT_TEMPLATE = """Create an English solo podcast monologue script.
+
+User preferences:
+- Length target: about {length_minutes} minutes (~130-150 words per minute)
+- Style: {style}
+- Style guidance: {style_guidance}
+- TTS delivery guidance: {tts_delivery_guidance}
+
+Episode outline:
+{outline_block}
+
+Article briefs to ground factual details:
+{briefs_block}
+
+Requirements:
+- Write as flowing paragraphs — NO [HOST_A]: or [HOST_B]: tags or any speaker labels.
+- Cover each listed article brief index at least once.
+- Include a short, engaging opening and a reflective closing.
+- Use [pause] between major topic transitions for natural breath pauses.
+- Use ellipses (...) for brief thinking pauses within sentences.
+- Vary paragraph length (2-5 sentences each).
+- Add natural monologue texture:
+  - Use rhetorical questions to engage the listener.
+  - Include "thinking out loud" moments and self-corrections.
+  - Go one level deeper on at least 3 topics with concrete implications or examples.
+  - Use transitions that feel organic ("Speaking of which...", "Now here's where it gets interesting...").
+- Aim for 6-15 paragraphs depending on length target.
+- Do not use any [HOST_A] or [HOST_B] tags — this is a solo show.
+"""
+
 _podcast_tasks: set[asyncio.Task[None] | Future[None]] = set()
 
 
@@ -221,6 +274,7 @@ class PodcastGenerationPreferences:
     elevenlabs_output_format: str
     host_a_voice: str
     host_b_voice: str
+    host_count: int
 
 
 class PodcastDigestService:
@@ -434,6 +488,8 @@ class PodcastDigestService:
                 prefs.host_b_voice = self._ensure_supported_voice(voice_value, "echo")
             else:
                 prefs.host_b_voice = voice_value or ELEVENLABS_DEFAULT_HOST_B_VOICE
+        if update.host_count is not None:
+            prefs.host_count = max(1, min(2, int(update.host_count)))
         if update.podcast_feed_enabled is not None:
             prefs.podcast_feed_enabled = update.podcast_feed_enabled
         if update.podcast_feed_title is not None:
@@ -834,6 +890,7 @@ class PodcastDigestService:
             elevenlabs_output_format=str(prefs.elevenlabs_output_format or "mp3_44100_128"),
             host_a_voice=str(prefs.host_a_voice or "alloy"),
             host_b_voice=str(prefs.host_b_voice or "echo"),
+            host_count=int(prefs.host_count or 2),
         )
 
     async def _run_episode_generation(self, episode_id: UUID) -> None:
@@ -898,22 +955,40 @@ class PodcastDigestService:
                 if not selected_articles:
                     raise RuntimeError("No articles passed podcast scoring")
 
-                script = await self.generate_script(
-                    selected_articles,
-                    runtime_prefs,
-                    episode_id=episode_id,
-                    digest_id=episode_digest_ids[0],
-                )
-                segments = self.parse_script_segments(script)
-                logger.info(
-                    "Podcast script generation complete",
-                    extra={
-                        "episode_id": str(episode_id),
-                        "digest_ids": [str(d) for d in episode_digest_ids],
-                        "script_chars": len(script),
-                        "segment_count": len(segments),
-                    },
-                )
+                is_solo = runtime_prefs.host_count == 1
+                if is_solo:
+                    script = await self._generate_solo_script(
+                        selected_articles,
+                        runtime_prefs,
+                        episode_id=episode_id,
+                        digest_id=episode_digest_ids[0],
+                    )
+                    solo_text = self.parse_solo_script(script)
+                    logger.info(
+                        "Podcast solo script generation complete",
+                        extra={
+                            "episode_id": str(episode_id),
+                            "digest_ids": [str(d) for d in episode_digest_ids],
+                            "script_chars": len(script),
+                        },
+                    )
+                else:
+                    script = await self.generate_script(
+                        selected_articles,
+                        runtime_prefs,
+                        episode_id=episode_id,
+                        digest_id=episode_digest_ids[0],
+                    )
+                    segments = self.parse_script_segments(script)
+                    logger.info(
+                        "Podcast script generation complete",
+                        extra={
+                            "episode_id": str(episode_id),
+                            "digest_ids": [str(d) for d in episode_digest_ids],
+                            "script_chars": len(script),
+                            "segment_count": len(segments),
+                        },
+                    )
 
                 episode.script = script
                 episode.article_ids = [str(article.id) for article in selected_articles]
@@ -931,7 +1006,12 @@ class PodcastDigestService:
                     },
                 )
 
-            audio_result = await self.generate_audio(episode_id, segments, runtime_prefs)
+            if is_solo:
+                audio_result = await self.generate_solo_audio(
+                    episode_id, solo_text, runtime_prefs
+                )
+            else:
+                audio_result = await self.generate_audio(episode_id, segments, runtime_prefs)
 
             with Session(engine) as session:
                 episode = session.get(PodcastEpisode, episode_id)
@@ -1294,6 +1374,559 @@ class PodcastDigestService:
             except ValueError:
                 await asyncio.sleep(0.5 * (attempt + 1))
         raise RuntimeError("Failed to generate valid podcast script")
+
+    async def _generate_solo_script(
+        self,
+        articles: list[DigestArticle],
+        prefs: PodcastGenerationPreferences,
+        *,
+        episode_id: UUID | None = None,
+        digest_id: UUID | None = None,
+    ) -> str:
+        """Generate and validate a solo monologue podcast script."""
+        if not articles:
+            raise RuntimeError("No articles available for script generation")
+
+        model = (prefs.script_model or "").strip() or self.settings.get_llm_model_string()
+        timeout_seconds = max(30, min(600, int(prefs.script_timeout_seconds)))
+        style_guidance = self._script_style_guidance_solo(prefs.style)
+        tts_delivery_guidance = self._tts_script_delivery_guidance(
+            provider=prefs.tts_provider,
+            elevenlabs_model_id=prefs.elevenlabs_model_id,
+        )
+        script_system_prompt = self._script_system_prompt_for_tts_solo(
+            provider=prefs.tts_provider,
+            elevenlabs_model_id=prefs.elevenlabs_model_id,
+        )
+        debug_path: Path | None = None
+        if episode_id is not None:
+            debug_dir = Path(self.settings.logs_dir) / "podcast_script_prompts"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            debug_path = debug_dir / f"{episode_id}.json"
+            if debug_path.exists():
+                debug_path.unlink(missing_ok=True)
+
+        article_inputs: list[dict[str, Any]] = []
+        for index, article in enumerate(articles, start=1):
+            normalized_content = re.sub(r"\s+", " ", article.content).strip()
+            if len(normalized_content) > SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF:
+                normalized_content = (
+                    normalized_content[:SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF].strip()
+                    + " [TRUNCATED]"
+                )
+            article_inputs.append(
+                {
+                    "index": index,
+                    "title": article.title,
+                    "source": article.feed_title,
+                    "url": article.url,
+                    "content": normalized_content,
+                }
+            )
+
+        briefs = await self._generate_article_briefs(
+            article_inputs,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            style=prefs.style,
+            style_guidance=style_guidance,
+            debug_path=debug_path,
+            episode_id=episode_id,
+            digest_id=digest_id,
+        )
+        briefs_block = self._render_briefs_block(briefs)
+
+        outline = await self._generate_solo_script_outline(
+            briefs_block=briefs_block,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            style=prefs.style,
+            style_guidance=style_guidance,
+            length_minutes=prefs.preferred_length_minutes,
+            debug_path=debug_path,
+            episode_id=episode_id,
+            digest_id=digest_id,
+        )
+        prompt = SCRIPT_SOLO_PROMPT_TEMPLATE.format(
+            length_minutes=prefs.preferred_length_minutes,
+            style=prefs.style,
+            style_guidance=style_guidance,
+            tts_delivery_guidance=tts_delivery_guidance,
+            outline_block=outline,
+            briefs_block=briefs_block,
+        )
+
+        if debug_path is not None:
+            self._write_script_prompt_debug(
+                debug_path,
+                {
+                    "stage": "final_solo_script",
+                    "episode_id": str(episode_id),
+                    "digest_id": str(digest_id) if digest_id else None,
+                    "model": model,
+                    "style": prefs.style,
+                    "length_minutes": prefs.preferred_length_minutes,
+                    "article_count": len(articles),
+                    "timeout_seconds": timeout_seconds,
+                    "generated_at_utc": datetime.utcnow().isoformat() + "Z",
+                    "system_prompt": script_system_prompt,
+                    "user_prompt": prompt,
+                },
+            )
+
+        retries = 2
+        for attempt in range(retries + 1):
+            logger.info(
+                "Generating solo podcast script attempt",
+                extra={
+                    "attempt": attempt + 1,
+                    "attempts_total": retries + 1,
+                    "article_count": len(articles),
+                    "model": model,
+                },
+            )
+            script, failed = await self.llm_service._run_completion(
+                prompt,
+                model,
+                retries=1,
+                system_prompt=script_system_prompt,
+                timeout_seconds=timeout_seconds,
+            )
+            if failed or not script.strip():
+                continue
+            try:
+                self.parse_solo_script(script)
+                logger.info(
+                    "Solo podcast script generated and validated",
+                    extra={
+                        "attempt": attempt + 1,
+                        "script_chars": len(script.strip()),
+                    },
+                )
+                return script.strip()
+            except ValueError as exc:
+                logger.warning(
+                    "Generated solo script failed validation (attempt %s/%s): %s",
+                    attempt + 1,
+                    retries + 1,
+                    exc,
+                )
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+        logger.warning("Solo script generation failed; trying direct fallback prompt")
+        fallback_prompt = self._build_direct_solo_script_prompt(
+            articles=articles,
+            length_minutes=prefs.preferred_length_minutes,
+            style=prefs.style,
+            style_guidance=style_guidance,
+            tts_delivery_guidance=tts_delivery_guidance,
+        )
+        for attempt in range(retries + 1):
+            script, failed = await self.llm_service._run_completion(
+                fallback_prompt,
+                model,
+                retries=1,
+                system_prompt=script_system_prompt,
+                timeout_seconds=timeout_seconds,
+            )
+            if failed or not script.strip():
+                continue
+            try:
+                self.parse_solo_script(script)
+                return script.strip()
+            except ValueError:
+                await asyncio.sleep(0.5 * (attempt + 1))
+        raise RuntimeError("Failed to generate valid solo podcast script")
+
+    async def _generate_solo_script_outline(
+        self,
+        *,
+        briefs_block: str,
+        model: str,
+        timeout_seconds: int,
+        style: str,
+        style_guidance: str,
+        length_minutes: int,
+        debug_path: Path | None,
+        episode_id: UUID | None,
+        digest_id: UUID | None,
+    ) -> str:
+        """Generate episode outline for a solo monologue."""
+        prompt = SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE.format(
+            length_minutes=length_minutes,
+            style=style,
+            style_guidance=style_guidance,
+            briefs_block=briefs_block,
+        )
+        if debug_path is not None:
+            self._write_script_prompt_debug(
+                debug_path,
+                {
+                    "stage": "solo_outline",
+                    "episode_id": str(episode_id) if episode_id else None,
+                    "digest_id": str(digest_id) if digest_id else None,
+                    "model": model,
+                    "system_prompt": SCRIPT_SOLO_SYSTEM_PROMPT,
+                    "user_prompt": prompt,
+                },
+            )
+
+        for attempt in range(3):
+            outline, failed = await self.llm_service._run_completion(
+                prompt,
+                model,
+                retries=1,
+                system_prompt=SCRIPT_SOLO_SYSTEM_PROMPT,
+                timeout_seconds=timeout_seconds,
+            )
+            if not failed and outline.strip():
+                return outline.strip()
+            await asyncio.sleep(0.3 * (attempt + 1))
+        return "Opening -> cover top stories -> explain implications -> closing."
+
+    def _build_direct_solo_script_prompt(
+        self,
+        *,
+        articles: list[DigestArticle],
+        length_minutes: int,
+        style: str,
+        style_guidance: str,
+        tts_delivery_guidance: str,
+    ) -> str:
+        """Build one-shot solo prompt as fallback if chunked generation fails."""
+        articles_block_lines: list[str] = []
+        for index, article in enumerate(articles, start=1):
+            clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:500]
+            articles_block_lines.append(
+                f"{index}. {article.title}\n"
+                f"Source: {article.feed_title}\n"
+                f"URL: {article.url}\n"
+                f"Key points: {clean_snippet}"
+            )
+        articles_block = "\n\n".join(articles_block_lines)
+        return SCRIPT_SOLO_PROMPT_TEMPLATE.format(
+            length_minutes=length_minutes,
+            style=style,
+            style_guidance=style_guidance,
+            tts_delivery_guidance=tts_delivery_guidance,
+            outline_block="Use this source list directly as outline.",
+            briefs_block=articles_block,
+        )
+
+    @staticmethod
+    def _script_system_prompt_for_tts_solo(*, provider: str, elevenlabs_model_id: str) -> str:
+        """Return solo system prompt with provider-specific constraints."""
+        normalized_provider = (provider or "openai").strip().lower()
+        if normalized_provider != "elevenlabs":
+            return SCRIPT_SOLO_SYSTEM_PROMPT
+
+        model_id = (elevenlabs_model_id or "").strip().lower()
+        extra = [
+            "Additional spoken-delivery rules for ElevenLabs:",
+            "- Write text that sounds natural when spoken out loud, not read silently.",
+            "- Expand abbreviations, symbols, URLs, and shorthand when practical.",
+            "- Use contractions and occasional short interjections to keep rhythm human.",
+            "- Avoid overly dense clauses or robotic repeated sentence templates.",
+        ]
+        if model_id == "eleven_v3":
+            extra.extend(
+                [
+                    "- Keep paragraphs substantial enough for stable prosody.",
+                    "- Use punctuation and conversational cadence cues instead of SSML tags.",
+                    "- Optional inline audio tags are allowed (for example [laughs], [sighs]).",
+                    "- Keep tags sparse and intentional.",
+                ]
+            )
+        return SCRIPT_SOLO_SYSTEM_PROMPT + "\n" + "\n".join(extra)
+
+    @staticmethod
+    def _script_style_guidance_solo(style: str) -> str:
+        """Return style-specific guidance for solo monologue scripts."""
+        if style == "deep-dive":
+            return (
+                "Prioritize depth, tradeoffs, and context; unpack why stories matter "
+                "with concrete examples and thoughtful analysis."
+            )
+        if style == "formal":
+            return (
+                "Keep tone professional and composed while still sounding human; "
+                "use precise explanations and clear transitions between topics."
+            )
+        return (
+            "Keep tone approachable and lively; include light humor, rhetorical questions, "
+            "and natural thinking-out-loud moments without losing factual clarity."
+        )
+
+    @staticmethod
+    def parse_solo_script(script: str) -> str:
+        """Validate and clean a solo monologue script. Returns the cleaned text."""
+        text = script.strip()
+        if not text:
+            raise ValueError("Script is empty")
+
+        # Reject if HOST tags leaked into the script
+        if re.search(r"\[HOST_[AB]\]:", text):
+            raise ValueError("Solo script contains HOST tags")
+
+        # Split into content paragraphs (skip [pause] markers)
+        paragraphs = [
+            p.strip()
+            for p in text.split("\n\n")
+            if p.strip() and p.strip().lower() != "[pause]"
+        ]
+        # Also count single-newline-separated paragraphs
+        if len(paragraphs) < 2:
+            paragraphs = [
+                p.strip()
+                for p in text.split("\n")
+                if p.strip()
+                and p.strip().lower() != "[pause]"
+                and len(p.strip()) > 20
+            ]
+
+        if len(paragraphs) < 4:
+            raise ValueError(
+                f"Solo script must contain at least 4 content paragraphs, got {len(paragraphs)}"
+            )
+
+        if len(text) < 200:
+            raise ValueError(
+                f"Solo script must be at least 200 characters, got {len(text)}"
+            )
+
+        return text
+
+    async def generate_solo_audio(
+        self,
+        episode_id: UUID,
+        script: str,
+        prefs: PodcastGenerationPreferences,
+    ) -> AudioGenerationResult:
+        """Synthesize audio from a solo monologue script."""
+        if not script.strip():
+            raise RuntimeError("No script text for solo audio generation")
+
+        output_dir = Path(self.settings.output_dir) / "podcasts"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        final_path = output_dir / f"{episode_id}.mp3"
+        debug_dir = Path(self.settings.logs_dir) / "podcast_tts_prompts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        debug_path = debug_dir / f"{episode_id}.jsonl"
+        debug_path.write_text("", encoding="utf-8")
+
+        provider = (prefs.tts_provider or "openai").strip().lower()
+        if provider not in SUPPORTED_TTS_PROVIDERS:
+            raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
+
+        # Clean script: replace [pause] markers with ellipses for natural TTS pauses
+        cleaned = re.sub(r"\[pause\]", "...", script, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        voice = prefs.host_a_voice
+        if provider == "openai":
+            voice = self._ensure_supported_voice(voice, "alloy")
+        else:
+            voice = voice.strip() or ELEVENLABS_DEFAULT_HOST_A_VOICE
+
+        self._append_tts_debug_entry(
+            debug_path,
+            {
+                "event": "solo_audio_generation_started",
+                "episode_id": str(episode_id),
+                "provider": provider,
+                "voice": voice,
+                "script_chars": len(cleaned),
+                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            },
+        )
+
+        synthesized_chars = 0
+
+        if provider == "elevenlabs":
+            # ElevenLabs handles long text natively — single API call
+            normalized = self._normalize_tts_segment_text(
+                cleaned,
+                provider=provider,
+                elevenlabs_model_id=prefs.elevenlabs_model_id,
+            )
+            self._append_tts_debug_entry(
+                debug_path,
+                {
+                    "event": "tts_request",
+                    "segment_index": 1,
+                    "speaker": "solo",
+                    "voice": voice,
+                    "provider": provider,
+                    "text_chars": len(normalized),
+                    "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                },
+            )
+            audio_bytes = await self._synthesize_segment_with_retry(
+                text=normalized,
+                voice=voice,
+                provider=provider,
+                prefs=prefs,
+            )
+            if not audio_bytes:
+                raise RuntimeError("TTS failed for solo script")
+            final_path.write_bytes(audio_bytes)
+            synthesized_chars = len(cleaned)
+        else:
+            # OpenAI: chunk at paragraph boundaries (max ~3900 chars per chunk)
+            paragraphs = [p.strip() for p in cleaned.split("\n") if p.strip()]
+            if not paragraphs:
+                paragraphs = [cleaned]
+            chunks = self._chunk_paragraphs_for_openai(paragraphs, max_chars=3900)
+
+            with tempfile.TemporaryDirectory(prefix="podcast_solo_tts_") as tmpdir:
+                chunk_paths: list[Path] = []
+                for idx, chunk_text in enumerate(chunks, start=1):
+                    normalized = self._normalize_tts_segment_text(
+                        chunk_text,
+                        provider=provider,
+                    )
+                    self._append_tts_debug_entry(
+                        debug_path,
+                        {
+                            "event": "tts_request",
+                            "segment_index": idx,
+                            "speaker": "solo",
+                            "voice": voice,
+                            "provider": provider,
+                            "text_chars": len(normalized),
+                            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                        },
+                    )
+                    audio_bytes = await self._synthesize_segment_with_retry(
+                        text=normalized,
+                        voice=voice,
+                        provider=provider,
+                        prefs=prefs,
+                    )
+                    if not audio_bytes:
+                        logger.warning("Skipping solo TTS chunk %d after retries", idx)
+                        continue
+                    path = Path(tmpdir) / f"chunk_{idx:04d}.mp3"
+                    path.write_bytes(audio_bytes)
+                    chunk_paths.append(path)
+                    synthesized_chars += len(chunk_text)
+
+                if not chunk_paths:
+                    raise RuntimeError("TTS failed for all solo chunks")
+
+                if len(chunk_paths) == 1:
+                    shutil.copyfile(chunk_paths[0], final_path)
+                else:
+                    await self._concat_segments_seamless(chunk_paths, final_path)
+
+        audio_size = final_path.stat().st_size
+        duration = await self._probe_audio_duration_seconds(final_path)
+        self._append_tts_debug_entry(
+            debug_path,
+            {
+                "event": "solo_audio_generation_completed",
+                "episode_id": str(episode_id),
+                "audio_size_bytes": audio_size,
+                "duration_seconds": duration,
+                "synthesized_chars": synthesized_chars,
+                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            },
+        )
+        logger.info(
+            "Solo podcast audio generation complete",
+            extra={
+                "episode_id": str(episode_id),
+                "audio_size_bytes": audio_size,
+                "duration_seconds": duration,
+                "synthesized_chars": synthesized_chars,
+            },
+        )
+        return AudioGenerationResult(
+            audio_path=str(final_path),
+            audio_size_bytes=audio_size,
+            duration_seconds=duration,
+            synthesized_chars=synthesized_chars,
+        )
+
+    @staticmethod
+    def _chunk_paragraphs_for_openai(
+        paragraphs: list[str],
+        max_chars: int = 3900,
+    ) -> list[str]:
+        """Greedily accumulate paragraphs into chunks under max_chars limit."""
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = 0
+
+        for para in paragraphs:
+            para_len = len(para)
+            if para_len > max_chars:
+                # Flush current accumulation
+                if current:
+                    chunks.append("\n\n".join(current))
+                    current = []
+                    current_len = 0
+                # Split oversized paragraph at sentence boundaries
+                sentences = re.split(r"(?<=[.!?])\s+", para)
+                sent_chunk: list[str] = []
+                sent_len = 0
+                for sentence in sentences:
+                    if sent_len + len(sentence) + 1 > max_chars and sent_chunk:
+                        chunks.append(" ".join(sent_chunk))
+                        sent_chunk = []
+                        sent_len = 0
+                    sent_chunk.append(sentence)
+                    sent_len += len(sentence) + 1
+                if sent_chunk:
+                    chunks.append(" ".join(sent_chunk))
+                continue
+
+            if current_len + para_len + 2 > max_chars and current:
+                chunks.append("\n\n".join(current))
+                current = []
+                current_len = 0
+
+            current.append(para)
+            current_len += para_len + 2
+
+        if current:
+            chunks.append("\n\n".join(current))
+
+        return chunks
+
+    async def _concat_segments_seamless(
+        self,
+        segment_paths: list[Path],
+        output_path: Path,
+    ) -> None:
+        """Concatenate MP3 segments seamlessly without silence gaps."""
+        if len(segment_paths) == 1:
+            shutil.copyfile(segment_paths[0], output_path)
+            return
+
+        with tempfile.TemporaryDirectory(prefix="podcast_concat_") as tmpdir:
+            concat_list_path = Path(tmpdir) / "concat.txt"
+            concat_lines = [
+                f"file '{self._ffmpeg_quote(path)}'" for path in segment_paths
+            ]
+            concat_list_path.write_text("\n".join(concat_lines), encoding="utf-8")
+
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_list_path),
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "96k",
+                str(output_path),
+            ]
+            await self._run_subprocess(cmd, "failed to concatenate solo podcast audio")
 
     async def _generate_article_briefs(
         self,

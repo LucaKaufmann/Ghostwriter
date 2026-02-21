@@ -560,6 +560,7 @@ export interface PodcastPreferencesResponse {
 	elevenlabs_output_format: string;
 	host_a_voice: string;
 	host_b_voice: string;
+	host_count: 1 | 2;
 	podcast_feed_enabled: boolean;
 	podcast_feed_title: string;
 	podcast_feed_description: string;
@@ -585,6 +586,7 @@ export interface PodcastPreferencesUpdate {
 	elevenlabs_output_format?: string;
 	host_a_voice?: string;
 	host_b_voice?: string;
+	host_count?: 1 | 2;
 	podcast_feed_enabled?: boolean;
 	podcast_feed_title?: string;
 	podcast_feed_description?: string;
