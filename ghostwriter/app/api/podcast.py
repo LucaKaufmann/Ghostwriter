@@ -875,9 +875,6 @@ async def upload_podcast_feed_artwork(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid artwork image: {exc}") from exc
 
-    if width < 1400 or height < 1400:
-        raise HTTPException(status_code=400, detail="Artwork must be at least 1400x1400")
-
     ext = (image.format or "JPEG").lower()
     if ext == "jpeg":
         ext = "jpg"
