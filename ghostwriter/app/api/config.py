@@ -594,6 +594,10 @@ async def update_config(
         )
         logger.info(f"Updated schedule {period} from config sync: {updates}")
 
+    # If timezone changed, also reload the podcast schedule with the new timezone
+    if request.timezone is not None:
+        scheduler_module.update_podcast_schedule()
+
     # Update media processing interval if changed
     if request.media_processing_interval_hours is not None:
         scheduler_module.update_media_processing_interval(
