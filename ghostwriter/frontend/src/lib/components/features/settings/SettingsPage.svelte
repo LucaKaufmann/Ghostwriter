@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest, type PodcastPreferencesUpdate } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -34,7 +34,9 @@
 		ChevronUp,
 		Plug,
 		TestTube2,
-		Search
+		Search,
+		Rss,
+		Upload
 	} from 'lucide-svelte';
 
 	const queryClient = useQueryClient();
@@ -68,6 +70,16 @@
 	const logFilesQuery = createQuery(() => ({
 		queryKey: ['log-files'],
 		queryFn: () => api.getLogFiles()
+	}));
+
+	const podcastFeedInfoQuery = createQuery(() => ({
+		queryKey: ['podcast-feed-info'],
+		queryFn: () => api.getPodcastFeedInfo()
+	}));
+
+	const podcastPreferencesQuery = createQuery(() => ({
+		queryKey: ['podcast-preferences'],
+		queryFn: () => api.getPodcastPreferences()
 	}));
 
 	// Mutations
@@ -283,6 +295,48 @@
 		}
 	}));
 
+	const uploadPodcastArtworkMutation = createMutation(() => ({
+		mutationFn: (file: File) => api.uploadPodcastFeedArtwork(file),
+		onSuccess: (data) => {
+			queryClient.invalidateQueries({ queryKey: ['podcast-feed-info'] });
+			toast.success('Podcast artwork uploaded', {
+				description: `${data.width}x${data.height}`
+			});
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to upload podcast artwork', { description: err.message });
+		}
+	}));
+
+	const updatePodcastPreferencesMutation = createMutation(() => ({
+		mutationFn: (update: PodcastPreferencesUpdate) => api.updatePodcastPreferences(update),
+		onSuccess: (data) => {
+			podcastGenerationEnabled = data.enabled;
+			podcastSchedule = data.schedule;
+			podcastScheduleTime = data.schedule_time;
+			podcastScheduleDay = data.schedule_day;
+			podcastStyle = data.style;
+			podcastTTSProvider = data.tts_provider;
+			podcastOpenAITTSModel = data.openai_tts_model;
+			podcastElevenLabsModelId = data.elevenlabs_model_id;
+			podcastElevenLabsOutputFormat = data.elevenlabs_output_format;
+			podcastHostAVoice = data.host_a_voice;
+			podcastHostBVoice = data.host_b_voice;
+			podcastHostCount = data.host_count;
+			podcastPreferredLengthMinutes = data.preferred_length_minutes;
+			podcastFeedEnabled = data.podcast_feed_enabled;
+			podcastFeedBaseUrl = data.podcast_feed_base_url ?? '';
+			podcastOpenAIAPIKey = '';
+			podcastElevenLabsAPIKey = '';
+			queryClient.invalidateQueries({ queryKey: ['podcast-preferences'] });
+			queryClient.invalidateQueries({ queryKey: ['podcast-feed-info'] });
+			toast.success('Podcast settings updated');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to update podcast settings', { description: err.message });
+		}
+	}));
+
 	// Preview state
 	let wallabagPreview = $state<PreviewResponse | null>(null);
 	let newsletterPreview = $state<PreviewResponse | null>(null);
@@ -359,6 +413,35 @@
 	let coverGeminiKey = $state('');
 	let coverSettingsInitialized = $state(false);
 	let manualCoverInput: HTMLInputElement | null = $state(null);
+	let podcastArtworkInput: HTMLInputElement | null = $state(null);
+	let podcastGenerationEnabled = $state(false);
+	let podcastSchedule = $state<'daily' | 'weekly' | 'manual'>('manual');
+	let podcastScheduleTime = $state('08:00');
+	let podcastScheduleDay = $state<'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'>('monday');
+	let podcastStyle = $state<'casual' | 'formal' | 'deep-dive'>('casual');
+	let podcastTTSProvider = $state<'openai' | 'elevenlabs'>('openai');
+	let podcastOpenAITTSModel = $state('tts-1');
+	let podcastOpenAIAPIKey = $state('');
+	let podcastElevenLabsModelId = $state('eleven_turbo_v2_5');
+	let podcastElevenLabsOutputFormat = $state('mp3_44100_128');
+	let podcastElevenLabsAPIKey = $state('');
+	let podcastHostCount = $state<1 | 2>(2);
+	let podcastHostAVoice = $state('alloy');
+	let podcastHostBVoice = $state('echo');
+	let podcastPreferredLengthMinutes = $state(15);
+	let podcastScriptModel = $state('');
+	let podcastScriptTimeoutSeconds = $state(60);
+	let podcastFeedEnabled = $state(false);
+	let podcastFeedBaseUrl = $state('');
+	let podcastPreferencesInitialized = $state(false);
+	let copiedPodcastFeedUrl = $state(false);
+	const OPENAI_VOICE_OPTIONS = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
+	const ELEVENLABS_VOICE_PRESETS = [
+		{ label: 'Chris', id: 'iP95p4xoKVk53GoZ742B' },
+		{ label: 'Matilda', id: 'XrExE9yKIg1WjnnlVkGX' },
+		{ label: 'George', id: 'JBFqnCBsd6RMkjVDRZzb' },
+		{ label: 'Bella', id: 'hpp4J3VqNfWAUOO0d1Us' }
+	] as const;
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -407,6 +490,30 @@
 			coverOpenAIKey = data.cover_openai_api_key ?? '';
 			coverGeminiKey = data.cover_gemini_api_key ?? '';
 			coverSettingsInitialized = true;
+		}
+	});
+
+	$effect(() => {
+		const data = podcastPreferencesQuery.data;
+		if (data && !podcastPreferencesInitialized) {
+			podcastGenerationEnabled = data.enabled;
+			podcastSchedule = data.schedule;
+			podcastScheduleTime = data.schedule_time;
+			podcastScheduleDay = data.schedule_day;
+			podcastStyle = data.style;
+			podcastTTSProvider = data.tts_provider;
+			podcastOpenAITTSModel = data.openai_tts_model;
+			podcastElevenLabsModelId = data.elevenlabs_model_id;
+			podcastElevenLabsOutputFormat = data.elevenlabs_output_format;
+			podcastHostAVoice = data.host_a_voice;
+			podcastHostBVoice = data.host_b_voice;
+			podcastHostCount = data.host_count;
+			podcastPreferredLengthMinutes = data.preferred_length_minutes;
+			podcastScriptModel = data.script_model ?? '';
+			podcastScriptTimeoutSeconds = data.script_timeout_seconds;
+			podcastFeedEnabled = data.podcast_feed_enabled;
+			podcastFeedBaseUrl = data.podcast_feed_base_url ?? '';
+			podcastPreferencesInitialized = true;
 		}
 	});
 
@@ -476,6 +583,115 @@
 		if (!file) return;
 		uploadManualCoverMutation.mutate(file);
 		target.value = '';
+	}
+
+	function triggerPodcastArtworkUpload() {
+		podcastArtworkInput?.click();
+	}
+
+	function handlePodcastArtworkFileChange(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) return;
+		uploadPodcastArtworkMutation.mutate(file);
+		target.value = '';
+	}
+
+	function hasPodcastGenerationSettingsChanged(): boolean {
+		const data = podcastPreferencesQuery.data;
+		if (!data) return false;
+		return (
+			podcastGenerationEnabled !== data.enabled ||
+			podcastSchedule !== data.schedule ||
+			podcastScheduleTime !== data.schedule_time ||
+			podcastScheduleDay !== data.schedule_day ||
+			podcastStyle !== data.style ||
+			podcastTTSProvider !== data.tts_provider ||
+			podcastOpenAITTSModel.trim() !== data.openai_tts_model ||
+			podcastElevenLabsModelId.trim() !== data.elevenlabs_model_id ||
+			podcastElevenLabsOutputFormat.trim() !== data.elevenlabs_output_format ||
+			podcastHostAVoice.trim() !== data.host_a_voice ||
+			podcastHostBVoice.trim() !== data.host_b_voice ||
+			podcastHostCount !== data.host_count ||
+			podcastPreferredLengthMinutes !== data.preferred_length_minutes ||
+			podcastScriptModel.trim() !== (data.script_model ?? '') ||
+			podcastScriptTimeoutSeconds !== data.script_timeout_seconds ||
+			podcastOpenAIAPIKey.trim().length > 0 ||
+			podcastElevenLabsAPIKey.trim().length > 0
+		);
+	}
+
+	function savePodcastGenerationSettings() {
+		const clampedMinutes = Math.max(5, Math.min(60, podcastPreferredLengthMinutes));
+		const clampedTimeout = Math.max(30, Math.min(600, podcastScriptTimeoutSeconds));
+		podcastPreferredLengthMinutes = clampedMinutes;
+		podcastScriptTimeoutSeconds = clampedTimeout;
+		const update: PodcastPreferencesUpdate = {
+			enabled: podcastGenerationEnabled,
+			schedule: podcastSchedule,
+			schedule_time: podcastScheduleTime,
+			schedule_day: podcastScheduleDay,
+			style: podcastStyle,
+			script_model: podcastScriptModel.trim(),
+			script_timeout_seconds: clampedTimeout,
+			tts_provider: podcastTTSProvider,
+			openai_tts_model: podcastOpenAITTSModel.trim(),
+			elevenlabs_model_id: podcastElevenLabsModelId.trim(),
+			elevenlabs_output_format: podcastElevenLabsOutputFormat.trim(),
+			host_a_voice: podcastHostAVoice.trim(),
+			host_b_voice: podcastHostBVoice.trim(),
+			host_count: podcastHostCount,
+			preferred_length_minutes: clampedMinutes
+		};
+		if (podcastOpenAIAPIKey.trim()) {
+			update.openai_api_key = podcastOpenAIAPIKey.trim();
+		}
+		if (podcastElevenLabsAPIKey.trim()) {
+			update.elevenlabs_api_key = podcastElevenLabsAPIKey.trim();
+		}
+		updatePodcastPreferencesMutation.mutate(update);
+	}
+
+	function applyPodcastVoicePreset(preset: 'openai-default' | 'openai-alt' | 'eleven-default' | 'eleven-alt') {
+		if (preset === 'openai-default') {
+			podcastHostAVoice = 'alloy';
+			podcastHostBVoice = 'echo';
+			return;
+		}
+		if (preset === 'openai-alt') {
+			podcastHostAVoice = 'nova';
+			podcastHostBVoice = 'fable';
+			return;
+		}
+		if (preset === 'eleven-default') {
+			podcastHostAVoice = 'iP95p4xoKVk53GoZ742B';
+			podcastHostBVoice = 'XrExE9yKIg1WjnnlVkGX';
+			return;
+		}
+		podcastHostAVoice = 'JBFqnCBsd6RMkjVDRZzb';
+		podcastHostBVoice = 'hpp4J3VqNfWAUOO0d1Us';
+	}
+
+	function swapPodcastVoices() {
+		const currentA = podcastHostAVoice;
+		podcastHostAVoice = podcastHostBVoice;
+		podcastHostBVoice = currentA;
+	}
+
+	function hasPodcastFeedSettingsChanged(): boolean {
+		const data = podcastPreferencesQuery.data;
+		if (!data) return false;
+		return (
+			podcastFeedEnabled !== data.podcast_feed_enabled ||
+			podcastFeedBaseUrl.trim() !== (data.podcast_feed_base_url ?? '')
+		);
+	}
+
+	function savePodcastFeedSettings() {
+		updatePodcastPreferencesMutation.mutate({
+			podcast_feed_enabled: podcastFeedEnabled,
+			podcast_feed_base_url: podcastFeedBaseUrl.trim()
+		});
 	}
 
 	function formatBytes(value: number): string {
@@ -630,6 +846,23 @@
 			setTimeout(() => (copiedNewToken = false), 2000);
 		} catch {
 			toast.error('Failed to copy token');
+		}
+	}
+
+	async function copyPodcastFeedUrl() {
+		const feedUrl = podcastFeedInfoQuery.data?.feed_url;
+		if (!feedUrl) return;
+		try {
+			if (navigator.clipboard && window.isSecureContext) {
+				await navigator.clipboard.writeText(feedUrl);
+			} else if (!copyToClipboard(feedUrl)) {
+				throw new Error('Copy failed');
+			}
+			copiedPodcastFeedUrl = true;
+			toast.success('Podcast feed URL copied');
+			setTimeout(() => (copiedPodcastFeedUrl = false), 2000);
+		} catch {
+			toast.error('Failed to copy podcast feed URL');
 		}
 	}
 
@@ -1038,6 +1271,477 @@
 							Save
 						</Button>
 					</div>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+
+		<Card.Root>
+			<Card.Header>
+				<Card.Title class="flex items-center gap-2">
+					<Rss class="h-5 w-5" />
+					Podcast Generation
+				</Card.Title>
+				<Card.Description>
+					Configure automatic digest podcast generation and voice style.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="space-y-4">
+				{#if podcastPreferencesQuery.isPending}
+					<div class="space-y-3">
+						<Skeleton class="h-10 w-full" />
+						<Skeleton class="h-10 w-full" />
+						<Skeleton class="h-10 w-full" />
+					</div>
+				{:else if podcastPreferencesQuery.data}
+					<div class="rounded-lg border p-3 space-y-3">
+						<div class="flex items-center justify-between gap-3">
+							<div>
+								<p class="text-sm font-medium">Enable podcast generation</p>
+								<p class="text-xs text-muted-foreground">
+									When enabled, podcast episodes will be generated on the configured schedule.
+								</p>
+							</div>
+							<Switch
+								checked={podcastGenerationEnabled}
+								onCheckedChange={(checked) => (podcastGenerationEnabled = checked)}
+							/>
+						</div>
+					</div>
+
+					<div class="grid gap-4 md:grid-cols-2">
+						<div class="space-y-2">
+							<Label for="podcast-schedule">Schedule</Label>
+							<Select.Root
+								type="single"
+								name="podcast-schedule"
+								value={podcastSchedule}
+								onValueChange={(value) =>
+									(podcastSchedule = value as 'daily' | 'weekly' | 'manual')}
+							>
+								<Select.Trigger id="podcast-schedule">
+									<span class="capitalize">{podcastSchedule}</span>
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="manual">Manual only</Select.Item>
+									<Select.Item value="daily">Daily</Select.Item>
+									<Select.Item value="weekly">Weekly</Select.Item>
+								</Select.Content>
+							</Select.Root>
+						</div>
+
+						<div class="space-y-2">
+							<Label for="podcast-schedule-time">Schedule time</Label>
+							<Input id="podcast-schedule-time" type="time" bind:value={podcastScheduleTime} />
+						</div>
+
+						{#if podcastSchedule === 'weekly'}
+							<div class="space-y-2 md:col-span-2">
+								<Label for="podcast-schedule-day">Weekly day</Label>
+								<Select.Root
+									type="single"
+									name="podcast-schedule-day"
+									value={podcastScheduleDay}
+									onValueChange={(value) =>
+										(podcastScheduleDay = value as 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday')}
+								>
+									<Select.Trigger id="podcast-schedule-day">
+										<span class="capitalize">{podcastScheduleDay}</span>
+									</Select.Trigger>
+									<Select.Content>
+										<Select.Item value="monday">Monday</Select.Item>
+										<Select.Item value="tuesday">Tuesday</Select.Item>
+										<Select.Item value="wednesday">Wednesday</Select.Item>
+										<Select.Item value="thursday">Thursday</Select.Item>
+										<Select.Item value="friday">Friday</Select.Item>
+										<Select.Item value="saturday">Saturday</Select.Item>
+										<Select.Item value="sunday">Sunday</Select.Item>
+									</Select.Content>
+								</Select.Root>
+							</div>
+						{/if}
+					</div>
+
+					<div class="grid gap-4 md:grid-cols-2">
+						<div class="space-y-2">
+							<Label for="podcast-style">Style</Label>
+							<Select.Root
+								type="single"
+								name="podcast-style"
+								value={podcastStyle}
+								onValueChange={(value) =>
+									(podcastStyle = value as 'casual' | 'formal' | 'deep-dive')}
+							>
+								<Select.Trigger id="podcast-style">
+									<span class="capitalize">{podcastStyle}</span>
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="casual">Casual</Select.Item>
+									<Select.Item value="formal">Formal</Select.Item>
+									<Select.Item value="deep-dive">Deep-dive</Select.Item>
+								</Select.Content>
+							</Select.Root>
+						</div>
+						<div class="space-y-2">
+							<Label for="podcast-length">Preferred length (minutes)</Label>
+							<Input id="podcast-length" type="number" min="5" max="60" bind:value={podcastPreferredLengthMinutes} />
+						</div>
+						<div class="space-y-2">
+							<Label for="podcast-script-timeout">Script timeout (seconds)</Label>
+							<Input id="podcast-script-timeout" type="number" min="30" max="600" bind:value={podcastScriptTimeoutSeconds} />
+						</div>
+						<div class="space-y-2 md:col-span-2">
+							<Label for="podcast-script-model">Script model override (optional)</Label>
+							<Input id="podcast-script-model" bind:value={podcastScriptModel} placeholder="e.g. gpt-4.1-mini (blank uses global model)" />
+						</div>
+						<div class="space-y-2 md:col-span-2">
+							<Label>Host format</Label>
+							<div class="flex gap-2">
+								<Button
+									type="button"
+									size="sm"
+									variant={podcastHostCount === 1 ? 'default' : 'outline'}
+									onclick={() => (podcastHostCount = 1)}
+								>
+									Solo
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant={podcastHostCount === 2 ? 'default' : 'outline'}
+									onclick={() => (podcastHostCount = 2)}
+								>
+									Duo
+								</Button>
+							</div>
+							<p class="text-xs text-muted-foreground">
+								{podcastHostCount === 1
+									? 'Single narrator monologue — one voice, flowing paragraphs.'
+									: 'Two-host conversation — alternating dialogue between Host A and Host B.'}
+							</p>
+						</div>
+						<div class="space-y-2">
+							<Label for="podcast-tts-provider">TTS provider</Label>
+							<Select.Root
+								type="single"
+								name="podcast-tts-provider"
+								value={podcastTTSProvider}
+								onValueChange={(value) =>
+									(podcastTTSProvider = value as 'openai' | 'elevenlabs')}
+							>
+								<Select.Trigger id="podcast-tts-provider">
+									<span class="capitalize">{podcastTTSProvider}</span>
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="openai">OpenAI</Select.Item>
+									<Select.Item value="elevenlabs">ElevenLabs</Select.Item>
+								</Select.Content>
+							</Select.Root>
+							<p class="text-xs text-muted-foreground">
+								Provider-specific fields and presets appear below.
+							</p>
+						</div>
+						{#if podcastTTSProvider === 'openai'}
+							<div class="space-y-2">
+								<Label for="podcast-openai-model">OpenAI TTS model</Label>
+								<Input
+									id="podcast-openai-model"
+									bind:value={podcastOpenAITTSModel}
+									placeholder="tts-1"
+								/>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastOpenAITTSModel = 'tts-1')}>
+										Use tts-1
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastOpenAITTSModel = 'tts-1-hd')}>
+										Use tts-1-hd
+									</Button>
+								</div>
+							</div>
+							<div class="space-y-2 md:col-span-2">
+								<Label for="podcast-openai-key">OpenAI API key override (optional)</Label>
+								<Input
+									id="podcast-openai-key"
+									type="password"
+									bind:value={podcastOpenAIAPIKey}
+									placeholder="sk-..."
+								/>
+								<p class="text-xs text-muted-foreground">
+									If blank, Ghostwriter uses the global OpenAI key from server config.
+								</p>
+							</div>
+							<div class="space-y-2 md:col-span-2 rounded-lg border p-3">
+								<p class="text-sm font-medium">OpenAI voice presets</p>
+								<div class="flex flex-wrap gap-2">
+									{#if podcastHostCount === 1}
+										{#each OPENAI_VOICE_OPTIONS as voice}
+											<Button type="button" size="sm" variant="outline" onclick={() => (podcastHostAVoice = voice)}>
+												{voice.charAt(0).toUpperCase() + voice.slice(1)}
+											</Button>
+										{/each}
+									{:else}
+										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-default')}>
+											Default: Alloy + Echo
+										</Button>
+										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-alt')}>
+											Alt: Nova + Fable
+										</Button>
+									{/if}
+								</div>
+								<p class="text-xs text-muted-foreground">
+									Supported OpenAI voices: {OPENAI_VOICE_OPTIONS.join(', ')}.
+								</p>
+							</div>
+						{:else}
+							<div class="space-y-2">
+								<Label for="podcast-elevenlabs-model">ElevenLabs model</Label>
+								<Input
+									id="podcast-elevenlabs-model"
+									bind:value={podcastElevenLabsModelId}
+									placeholder="eleven_turbo_v2_5"
+								/>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsModelId = 'eleven_turbo_v2_5')}>
+										Use Turbo v2.5
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsModelId = 'eleven_v3')}>
+										Use v3
+									</Button>
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsModelId = 'eleven_multilingual_v2')}>
+										Use Multilingual v2
+									</Button>
+								</div>
+							</div>
+							<div class="space-y-2">
+								<Label for="podcast-elevenlabs-format">ElevenLabs output format</Label>
+								<Input
+									id="podcast-elevenlabs-format"
+									bind:value={podcastElevenLabsOutputFormat}
+									placeholder="mp3_44100_128"
+								/>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" size="sm" variant="outline" onclick={() => (podcastElevenLabsOutputFormat = 'mp3_44100_128')}>
+										Use mp3_44100_128
+									</Button>
+								</div>
+								<p class="text-xs text-muted-foreground">
+									Recommended: <code>mp3_44100_128</code>. Some higher-bitrate formats (like <code>mp3_44100_192</code>)
+									require higher ElevenLabs subscription tiers.
+								</p>
+							</div>
+							<div class="space-y-2 md:col-span-2">
+								<Label for="podcast-elevenlabs-key">ElevenLabs API key</Label>
+								<Input
+									id="podcast-elevenlabs-key"
+									type="password"
+									bind:value={podcastElevenLabsAPIKey}
+									placeholder="xi-..."
+								/>
+								<p class="text-xs text-muted-foreground">
+									Voice fields require ElevenLabs voice IDs (not voice names).
+								</p>
+							</div>
+							<div class="space-y-2 md:col-span-2 rounded-lg border p-3">
+								<p class="text-sm font-medium">{podcastHostCount === 1 ? 'ElevenLabs voice presets' : 'ElevenLabs voice pair presets'}</p>
+								<div class="flex flex-wrap gap-2">
+									{#if podcastHostCount === 1}
+										{#each ELEVENLABS_VOICE_PRESETS as preset}
+											<Button type="button" size="sm" variant="outline" onclick={() => (podcastHostAVoice = preset.id)}>
+												{preset.label}
+											</Button>
+										{/each}
+									{:else}
+										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-default')}>
+											Chris + Matilda
+										</Button>
+										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-alt')}>
+											George + Bella
+										</Button>
+									{/if}
+								</div>
+								<div class="mt-2 text-xs text-muted-foreground">
+									{#each ELEVENLABS_VOICE_PRESETS as preset}
+										<div>{preset.label}: {preset.id}</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+						<div class="space-y-2">
+							<Label for="podcast-host-a">{podcastHostCount === 1 ? 'Voice' : 'Host A voice'}</Label>
+							<Input
+								id="podcast-host-a"
+								bind:value={podcastHostAVoice}
+								placeholder={podcastTTSProvider === 'openai' ? 'alloy' : 'ElevenLabs voice ID'}
+							/>
+							<p class="text-xs text-muted-foreground">
+								{podcastTTSProvider === 'openai' ? 'Use one of the OpenAI voice names.' : 'Paste the ElevenLabs voice ID.'}
+							</p>
+						</div>
+						{#if podcastHostCount === 2}
+							<div class="space-y-2">
+								<Label for="podcast-host-b">Host B voice</Label>
+								<Input
+									id="podcast-host-b"
+									bind:value={podcastHostBVoice}
+									placeholder={podcastTTSProvider === 'openai' ? 'echo' : 'ElevenLabs voice ID'}
+								/>
+								<div class="flex items-center justify-between gap-2">
+									<p class="text-xs text-muted-foreground">
+										{podcastTTSProvider === 'openai' ? 'Use one of the OpenAI voice names.' : 'Paste the ElevenLabs voice ID for Host B.'}
+									</p>
+									<Button type="button" size="sm" variant="ghost" onclick={swapPodcastVoices}>
+										Swap voices
+									</Button>
+								</div>
+							</div>
+						{/if}
+					</div>
+
+					<div class="flex justify-end">
+						<Button
+							size="sm"
+							onclick={savePodcastGenerationSettings}
+							disabled={!hasPodcastGenerationSettingsChanged() || updatePodcastPreferencesMutation.isPending}
+						>
+							{#if updatePodcastPreferencesMutation.isPending}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							{:else}
+								<Save class="mr-2 h-4 w-4" />
+							{/if}
+							Save
+						</Button>
+					</div>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+
+		<Card.Root>
+			<Card.Header>
+				<Card.Title class="flex items-center gap-2">
+					<Rss class="h-5 w-5" />
+					Podcast RSS Feed
+				</Card.Title>
+				<Card.Description>
+					Copy your private podcast URL and upload artwork for podcast apps.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="space-y-4">
+				{#if podcastFeedInfoQuery.isPending || podcastPreferencesQuery.isPending}
+					<div class="space-y-3">
+						<Skeleton class="h-10 w-full" />
+						<Skeleton class="h-24 w-full" />
+					</div>
+				{:else if podcastFeedInfoQuery.data && podcastPreferencesQuery.data}
+					<div class="rounded-lg border p-3">
+						<div class="flex items-center justify-between gap-3">
+							<div>
+								<p class="text-sm font-medium">Feed enabled</p>
+								<p class="text-xs text-muted-foreground">
+									Allow podcast apps to fetch new generated episodes from your private feed.
+								</p>
+							</div>
+							<Switch
+								checked={podcastFeedEnabled}
+								onCheckedChange={(checked) => (podcastFeedEnabled = checked)}
+							/>
+						</div>
+						<div class="mt-3 space-y-2">
+							<Label for="podcast-feed-base-url">Public base URL (optional)</Label>
+							<Input
+								id="podcast-feed-base-url"
+								bind:value={podcastFeedBaseUrl}
+								placeholder="https://podcasts.example.com"
+							/>
+							<p class="text-xs text-muted-foreground">
+								Use a URL reachable by your podcast app. Leave blank to use the current server host.
+							</p>
+						</div>
+						<div class="mt-3 flex justify-end">
+							<Button
+								size="sm"
+								onclick={savePodcastFeedSettings}
+								disabled={!hasPodcastFeedSettingsChanged() || updatePodcastPreferencesMutation.isPending}
+							>
+								{#if updatePodcastPreferencesMutation.isPending}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								{:else}
+									<Save class="mr-2 h-4 w-4" />
+								{/if}
+								Save
+							</Button>
+						</div>
+					</div>
+
+					<div class="space-y-2">
+						<Label for="podcast-feed-url">Private feed URL</Label>
+						<div class="flex flex-col gap-2 sm:flex-row">
+							<Input
+								id="podcast-feed-url"
+								value={podcastFeedInfoQuery.data.feed_url}
+								readonly
+								class="font-mono text-xs"
+							/>
+							<Button
+								type="button"
+								variant="outline"
+								onclick={copyPodcastFeedUrl}
+								class="sm:w-auto"
+							>
+								{#if copiedPodcastFeedUrl}
+									<CheckCircle2 class="mr-2 h-4 w-4" />
+									Copied
+								{:else}
+									<Copy class="mr-2 h-4 w-4" />
+									Copy URL
+								{/if}
+							</Button>
+						</div>
+					</div>
+
+					<div class="rounded-lg border p-3">
+						<p class="text-sm font-medium">Artwork</p>
+						<p class="text-xs text-muted-foreground">
+							Upload square artwork (minimum 1400x1400) for Apple Podcasts and other players.
+						</p>
+						<div class="mt-3 flex items-center gap-2">
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								onclick={triggerPodcastArtworkUpload}
+								disabled={uploadPodcastArtworkMutation.isPending}
+							>
+								{#if uploadPodcastArtworkMutation.isPending}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+									Uploading...
+								{:else}
+									<Upload class="mr-2 h-4 w-4" />
+									Upload Artwork
+								{/if}
+							</Button>
+							<input
+								class="hidden"
+								type="file"
+								accept="image/*"
+								bind:this={podcastArtworkInput}
+								onchange={handlePodcastArtworkFileChange}
+							/>
+						</div>
+					</div>
+
+					<div class="rounded-lg border p-3">
+						<p class="text-sm font-medium">Setup instructions</p>
+						<ol class="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+							{#each podcastFeedInfoQuery.data.setup_instructions as step}
+								<li>{step}</li>
+							{/each}
+						</ol>
+					</div>
+
+					{#if !podcastFeedEnabled}
+						<p class="text-xs text-amber-700">
+							Podcast feed is currently disabled.
+						</p>
+					{/if}
 				{/if}
 			</Card.Content>
 		</Card.Root>
@@ -1528,7 +2232,7 @@
 								Clear History
 							</Button>
 						{:else}
-							<a href="/newsletters" class="text-sm text-primary hover:underline">
+							<a href="/sources/newsletters" class="text-sm text-primary hover:underline">
 								Configure
 							</a>
 						{/if}

@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from app.core.database import init_db, engine
 from app.core.logging import configure_logging, digest_logger
 from app.models.digest import Digest
 from sqlmodel import Session, select
+from app.services.podcast_service import podcast_service
 from app.worker.scheduler import setup_scheduler, shutdown_scheduler
 
 # Configure logging (both standard and digest activity logging)
@@ -121,6 +123,14 @@ async def lifespan(app: FastAPI):
             "Cleared stuck processing digests on startup",
             extra={"count": cleared},
         )
+
+    recovered_episodes = podcast_service.recover_stuck_episodes()
+    if recovered_episodes:
+        logger.warning(
+            "Cleared stuck podcast episodes on startup",
+            extra={"count": recovered_episodes},
+        )
+    podcast_service.set_event_loop(asyncio.get_running_loop())
 
     # Track startup time
     set_startup_time(datetime.utcnow())

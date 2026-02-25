@@ -303,6 +303,7 @@
 			downloadPendingByKey = { ...downloadPendingByKey, [key]: false };
 		}
 	}
+
 </script>
 
 <svelte:head>
@@ -535,7 +536,7 @@
 								<Table.Head>Status</Table.Head>
 								<Table.Head>Articles</Table.Head>
 								<Table.Head>Duration</Table.Head>
-								<Table.Head class="w-[260px]">Actions</Table.Head>
+								<Table.Head class="w-[240px]">Actions</Table.Head>
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>

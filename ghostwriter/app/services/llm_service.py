@@ -2,7 +2,9 @@
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 import litellm
 from litellm import acompletion
@@ -320,8 +322,10 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
         retries: int,
         *,
         system_prompt: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> tuple[str, bool]:
         """Run one LLM completion with retries, returning (output, failed)."""
+        call_id = str(uuid4())
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -330,7 +334,7 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "timeout": self.settings.ai_timeout_seconds,
+            "timeout": timeout_seconds or self.settings.ai_timeout_seconds,
         }
 
         if self.settings.ai_provider == "ollama":
@@ -340,26 +344,92 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
         elif self.settings.ai_provider == "openai":
             kwargs["api_key"] = self.settings.openai_api_key
 
+        logger.info(
+            "LLM call started | call_id=%s provider=%s model=%s retries=%s prompt_chars=%s system_prompt_chars=%s timeout_seconds=%s started_at=%s",
+            call_id,
+            self.settings.ai_provider,
+            model,
+            retries,
+            len(prompt),
+            len(system_prompt or ""),
+            timeout_seconds or self.settings.ai_timeout_seconds,
+            datetime.utcnow().isoformat() + "Z",
+        )
+        logger.info(
+            "LLM call prompt | call_id=%s system_prompt=%r user_prompt=%r",
+            call_id,
+            system_prompt or "",
+            prompt,
+        )
+
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             try:
-                logger.debug("LLM completion attempt %s/%s with model %s", attempt + 1, retries + 1, model)
+                logger.info(
+                    "LLM attempt started | call_id=%s attempt=%s attempts_total=%s",
+                    call_id,
+                    attempt + 1,
+                    retries + 1,
+                )
                 response = await acompletion(**kwargs)
                 text = response.choices[0].message.content
                 if text:
+                    logger.info(
+                        "LLM call succeeded | call_id=%s attempt=%s response_chars=%s",
+                        call_id,
+                        attempt + 1,
+                        len(text.strip()),
+                    )
                     return text.strip(), False
-                logger.warning("Empty response from LLM, retrying...")
+                logger.warning(
+                    "LLM empty response | call_id=%s attempt=%s attempts_total=%s",
+                    call_id,
+                    attempt + 1,
+                    retries + 1,
+                )
             except Exception as e:
                 last_error = e
-                logger.warning(f"LLM summarize attempt {attempt + 1} failed: {e}")
+                logger.error(
+                    "LLM attempt failed | call_id=%s attempt=%s attempts_total=%s error_type=%s error=%s details=%s",
+                    call_id,
+                    attempt + 1,
+                    retries + 1,
+                    type(e).__name__,
+                    str(e),
+                    self._extract_error_details(e),
+                    exc_info=True,
+                )
                 if attempt < retries:
                     await asyncio.sleep(2**attempt)
 
         logger.error(
-            f"All LLM summarize attempts failed. Last error: {last_error}. "
-            "Falling back to raw content."
+            "LLM call failed after retries | call_id=%s provider=%s model=%s retries=%s last_error=%s. Falling back to raw content.",
+            call_id,
+            self.settings.ai_provider,
+            model,
+            retries,
+            str(last_error),
         )
         return "", True
+
+    @staticmethod
+    def _extract_error_details(error: Exception) -> str:
+        """Extract provider-specific error details when available for logs."""
+        details: list[str] = []
+        status_code = getattr(error, "status_code", None)
+        if status_code is not None:
+            details.append(f"status_code={status_code}")
+        response = getattr(error, "response", None)
+        if response is not None:
+            response_text = getattr(response, "text", None)
+            if response_text:
+                details.append(f"response_text={response_text}")
+            body = getattr(response, "content", None)
+            if body:
+                details.append(f"response_content={body}")
+        if not details:
+            return "none"
+        return "; ".join(details)
 
     @staticmethod
     def _chunk_text(text: str, chunk_size: int) -> list[str]:

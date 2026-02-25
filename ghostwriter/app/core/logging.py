@@ -446,17 +446,20 @@ class DigestActivityLogger:
         digests_deleted: int = 0,
         articles_cleaned: int = 0,
         tombstones_cleaned: int = 0,
+        podcast_episodes_cleaned: int = 0,
     ) -> None:
         """Log daily maintenance completion."""
         self.info(
             f"Daily maintenance completed: {digests_deleted} digests deleted, "
-            f"{articles_cleaned} seen articles cleaned, {tombstones_cleaned} tombstones cleaned",
+            f"{articles_cleaned} seen articles cleaned, {tombstones_cleaned} tombstones cleaned, "
+            f"{podcast_episodes_cleaned} podcast episodes cleaned",
             component="maintenance",
             event="completed",
             context={
                 "digests_deleted": digests_deleted,
                 "articles_cleaned": articles_cleaned,
                 "tombstones_cleaned": tombstones_cleaned,
+                "podcast_episodes_cleaned": podcast_episodes_cleaned,
             },
         )
 
@@ -491,11 +494,35 @@ def configure_logging() -> None:
     """
     settings = get_settings()
 
-    # Configure standard Python logging
+    # Configure standard Python logging (console/stdout)
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper()),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+
+    # Also persist standard app logs (including podcast service logs) to ghostwriter.log.
+    # Keep this idempotent so repeated startup/init doesn't duplicate handlers.
+    os.makedirs(settings.logs_dir, exist_ok=True)
+    root_logger = logging.getLogger()
+    has_file_handler = any(
+        isinstance(handler, TimedRotatingFileHandler)
+        and getattr(handler, "baseFilename", "").endswith("ghostwriter.log")
+        for handler in root_logger.handlers
+    )
+    if not has_file_handler:
+        app_file_handler = TimedRotatingFileHandler(
+            os.path.join(settings.logs_dir, "ghostwriter.log"),
+            when="midnight",
+            interval=1,
+            backupCount=30,
+            utc=True,
+        )
+        app_file_handler.suffix = "%Y-%m-%d"
+        app_file_handler.namer = lambda name: name.replace(".log.", "-") + ".log"
+        app_file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        root_logger.addHandler(app_file_handler)
 
     # Configure digest activity logger
     digest_logger.configure()
