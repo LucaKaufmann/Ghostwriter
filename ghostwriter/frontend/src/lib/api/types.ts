@@ -524,6 +524,116 @@ export interface RetryFailedMediaResponse {
 	skipped: number;
 }
 
+// ============ Podcast Digests ============
+
+export interface PodcastFeedInfoResponse {
+	feed_enabled: boolean;
+	feed_title: string;
+	feed_description: string;
+	feed_url: string;
+	setup_instructions: string[];
+}
+
+export interface PodcastArtworkUploadResponse {
+	status: string;
+	artwork_path: string;
+	width: number;
+	height: number;
+}
+
+export interface PodcastPreferencesResponse {
+	enabled: boolean;
+	schedule: 'daily' | 'weekly' | 'manual';
+	schedule_time: string;
+	schedule_day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+	topic_weights: Record<string, number>;
+	boost_sources: string[];
+	boost_keywords: string[];
+	filter_keywords: string[];
+	preferred_length_minutes: number;
+	script_model: string | null;
+	script_timeout_seconds: number;
+	style: 'casual' | 'formal' | 'deep-dive';
+	tts_provider: 'openai' | 'elevenlabs';
+	openai_tts_model: string;
+	elevenlabs_model_id: string;
+	elevenlabs_output_format: string;
+	host_a_voice: string;
+	host_b_voice: string;
+	host_count: 1 | 2;
+	podcast_feed_enabled: boolean;
+	podcast_feed_title: string;
+	podcast_feed_description: string;
+	podcast_feed_base_url: string | null;
+	podcast_feed_artwork_path: string | null;
+	updated_at: string;
+}
+
+export interface PodcastPreferencesUpdate {
+	enabled?: boolean;
+	schedule?: 'daily' | 'weekly' | 'manual';
+	schedule_time?: string;
+	schedule_day?: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+	preferred_length_minutes?: number;
+	script_model?: string;
+	script_timeout_seconds?: number;
+	style?: 'casual' | 'formal' | 'deep-dive';
+	tts_provider?: 'openai' | 'elevenlabs';
+	openai_tts_model?: string;
+	openai_api_key?: string;
+	elevenlabs_model_id?: string;
+	elevenlabs_api_key?: string;
+	elevenlabs_output_format?: string;
+	host_a_voice?: string;
+	host_b_voice?: string;
+	host_count?: 1 | 2;
+	podcast_feed_enabled?: boolean;
+	podcast_feed_title?: string;
+	podcast_feed_description?: string;
+	podcast_feed_base_url?: string;
+}
+
+export interface PodcastTriggerResponse {
+	episode_id: string;
+	digest_ids: string[];
+	status: string;
+	message: string;
+}
+
+export interface PodcastEpisodeStatusResponse {
+	id: string;
+	digest_ids: string[];
+	trigger: string;
+	status: string;
+	audio_size_bytes: number | null;
+	duration_seconds: number | null;
+	article_count: number;
+	generation_cost_cents: number | null;
+	error_message: string | null;
+	created_at: string;
+	completed_at: string | null;
+	stream_url: string | null;
+	download_url: string | null;
+}
+
+export interface DigestPodcastStatusResponse {
+	digest_id: string;
+	episode: PodcastEpisodeStatusResponse;
+}
+
+export interface PodcastEpisodeArticle {
+	id: string;
+	title: string;
+	url: string;
+	feed_title: string;
+}
+
+export interface PodcastEpisodeDetailResponse extends PodcastEpisodeStatusResponse {
+	script: string | null;
+	article_ids: string[];
+	articles: PodcastEpisodeArticle[];
+}
+
 // ============ API Error ============
 
 export interface APIError {

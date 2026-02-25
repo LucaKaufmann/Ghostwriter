@@ -89,3 +89,36 @@ async def test_summarize_fallback(llm_service):
     # Should return original content on failure
     assert ai_failed is True
     assert result == content
+
+
+@pytest.mark.asyncio
+async def test_run_completion_uses_timeout_override(llm_service, monkeypatch):
+    """Explicit timeout override should be forwarded to provider call."""
+
+    class _Message:
+        content = "ok"
+
+    class _Choice:
+        message = _Message()
+
+    class _Response:
+        choices = [_Choice()]
+
+    captured: dict[str, object] = {}
+
+    async def _fake_completion(**kwargs):
+        captured.update(kwargs)
+        return _Response()
+
+    monkeypatch.setattr("app.services.llm_service.acompletion", _fake_completion)
+
+    result, failed = await llm_service._run_completion(
+        "prompt",
+        "ollama/llama3.2",
+        retries=0,
+        timeout_seconds=123,
+    )
+
+    assert failed is False
+    assert result == "ok"
+    assert captured["timeout"] == 123

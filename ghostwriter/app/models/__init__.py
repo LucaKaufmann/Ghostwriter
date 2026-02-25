@@ -1,5 +1,6 @@
 """Database models."""
 
+from app.models.article_feedback import ArticleFeedback
 from app.models.api_token import APIToken
 from app.models.client_config import ClientConfig
 from app.models.client_settings import ClientSettings
@@ -9,11 +10,14 @@ from app.models.media_feed import MediaFeed
 from app.models.media_item import MediaItem
 from app.models.media_processing_run import MediaProcessingRun
 from app.models.manual_cover import ManualCover
+from app.models.podcast_episode import PodcastEpisode
+from app.models.podcast_preferences import PodcastPreferences
 from app.models.schedule import Schedule
 from app.models.seen_article import SeenArticle
 from app.models.user import User
 
 __all__ = [
+    "ArticleFeedback",
     "APIToken",
     "ClientConfig",
     "ClientSettings",
@@ -24,6 +28,8 @@ __all__ = [
     "MediaItem",
     "MediaProcessingRun",
     "ManualCover",
+    "PodcastEpisode",
+    "PodcastPreferences",
     "Schedule",
     "SeenArticle",
     "User",

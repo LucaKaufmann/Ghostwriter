@@ -47,7 +47,15 @@ import type {
 	MediaTriggerResponse,
 	MediaRetryResponse,
 	RetryFailedMediaResponse,
-	FeedCheckResponse
+	FeedCheckResponse,
+	PodcastFeedInfoResponse,
+	PodcastArtworkUploadResponse,
+	PodcastPreferencesResponse,
+	PodcastPreferencesUpdate,
+	PodcastTriggerResponse,
+	PodcastEpisodeStatusResponse,
+	PodcastEpisodeDetailResponse,
+	DigestPodcastStatusResponse
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -582,6 +590,96 @@ class ApiClient {
 
 	async getAllPodcastItems(): Promise<MediaItemSummary[]> {
 		return this.request<MediaItemSummary[]>('/media/podcasts/items/all');
+	}
+
+	// ============ Podcast Digests ============
+
+	async getPodcastFeedInfo(): Promise<PodcastFeedInfoResponse> {
+		return this.request<PodcastFeedInfoResponse>('/podcast/feed/info');
+	}
+
+	async getPodcastPreferences(): Promise<PodcastPreferencesResponse> {
+		return this.request<PodcastPreferencesResponse>('/podcast/preferences');
+	}
+
+	async updatePodcastPreferences(data: PodcastPreferencesUpdate): Promise<PodcastPreferencesResponse> {
+		return this.request<PodcastPreferencesResponse>('/podcast/preferences', {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async triggerDigestPodcast(digestId: string): Promise<PodcastTriggerResponse> {
+		return this.request<PodcastTriggerResponse>(`/digests/${digestId}/podcast`, {
+			method: 'POST'
+		});
+	}
+
+	async getDigestPodcastStatus(digestId: string): Promise<DigestPodcastStatusResponse> {
+		return this.request<DigestPodcastStatusResponse>(`/digests/${digestId}/podcast`);
+	}
+
+	downloadPodcastEpisode(episodeId: string): Promise<{ blob: Blob; filename: string }> {
+		return this.download(`/podcast/episodes/${episodeId}/download`, `podcast-${episodeId}.mp3`);
+	}
+
+	async streamPodcastEpisode(episodeId: string): Promise<string> {
+		const { blob } = await this.download(
+			`/podcast/episodes/${episodeId}/download`,
+			`podcast-${episodeId}.mp3`
+		);
+		return URL.createObjectURL(blob);
+	}
+
+	// ============ Podcast Episodes ============
+
+	async getPodcastEpisodes(): Promise<PodcastEpisodeStatusResponse[]> {
+		return this.request<PodcastEpisodeStatusResponse[]>('/podcast/episodes');
+	}
+
+	async getPodcastEpisode(id: string): Promise<PodcastEpisodeDetailResponse> {
+		return this.request<PodcastEpisodeDetailResponse>(`/podcast/episodes/${id}`);
+	}
+
+	async deletePodcastEpisode(id: string): Promise<{ status: string }> {
+		return this.request(`/podcast/episodes/${id}`, { method: 'DELETE' });
+	}
+
+	async retryPodcastEpisode(id: string): Promise<PodcastTriggerResponse> {
+		return this.request<PodcastTriggerResponse>(`/podcast/episodes/${id}/retry`, {
+			method: 'POST'
+		});
+	}
+
+	async generateScheduledEpisode(): Promise<PodcastTriggerResponse> {
+		return this.request<PodcastTriggerResponse>('/podcast/episodes/generate', {
+			method: 'POST'
+		});
+	}
+
+	async uploadPodcastFeedArtwork(file: File): Promise<PodcastArtworkUploadResponse> {
+		const token = this.getToken();
+		const formData = new FormData();
+		formData.append('file', file);
+		const headers: Record<string, string> = {};
+		if (token) headers['Authorization'] = `Bearer ${token}`;
+
+		const response = await fetch(`${BASE_URL}/podcast/feed/artwork`, {
+			method: 'POST',
+			headers,
+			body: formData
+		});
+		if (!response.ok) {
+			let error: APIError;
+			try {
+				error = await response.json();
+			} catch {
+				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+			}
+			throw new ApiError(response.status, error);
+		}
+
+		return response.json();
 	}
 
 	// ============ Media: YouTube ============

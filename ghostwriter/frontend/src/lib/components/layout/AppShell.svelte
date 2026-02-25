@@ -14,10 +14,10 @@
 		ChevronRight,
 		LayoutDashboard,
 		Headphones,
-		Youtube,
 		LogOut,
 		Mail,
 		Menu,
+		Mic,
 		Play,
 		Rss,
 		Settings
@@ -26,15 +26,30 @@
 	let { children } = $props();
 	let mobileMenuOpen = $state(false);
 
-	const navItems = [
-		{ href: '/', label: 'Dashboard', icon: LayoutDashboard },
-		{ href: '/feeds', label: 'Feeds', icon: Rss },
-		{ href: '/podcasts', label: 'Podcasts', icon: Headphones },
-		{ href: '/youtube', label: 'YouTube', icon: Youtube },
-		{ href: '/digests', label: 'Digests', icon: BookCopy },
-		{ href: '/newsletters', label: 'Newsletters', icon: Mail },
-		{ href: '/settings', label: 'Settings', icon: Settings }
+	type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
+	type NavSection = { label?: string; items: NavItem[] };
+
+	const navSections: NavSection[] = [
+		{ items: [{ href: '/', label: 'Dashboard', icon: LayoutDashboard }] },
+		{
+			label: 'Sources',
+			items: [
+				{ href: '/sources/feeds', label: 'Feeds', icon: Rss },
+				{ href: '/sources/media', label: 'Media', icon: Headphones },
+				{ href: '/sources/newsletters', label: 'Newsletters', icon: Mail }
+			]
+		},
+		{
+			label: 'Library',
+			items: [
+				{ href: '/digests', label: 'Digests', icon: BookCopy },
+				{ href: '/episodes', label: 'Episodes', icon: Mic }
+			]
+		},
+		{ items: [{ href: '/settings', label: 'Settings', icon: Settings }] }
 	];
+
+	const allNavItems = navSections.flatMap((s) => s.items);
 
 	const quickDigestMutation = createMutation(() => ({
 		mutationFn: () => api.triggerDigest(),
@@ -53,7 +68,7 @@
 		return $page.url.pathname.startsWith(href);
 	}
 
-	const activeNavItem = $derived.by(() => navItems.find((item) => isActive(item.href)) ?? navItems[0]);
+	const activeNavItem = $derived.by(() => allNavItems.find((item) => isActive(item.href)) ?? allNavItems[0]);
 
 	function handleLogout() {
 		auth.logout();
@@ -91,23 +106,30 @@
 				</Button>
 			</div>
 
-			<nav class="flex-1 space-y-1 p-4">
-				{#each navItems as item}
-					<a
-						href={item.href}
-						aria-current={isActive(item.href) ? 'page' : undefined}
-						class="group flex items-center gap-3 rounded-lg border px-3 py-2 text-sm font-medium transition-colors {isActive(
-							item.href
-						)
-							? 'border-primary/30 bg-primary/10 text-primary'
-							: 'border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-accent-foreground'}"
-					>
-						<item.icon class="h-4 w-4" />
-						{item.label}
-						{#if isActive(item.href)}
-							<span class="ml-auto h-2 w-2 rounded-full bg-primary" aria-hidden="true"></span>
+			<nav class="flex-1 space-y-4 p-4">
+				{#each navSections as section}
+					<div class="space-y-1">
+						{#if section.label}
+							<p class="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">{section.label}</p>
 						{/if}
-					</a>
+						{#each section.items as item}
+							<a
+								href={item.href}
+								aria-current={isActive(item.href) ? 'page' : undefined}
+								class="group flex items-center gap-3 rounded-lg border px-3 py-2 text-sm font-medium transition-colors {isActive(
+									item.href
+								)
+									? 'border-primary/30 bg-primary/10 text-primary'
+									: 'border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-accent-foreground'}"
+							>
+								<item.icon class="h-4 w-4" />
+								{item.label}
+								{#if isActive(item.href)}
+									<span class="ml-auto h-2 w-2 rounded-full bg-primary" aria-hidden="true"></span>
+								{/if}
+							</a>
+						{/each}
+					</div>
 				{/each}
 			</nav>
 
@@ -159,22 +181,29 @@
 							</Button>
 						</div>
 
-						<nav class="flex-1 space-y-1 p-4">
-							{#each navItems as item}
-								<a
-									href={item.href}
-									onclick={closeMobileMenu}
-									aria-current={isActive(item.href) ? 'page' : undefined}
-									class="flex items-center gap-3 rounded-lg border px-3 py-3 text-sm font-medium transition-colors {isActive(
-										item.href
-									)
-										? 'border-primary/30 bg-primary/10 text-primary'
-										: 'border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-accent-foreground'}"
-								>
-									<item.icon class="h-4 w-4" />
-									{item.label}
-									<ChevronRight class="ml-auto h-4 w-4" />
-								</a>
+						<nav class="flex-1 space-y-4 p-4">
+							{#each navSections as section}
+								<div class="space-y-1">
+									{#if section.label}
+										<p class="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">{section.label}</p>
+									{/if}
+									{#each section.items as item}
+										<a
+											href={item.href}
+											onclick={closeMobileMenu}
+											aria-current={isActive(item.href) ? 'page' : undefined}
+											class="flex items-center gap-3 rounded-lg border px-3 py-3 text-sm font-medium transition-colors {isActive(
+												item.href
+											)
+												? 'border-primary/30 bg-primary/10 text-primary'
+												: 'border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-accent-foreground'}"
+										>
+											<item.icon class="h-4 w-4" />
+											{item.label}
+											<ChevronRight class="ml-auto h-4 w-4" />
+										</a>
+									{/each}
+								</div>
 							{/each}
 						</nav>
 

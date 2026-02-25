@@ -121,6 +121,13 @@ class Settings(BaseSettings):
         default="",
         description="Comma-separated list of trusted proxy IPs/CIDRs for forwarded headers",
     )
+    podcast_public_base_url: str = Field(
+        default="",
+        description=(
+            "Public base URL used in podcast RSS links/enclosures "
+            "(e.g. https://ghostwriter.example.com)"
+        ),
+    )
 
     # Rate limiting
     auth_rate_limit_enabled: bool = Field(default=True, description="Enable auth rate limiting")

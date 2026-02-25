@@ -1,9 +1,9 @@
 # Epilogue
 
-Epilogue is a cross-platform RSS-to-EPUB workflow for focused reading.
+Epilogue is a cross-platform RSS-to-EPUB workflow for focused reading — with optional AI-narrated podcast generation.
 
 - Mobile apps (Android + iOS) manage feeds and read digests.
-- Ghostwriter (self-hosted backend) generates digests, runs schedules, and syncs across devices.
+- Ghostwriter (self-hosted backend) generates digests, runs schedules, syncs across devices, and produces podcast episodes from your content.
 
 If you want to try the project quickly, start with Ghostwriter.
 
@@ -13,13 +13,16 @@ If you want to try the project quickly, start with Ghostwriter.
 - `Fidelity` mode for full-article extraction.
 - `Briefing` mode for AI summaries.
 - Read generated EPUBs on e-ink devices, phones, or tablets.
+- **Generate AI-narrated podcast episodes** from your digests using ElevenLabs TTS.
+- Subscribe via a standards-compliant RSS podcast feed in your favorite podcast app.
+- Choose between two-host conversational or single-host monologue narration styles.
 - Optionally sync feeds and digests through a self-hosted backend.
 
 ## Project Layout
 
 - `app/`: Android app (Kotlin, Compose, Room, WorkManager).
 - `EpilogueIOS/`: iOS app (Swift, SwiftUI, Tuist modules).
-- `ghostwriter/`: FastAPI backend + Svelte web UI.
+- `ghostwriter/`: FastAPI backend + Svelte web UI, including podcast generation pipeline and TTS integration.
 - `docs/`, `examples/`: project docs and sample files.
 
 ## Ghostwriter Quick Start (Docker)
@@ -35,7 +38,7 @@ cd ghostwriter
 cp .env.example .env
 ```
 
-Edit `.env` as needed (AI provider, timezone, schedule, credentials).
+Edit `.env` as needed (AI provider, timezone, schedule, credentials). For podcast generation, configure your ElevenLabs API key and TTS preferences in the web UI under Settings.
 
 ### 2. Start Services
 
