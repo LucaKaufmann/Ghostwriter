@@ -26,6 +26,7 @@ class ContentProcessor @Inject constructor(
         private const val TAG = "ContentProcessor"
         private const val DEFAULT_TIMEOUT_MS = 60_000
         private const val DEFAULT_MIN_WORD_COUNT = 0
+        private const val MIN_EXTRACTED_ARTICLE_WORDS = 15
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
         // Minimum word count to use RSS content directly
@@ -318,6 +319,12 @@ class ContentProcessor @Inject constructor(
 
         // Clean up the extracted HTML
         val cleanedContent = cleanHtml(content)
+
+        // Readability can return boilerplate snippets (e.g. nav-only pages).
+        if (countWords(cleanedContent) < MIN_EXTRACTED_ARTICLE_WORDS) {
+            return null
+        }
+
         return ProcessedArticle(
             title = title,
             author = article.byline?.trim() ?: "",
@@ -343,6 +350,10 @@ class ContentProcessor @Inject constructor(
 
         // Remove tracking pixels and hidden images
         doc.select("img[width=1], img[height=1], img[src*='pixel'], img[src*='track']").remove()
+
+        // Remove style/class attributes to keep extracted HTML deterministic and lightweight.
+        doc.select("[style]").removeAttr("style")
+        doc.select("[class]").removeAttr("class")
 
         // Get the body content - use text() if html() is empty (Readability sometimes returns text-only)
         var result = doc.body().html()

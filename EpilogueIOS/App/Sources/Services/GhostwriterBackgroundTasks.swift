@@ -12,8 +12,8 @@ import OSLog
 
 /// Background task identifiers for Ghostwriter sync
 public enum GhostwriterBackgroundTask {
-    public static let feedSync = "com.epilogue.app.feedSync"
-    public static let digestSync = "com.epilogue.app.digestSync"
+    public static let feedSync = "com.codable.epilogue.feedSync"
+    public static let digestSync = "com.codable.epilogue.digestSync"
 }
 
 /// Manages background task registration and scheduling for Ghostwriter sync
