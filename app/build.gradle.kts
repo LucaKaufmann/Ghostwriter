@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,16 +7,51 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val releaseVersionCode = (
+    providers.gradleProperty("EPILOGUE_VERSION_CODE").orNull
+        ?: System.getenv("EPILOGUE_VERSION_CODE")
+        ?: "1"
+).toInt()
+
+val releaseVersionName = (
+    providers.gradleProperty("EPILOGUE_VERSION_NAME").orNull
+        ?: System.getenv("EPILOGUE_VERSION_NAME")
+        ?: "1.0.0"
+)
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun keystoreValue(key: String): String =
+    keystoreProperties.getProperty(key)
+        ?: throw GradleException("Missing '$key' in keystore.properties")
+
+val releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    val normalized = taskName.lowercase()
+    normalized.contains("release") || normalized.contains("bundle") || normalized.contains("publish")
+}
+
+if (releaseTaskRequested && !keystorePropertiesFile.exists()) {
+    throw GradleException(
+        "Release build requested but keystore.properties was not found at ${keystorePropertiesFile.absolutePath}. " +
+            "Create it from keystore.properties.example."
+    )
+}
+
 android {
-    namespace = "com.example.epilogue"
-    compileSdk = 34
+    namespace = "com.codable.epilogue"
+    compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.epilogue"
+        applicationId = "com.codable.epilogue"
         minSdk = 33
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 35
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -22,8 +59,22 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists()) {
+                storeFile = rootProject.file(keystoreValue("storeFile"))
+                storePassword = keystoreValue("storePassword")
+                keyAlias = keystoreValue("keyAlias")
+                keyPassword = keystoreValue("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -103,6 +103,8 @@ extension Settings {
                 "SWIFT_VERSION": "5.9",
                 "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
                 "ENABLE_PREVIEWS": "YES",
+                "MARKETING_VERSION": "1.0.0",
+                "CURRENT_PROJECT_VERSION": "1",
                 "DEVELOPMENT_TEAM": "6Y9C574C9M",
                 "CODE_SIGN_STYLE": "Automatic"
             ],

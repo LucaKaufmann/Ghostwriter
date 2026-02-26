@@ -13,7 +13,7 @@ import Security
 public final class KeychainService: Sendable {
     private let serviceName: String
 
-    public init(serviceName: String = "com.epilogue.app") {
+    public init(serviceName: String = "com.codable.epilogue") {
         self.serviceName = serviceName
     }
 

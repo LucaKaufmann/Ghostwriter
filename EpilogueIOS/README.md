@@ -177,7 +177,7 @@ tuist build --configuration Release
 - Unique constraints on Feed.url and Digest.id
 
 ### Background Tasks
-- Task ID: `com.epilogue.app.digestgeneration`
+- Task ID: `com.codable.epilogue.digestgeneration`
 - Requires network connectivity
 - No external power requirement
 - Registered in Info.plist
