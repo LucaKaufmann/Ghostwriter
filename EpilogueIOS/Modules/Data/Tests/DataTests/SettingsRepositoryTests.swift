@@ -52,12 +52,15 @@ struct SettingsRepositoryTests {
         }
     }
 
-    @Test("Get and set schedule enabled")
+    @Test("Schedule is enabled when periods exist, disabled when empty")
     func testScheduleEnabled() async throws {
+        // isScheduleEnabled() now checks getEnabledPeriods(), not the legacy bool key
+        // Default periods are non-empty, so schedule starts enabled
         let enabled = try await repository.isScheduleEnabled()
-        #expect(enabled == true) // Default value
+        #expect(enabled == true)
 
-        try await repository.setScheduleEnabled(false)
+        // Clearing all periods disables the schedule
+        try await repository.setEnabledPeriods([])
         let updated = try await repository.isScheduleEnabled()
         #expect(updated == false)
     }
