@@ -27,6 +27,8 @@ struct EpilogueApp: App {
     @State private var localDigestScheduler: LocalDigestScheduler?
     @State private var backgroundTaskManager: GhostwriterBackgroundTaskManager?
 
+    @Environment(\.scenePhase) private var scenePhase
+
     init() {
         let persistence = PersistenceController.shared
         let context = persistence.container.mainContext
@@ -56,19 +58,21 @@ struct EpilogueApp: App {
         )
         _localDigestService = StateObject(wrappedValue: localDigest)
 
-        // Register background tasks
+        // Register background tasks (must happen before scene setup)
         let taskManager = GhostwriterBackgroundTaskManager(coordinator: coordinator)
         taskManager.registerBackgroundTasks()
         _backgroundTaskManager = State(initialValue: taskManager)
 
-        // Register local digest scheduler
         let scheduler = LocalDigestScheduler(
             feedRepository: feeds,
             digestRepository: digests,
             settingsRepository: settings
         )
-        scheduler.registerBackgroundTask()
+        scheduler.registerBackgroundTasks()
         _localDigestScheduler = State(initialValue: scheduler)
+
+        // Register notification categories
+        LocalDigestScheduler.registerNotificationCategories()
     }
 
     var body: some Scene {
@@ -83,16 +87,34 @@ struct EpilogueApp: App {
                 .task {
                     // Perform initial sync on app launch
                     await ghostwriterCoordinator.performFullSync()
+
+                    // PRIMARY: Catch-up — generate missed digest if needed
+                    await localDigestScheduler?.checkForMissedDigests()
+
+                    // Set up standing daily reminder notification
+                    await localDigestScheduler?.scheduleDigestReminderNotification()
+
+                    // Clean up delivered notifications
+                    LocalDigestScheduler.cleanUpDeliveredNotifications()
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .background {
+                        scheduleAllBackgroundWork()
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-                    // Schedule background tasks when app goes to background
-                    backgroundTaskManager?.scheduleBackgroundTasks()
-                    Task {
-                        await localDigestScheduler?.scheduleNextDigest()
-                    }
+                    scheduleAllBackgroundWork()
                 }
         }
         .modelContainer(persistenceController.container)
+    }
+
+    private func scheduleAllBackgroundWork() {
+        backgroundTaskManager?.scheduleBackgroundTasks()
+        localDigestScheduler?.scheduleFeedRefresh()
+        Task {
+            await localDigestScheduler?.scheduleOvernightDigest()
+        }
     }
 }
 
