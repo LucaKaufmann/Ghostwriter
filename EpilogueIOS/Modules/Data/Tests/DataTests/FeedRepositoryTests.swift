@@ -12,6 +12,7 @@ import SwiftData
 @testable import Domain
 
 @Suite("FeedRepository Tests")
+@MainActor
 struct FeedRepositoryTests {
     let container: ModelContainer
     let context: ModelContext
