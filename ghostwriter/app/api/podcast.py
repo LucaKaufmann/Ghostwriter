@@ -25,6 +25,12 @@ from app.models.article_feedback import ArticleFeedbackRead, ArticleFeedbackUpse
 from app.models.digest import DigestArticle
 from app.models.podcast_episode import PodcastEpisode, PodcastEpisodeArticleRead
 from app.models.podcast_preferences import PodcastPreferencesRead, PodcastPreferencesUpdate
+from app.models.podcast_schedule import (
+    PodcastSchedule,
+    PodcastScheduleCreate,
+    PodcastScheduleRead,
+    PodcastScheduleUpdate,
+)
 from app.services.podcast_service import podcast_service
 
 router = APIRouter()
@@ -900,4 +906,227 @@ async def upload_podcast_feed_artwork(
         artwork_path=str(artwork_path),
         width=width,
         height=height,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Podcast Schedules CRUD
+# ---------------------------------------------------------------------------
+
+
+def _schedule_to_read(sched: PodcastSchedule, next_run_at: datetime | None = None) -> PodcastScheduleRead:
+    return PodcastScheduleRead(
+        id=sched.id,
+        name=sched.name,
+        days=sched.days or [],
+        time=sched.time,
+        timezone=sched.timezone,
+        enabled=sched.enabled,
+        last_run_at=sched.last_run_at,
+        last_episode_id=sched.last_episode_id,
+        next_run_at=next_run_at,
+        created_at=sched.created_at,
+        updated_at=sched.updated_at,
+    )
+
+
+@router.get(
+    "/podcast/schedules",
+    response_model=list[PodcastScheduleRead],
+    dependencies=[Depends(verify_api_key)],
+)
+async def list_podcast_schedules(session: Session = Depends(get_session)):
+    """List all podcast schedules."""
+    from app.worker.scheduler import get_podcast_schedule_next_run
+
+    schedules = session.exec(
+        select(PodcastSchedule).order_by(PodcastSchedule.created_at.asc())
+    ).all()
+    return [
+        _schedule_to_read(s, get_podcast_schedule_next_run(s.id))
+        for s in schedules
+    ]
+
+
+@router.post(
+    "/podcast/schedules",
+    response_model=PodcastScheduleRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_api_key)],
+)
+async def create_podcast_schedule(
+    payload: PodcastScheduleCreate,
+    session: Session = Depends(get_session),
+):
+    """Create a new podcast schedule."""
+    from app.worker.scheduler import get_podcast_schedule_next_run, update_podcast_schedule
+
+    if not payload.days:
+        raise HTTPException(status_code=400, detail="At least one day must be specified")
+
+    # Validate time format
+    parts = payload.time.strip().split(":")
+    if len(parts) != 2:
+        raise HTTPException(status_code=400, detail="time must be in HH:MM format")
+    try:
+        h, m = int(parts[0]), int(parts[1])
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=400, detail="time must be in HH:MM format")
+
+    user_id = podcast_service.resolve_user_id(session)
+    now = datetime.utcnow()
+
+    # Resolve timezone: use payload, fall back to client config
+    tz = payload.timezone
+    if not tz:
+        from app.models.client_config import ClientConfig
+        config = session.exec(select(ClientConfig)).first()
+        tz = config.timezone if config and config.timezone else "UTC"
+
+    sched = PodcastSchedule(
+        user_id=user_id,
+        name=payload.name,
+        days=[d for d in payload.days],
+        time=payload.time,
+        timezone=tz,
+        enabled=payload.enabled,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(sched)
+    session.commit()
+    session.refresh(sched)
+
+    update_podcast_schedule()
+
+    return _schedule_to_read(sched, get_podcast_schedule_next_run(sched.id))
+
+
+@router.get(
+    "/podcast/schedules/{schedule_id}",
+    response_model=PodcastScheduleRead,
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_podcast_schedule(
+    schedule_id: UUID,
+    session: Session = Depends(get_session),
+):
+    """Get a single podcast schedule."""
+    from app.worker.scheduler import get_podcast_schedule_next_run
+
+    sched = session.get(PodcastSchedule, schedule_id)
+    if sched is None:
+        raise HTTPException(status_code=404, detail="Podcast schedule not found")
+    return _schedule_to_read(sched, get_podcast_schedule_next_run(sched.id))
+
+
+@router.put(
+    "/podcast/schedules/{schedule_id}",
+    response_model=PodcastScheduleRead,
+    dependencies=[Depends(verify_api_key)],
+)
+async def update_podcast_schedule_endpoint(
+    schedule_id: UUID,
+    payload: PodcastScheduleUpdate,
+    session: Session = Depends(get_session),
+):
+    """Update a podcast schedule."""
+    from app.worker.scheduler import get_podcast_schedule_next_run, update_podcast_schedule
+
+    sched = session.get(PodcastSchedule, schedule_id)
+    if sched is None:
+        raise HTTPException(status_code=404, detail="Podcast schedule not found")
+
+    if payload.name is not None:
+        sched.name = payload.name
+    if payload.days is not None:
+        if not payload.days:
+            raise HTTPException(status_code=400, detail="At least one day must be specified")
+        sched.days = [d for d in payload.days]
+    if payload.time is not None:
+        parts = payload.time.strip().split(":")
+        if len(parts) != 2:
+            raise HTTPException(status_code=400, detail="time must be in HH:MM format")
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError
+        except ValueError:
+            raise HTTPException(status_code=400, detail="time must be in HH:MM format")
+        sched.time = payload.time
+    if payload.timezone is not None:
+        sched.timezone = payload.timezone
+    if payload.enabled is not None:
+        sched.enabled = payload.enabled
+
+    sched.updated_at = datetime.utcnow()
+    session.add(sched)
+    session.commit()
+    session.refresh(sched)
+
+    update_podcast_schedule()
+
+    return _schedule_to_read(sched, get_podcast_schedule_next_run(sched.id))
+
+
+@router.delete(
+    "/podcast/schedules/{schedule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_api_key)],
+)
+async def delete_podcast_schedule(
+    schedule_id: UUID,
+    session: Session = Depends(get_session),
+):
+    """Delete a podcast schedule."""
+    from app.worker.scheduler import update_podcast_schedule
+
+    sched = session.get(PodcastSchedule, schedule_id)
+    if sched is None:
+        raise HTTPException(status_code=404, detail="Podcast schedule not found")
+
+    session.delete(sched)
+    session.commit()
+
+    update_podcast_schedule()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/podcast/schedules/{schedule_id}/trigger",
+    response_model=PodcastTriggerResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def trigger_podcast_schedule(
+    schedule_id: UUID,
+    session: Session = Depends(get_session),
+):
+    """Manually trigger podcast generation for a specific schedule."""
+    sched = session.get(PodcastSchedule, schedule_id)
+    if sched is None:
+        raise HTTPException(status_code=404, detail="Podcast schedule not found")
+
+    try:
+        episode_id = podcast_service.generate_episode_for_schedule(schedule_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+
+    if episode_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No eligible digests found since last podcast generation",
+        )
+
+    episode = session.get(PodcastEpisode, episode_id)
+    if episode is None:
+        raise HTTPException(status_code=500, detail="Episode created but not found")
+
+    return PodcastTriggerResponse(
+        episode_id=episode.id,
+        digest_ids=episode.digest_ids or [],
+        status=episode.status,
+        message=f"Podcast generation queued for schedule '{sched.name}'",
     )

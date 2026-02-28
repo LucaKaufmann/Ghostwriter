@@ -12,6 +12,7 @@ from app.models.media_processing_run import MediaProcessingRun
 from app.models.manual_cover import ManualCover
 from app.models.podcast_episode import PodcastEpisode
 from app.models.podcast_preferences import PodcastPreferences
+from app.models.podcast_schedule import PodcastSchedule
 from app.models.schedule import Schedule
 from app.models.seen_article import SeenArticle
 from app.models.user import User
@@ -30,6 +31,7 @@ __all__ = [
     "ManualCover",
     "PodcastEpisode",
     "PodcastPreferences",
+    "PodcastSchedule",
     "Schedule",
     "SeenArticle",
     "User",

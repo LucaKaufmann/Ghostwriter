@@ -634,6 +634,47 @@ export interface PodcastEpisodeDetailResponse extends PodcastEpisodeStatusRespon
 	articles: PodcastEpisodeArticle[];
 }
 
+// ============ Podcast Schedules ============
+
+export type PodcastScheduleDay =
+	| 'monday'
+	| 'tuesday'
+	| 'wednesday'
+	| 'thursday'
+	| 'friday'
+	| 'saturday'
+	| 'sunday';
+
+export interface PodcastScheduleResponse {
+	id: string;
+	name: string;
+	days: PodcastScheduleDay[];
+	time: string;
+	timezone: string;
+	enabled: boolean;
+	last_run_at: string | null;
+	last_episode_id: string | null;
+	next_run_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface PodcastScheduleCreate {
+	name: string;
+	days: PodcastScheduleDay[];
+	time: string;
+	timezone?: string;
+	enabled?: boolean;
+}
+
+export interface PodcastScheduleUpdate {
+	name?: string;
+	days?: PodcastScheduleDay[];
+	time?: string;
+	timezone?: string;
+	enabled?: boolean;
+}
+
 // ============ API Error ============
 
 export interface APIError {
