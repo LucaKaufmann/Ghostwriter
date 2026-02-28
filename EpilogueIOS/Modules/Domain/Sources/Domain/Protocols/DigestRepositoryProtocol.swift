@@ -37,6 +37,9 @@ public protocol DigestRepositoryProtocol: Sendable {
     /// Gets the count of stored digests
     func getDigestCount() async throws -> Int
 
+    /// Returns true if a completed digest exists since the given date
+    func hasDigestSince(_ date: Date) async throws -> Bool
+
     /// Deletes digests older than the specified count limit
     /// Used to enforce the 30-digest retention policy
     func enforceRetentionPolicy(maxDigests: Int) async throws

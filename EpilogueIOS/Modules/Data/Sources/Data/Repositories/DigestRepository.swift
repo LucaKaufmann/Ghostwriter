@@ -86,6 +86,15 @@ public final class DigestRepository: DigestRepositoryProtocol {
         return try modelContext.fetchCount(descriptor)
     }
 
+    public func hasDigestSince(_ date: Date) async throws -> Bool {
+        let descriptor = FetchDescriptor<Digest>(
+            predicate: #Predicate { digest in
+                digest.generatedAt >= date && digest.isComplete == true
+            }
+        )
+        return try modelContext.fetchCount(descriptor) > 0
+    }
+
     public func enforceRetentionPolicy(maxDigests: Int) async throws {
         let count = try await getDigestCount()
 

@@ -24,11 +24,13 @@ let project = Project(
                     "UIUserInterfaceStyle": "Light",
                     "BGTaskSchedulerPermittedIdentifiers": [
                         "com.epilogue.app.digestgeneration",
+                        "com.epilogue.app.feedRefresh",
                         "com.epilogue.app.feedSync",
                         "com.epilogue.app.digestSync"
                     ],
                     "UIBackgroundModes": [
-                        "processing"
+                        "processing",
+                        "fetch"
                     ]
                 ]
             ),

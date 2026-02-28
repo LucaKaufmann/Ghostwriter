@@ -13,6 +13,7 @@ import Foundation
 @testable import Domain
 
 @Suite("DigestRepository Tests")
+@MainActor
 struct DigestRepositoryTests {
     let container: ModelContainer
     let context: ModelContext
