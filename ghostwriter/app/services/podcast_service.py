@@ -831,6 +831,74 @@ class PodcastDigestService:
             )
             return episode.id
 
+    def generate_episode_for_schedule(self, schedule_id: UUID) -> UUID | None:
+        """Generate a podcast episode for a specific podcast schedule.
+
+        Finds completed digests created after the schedule's last_run_at
+        (or all time if never run). Returns the episode ID if queued, or
+        None if no eligible digests exist.
+        """
+        from app.models.podcast_schedule import PodcastSchedule
+
+        with Session(engine) as session:
+            schedule = session.get(PodcastSchedule, schedule_id)
+            if schedule is None:
+                logger.warning(
+                    "Podcast schedule not found: %s", schedule_id,
+                )
+                return None
+
+            if not schedule.enabled:
+                logger.debug(
+                    "Podcast schedule %s is disabled, skipping", schedule_id,
+                )
+                return None
+
+            # Find digests completed after the schedule's last run
+            stmt = select(Digest).where(Digest.status == "completed")
+            if schedule.last_run_at is not None:
+                stmt = stmt.where(Digest.created_at > schedule.last_run_at)
+            stmt = stmt.order_by(Digest.created_at.asc())
+
+            digests = session.exec(stmt).all()
+
+            if not digests:
+                logger.info(
+                    "Podcast schedule %s: no new digests since last run",
+                    schedule.name or str(schedule_id),
+                    extra={"schedule_id": str(schedule_id), "last_run_at": str(schedule.last_run_at)},
+                )
+                return None
+
+            digest_ids = [d.id for d in digests]
+            logger.info(
+                "Podcast schedule '%s' generating episode from %d digest(s)",
+                schedule.name or str(schedule_id),
+                len(digest_ids),
+                extra={
+                    "schedule_id": str(schedule_id),
+                    "digest_count": len(digest_ids),
+                    "digest_ids": [str(d) for d in digest_ids],
+                },
+            )
+
+            user_id = schedule.user_id or self._resolve_user_id(session)
+            episode = self.queue_multi_digest_episode(
+                session,
+                digest_ids,
+                user_id=user_id,
+            )
+
+            # Update the schedule's last run tracking
+            now = datetime.utcnow()
+            schedule.last_run_at = now
+            schedule.last_episode_id = episode.id
+            schedule.updated_at = now
+            session.add(schedule)
+            session.commit()
+
+            return episode.id
+
     def _resolve_timezone(self, session: Session) -> ZoneInfo:
         """Resolve schedule timezone from client config or global settings."""
         config = session.exec(select(ClientConfig)).first()
