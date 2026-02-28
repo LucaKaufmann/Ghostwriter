@@ -55,7 +55,10 @@ import type {
 	PodcastTriggerResponse,
 	PodcastEpisodeStatusResponse,
 	PodcastEpisodeDetailResponse,
-	DigestPodcastStatusResponse
+	DigestPodcastStatusResponse,
+	PodcastScheduleResponse,
+	PodcastScheduleCreate,
+	PodcastScheduleUpdate
 } from './types';
 
 // Base URL - in production, served from same origin; in dev, proxied via vite
@@ -653,6 +656,41 @@ class ApiClient {
 
 	async generateScheduledEpisode(): Promise<PodcastTriggerResponse> {
 		return this.request<PodcastTriggerResponse>('/podcast/episodes/generate', {
+			method: 'POST'
+		});
+	}
+
+	// ============ Podcast Schedules ============
+
+	async getPodcastSchedules(): Promise<PodcastScheduleResponse[]> {
+		return this.request<PodcastScheduleResponse[]>('/podcast/schedules');
+	}
+
+	async createPodcastSchedule(data: PodcastScheduleCreate): Promise<PodcastScheduleResponse> {
+		return this.request<PodcastScheduleResponse>('/podcast/schedules', {
+			method: 'POST',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async updatePodcastSchedule(
+		id: string,
+		data: PodcastScheduleUpdate
+	): Promise<PodcastScheduleResponse> {
+		return this.request<PodcastScheduleResponse>(`/podcast/schedules/${id}`, {
+			method: 'PUT',
+			body: JSON.stringify(data)
+		});
+	}
+
+	async deletePodcastSchedule(id: string): Promise<void> {
+		await this.request<void>(`/podcast/schedules/${id}`, {
+			method: 'DELETE'
+		});
+	}
+
+	async triggerPodcastSchedule(id: string): Promise<PodcastTriggerResponse> {
+		return this.request<PodcastTriggerResponse>(`/podcast/schedules/${id}/trigger`, {
 			method: 'POST'
 		});
 	}

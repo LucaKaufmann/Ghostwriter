@@ -19,6 +19,7 @@ from app.models.api_token import APIToken
 from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
+from app.models.podcast_schedule import PodcastSchedule
 from app.models.user import User
 from app.services.podcast_service import (
     AudioGenerationResult,
@@ -760,3 +761,182 @@ async def test_elevenlabs_non_v3_synthesis_includes_context(monkeypatch):
     assert payload["apply_text_normalization"] == "auto"
     assert payload["previous_text"] == "Previous context line"
     assert payload["next_text"] == "Next context line"
+
+
+# ======================== Podcast Schedules CRUD ========================
+
+
+def test_podcast_schedules_crud(client, auth_headers):
+    """Full lifecycle: create, list, get, update, delete a podcast schedule."""
+    # List: initially empty
+    list_resp = client.get("/api/podcast/schedules", headers=auth_headers)
+    assert list_resp.status_code == 200
+    assert list_resp.json() == []
+
+    # Create
+    create_resp = client.post(
+        "/api/podcast/schedules",
+        json={
+            "name": "Morning Tech",
+            "days": ["monday", "wednesday", "friday"],
+            "time": "07:30",
+        },
+        headers=auth_headers,
+    )
+    assert create_resp.status_code == 201
+    created = create_resp.json()
+    assert created["name"] == "Morning Tech"
+    assert set(created["days"]) == {"monday", "wednesday", "friday"}
+    assert created["time"] == "07:30"
+    assert created["enabled"] is True
+    schedule_id = created["id"]
+
+    # Get
+    get_resp = client.get(f"/api/podcast/schedules/{schedule_id}", headers=auth_headers)
+    assert get_resp.status_code == 200
+    assert get_resp.json()["name"] == "Morning Tech"
+
+    # List: now has one
+    list_resp = client.get("/api/podcast/schedules", headers=auth_headers)
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()) == 1
+
+    # Update
+    update_resp = client.put(
+        f"/api/podcast/schedules/{schedule_id}",
+        json={"name": "Morning Briefing", "days": ["monday", "tuesday"], "time": "08:00"},
+        headers=auth_headers,
+    )
+    assert update_resp.status_code == 200
+    updated = update_resp.json()
+    assert updated["name"] == "Morning Briefing"
+    assert set(updated["days"]) == {"monday", "tuesday"}
+    assert updated["time"] == "08:00"
+
+    # Delete
+    delete_resp = client.delete(f"/api/podcast/schedules/{schedule_id}", headers=auth_headers)
+    assert delete_resp.status_code == 204
+
+    # Verify deleted
+    get_resp = client.get(f"/api/podcast/schedules/{schedule_id}", headers=auth_headers)
+    assert get_resp.status_code == 404
+
+
+def test_podcast_schedule_validation(client, auth_headers):
+    """Validate schedule creation constraints."""
+    # No days
+    resp = client.post(
+        "/api/podcast/schedules",
+        json={"name": "Bad", "days": [], "time": "08:00"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
+
+    # Invalid time format
+    resp = client.post(
+        "/api/podcast/schedules",
+        json={"name": "Bad", "days": ["monday"], "time": "99:99"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
+
+
+def test_podcast_schedule_toggle_enabled(client, auth_headers):
+    """Toggle a schedule's enabled state."""
+    create = client.post(
+        "/api/podcast/schedules",
+        json={"name": "Toggle Test", "days": ["saturday"], "time": "10:00"},
+        headers=auth_headers,
+    )
+    schedule_id = create.json()["id"]
+
+    # Disable
+    resp = client.put(
+        f"/api/podcast/schedules/{schedule_id}",
+        json={"enabled": False},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+
+    # Re-enable
+    resp = client.put(
+        f"/api/podcast/schedules/{schedule_id}",
+        json={"enabled": True},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is True
+
+
+def test_podcast_schedule_trigger(client, monkeypatch, auth_headers):
+    """Trigger podcast generation for a specific schedule."""
+    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    digest_id, _ = _create_digest_with_articles(article_count=2)
+
+    create = client.post(
+        "/api/podcast/schedules",
+        json={"name": "Trigger Test", "days": ["monday"], "time": "09:00"},
+        headers=auth_headers,
+    )
+    schedule_id = create.json()["id"]
+
+    trigger = client.post(
+        f"/api/podcast/schedules/{schedule_id}/trigger",
+        headers=auth_headers,
+    )
+    assert trigger.status_code == 200
+    payload = trigger.json()
+    assert payload["status"] == "pending"
+    assert str(digest_id) in payload["digest_ids"]
+
+    # Verify schedule tracking was updated
+    with Session(engine) as session:
+        sched = session.get(PodcastSchedule, UUID(schedule_id))
+        assert sched is not None
+        assert sched.last_run_at is not None
+        assert sched.last_episode_id is not None
+
+
+def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
+    """Verify that only digests created after last_run_at are included."""
+    from datetime import timedelta
+
+    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+
+    # Create an older digest
+    old_time = datetime.utcnow() - timedelta(hours=2)
+    _create_digest_with_articles(article_count=1, completed_at=old_time)
+
+    # Create a schedule with last_run_at after the old digest
+    last_run = datetime.utcnow() - timedelta(hours=1)
+    with Session(engine) as session:
+        sched = PodcastSchedule(
+            name="Filter Test",
+            days=["monday"],
+            time="08:00",
+            enabled=True,
+            last_run_at=last_run,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(sched)
+        session.commit()
+        session.refresh(sched)
+        schedule_id = sched.id
+
+    # No new digests since last_run_at -> should return None
+    result = podcast_service.generate_episode_for_schedule(schedule_id)
+    assert result is None
+
+    # Create a new digest after last_run_at
+    new_digest_id, _ = _create_digest_with_articles(article_count=2)
+
+    # Now it should find the new digest and generate
+    result = podcast_service.generate_episode_for_schedule(schedule_id)
+    assert result is not None
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, result)
+        assert episode is not None
+        assert str(new_digest_id) in episode.digest_ids
