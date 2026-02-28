@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest, type PodcastPreferencesUpdate } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest, type PodcastPreferencesUpdate, type PodcastScheduleResponse, type PodcastScheduleCreate, type PodcastScheduleDay } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -36,7 +36,9 @@
 		TestTube2,
 		Search,
 		Rss,
-		Upload
+		Upload,
+		Calendar,
+		Pencil
 	} from 'lucide-svelte';
 
 	const queryClient = useQueryClient();
@@ -80,6 +82,11 @@
 	const podcastPreferencesQuery = createQuery(() => ({
 		queryKey: ['podcast-preferences'],
 		queryFn: () => api.getPodcastPreferences()
+	}));
+
+	const podcastSchedulesQuery = createQuery(() => ({
+		queryKey: ['podcast-schedules'],
+		queryFn: () => api.getPodcastSchedules()
 	}));
 
 	// Mutations
@@ -337,6 +344,45 @@
 		}
 	}));
 
+	const createPodcastScheduleMutation = createMutation(() => ({
+		mutationFn: (data: PodcastScheduleCreate) => api.createPodcastSchedule(data),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['podcast-schedules'] });
+			showAddPodcastSchedule = false;
+			newPodcastScheduleName = '';
+			newPodcastScheduleDays = [];
+			newPodcastScheduleTime = '08:00';
+			toast.success('Podcast schedule created');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to create podcast schedule', { description: err.message });
+		}
+	}));
+
+	const updatePodcastScheduleMutation = createMutation(() => ({
+		mutationFn: ({ id, data }: { id: string; data: { name?: string; days?: PodcastScheduleDay[]; time?: string; enabled?: boolean } }) =>
+			api.updatePodcastSchedule(id, data),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['podcast-schedules'] });
+			editingPodcastScheduleId = null;
+			toast.success('Podcast schedule updated');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to update podcast schedule', { description: err.message });
+		}
+	}));
+
+	const deletePodcastScheduleMutation = createMutation(() => ({
+		mutationFn: (id: string) => api.deletePodcastSchedule(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['podcast-schedules'] });
+			toast.success('Podcast schedule deleted');
+		},
+		onError: (err: Error) => {
+			toast.error('Failed to delete podcast schedule', { description: err.message });
+		}
+	}));
+
 	// Preview state
 	let wallabagPreview = $state<PreviewResponse | null>(null);
 	let newsletterPreview = $state<PreviewResponse | null>(null);
@@ -435,6 +481,21 @@
 	let podcastFeedBaseUrl = $state('');
 	let podcastPreferencesInitialized = $state(false);
 	let copiedPodcastFeedUrl = $state(false);
+
+	// Podcast schedule form state
+	let showAddPodcastSchedule = $state(false);
+	let newPodcastScheduleName = $state('');
+	let newPodcastScheduleDays = $state<PodcastScheduleDay[]>([]);
+	let newPodcastScheduleTime = $state('08:00');
+	let editingPodcastScheduleId = $state<string | null>(null);
+	let editPodcastScheduleName = $state('');
+	let editPodcastScheduleDays = $state<PodcastScheduleDay[]>([]);
+	let editPodcastScheduleTime = $state('');
+	const ALL_DAYS: PodcastScheduleDay[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+	const DAY_LABELS: Record<PodcastScheduleDay, string> = {
+		monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu',
+		friday: 'Fri', saturday: 'Sat', sunday: 'Sun'
+	};
 	const OPENAI_VOICE_OPTIONS = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
 	const ELEVENLABS_VOICE_PRESETS = [
 		{ label: 'Chris', id: 'iP95p4xoKVk53GoZ742B' },
@@ -602,9 +663,6 @@
 		if (!data) return false;
 		return (
 			podcastGenerationEnabled !== data.enabled ||
-			podcastSchedule !== data.schedule ||
-			podcastScheduleTime !== data.schedule_time ||
-			podcastScheduleDay !== data.schedule_day ||
 			podcastStyle !== data.style ||
 			podcastTTSProvider !== data.tts_provider ||
 			podcastOpenAITTSModel.trim() !== data.openai_tts_model ||
@@ -628,9 +686,6 @@
 		podcastScriptTimeoutSeconds = clampedTimeout;
 		const update: PodcastPreferencesUpdate = {
 			enabled: podcastGenerationEnabled,
-			schedule: podcastSchedule,
-			schedule_time: podcastScheduleTime,
-			schedule_day: podcastScheduleDay,
 			style: podcastStyle,
 			script_model: podcastScriptModel.trim(),
 			script_timeout_seconds: clampedTimeout,
@@ -676,6 +731,50 @@
 		const currentA = podcastHostAVoice;
 		podcastHostAVoice = podcastHostBVoice;
 		podcastHostBVoice = currentA;
+	}
+
+	function toggleNewScheduleDay(day: PodcastScheduleDay) {
+		if (newPodcastScheduleDays.includes(day)) {
+			newPodcastScheduleDays = newPodcastScheduleDays.filter((d) => d !== day);
+		} else {
+			newPodcastScheduleDays = [...newPodcastScheduleDays, day];
+		}
+	}
+
+	function toggleEditScheduleDay(day: PodcastScheduleDay) {
+		if (editPodcastScheduleDays.includes(day)) {
+			editPodcastScheduleDays = editPodcastScheduleDays.filter((d) => d !== day);
+		} else {
+			editPodcastScheduleDays = [...editPodcastScheduleDays, day];
+		}
+	}
+
+	function startEditingSchedule(sched: PodcastScheduleResponse) {
+		editingPodcastScheduleId = sched.id;
+		editPodcastScheduleName = sched.name;
+		editPodcastScheduleDays = [...sched.days] as PodcastScheduleDay[];
+		editPodcastScheduleTime = sched.time;
+	}
+
+	function saveEditingSchedule() {
+		if (!editingPodcastScheduleId) return;
+		updatePodcastScheduleMutation.mutate({
+			id: editingPodcastScheduleId,
+			data: {
+				name: editPodcastScheduleName,
+				days: editPodcastScheduleDays,
+				time: editPodcastScheduleTime
+			}
+		});
+	}
+
+	function createNewPodcastSchedule() {
+		if (!newPodcastScheduleName.trim() || newPodcastScheduleDays.length === 0) return;
+		createPodcastScheduleMutation.mutate({
+			name: newPodcastScheduleName.trim(),
+			days: newPodcastScheduleDays,
+			time: newPodcastScheduleTime
+		});
 	}
 
 	function hasPodcastFeedSettingsChanged(): boolean {
@@ -1298,7 +1397,7 @@
 							<div>
 								<p class="text-sm font-medium">Enable podcast generation</p>
 								<p class="text-xs text-muted-foreground">
-									When enabled, podcast episodes will be generated on the configured schedule.
+									When enabled, podcast episodes will be generated on the configured schedules.
 								</p>
 							</div>
 							<Switch
@@ -1308,56 +1407,175 @@
 						</div>
 					</div>
 
-					<div class="grid gap-4 md:grid-cols-2">
-						<div class="space-y-2">
-							<Label for="podcast-schedule">Schedule</Label>
-							<Select.Root
-								type="single"
-								name="podcast-schedule"
-								value={podcastSchedule}
-								onValueChange={(value) =>
-									(podcastSchedule = value as 'daily' | 'weekly' | 'manual')}
-							>
-								<Select.Trigger id="podcast-schedule">
-									<span class="capitalize">{podcastSchedule}</span>
-								</Select.Trigger>
-								<Select.Content>
-									<Select.Item value="manual">Manual only</Select.Item>
-									<Select.Item value="daily">Daily</Select.Item>
-									<Select.Item value="weekly">Weekly</Select.Item>
-								</Select.Content>
-							</Select.Root>
-						</div>
-
-						<div class="space-y-2">
-							<Label for="podcast-schedule-time">Schedule time</Label>
-							<Input id="podcast-schedule-time" type="time" bind:value={podcastScheduleTime} />
-						</div>
-
-						{#if podcastSchedule === 'weekly'}
-							<div class="space-y-2 md:col-span-2">
-								<Label for="podcast-schedule-day">Weekly day</Label>
-								<Select.Root
-									type="single"
-									name="podcast-schedule-day"
-									value={podcastScheduleDay}
-									onValueChange={(value) =>
-										(podcastScheduleDay = value as 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday')}
-								>
-									<Select.Trigger id="podcast-schedule-day">
-										<span class="capitalize">{podcastScheduleDay}</span>
-									</Select.Trigger>
-									<Select.Content>
-										<Select.Item value="monday">Monday</Select.Item>
-										<Select.Item value="tuesday">Tuesday</Select.Item>
-										<Select.Item value="wednesday">Wednesday</Select.Item>
-										<Select.Item value="thursday">Thursday</Select.Item>
-										<Select.Item value="friday">Friday</Select.Item>
-										<Select.Item value="saturday">Saturday</Select.Item>
-										<Select.Item value="sunday">Sunday</Select.Item>
-									</Select.Content>
-								</Select.Root>
+					<!-- Podcast Schedules -->
+					<div class="space-y-3">
+						<div class="flex items-center justify-between">
+							<div>
+								<p class="text-sm font-medium">Schedules</p>
+								<p class="text-xs text-muted-foreground">
+									Create recurring podcast schedules. Each podcast includes articles from digests created since the previous podcast.
+								</p>
 							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => (showAddPodcastSchedule = !showAddPodcastSchedule)}
+							>
+								<Plus class="h-4 w-4 mr-1" />
+								Add
+							</Button>
+						</div>
+
+						{#if showAddPodcastSchedule}
+							<div class="rounded-lg border p-3 space-y-3">
+								<div class="space-y-2">
+									<Label for="new-podcast-schedule-name">Name</Label>
+									<Input
+										id="new-podcast-schedule-name"
+										placeholder="e.g. Morning Briefing"
+										bind:value={newPodcastScheduleName}
+									/>
+								</div>
+								<div class="space-y-2">
+									<Label>Days</Label>
+									<div class="flex flex-wrap gap-1.5">
+										{#each ALL_DAYS as day}
+											<Button
+												variant={newPodcastScheduleDays.includes(day) ? 'default' : 'outline'}
+												size="sm"
+												onclick={() => toggleNewScheduleDay(day)}
+											>
+												{DAY_LABELS[day]}
+											</Button>
+										{/each}
+									</div>
+								</div>
+								<div class="space-y-2">
+									<Label for="new-podcast-schedule-time">Time</Label>
+									<Input
+										id="new-podcast-schedule-time"
+										type="time"
+										bind:value={newPodcastScheduleTime}
+									/>
+								</div>
+								<div class="flex gap-2 justify-end">
+									<Button
+										variant="ghost"
+										size="sm"
+										onclick={() => (showAddPodcastSchedule = false)}
+									>
+										Cancel
+									</Button>
+									<Button
+										size="sm"
+										disabled={!newPodcastScheduleName.trim() || newPodcastScheduleDays.length === 0 || createPodcastScheduleMutation.isPending}
+										onclick={createNewPodcastSchedule}
+									>
+										{#if createPodcastScheduleMutation.isPending}
+											<Loader2 class="h-4 w-4 mr-1 animate-spin" />
+										{/if}
+										Create
+									</Button>
+								</div>
+							</div>
+						{/if}
+
+						{#if podcastSchedulesQuery.isPending}
+							<Skeleton class="h-16 w-full" />
+						{:else if podcastSchedulesQuery.data && podcastSchedulesQuery.data.length > 0}
+							<div class="space-y-2">
+								{#each podcastSchedulesQuery.data as sched (sched.id)}
+									{#if editingPodcastScheduleId === sched.id}
+										<!-- Editing mode -->
+										<div class="rounded-lg border p-3 space-y-3">
+											<div class="space-y-2">
+												<Label>Name</Label>
+												<Input bind:value={editPodcastScheduleName} />
+											</div>
+											<div class="space-y-2">
+												<Label>Days</Label>
+												<div class="flex flex-wrap gap-1.5">
+													{#each ALL_DAYS as day}
+														<Button
+															variant={editPodcastScheduleDays.includes(day) ? 'default' : 'outline'}
+															size="sm"
+															onclick={() => toggleEditScheduleDay(day)}
+														>
+															{DAY_LABELS[day]}
+														</Button>
+													{/each}
+												</div>
+											</div>
+											<div class="space-y-2">
+												<Label>Time</Label>
+												<Input type="time" bind:value={editPodcastScheduleTime} />
+											</div>
+											<div class="flex gap-2 justify-end">
+												<Button
+													variant="ghost"
+													size="sm"
+													onclick={() => (editingPodcastScheduleId = null)}
+												>
+													Cancel
+												</Button>
+												<Button
+													size="sm"
+													disabled={editPodcastScheduleDays.length === 0 || updatePodcastScheduleMutation.isPending}
+													onclick={saveEditingSchedule}
+												>
+													{#if updatePodcastScheduleMutation.isPending}
+														<Loader2 class="h-4 w-4 mr-1 animate-spin" />
+													{/if}
+													Save
+												</Button>
+											</div>
+										</div>
+									{:else}
+										<!-- Display mode -->
+										<div class="rounded-lg border p-3 flex items-center justify-between gap-3">
+											<div class="min-w-0 flex-1">
+												<p class="text-sm font-medium truncate">{sched.name || 'Unnamed schedule'}</p>
+												<div class="flex flex-wrap gap-1 mt-1">
+													{#each sched.days as day}
+														<span class="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium">
+															{DAY_LABELS[day as PodcastScheduleDay] ?? day}
+														</span>
+													{/each}
+													<span class="text-xs text-muted-foreground ml-1 self-center">at {sched.time}</span>
+												</div>
+												{#if sched.next_run_at}
+													<p class="text-xs text-muted-foreground mt-0.5">
+														Next: {formatUTCDate(sched.next_run_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+													</p>
+												{/if}
+											</div>
+											<div class="flex items-center gap-1.5 shrink-0">
+												<Switch
+													checked={sched.enabled}
+													onCheckedChange={(checked) =>
+														updatePodcastScheduleMutation.mutate({ id: sched.id, data: { enabled: checked } })}
+												/>
+												<Button
+													variant="ghost"
+													size="sm"
+													onclick={() => startEditingSchedule(sched)}
+												>
+													<Pencil class="h-4 w-4" />
+												</Button>
+												<Button
+													variant="ghost"
+													size="sm"
+													onclick={() => deletePodcastScheduleMutation.mutate(sched.id)}
+												>
+													<Trash2 class="h-4 w-4 text-destructive" />
+												</Button>
+											</div>
+										</div>
+									{/if}
+								{/each}
+							</div>
+						{:else}
+							<p class="text-xs text-muted-foreground italic">No podcast schedules configured. Podcasts will only be generated manually.</p>
 						{/if}
 					</div>
 

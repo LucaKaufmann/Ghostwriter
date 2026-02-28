@@ -506,8 +506,39 @@ def update_media_processing_interval(hours: int) -> None:
     )
 
 
+_PODCAST_SCHEDULE_JOB_PREFIX = "podcast_schedule_"
+
+_DAY_TO_CRON = {
+    "monday": "mon",
+    "tuesday": "tue",
+    "wednesday": "wed",
+    "thursday": "thu",
+    "friday": "fri",
+    "saturday": "sat",
+    "sunday": "sun",
+}
+
+
 def _setup_podcast_job() -> None:
-    """Set up the independent podcast generation cron job from preferences."""
+    """Set up podcast generation cron jobs from podcast_schedules table.
+
+    Also falls back to the legacy PodcastPreferences single-schedule if no
+    podcast_schedules rows exist yet (backward compatibility).
+    """
+    from app.models.podcast_schedule import PodcastSchedule
+
+    with Session(engine) as session:
+        schedules = session.exec(
+            select(PodcastSchedule).where(PodcastSchedule.enabled == True)  # noqa: E712
+        ).all()
+
+    if schedules:
+        for sched in schedules:
+            _apply_podcast_schedule_entry(sched)
+        logger.info("Podcast scheduler: loaded %d schedule(s)", len(schedules))
+        return
+
+    # Fallback: legacy single schedule from PodcastPreferences
     from app.models.podcast_preferences import PodcastPreferences
 
     with Session(engine) as session:
@@ -519,16 +550,60 @@ def _setup_podcast_job() -> None:
         logger.info("Podcast scheduler: no active schedule configured")
         return
 
-    _apply_podcast_schedule(prefs)
+    _apply_legacy_podcast_schedule(prefs)
 
 
-def _apply_podcast_schedule(prefs: Any) -> None:
-    """Add or replace the podcast_generation APScheduler job from preferences."""
+def _apply_podcast_schedule_entry(sched: Any) -> None:
+    """Add or replace an APScheduler job for one PodcastSchedule row."""
+    from app.services.podcast_service import PodcastDigestService
+
+    hour, minute = PodcastDigestService._parse_schedule_time(sched.time)
+
+    tz_name = sched.timezone or "UTC"
+    try:
+        tz = pytz.timezone(tz_name)
+    except pytz.exceptions.UnknownTimeZoneError:
+        logger.warning("Podcast scheduler: unknown timezone '%s', using UTC", tz_name)
+        tz = pytz.UTC
+
+    days = sched.days or []
+    if not days:
+        logger.warning(
+            "Podcast schedule '%s' has no days configured, skipping",
+            sched.name or str(sched.id),
+        )
+        return
+
+    day_of_week = ",".join(_DAY_TO_CRON.get(d, d[:3]) for d in days)
+    trigger = CronTrigger(day_of_week=day_of_week, hour=hour, minute=minute, timezone=tz)
+
+    job_id = f"{_PODCAST_SCHEDULE_JOB_PREFIX}{sched.id}"
+    schedule_id = sched.id
+
+    scheduler.add_job(
+        _scheduled_podcast_for_schedule,
+        trigger,
+        args=[schedule_id],
+        id=job_id,
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+    logger.info(
+        "Podcast schedule '%s' configured: %s at %02d:%02d (%s)",
+        sched.name or str(sched.id),
+        day_of_week,
+        hour,
+        minute,
+        tz_name,
+    )
+
+
+def _apply_legacy_podcast_schedule(prefs: Any) -> None:
+    """Add or replace the legacy single podcast_generation APScheduler job."""
     from app.services.podcast_service import PodcastDigestService
 
     hour, minute = PodcastDigestService._parse_schedule_time(prefs.schedule_time)
 
-    # Resolve timezone
     with Session(engine) as session:
         config = session.exec(select(ClientConfig)).first()
         tz_name = config.timezone if config and config.timezone else get_settings().timezone
@@ -542,23 +617,20 @@ def _apply_podcast_schedule(prefs: Any) -> None:
     if prefs.schedule == "daily":
         trigger = CronTrigger(hour=hour, minute=minute, timezone=tz)
     elif prefs.schedule == "weekly":
-        day_of_week = {
-            "monday": "mon", "tuesday": "tue", "wednesday": "wed",
-            "thursday": "thu", "friday": "fri", "saturday": "sat", "sunday": "sun",
-        }.get(prefs.schedule_day, "mon")
+        day_of_week = _DAY_TO_CRON.get(prefs.schedule_day, "mon")
         trigger = CronTrigger(day_of_week=day_of_week, hour=hour, minute=minute, timezone=tz)
     else:
         return
 
     scheduler.add_job(
-        _scheduled_podcast,
+        _scheduled_podcast_legacy,
         trigger,
         id="podcast_generation",
         replace_existing=True,
         misfire_grace_time=600,
     )
     logger.info(
-        "Podcast generation scheduled: %s at %02d:%02d (%s)",
+        "Legacy podcast generation scheduled: %s at %02d:%02d (%s)",
         prefs.schedule,
         hour,
         minute,
@@ -566,11 +638,26 @@ def _apply_podcast_schedule(prefs: Any) -> None:
     )
 
 
-async def _scheduled_podcast() -> None:
-    """Execute a scheduled podcast generation."""
+async def _scheduled_podcast_for_schedule(schedule_id: UUID) -> None:
+    """Execute a scheduled podcast generation for a specific PodcastSchedule."""
     from app.services.podcast_service import podcast_service
 
-    logger.info("Running scheduled podcast generation")
+    logger.info("Running podcast generation for schedule %s", schedule_id)
+    try:
+        episode_id = podcast_service.generate_episode_for_schedule(schedule_id)
+        if episode_id:
+            logger.info("Podcast episode queued for schedule %s: %s", schedule_id, episode_id)
+        else:
+            logger.info("Podcast generation skipped for schedule %s (no eligible digests)", schedule_id)
+    except Exception as e:
+        logger.exception("Podcast generation failed for schedule %s: %s", schedule_id, e)
+
+
+async def _scheduled_podcast_legacy() -> None:
+    """Execute a legacy scheduled podcast generation (single-schedule fallback)."""
+    from app.services.podcast_service import podcast_service
+
+    logger.info("Running scheduled podcast generation (legacy)")
     try:
         episode_id = podcast_service.generate_scheduled_episode()
         if episode_id:
@@ -582,30 +669,29 @@ async def _scheduled_podcast() -> None:
 
 
 def update_podcast_schedule() -> None:
-    """Reconfigure the podcast APScheduler job based on current preferences.
+    """Reconfigure podcast APScheduler jobs from podcast_schedules table.
 
-    Call this after updating podcast preferences via the API.
+    Call this after creating, updating, or deleting podcast schedules via the API.
+    Falls back to legacy PodcastPreferences if no podcast_schedules exist.
     """
-    from app.models.podcast_preferences import PodcastPreferences
-
     if not scheduler.running:
         return
 
-    with Session(engine) as session:
-        prefs = session.exec(
-            select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
-        ).first()
+    # Remove all existing podcast schedule jobs
+    for job in scheduler.get_jobs():
+        if job.id.startswith(_PODCAST_SCHEDULE_JOB_PREFIX) or job.id == "podcast_generation":
+            scheduler.remove_job(job.id)
 
-    if prefs is None or not prefs.enabled or prefs.schedule == "manual":
-        # Remove the job if it exists
-        try:
-            scheduler.remove_job("podcast_generation")
-            logger.info("Podcast generation job removed (disabled or manual)")
-        except Exception:
-            pass
-        return
+    _setup_podcast_job()
 
-    _apply_podcast_schedule(prefs)
+
+def get_podcast_schedule_next_run(schedule_id: UUID) -> datetime | None:
+    """Get next run time for a specific podcast schedule."""
+    job_id = f"{_PODCAST_SCHEDULE_JOB_PREFIX}{schedule_id}"
+    job = scheduler.get_job(job_id)
+    if job and job.next_run_time:
+        return job.next_run_time.astimezone(pytz.UTC)
+    return None
 
 
 def shutdown_scheduler() -> None:
