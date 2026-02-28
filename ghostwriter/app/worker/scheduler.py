@@ -525,28 +525,38 @@ def _setup_podcast_job() -> None:
     Also falls back to the legacy PodcastPreferences single-schedule if no
     podcast_schedules rows exist yet (backward compatibility).
     """
+    from app.models.podcast_preferences import PodcastPreferences
     from app.models.podcast_schedule import PodcastSchedule
 
-    with Session(engine) as session:
-        schedules = session.exec(
-            select(PodcastSchedule).where(PodcastSchedule.enabled == True)  # noqa: E712
-        ).all()
-
-    if schedules:
-        for sched in schedules:
-            _apply_podcast_schedule_entry(sched)
-        logger.info("Podcast scheduler: loaded %d schedule(s)", len(schedules))
-        return
-
-    # Fallback: legacy single schedule from PodcastPreferences
-    from app.models.podcast_preferences import PodcastPreferences
-
+    # Check global podcast enabled flag first
     with Session(engine) as session:
         prefs = session.exec(
             select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
         ).first()
 
-    if prefs is None or not prefs.enabled or prefs.schedule == "manual":
+    if prefs is not None and not prefs.enabled:
+        logger.info("Podcast scheduler: globally disabled via preferences")
+        return
+
+    # Check if any podcast_schedules rows exist (enabled or not)
+    with Session(engine) as session:
+        all_schedules = session.exec(select(PodcastSchedule)).all()
+        enabled_schedules = [s for s in all_schedules if s.enabled]
+
+    if all_schedules:
+        # New multi-schedule mode: only configure enabled schedules.
+        # If all schedules are disabled, do NOT fall back to legacy.
+        if enabled_schedules:
+            for sched in enabled_schedules:
+                _apply_podcast_schedule_entry(sched)
+            logger.info("Podcast scheduler: loaded %d schedule(s)", len(enabled_schedules))
+        else:
+            logger.info("Podcast scheduler: all schedules disabled")
+        return
+
+    # Fallback: legacy single schedule from PodcastPreferences
+    # (only when no podcast_schedules rows exist at all)
+    if prefs is None or prefs.schedule == "manual":
         logger.info("Podcast scheduler: no active schedule configured")
         return
 
