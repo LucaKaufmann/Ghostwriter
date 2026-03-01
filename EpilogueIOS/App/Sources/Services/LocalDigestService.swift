@@ -87,7 +87,10 @@ public final class LocalDigestService: ObservableObject {
             generationStatus = "Fetching and processing feeds..."
             logger.info("Starting digest generation pipeline")
 
-            let digest = try await digestGenerator.generateDigest(triggerType: .manual)
+            let digest = try await digestGenerator.generateDigest(
+                triggerType: .manual,
+                period: "manual"
+            )
 
             lastGeneratedDigest = digest
             generationStatus = "Complete! \(digest.articleCount) articles"

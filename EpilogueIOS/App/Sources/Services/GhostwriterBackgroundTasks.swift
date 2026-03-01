@@ -54,6 +54,8 @@ public final class GhostwriterBackgroundTaskManager {
 
     /// Schedule feed sync task
     public func scheduleFeedSync() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: GhostwriterBackgroundTask.feedSync)
+
         let request = BGAppRefreshTaskRequest(identifier: GhostwriterBackgroundTask.feedSync)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // 15 minutes
 
@@ -67,6 +69,8 @@ public final class GhostwriterBackgroundTaskManager {
 
     /// Schedule digest sync task
     public func scheduleDigestSync() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: GhostwriterBackgroundTask.digestSync)
+
         let request = BGAppRefreshTaskRequest(identifier: GhostwriterBackgroundTask.digestSync)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 30 * 60) // 30 minutes
 

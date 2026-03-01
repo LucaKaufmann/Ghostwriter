@@ -39,21 +39,25 @@ public final class DigestGenerator {
         }
     }
 
-    /// Generate a new digest from all enabled feeds
-    public func generateDigest(triggerType: TriggerType) async throws -> Digest {
+    /// Generate a new digest from all enabled feeds.
+    /// - Parameters:
+    ///   - triggerType: How the generation was initiated.
+    ///   - period: Optional digest period label (e.g. MORNING/NOON/EVENING/manual).
+    public func generateDigest(triggerType: TriggerType, period: String? = nil) async throws -> Digest {
         // Create Documents/Epilogue directory if needed
         try createDocumentsDirectory()
 
         // Create digest record
         let date = Date()
-        let epubFileName = generateFileName(for: date)
+        let epubFileName = generateFileName(for: date, period: period)
         let epubFilePath = documentsDirectory.appendingPathComponent(epubFileName).path
 
         let digest = Digest(
             generatedAt: date,
             epubFilePath: epubFilePath,
             triggerType: triggerType,
-            isComplete: false
+            isComplete: false,
+            period: period
         )
 
         // Save initial digest
@@ -163,10 +167,17 @@ public final class DigestGenerator {
         }
     }
 
-    private func generateFileName(for date: Date) -> String {
+    private func generateFileName(for date: Date, period: String?) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         let dateString = formatter.string(from: date)
+
+        if let period {
+            let slug = period.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }
+            if !slug.isEmpty {
+                return "Epilogue_\(dateString)_\(slug).epub"
+            }
+        }
         return "Epilogue_\(dateString).epub"
     }
 }
