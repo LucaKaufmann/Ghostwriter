@@ -227,4 +227,29 @@ class ContentProcessorTest {
         assertNotNull(result)
         assertFalse(result!!.isSummary)
     }
+
+    @Test
+    fun `processDocument keeps valid CJK article content`() {
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head><title>中文文章</title></head>
+            <body>
+                <article>
+                    <h1>中文文章</h1>
+                    <p>这是第一段内容，介绍主题背景并提供上下文信息，让读者可以理解文章要点。</p>
+                    <p>这是第二段内容，包含更多细节、分析和示例，帮助读者深入理解问题。</p>
+                    <p>这是第三段内容，总结关键结论，并给出后续建议与行动方向。</p>
+                </article>
+            </body>
+            </html>
+        """.trimIndent()
+
+        val document = Jsoup.parse(html)
+        val result = processor.processDocument("https://example.com/cjk", document)
+
+        assertNotNull(result)
+        assertEquals("中文文章", result!!.title)
+        assertTrue(result.content.contains("第一段内容"))
+    }
 }

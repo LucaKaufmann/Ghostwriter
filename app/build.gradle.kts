@@ -32,7 +32,7 @@ fun keystoreValue(key: String): String =
 
 val releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
     val normalized = taskName.lowercase()
-    normalized.contains("release") || normalized.contains("bundle") || normalized.contains("publish")
+    normalized.contains("release")
 }
 
 if (releaseTaskRequested && !keystorePropertiesFile.exists()) {
