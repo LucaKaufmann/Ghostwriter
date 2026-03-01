@@ -56,6 +56,90 @@ class DigestRepository @Inject constructor(
         }
 
     /**
+     * Create a digest placeholder while generation is in progress.
+     */
+    suspend fun createPendingDigest(
+        feeds: List<Feed>,
+        triggerType: TriggerType,
+        period: String? = null
+    ): Long {
+        val feedNames = feeds.map { it.name }.distinct()
+        val digestEntity = DigestEntity(
+            generatedAt = System.currentTimeMillis(),
+            epubFilePath = "",
+            articleCount = 0,
+            briefingCount = 0,
+            fidelityCount = 0,
+            triggerType = triggerType,
+            feedNames = feedNames.joinToString(","),
+            period = period ?: if (triggerType == TriggerType.MANUAL) "manual" else null,
+            isComplete = false,
+            errorMessage = null
+        )
+        return digestDao.insertDigest(digestEntity)
+    }
+
+    /**
+     * Finalize an in-progress digest with generated content.
+     */
+    suspend fun completePendingDigest(
+        digestId: Long,
+        articles: List<ProcessedArticle>,
+        feeds: List<Feed>,
+        epubFilePath: String
+    ) {
+        val briefingCount = articles.count { it.isSummary }
+        val fidelityCount = articles.count { !it.isSummary }
+
+        val articleEntities = articles.mapIndexed { index, article ->
+            val feedName = article.feedName.ifBlank {
+                feeds.find { feed ->
+                    val feedDomain = feed.url
+                        .removePrefix("https://")
+                        .removePrefix("http://")
+                        .split("/")
+                        .firstOrNull()
+                        ?: ""
+                    article.originalUrl.contains(feedDomain)
+                }?.name ?: "Unknown"
+            }
+
+            DigestArticleEntity(
+                digestId = digestId,
+                title = article.title,
+                author = article.author,
+                content = article.content,
+                originalUrl = article.originalUrl,
+                isSummary = article.isSummary,
+                feedName = feedName,
+                sortOrder = index
+            )
+        }
+
+        val feedNames = articleEntities.map { it.feedName }.distinct().filter { it != "Unknown" }
+
+        digestDao.completeDigestWithArticles(
+            digestId = digestId,
+            epubFilePath = epubFilePath,
+            articleCount = articles.size,
+            briefingCount = briefingCount,
+            fidelityCount = fidelityCount,
+            feedNames = feedNames.joinToString(","),
+            articles = articleEntities
+        )
+
+        cleanupOldDigests()
+    }
+
+    suspend fun markDigestFailed(digestId: Long, errorMessage: String) {
+        digestDao.markDigestFailed(digestId, errorMessage)
+    }
+
+    suspend fun deleteDigestById(digestId: Long) {
+        digestDao.deleteDigestById(digestId)
+    }
+
+    /**
      * Save a new digest with its articles.
      *
      * @param articles The processed articles to save
@@ -120,7 +204,9 @@ class DigestRepository @Inject constructor(
             fidelityCount = fidelityCount,
             triggerType = triggerType,
             feedNames = feedNames.joinToString(","),
-            period = period ?: if (triggerType == TriggerType.MANUAL) "manual" else null
+            period = period ?: if (triggerType == TriggerType.MANUAL) "manual" else null,
+            isComplete = true,
+            errorMessage = null
         )
 
         val digestId = digestDao.insertDigestWithArticles(digestEntity, articleEntities)
@@ -272,7 +358,9 @@ class DigestRepository @Inject constructor(
             triggerType = triggerType,
             feedNames = feedNames.joinToString(","),
             remoteId = remoteId,
-            period = period
+            period = period,
+            isComplete = true,
+            errorMessage = null
         )
 
         val digestId = if (articles != null && articles.isNotEmpty()) {
