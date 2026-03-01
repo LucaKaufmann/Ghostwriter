@@ -31,6 +31,57 @@ interface DigestDao {
     @Insert
     suspend fun insertArticles(articles: List<DigestArticleEntity>)
 
+    @Query("DELETE FROM digest_articles WHERE digestId = :digestId")
+    suspend fun deleteArticlesForDigest(digestId: Long)
+
+    @Query(
+        """
+        UPDATE digests
+        SET epubFilePath = :epubFilePath,
+            articleCount = :articleCount,
+            briefingCount = :briefingCount,
+            fidelityCount = :fidelityCount,
+            feedNames = :feedNames,
+            isComplete = 1,
+            errorMessage = NULL
+        WHERE id = :id
+        """
+    )
+    suspend fun markDigestCompleted(
+        id: Long,
+        epubFilePath: String,
+        articleCount: Int,
+        briefingCount: Int,
+        fidelityCount: Int,
+        feedNames: String
+    )
+
+    @Transaction
+    suspend fun completeDigestWithArticles(
+        digestId: Long,
+        epubFilePath: String,
+        articleCount: Int,
+        briefingCount: Int,
+        fidelityCount: Int,
+        feedNames: String,
+        articles: List<DigestArticleEntity>
+    ) {
+        markDigestCompleted(
+            id = digestId,
+            epubFilePath = epubFilePath,
+            articleCount = articleCount,
+            briefingCount = briefingCount,
+            fidelityCount = fidelityCount,
+            feedNames = feedNames
+        )
+        deleteArticlesForDigest(digestId)
+        val articlesWithDigestId = articles.map { it.copy(digestId = digestId) }
+        insertArticles(articlesWithDigestId)
+    }
+
+    @Query("UPDATE digests SET isComplete = 0, errorMessage = :errorMessage WHERE id = :id")
+    suspend fun markDigestFailed(id: Long, errorMessage: String)
+
     @Transaction
     suspend fun insertDigestWithArticles(
         digest: DigestEntity,

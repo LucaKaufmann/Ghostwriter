@@ -23,11 +23,38 @@ struct DigestDetailView: View {
     }
 
     var body: some View {
-        EinkReaderView(
-            articles: orderedArticles,
-            epubFilePath: digest.epubFilePath,
-            remoteDigestId: digest.remoteId
-        )
+        Group {
+            if digest.isComplete {
+                EinkReaderView(
+                    articles: orderedArticles,
+                    epubFilePath: digest.epubFilePath,
+                    remoteDigestId: digest.remoteId
+                )
+            } else if let error = digest.errorMessage, !error.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.title2)
+                    Text("Digest generation failed")
+                        .font(.headline)
+                    Text(error)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding()
+            } else {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Digest is being created…")
+                        .font(.headline)
+                    Text("Check back in a moment.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+            }
+        }
         .navigationTitle(dateFormatter.string(from: digest.generatedAt))
         .navigationBarTitleDisplayMode(.inline)
     }
