@@ -39,8 +39,8 @@ actor TaskCompletionGuard {
 // MARK: - LocalDigestScheduler
 
 public final class LocalDigestScheduler: Sendable {
-    public static let digestTaskIdentifier = "com.epilogue.app.digestgeneration"
-    public static let feedRefreshTaskIdentifier = "com.epilogue.app.feedRefresh"
+    public static let digestTaskIdentifier = "com.codable.epilogue.digestgeneration"
+    public static let feedRefreshTaskIdentifier = "com.codable.epilogue.feedRefresh"
 
     private let feedRepository: FeedRepositoryProtocol
     private let digestRepository: DigestRepositoryProtocol

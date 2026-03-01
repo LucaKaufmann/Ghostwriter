@@ -14,6 +14,7 @@ import GhostwriterClient
 
 @main
 struct EpilogueApp: App {
+    private let launchOptions: ScreenshotLaunchOptions
     let persistenceController = PersistenceController.shared
 
     // Repositories
@@ -30,8 +31,13 @@ struct EpilogueApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        let launchOptions = ScreenshotLaunchOptions.current
+        self.launchOptions = launchOptions
+
         let persistence = PersistenceController.shared
         let context = persistence.container.mainContext
+
+        ScreenshotDataSeeder.seedIfNeeded(context: context, options: launchOptions)
 
         // Initialize repositories
         let settings = SettingsRepository()
@@ -58,21 +64,26 @@ struct EpilogueApp: App {
         )
         _localDigestService = StateObject(wrappedValue: localDigest)
 
-        // Register background tasks (must happen before scene setup)
-        let taskManager = GhostwriterBackgroundTaskManager(coordinator: coordinator)
-        taskManager.registerBackgroundTasks()
-        _backgroundTaskManager = State(initialValue: taskManager)
+        if launchOptions.isEnabled {
+            _backgroundTaskManager = State(initialValue: nil)
+            _localDigestScheduler = State(initialValue: nil)
+        } else {
+            // Register background tasks (must happen before scene setup)
+            let taskManager = GhostwriterBackgroundTaskManager(coordinator: coordinator)
+            taskManager.registerBackgroundTasks()
+            _backgroundTaskManager = State(initialValue: taskManager)
 
-        let scheduler = LocalDigestScheduler(
-            feedRepository: feeds,
-            digestRepository: digests,
-            settingsRepository: settings
-        )
-        scheduler.registerBackgroundTasks()
-        _localDigestScheduler = State(initialValue: scheduler)
+            let scheduler = LocalDigestScheduler(
+                feedRepository: feeds,
+                digestRepository: digests,
+                settingsRepository: settings
+            )
+            scheduler.registerBackgroundTasks()
+            _localDigestScheduler = State(initialValue: scheduler)
 
-        // Register notification categories
-        LocalDigestScheduler.registerNotificationCategories()
+            // Register notification categories
+            LocalDigestScheduler.registerNotificationCategories()
+        }
     }
 
     var body: some Scene {
@@ -85,6 +96,8 @@ struct EpilogueApp: App {
                 .environment(\.feedRepository, feedRepository)
                 .environment(\.digestRepository, digestRepository)
                 .task {
+                    guard !launchOptions.isEnabled else { return }
+
                     // Perform initial sync on app launch
                     await ghostwriterCoordinator.performFullSync()
 
@@ -98,11 +111,12 @@ struct EpilogueApp: App {
                     LocalDigestScheduler.cleanUpDeliveredNotifications()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
-                    if newPhase == .background {
+                    if newPhase == .background, !launchOptions.isEnabled {
                         scheduleAllBackgroundWork()
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                    guard !launchOptions.isEnabled else { return }
                     scheduleAllBackgroundWork()
                 }
         }

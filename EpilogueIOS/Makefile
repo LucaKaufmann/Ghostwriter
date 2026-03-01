@@ -2,7 +2,7 @@ JAVA_HOME ?= /Applications/Android Studio.app/Contents/jbr/Contents/Home
 GRADLE := JAVA_HOME="$(JAVA_HOME)" ../gradlew
 XCFRAMEWORK_DIR := ../shared/build/XCFrameworks/debug/EpilogueShared.xcframework
 
-.PHONY: setup generate build clean xcframework
+.PHONY: setup generate build clean xcframework screenshot
 
 ## Default: build XCFramework + generate Xcode project
 setup: xcframework generate
@@ -20,6 +20,10 @@ generate: $(XCFRAMEWORK_DIR)
 ## Build via Tuist CLI (requires XCFramework)
 build: $(XCFRAMEWORK_DIR)
 	tuist build
+
+## Capture App Store screenshots via UI tests across simulators
+screenshot: $(XCFRAMEWORK_DIR) generate
+	./scripts/capture_screenshots.sh
 
 ## Build XCFramework if missing
 $(XCFRAMEWORK_DIR):

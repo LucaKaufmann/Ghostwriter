@@ -1,0 +1,119 @@
+{
+  "feeds": [
+    {
+      "url": "https://www.theverge.com/rss/index.xml",
+      "name": "The Verge",
+      "mode": "BRIEFING",
+      "maxArticles": 12,
+      "isEnabled": true,
+      "lastFetched": 1761986400000,
+      "createdAt": "2026-02-20T07:30:00Z"
+    },
+    {
+      "url": "https://stratechery.com/feed/",
+      "name": "Stratechery",
+      "mode": "FIDELITY",
+      "maxArticles": 6,
+      "isEnabled": true,
+      "lastFetched": 1761986400000,
+      "createdAt": "2026-02-19T07:30:00Z"
+    },
+    {
+      "url": "https://newsletter.notboring.co/feed",
+      "name": "Not Boring",
+      "mode": "BRIEFING",
+      "maxArticles": 8,
+      "isEnabled": true,
+      "lastFetched": 1761986400000,
+      "createdAt": "2026-02-18T07:30:00Z"
+    }
+  ],
+  "digests": [
+    {
+      "generatedAt": "2026-02-28T06:00:00Z",
+      "epubFileName": "Epilogue_2026-02-28_morning.epub",
+      "articleCount": 3,
+      "briefingCount": 2,
+      "deepDiveCount": 1,
+      "triggerType": "SCHEDULED",
+      "fileSizeBytes": 1843240,
+      "remoteId": "digest_2026_02_28_morning",
+      "period": "morning",
+      "articles": [
+        {
+          "title": "Apple Expands On-Device AI Summaries to Newsstand Widgets",
+          "author": "Emma Roth",
+          "content": "<p><strong>What happened:</strong> Apple rolled out expanded on-device summaries for Newsstand widgets in iOS 26. The update focuses on lower-latency personalization and clearer source attribution.</p><p><strong>Why it matters:</strong> Reader apps now compete against a stronger default experience, so curation quality and trust become central differentiators.</p><p><strong>What to watch:</strong> Whether users prefer fully automated digests or hybrid editorial models that still preserve original voice.</p>",
+          "originalUrl": "https://www.theverge.com/ai-newsstand-widgets",
+          "feedUrl": "https://www.theverge.com/rss/index.xml",
+          "feedName": "The Verge",
+          "contentType": "BRIEFING",
+          "publishedAt": "2026-02-27T18:25:00Z",
+          "orderIndex": 0,
+          "wordCount": 182
+        },
+        {
+          "title": "The Quiet Economics Behind Premium RSS Workflows",
+          "author": "Ben Thompson",
+          "content": "<p>Reader economics are shifting from ad inventory to high-intent subscriptions. The defensible product surface is not ingestion, but synthesis quality and retention loops that make daily reading feel indispensable.</p><p>Teams that treat digest generation as a pipeline product with strict reliability metrics are capturing meaningful engagement gains.</p>",
+          "originalUrl": "https://stratechery.com/2026/premium-rss-economics/",
+          "feedUrl": "https://stratechery.com/feed/",
+          "feedName": "Stratechery",
+          "contentType": "DEEP_DIVE",
+          "publishedAt": "2026-02-27T11:10:00Z",
+          "orderIndex": 1,
+          "wordCount": 246
+        },
+        {
+          "title": "Designing Reading Products That Feel Personal, Not Busy",
+          "author": "Packy McCormick",
+          "content": "<p><strong>Thesis:</strong> The next wave of media apps will optimize for calm and confidence instead of infinite refresh.</p><p><strong>Execution:</strong> Smaller article sets, explicit source labeling, and better digest context increase completion rates and user trust.</p>",
+          "originalUrl": "https://newsletter.notboring.co/p/personal-not-busy",
+          "feedUrl": "https://newsletter.notboring.co/feed",
+          "feedName": "Not Boring",
+          "contentType": "BRIEFING",
+          "publishedAt": "2026-02-27T08:40:00Z",
+          "orderIndex": 2,
+          "wordCount": 163
+        }
+      ]
+    },
+    {
+      "generatedAt": "2026-02-27T18:30:00Z",
+      "epubFileName": "Epilogue_2026-02-27_evening.epub",
+      "articleCount": 2,
+      "briefingCount": 1,
+      "deepDiveCount": 1,
+      "triggerType": "GHOSTWRITER",
+      "fileSizeBytes": 1529760,
+      "remoteId": "digest_2026_02_27_evening",
+      "period": "evening",
+      "articles": [
+        {
+          "title": "How Publishers Are Rebuilding Direct Reader Relationships",
+          "author": "Alex Heath",
+          "content": "<p>Major publishers are reinvesting in direct channels and reducing dependence on algorithmic distribution. Bundled memberships and daily briefings are becoming default monetization levers.</p>",
+          "originalUrl": "https://www.theverge.com/direct-reader-relationships",
+          "feedUrl": "https://www.theverge.com/rss/index.xml",
+          "feedName": "The Verge",
+          "contentType": "DEEP_DIVE",
+          "publishedAt": "2026-02-27T15:05:00Z",
+          "orderIndex": 0,
+          "wordCount": 212
+        },
+        {
+          "title": "What a Durable AI Reading Stack Looks Like",
+          "author": "Ben Thompson",
+          "content": "<p><strong>Core principle:</strong> Durable stacks separate retrieval, transformation, and presentation so each layer can evolve independently.</p><p>In practice, this means robust ingestion contracts and explicit fallback behavior when upstream models change.</p>",
+          "originalUrl": "https://stratechery.com/2026/durable-ai-reading-stack/",
+          "feedUrl": "https://stratechery.com/feed/",
+          "feedName": "Stratechery",
+          "contentType": "BRIEFING",
+          "publishedAt": "2026-02-27T13:00:00Z",
+          "orderIndex": 1,
+          "wordCount": 171
+        }
+      ]
+    }
+  ]
+}
