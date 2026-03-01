@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -183,7 +184,7 @@ fun HistoryScreen(
     }
 
     // Delete confirmation dialog
-    uiState.digestToDelete?.let { digest ->
+    uiState.digestToDelete?.let {
         AlertDialog(
             onDismissRequest = { viewModel.dismissDeleteConfirmation() },
             title = { Text("Delete Digest?") },
@@ -228,7 +229,7 @@ fun DigestHistoryItem(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(enabled = digest.isComplete, onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -272,11 +273,27 @@ fun DigestHistoryItem(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Article counts
-                Text(
-                    text = "${digest.articleCount} articles (${digest.briefingCount} briefings, ${digest.fidelityCount} full)",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                if (digest.isProcessing) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.height(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            text = "Creating digest…",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                } else {
+                    // Article counts
+                    Text(
+                        text = "${digest.articleCount} articles (${digest.briefingCount} briefings, ${digest.fidelityCount} full)",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
 
                 // Feed names
                 if (digest.feedNames.isNotEmpty()) {
@@ -301,11 +318,20 @@ fun DigestHistoryItem(
                         color = MaterialTheme.colorScheme.tertiary
                     )
                 }
+
+                if (digest.isFailed) {
+                    Text(
+                        text = digest.errorMessage ?: "Digest generation failed",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 2
+                    )
+                }
             }
 
             // Action buttons
             Row {
-                if (digest.isFromGhostwriter && showPdfDownload) {
+                if (digest.isFromGhostwriter && showPdfDownload && digest.isComplete) {
                     TextButton(
                         onClick = onDownloadPdf,
                         enabled = !isDownloading
@@ -313,14 +339,14 @@ fun DigestHistoryItem(
                         Text(if (isDownloading) "Downloading..." else "PDF")
                     }
                 }
-                if (digest.isFromGhostwriter && !epubExists) {
+                if (digest.isFromGhostwriter && !epubExists && digest.isComplete) {
                     TextButton(
                         onClick = onDownload,
                         enabled = !isDownloading
                     ) {
                         Text(if (isDownloading) "Downloading..." else "Download")
                     }
-                } else {
+                } else if (digest.isComplete) {
                     IconButton(onClick = onOpenExternal) {
                         Icon(
                             imageVector = Icons.Default.OpenInNew,

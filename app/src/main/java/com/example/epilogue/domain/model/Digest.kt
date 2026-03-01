@@ -13,10 +13,15 @@ data class Digest(
     val triggerType: TriggerType,
     val feedNames: List<String>,
     val remoteId: String? = null,  // Ghostwriter digest ID if synced from backend
-    val period: String? = null      // morning, noon, evening, or manual
+    val period: String? = null,     // morning, noon, evening, or manual
+    val isComplete: Boolean = true,
+    val errorMessage: String? = null
 ) {
     /** Returns true if this digest was downloaded from Ghostwriter */
     val isFromGhostwriter: Boolean get() = remoteId != null
+
+    val isProcessing: Boolean get() = !isComplete && errorMessage.isNullOrBlank()
+    val isFailed: Boolean get() = !isComplete && !errorMessage.isNullOrBlank()
 
     /** Returns a display-friendly period name */
     val periodDisplay: String get() = when (period?.lowercase()) {

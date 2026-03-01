@@ -59,6 +59,7 @@ class DailyDigestWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         Log.i(TAG, "Starting daily digest generation (attempt ${runAttemptCount})")
+        var pendingDigestId: Long = -1
 
         // Skip local generation if Ghostwriter is configured
         // This is a safety check in case scheduled work wasn't cancelled properly
@@ -88,12 +89,20 @@ class DailyDigestWorker @AssistedInject constructor(
 
             // Get all feeds for later reference
             val feeds = feedRepository.getEnabledFeedsList()
+            val triggerType = if (isManual) TriggerType.MANUAL else TriggerType.SCHEDULED
+            val periodString = period?.name?.lowercase() ?: if (isManual) "manual" else null
+            pendingDigestId = digestRepository.createPendingDigest(
+                feeds = feeds,
+                triggerType = triggerType,
+                period = periodString
+            )
 
             // Fetch and process articles from all feeds
             val articles = articleRepository.fetchFromAllFeeds(onlyNew = fetchOnlyNew)
 
             if (articles.isEmpty()) {
                 Log.i(TAG, "No articles to process")
+                digestRepository.deleteDigestById(pendingDigestId)
                 return Result.success()
             }
 
@@ -116,42 +125,59 @@ class DailyDigestWorker @AssistedInject constructor(
                     ExportResult.NotConfigured -> { /* No-op */ }
                 }
 
-                // Save to digest history
-                val triggerType = if (isManual) TriggerType.MANUAL else TriggerType.SCHEDULED
-                val periodString = period?.name?.lowercase() ?: if (isManual) "manual" else null
-                digestRepository.saveDigest(
+                // Finalize digest history record
+                digestRepository.completePendingDigest(
+                    digestId = pendingDigestId,
                     articles = result.articles,
                     feeds = feeds,
-                    epubFilePath = result.file.absolutePath,
-                    triggerType = triggerType,
-                    period = periodString
+                    epubFilePath = result.file.absolutePath
                 )
                 Log.i(TAG, "Saved digest to history (period: $periodString)")
 
                 Result.success()
             } else {
                 Log.e(TAG, "Failed to generate EPUB")
-                retryOrFail()
+                handleFailure(
+                    digestId = pendingDigestId,
+                    message = "Failed to generate EPUB",
+                    retriable = true
+                )
             }
         } catch (e: IOException) {
             // Network errors are retriable
             Log.e(TAG, "Network error generating digest", e)
-            retryOrFail()
+            val message = e.message ?: "Network error generating digest"
+            handleFailure(
+                digestId = pendingDigestId.takeIf { it > 0 },
+                message = message,
+                retriable = true
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Error generating digest", e)
-            Result.failure()
+            val message = e.message ?: "Error generating digest"
+            handleFailure(
+                digestId = pendingDigestId.takeIf { it > 0 },
+                message = message,
+                retriable = false
+            )
         }
     }
 
-    /**
-     * Returns Result.retry() if under max attempts, otherwise Result.failure()
-     */
-    private fun retryOrFail(): Result {
-        return if (runAttemptCount < MAX_RETRY_ATTEMPTS) {
+    private suspend fun handleFailure(
+        digestId: Long?,
+        message: String,
+        retriable: Boolean
+    ): Result {
+        return if (retriable && runAttemptCount < MAX_RETRY_ATTEMPTS) {
+            if (digestId != null) {
+                digestRepository.deleteDigestById(digestId)
+            }
             Log.i(TAG, "Scheduling retry (attempt ${runAttemptCount + 1}/$MAX_RETRY_ATTEMPTS)")
             Result.retry()
         } else {
-            Log.e(TAG, "Max retry attempts reached, failing")
+            if (digestId != null) {
+                digestRepository.markDigestFailed(digestId, message)
+            }
             Result.failure()
         }
     }
