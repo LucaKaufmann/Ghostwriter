@@ -63,6 +63,18 @@ let project = Project(
             dependencies: [
                 .target(name: "Epilogue")
             ]
+        ),
+        .target(
+            name: "EpilogueUITests",
+            destinations: .iOS,
+            product: .uiTests,
+            bundleId: "com.codable.epilogue.uitests",
+            deploymentTargets: .iOS("18.0"),
+            infoPlist: .default,
+            sources: ["UITests/**"],
+            dependencies: [
+                .target(name: "Epilogue")
+            ]
         )
     ]
 )

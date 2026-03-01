@@ -159,6 +159,30 @@ xcodebuild test -workspace Epilogue.xcworkspace -scheme Domain
 xcodebuild test -workspace Epilogue.xcworkspace -scheme Data
 ```
 
+## App Store Screenshot Automation
+
+The iOS app includes a deterministic screenshot mode that seeds realistic mock feeds, digests, and article content.
+
+```bash
+# Generate project + capture screenshots on default simulators
+cd EpilogueIOS
+make screenshot
+```
+
+Output is written to `EpilogueIOS/artifacts/screenshots/<device>/`.
+
+Optional overrides:
+
+```bash
+# Use a custom fixture JSON file
+EPILOGUE_SCREENSHOT_FIXTURE_PATH=/absolute/path/to/fixture.json make screenshot
+
+# Capture only specific simulators
+./scripts/capture_screenshots.sh "iPhone 16 Pro Max" "iPad Pro 13-inch (M4)"
+```
+
+Fixture format is JSON with `feeds` and `digests` arrays, following `App/Resources/ScreenshotFixtures/default.json`.
+
 ## Build
 
 ```bash
