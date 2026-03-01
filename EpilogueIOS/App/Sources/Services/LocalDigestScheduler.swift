@@ -36,16 +36,30 @@ actor TaskCompletionGuard {
     }
 }
 
+/// Prevents duplicate execution of the same async operation.
+actor AsyncExecutionGate {
+    private var isRunning = false
+
+    func runIfIdle(_ operation: @Sendable () async -> Void) async {
+        guard !isRunning else { return }
+        isRunning = true
+        defer { isRunning = false }
+        await operation()
+    }
+}
+
 // MARK: - LocalDigestScheduler
 
 public final class LocalDigestScheduler: Sendable {
     public static let digestTaskIdentifier = "com.codable.epilogue.digestgeneration"
     public static let feedRefreshTaskIdentifier = "com.codable.epilogue.feedRefresh"
+    static let scheduledGenerationLeadTime: TimeInterval = 2 * 60 * 60
 
     private let feedRepository: FeedRepositoryProtocol
     private let digestRepository: DigestRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
     private let logger = Logger(subsystem: "com.epilogue", category: "LocalScheduler")
+    private let catchUpGate = AsyncExecutionGate()
 
     public init(
         feedRepository: FeedRepositoryProtocol,
@@ -130,6 +144,8 @@ public final class LocalDigestScheduler: Sendable {
     /// Schedule feed pre-fetch (BGAppRefreshTask, ~30s budget).
     /// Runs every ~1 hour to keep feeds fresh for quick digest generation.
     public func scheduleFeedRefresh() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.feedRefreshTaskIdentifier)
+
         let request = BGAppRefreshTaskRequest(identifier: Self.feedRefreshTaskIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 60 * 60) // 1 hour
 
@@ -146,30 +162,42 @@ public final class LocalDigestScheduler: Sendable {
     /// Check if a digest was missed and generate it immediately.
     /// This is the MOST RELIABLE layer — runs every time the user opens the app.
     public func checkForMissedDigests() async {
-        do {
-            let ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
-            if ghostwriterEnabled { return }
+        await catchUpGate.runIfIdle { [self] in
+            do {
+                let ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
+                if ghostwriterEnabled { return }
 
-            let enabledPeriods = try await settingsRepository.getEnabledPeriods()
-            guard !enabledPeriods.isEmpty else { return }
+                let now = Date()
+                let calendar = Calendar.current
+                let enabledPeriods = try await settingsRepository.getEnabledPeriods()
+                guard let latestElapsedPeriod = Self.latestElapsedPeriod(
+                    now: now,
+                    periods: enabledPeriods,
+                    calendar: calendar
+                ) else { return }
 
-            // Check if today's digest already exists
-            let today = Calendar.current.startOfDay(for: Date())
-            let hasDigestToday = try await digestRepository.hasDigestSince(today)
-            guard !hasDigestToday else { return }
+                let todayStart = calendar.startOfDay(for: now)
+                let digestsToday = try await digestRepository.getDigests(from: todayStart, to: now)
+                let hasDigestForLatestPeriod = Self.hasDigestCoveringLatestPeriod(
+                    latestElapsedPeriod,
+                    digests: digestsToday,
+                    now: now,
+                    calendar: calendar
+                )
+                guard !hasDigestForLatestPeriod else { return }
 
-            // Check if we're past any scheduled period
-            let hasMissedPeriod = hasMissedPeriodToday(periods: enabledPeriods)
-            guard hasMissedPeriod else { return }
+                logger.info("Catch-up: generating missed digest for \(latestElapsedPeriod.rawValue)")
+                let generator = try await buildDigestGenerator()
+                let digest = try await generator.generateDigest(
+                    triggerType: .scheduled,
+                    period: latestElapsedPeriod.rawValue
+                )
+                logger.info("Catch-up digest complete: \(digest.articleCount) articles")
 
-            logger.info("Catch-up: generating missed digest for today")
-            let generator = try await buildDigestGenerator()
-            let digest = try await generator.generateDigest(triggerType: .scheduled)
-            logger.info("Catch-up digest complete: \(digest.articleCount) articles")
-
-            await exportIfConfigured(digest: digest)
-        } catch {
-            logger.error("Catch-up digest generation failed: \(error.localizedDescription)")
+                await exportIfConfigured(digest: digest)
+            } catch {
+                logger.error("Catch-up digest generation failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -184,16 +212,35 @@ public final class LocalDigestScheduler: Sendable {
         // Schedule next overnight run immediately
         await scheduleOvernightDigest()
 
-        let generationTask = Task.detached(priority: .utility) { [self] in
+        let generationTask = Task.detached(priority: .utility) { [self] () async throws -> Bool in
             // Check Ghostwriter
             let ghostwriterEnabled = try await self.settingsRepository.isGhostwriterEnabled()
             if ghostwriterEnabled {
                 self.logger.info("Ghostwriter enabled — skipping overnight generation")
-                return nil as Digest?
+                return false
             }
 
+            let enabledPeriods = try await self.settingsRepository.getEnabledPeriods()
+            guard !enabledPeriods.isEmpty else {
+                self.logger.info("No enabled periods — skipping overnight generation")
+                return false
+            }
+
+            let now = Date()
+            let periodToGenerate = Self.latestElapsedPeriod(now: now, periods: enabledPeriods) ??
+                enabledPeriods.min(by: {
+                    ($0.hour, $0.minute) < ($1.hour, $1.minute)
+                })
+
             let generator = try await self.buildDigestGenerator()
-            return try await generator.generateDigest(triggerType: .scheduled)
+            let digest = try await generator.generateDigest(
+                triggerType: .scheduled,
+                period: periodToGenerate?.rawValue
+            )
+            self.logger.info("Overnight digest complete: \(digest.articleCount) articles")
+            await self.exportIfConfigured(digest: digest)
+            await self.scheduleMorningNotification(for: digest)
+            return true
         }
 
         task.expirationHandler = {
@@ -203,10 +250,8 @@ public final class LocalDigestScheduler: Sendable {
         }
 
         do {
-            if let digest = try await generationTask.value {
-                logger.info("Overnight digest complete: \(digest.articleCount) articles")
-                await exportIfConfigured(digest: digest)
-                await scheduleMorningNotification(for: digest)
+            let generatedDigest = try await generationTask.value
+            if generatedDigest {
                 await completionGuard.complete(task, success: true)
             } else {
                 // Ghostwriter was enabled, no local generation needed
@@ -306,10 +351,16 @@ public final class LocalDigestScheduler: Sendable {
     /// Schedule a standing daily reminder notification.
     /// Fires daily at the earliest enabled period. Replaced by "digest ready" when overnight succeeds.
     public func scheduleDigestReminderNotification() async {
+        let requestID = "daily-digest-reminder"
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [requestID])
+
         let enabledPeriods = (try? await settingsRepository.getEnabledPeriods()) ?? []
         guard let earliest = enabledPeriods.min(by: {
             ($0.hour, $0.minute) < ($1.hour, $1.minute)
-        }) else { return }
+        }) else {
+            logger.info("No enabled periods — removed daily digest reminder")
+            return
+        }
 
         let content = UNMutableNotificationContent()
         content.title = "Time for Your Digest"
@@ -324,7 +375,7 @@ public final class LocalDigestScheduler: Sendable {
         // Repeating daily
         let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
         let request = UNNotificationRequest(
-            identifier: "daily-digest-reminder",
+            identifier: requestID,
             content: content,
             trigger: trigger
         )
@@ -371,19 +422,68 @@ public final class LocalDigestScheduler: Sendable {
 
     // MARK: - Helpers
 
-    /// Check if current time has passed any enabled period today (full hour:minute comparison).
-    private func hasMissedPeriodToday(periods: Set<DigestPeriod>) -> Bool {
-        let calendar = Calendar.current
-        let now = Date()
-
-        return periods.contains { period in
-            var components = calendar.dateComponents([.year, .month, .day], from: now)
-            components.hour = period.hour
-            components.minute = period.minute
-            components.second = 0
-            guard let scheduledTime = calendar.date(from: components) else { return false }
-            return now >= scheduledTime
+    /// Returns the latest elapsed period today, or nil if no period has elapsed yet.
+    static func latestElapsedPeriod(
+        now: Date,
+        periods: Set<DigestPeriod>,
+        calendar: Calendar = .current
+    ) -> DigestPeriod? {
+        let elapsedPeriods = periods.compactMap { period -> (DigestPeriod, Date)? in
+            guard let scheduledTime = scheduledTime(for: period, on: now, calendar: calendar) else {
+                return nil
+            }
+            guard now >= scheduledTime else { return nil }
+            return (period, scheduledTime)
         }
+
+        return elapsedPeriods.max(by: { $0.1 < $1.1 })?.0
+    }
+
+    /// Returns true if a complete digest (or an in-progress digest) already covers the latest period.
+    static func hasDigestCoveringLatestPeriod(
+        _ latestPeriod: DigestPeriod,
+        digests: [Digest],
+        now: Date,
+        calendar: Calendar = .current
+    ) -> Bool {
+        let normalizedLatestPeriod = latestPeriod.rawValue.lowercased()
+        let digestsThatCount = digests.filter { digest in
+            digest.isComplete || (!digest.isComplete && digest.errorMessage == nil)
+        }
+
+        if digestsThatCount.contains(where: { digest in
+            digest.period?.lowercased() == normalizedLatestPeriod
+        }) {
+            return true
+        }
+
+        // Backward compatibility for legacy local digests that were saved without period.
+        guard let dueTime = scheduledTime(for: latestPeriod, on: now, calendar: calendar) else {
+            return false
+        }
+        let dayStart = calendar.startOfDay(for: now)
+        let fallbackWindowStart = max(dayStart, dueTime.addingTimeInterval(-scheduledGenerationLeadTime))
+        return digestsThatCount.contains(where: { digest in
+            guard digest.generatedAt >= fallbackWindowStart else { return false }
+            guard let normalizedPeriod = digest.period?.lowercased() else {
+                // Legacy local digests were saved without period.
+                return true
+            }
+            // Manual digests are allowed to satisfy the latest period window.
+            return normalizedPeriod == "manual"
+        })
+    }
+
+    static func scheduledTime(
+        for period: DigestPeriod,
+        on date: Date,
+        calendar: Calendar = .current
+    ) -> Date? {
+        var components = calendar.dateComponents([.year, .month, .day], from: date)
+        components.hour = period.hour
+        components.minute = period.minute
+        components.second = 0
+        return calendar.date(from: components)
     }
 
     func buildDigestGenerator() async throws -> DigestGenerator {

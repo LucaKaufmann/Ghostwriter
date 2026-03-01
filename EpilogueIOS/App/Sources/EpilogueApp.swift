@@ -101,17 +101,14 @@ struct EpilogueApp: App {
                     // Perform initial sync on app launch
                     await ghostwriterCoordinator.performFullSync()
 
-                    // PRIMARY: Catch-up — generate missed digest if needed
-                    await localDigestScheduler?.checkForMissedDigests()
-
-                    // Set up standing daily reminder notification
-                    await localDigestScheduler?.scheduleDigestReminderNotification()
-
-                    // Clean up delivered notifications
-                    LocalDigestScheduler.cleanUpDeliveredNotifications()
+                    await runForegroundDigestMaintenance()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
-                    if newPhase == .background, !launchOptions.isEnabled {
+                    guard !launchOptions.isEnabled else { return }
+
+                    if newPhase == .active {
+                        Task { await runForegroundDigestMaintenance() }
+                    } else if newPhase == .background {
                         scheduleAllBackgroundWork()
                     }
                 }
@@ -129,6 +126,17 @@ struct EpilogueApp: App {
         Task {
             await localDigestScheduler?.scheduleOvernightDigest()
         }
+    }
+
+    private func runForegroundDigestMaintenance() async {
+        // PRIMARY: Catch-up — generate missed digest if needed.
+        await localDigestScheduler?.checkForMissedDigests()
+
+        // Keep reminder in sync with the latest enabled period configuration.
+        await localDigestScheduler?.scheduleDigestReminderNotification()
+
+        // Remove stale delivered digest notifications.
+        LocalDigestScheduler.cleanUpDeliveredNotifications()
     }
 }
 
