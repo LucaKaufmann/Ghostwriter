@@ -1,4 +1,5 @@
 import ProjectDescription
+import Foundation
 
 // MARK: - Project Templates
 
@@ -98,16 +99,22 @@ extension Project {
 
 extension Settings {
     public static var defaultSettings: Settings {
+        var baseSettings: SettingsDictionary = [
+            "SWIFT_VERSION": "5.9",
+            "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+            "ENABLE_PREVIEWS": "YES",
+            "MARKETING_VERSION": "1.0.0",
+            "CURRENT_PROJECT_VERSION": "1",
+            "CODE_SIGN_STYLE": "Automatic"
+        ]
+
+        if let developmentTeam = ProcessInfo.processInfo.environment["EPILOGUE_IOS_DEVELOPMENT_TEAM"],
+           !developmentTeam.isEmpty {
+            baseSettings["DEVELOPMENT_TEAM"] = .string(developmentTeam)
+        }
+
         return .settings(
-            base: [
-                "SWIFT_VERSION": "5.9",
-                "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
-                "ENABLE_PREVIEWS": "YES",
-                "MARKETING_VERSION": "1.0.0",
-                "CURRENT_PROJECT_VERSION": "1",
-                "DEVELOPMENT_TEAM": "6Y9C574C9M",
-                "CODE_SIGN_STYLE": "Automatic"
-            ],
+            base: baseSettings,
             configurations: [
                 .debug(name: .debug),
                 .release(name: .release)

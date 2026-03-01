@@ -2,6 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Filled by scripts/render_export_options.sh using EPILOGUE_IOS_DEVELOPMENT_TEAM and EPILOGUE_IOS_APPSTORE_PROFILE -->
     <key>destination</key>
     <string>export</string>
     <key>method</key>
@@ -11,11 +12,11 @@
     <key>signingCertificate</key>
     <string>iPhone Distribution</string>
     <key>teamID</key>
-    <string>6Y9C574C9M</string>
+    <string>TEAM_ID_REQUIRED</string>
     <key>provisioningProfiles</key>
     <dict>
         <key>com.codable.epilogue</key>
-        <string>Epilogue AppStore</string>
+        <string>APPSTORE_PROFILE_REQUIRED</string>
     </dict>
     <key>uploadSymbols</key>
     <true/>

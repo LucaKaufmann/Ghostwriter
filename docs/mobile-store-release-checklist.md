@@ -52,7 +52,8 @@ This document captures the executable release workflow for both mobile apps.
 2. Archive:
    - `xcodebuild clean archive -workspace Epilogue.xcworkspace -scheme Epilogue -configuration Release -destination \"generic/platform=iOS\" -archivePath build/Epilogue.xcarchive`
 3. Export IPA:
-   - `xcodebuild -exportArchive -archivePath build/Epilogue.xcarchive -exportPath build/export -exportOptionsPlist ExportOptions-AppStore.plist`
+   - `EPILOGUE_IOS_DEVELOPMENT_TEAM=<TEAM_ID> EPILOGUE_IOS_APPSTORE_PROFILE="<PROFILE_NAME>" ./scripts/render_export_options.sh`
+   - `xcodebuild -exportArchive -archivePath build/Epilogue.xcarchive -exportPath build/export -exportOptionsPlist build/ExportOptions-AppStore.generated.plist`
 4. Upload TestFlight:
    - `asc publish testflight --app <APP_ID> --ipa build/export/Epilogue.ipa --group <GROUP_ID> --wait --notify`
 5. Submit App Store after beta validation:
