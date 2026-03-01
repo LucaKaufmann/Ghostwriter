@@ -39,9 +39,14 @@ struct HistoryView: View {
                     List {
                         ForEach(digests) { digest in
                             let epubAvailable = hasLocalEPUB(digest)
-                            NavigationLink {
-                                DigestDetailView(digest: digest)
-                            } label: {
+                            let lifecycle = digest.lifecycleState
+                            if lifecycle == .completed {
+                                NavigationLink {
+                                    DigestDetailView(digest: digest)
+                                } label: {
+                                    DigestRow(digest: digest, epubAvailable: epubAvailable)
+                                }
+                            } else {
                                 DigestRow(digest: digest, epubAvailable: epubAvailable)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -78,6 +83,24 @@ struct HistoryView: View {
                                         }
                                         .tint(.green)
                                     } else {
+                                        if lifecycle == .completed {
+                                            Button {
+                                                digestToShare = digest
+                                            } label: {
+                                                Label("Share", systemImage: "square.and.arrow.up")
+                                            }
+                                            .tint(.gray)
+
+                                            Button {
+                                                openInReader(digest)
+                                            } label: {
+                                                Label("Open", systemImage: "book")
+                                            }
+                                            .tint(.blue)
+                                        }
+                                    }
+                                } else {
+                                    if lifecycle == .completed {
                                         Button {
                                             digestToShare = digest
                                         } label: {
@@ -92,20 +115,6 @@ struct HistoryView: View {
                                         }
                                         .tint(.blue)
                                     }
-                                } else {
-                                    Button {
-                                        digestToShare = digest
-                                    } label: {
-                                        Label("Share", systemImage: "square.and.arrow.up")
-                                    }
-                                    .tint(.gray)
-
-                                    Button {
-                                        openInReader(digest)
-                                    } label: {
-                                        Label("Open", systemImage: "book")
-                                    }
-                                    .tint(.blue)
                                 }
                             }
                         }
@@ -275,6 +284,7 @@ struct DigestRow: View {
     }
 
     var body: some View {
+        let lifecycle = digest.lifecycleState
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 // Date
@@ -286,9 +296,18 @@ struct DigestRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                // Article counts matching Android format
-                Text("\(digest.articleCount) articles (\(digest.briefingCount) briefings, \(digest.deepDiveCount) full)")
-                    .font(.caption)
+                if lifecycle == .processing {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Creating digest…")
+                            .font(.caption)
+                    }
+                } else {
+                    // Article counts matching Android format
+                    Text("\(digest.articleCount) articles (\(digest.briefingCount) briefings, \(digest.deepDiveCount) full)")
+                        .font(.caption)
+                }
 
                 // Feed names (if available from articles)
                 if !digest.articles.isEmpty {
@@ -302,6 +321,13 @@ struct DigestRow: View {
                         .lineLimit(1)
                 }
 
+                if lifecycle == .failed {
+                    Text("Failed: \(digest.errorMessage ?? "Unknown error")")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+
                 if digest.remoteId != nil, !epubAvailable {
                     Text("EPUB not downloaded")
                         .font(.caption2)
@@ -310,6 +336,24 @@ struct DigestRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+private enum DigestLifecycleState {
+    case processing
+    case completed
+    case failed
+}
+
+private extension Digest {
+    var lifecycleState: DigestLifecycleState {
+        if isComplete {
+            return .completed
+        }
+        if let message = errorMessage, !message.isEmpty {
+            return .failed
+        }
+        return .processing
     }
 }
 
