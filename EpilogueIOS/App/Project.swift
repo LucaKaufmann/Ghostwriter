@@ -1,5 +1,9 @@
+import Foundation
 import ProjectDescription
 import ProjectDescriptionHelpers
+
+let marketingVersion = ProcessInfo.processInfo.environment["EPILOGUE_IOS_MARKETING_VERSION"] ?? "1.0.0"
+let currentBuildNumber = ProcessInfo.processInfo.environment["EPILOGUE_IOS_BUILD_NUMBER"] ?? "1"
 
 let project = Project(
     name: "Epilogue",
@@ -10,10 +14,13 @@ let project = Project(
             name: "Epilogue",
             destinations: .iOS,
             product: .app,
-            bundleId: "com.epilogue.app",
+            bundleId: "com.codable.epilogue",
             deploymentTargets: .iOS("18.0"),
             infoPlist: .extendingDefault(
                 with: [
+                    "CFBundleShortVersionString": .string(marketingVersion),
+                    "CFBundleVersion": .string(currentBuildNumber),
+                    "ITSAppUsesNonExemptEncryption": .boolean(false),
                     "UILaunchScreen": [
                         "UIColorName": "",
                         "UIImageName": ""
@@ -23,16 +30,16 @@ let project = Project(
                     ],
                     "UIUserInterfaceStyle": "Light",
                     "BGTaskSchedulerPermittedIdentifiers": [
-                        "com.epilogue.app.digestgeneration",
-                        "com.epilogue.app.feedRefresh",
-                        "com.epilogue.app.feedSync",
-                        "com.epilogue.app.digestSync"
+                        "com.codable.epilogue.digestgeneration",
+                        "com.codable.epilogue.feedRefresh",
+                        "com.codable.epilogue.feedSync",
+                        "com.codable.epilogue.digestSync"
                     ],
                     "UIBackgroundModes": [
                         "processing",
                         "fetch"
                     ]
-                ]
+                ] as [String: Plist.Value]
             ),
             sources: ["Sources/**"],
             resources: ["Resources/**"],
@@ -49,10 +56,22 @@ let project = Project(
             name: "EpilogueTests",
             destinations: .iOS,
             product: .unitTests,
-            bundleId: "com.epilogue.apptests",
+            bundleId: "com.codable.epilogue.tests",
             deploymentTargets: .iOS("18.0"),
             infoPlist: .default,
             sources: ["Tests/**"],
+            dependencies: [
+                .target(name: "Epilogue")
+            ]
+        ),
+        .target(
+            name: "EpilogueUITests",
+            destinations: .iOS,
+            product: .uiTests,
+            bundleId: "com.codable.epilogue.uitests",
+            deploymentTargets: .iOS("18.0"),
+            infoPlist: .default,
+            sources: ["UITests/**"],
             dependencies: [
                 .target(name: "Epilogue")
             ]

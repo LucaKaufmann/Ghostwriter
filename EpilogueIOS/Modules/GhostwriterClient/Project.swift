@@ -4,6 +4,6 @@ import ProjectDescriptionHelpers
 let project = Project.frameworkModule(
     name: "GhostwriterClient",
     dependencies: [
-        .xcframework(path: "../../../shared/build/XCFrameworks/debug/EpilogueShared.xcframework")
+        .xcframework(path: "../../../shared/build/XCFrameworks/release/EpilogueShared.xcframework")
     ]
 )
