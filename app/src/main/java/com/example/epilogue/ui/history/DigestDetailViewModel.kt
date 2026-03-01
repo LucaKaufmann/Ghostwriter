@@ -72,6 +72,10 @@ class DigestDetailViewModel @Inject constructor(
      */
     fun openInExternalReader() {
         val digest = _uiState.value.digest ?: return
+        if (!digest.isComplete) {
+            _uiState.update { it.copy(error = "Digest is still being processed") }
+            return
+        }
         val file = File(digest.epubFilePath)
         if (!file.exists()) {
             val message = if (digest.isFromGhostwriter) {

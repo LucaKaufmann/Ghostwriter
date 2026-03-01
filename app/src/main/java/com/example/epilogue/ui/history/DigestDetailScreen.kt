@@ -109,7 +109,7 @@ fun DigestDetailScreen(
                     }
                 },
                 actions = {
-                    uiState.digest?.let {
+                    uiState.digest?.takeIf { it.isComplete }?.let {
                         IconButton(onClick = { viewModel.openInExternalReader() }) {
                             Icon(
                                 imageVector = Icons.Default.OpenInNew,
@@ -150,45 +150,82 @@ fun DigestDetailScreen(
             }
             else -> {
                 val digest = uiState.digest!!
-                val isRemoteDigest = digest.remoteId != null
-                val orderedArticles = uiState.articles
-
-                // For remote digests (synced from Ghostwriter), show prompt to open EPUB
-                // since we don't have individual article records
-                if (isRemoteDigest && uiState.articles.isEmpty()) {
-                    RemoteDigestContent(
-                        digest = digest,
-                        onOpenInReader = { viewModel.openInExternalReader() },
+                if (!digest.isComplete) {
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
-                    )
-                } else if (einkMode) {
-                    // E-ink mode: Book-style reader with all articles as chapters
-                    // Only apply top padding (for app bar), ignore bottom system padding
-                    EinkBookReader(
-                        articles = orderedArticles,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(top = innerPadding.calculateTopPadding())
-                    )
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (digest.isProcessing) {
+                                Text(
+                                    text = "Digest is being created…",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "Check back in a moment.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Text(
+                                    text = "Digest generation failed",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = digest.errorMessage ?: "Unknown error",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
                 } else {
-                    // Standard mode: Scrollable list
-                    ScrollableArticleList(
-                        articles = orderedArticles,
-                        sourceStates = uiState.articleSourceStates,
-                        showSourceToggle = digest.remoteId != null,
-                        onSourceModeChange = { article, useSource ->
-                            viewModel.setArticleSourceMode(article, useSource)
-                        },
-                        onRetrySource = { article ->
-                            viewModel.retryArticleSource(article)
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                            .padding(horizontal = 16.dp)
-                    )
+                    val isRemoteDigest = digest.remoteId != null
+                    val orderedArticles = uiState.articles
+
+                    // For remote digests (synced from Ghostwriter), show prompt to open EPUB
+                    // since we don't have individual article records
+                    if (isRemoteDigest && uiState.articles.isEmpty()) {
+                        RemoteDigestContent(
+                            digest = digest,
+                            onOpenInReader = { viewModel.openInExternalReader() },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                        )
+                    } else if (einkMode) {
+                        // E-ink mode: Book-style reader with all articles as chapters
+                        // Only apply top padding (for app bar), ignore bottom system padding
+                        EinkBookReader(
+                            articles = orderedArticles,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = innerPadding.calculateTopPadding())
+                        )
+                    } else {
+                        // Standard mode: Scrollable list
+                        ScrollableArticleList(
+                            articles = orderedArticles,
+                            sourceStates = uiState.articleSourceStates,
+                            showSourceToggle = digest.remoteId != null,
+                            onSourceModeChange = { article, useSource ->
+                                viewModel.setArticleSourceMode(article, useSource)
+                            },
+                            onRetrySource = { article ->
+                                viewModel.retryArticleSource(article)
+                            },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                                .padding(horizontal = 16.dp)
+                        )
+                    }
                 }
             }
         }
