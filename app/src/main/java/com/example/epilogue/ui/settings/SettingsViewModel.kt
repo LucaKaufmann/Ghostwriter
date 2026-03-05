@@ -5,7 +5,6 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
-import com.example.epilogue.config.FeatureFlags
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
@@ -45,13 +44,12 @@ class SettingsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
-    private val ghostwriterSettingsEnabled = FeatureFlags.ghostwriterSettingsEnabled
 
     private var digestPollingJob: Job? = null
 
     init {
         loadSettings()
-        if (ghostwriterSettingsEnabled && settingsRepository.isGhostwriterConfigured()) {
+        if (settingsRepository.isGhostwriterConfigured()) {
             fetchIntegrationStatus()
             refreshMediaOverview()
             refreshLogFiles()
@@ -71,7 +69,7 @@ class SettingsViewModel @Inject constructor(
                 customExportEnabled = settingsRepository.isCustomExportEnabled(),
                 customExportDisplayPath = getDisplayPath(customExportUri),
                 // Ghostwriter settings
-                ghostwriterEnabled = ghostwriterSettingsEnabled && settingsRepository.isGhostwriterEnabled(),
+                ghostwriterEnabled = settingsRepository.isGhostwriterEnabled(),
                 ghostwriterUrl = settingsRepository.getGhostwriterUrl() ?: "",
                 ghostwriterApiKey = settingsRepository.getGhostwriterApiKey() ?: "",
                 ghostwriterDownloadEpubsOnSync = settingsRepository.shouldDownloadGhostwriterEpubsOnSync(),
@@ -104,7 +102,7 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(selectedPeriods = updatedPeriods) }
 
             // Sync schedule to Ghostwriter if enabled
-            if (ghostwriterSettingsEnabled && settingsRepository.isGhostwriterConfigured()) {
+            if (settingsRepository.isGhostwriterConfigured()) {
                 val result = ghostwriterRepository.updateSchedule(
                     period = period.name.lowercase(),
                     enabled = enabled
@@ -128,7 +126,7 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(minWordCount = count) }
 
             // Sync to Ghostwriter if enabled
-            if (ghostwriterSettingsEnabled && settingsRepository.isGhostwriterConfigured()) {
+            if (settingsRepository.isGhostwriterConfigured()) {
                 configSyncManager.pushMinWordCount(count)
             }
         }
@@ -142,11 +140,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun runDigestNow() {
-        if (
-            ghostwriterSettingsEnabled &&
-            _uiState.value.ghostwriterEnabled &&
-            _uiState.value.ghostwriterUrl.isNotBlank()
-        ) {
+        if (_uiState.value.ghostwriterEnabled && _uiState.value.ghostwriterUrl.isNotBlank()) {
             // Use Ghostwriter backend
             runDigestViaGhostwriter()
         } else {
@@ -436,7 +430,6 @@ class SettingsViewModel @Inject constructor(
     // ===== Ghostwriter Settings =====
 
     fun updateGhostwriterEnabled(enabled: Boolean) {
-        if (!ghostwriterSettingsEnabled) return
         viewModelScope.launch {
             settingsRepository.setGhostwriterEnabled(enabled)
             _uiState.update { it.copy(ghostwriterEnabled = enabled) }

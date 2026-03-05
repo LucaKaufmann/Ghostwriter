@@ -338,9 +338,9 @@ struct SettingsView: View {
             enabledPeriods = try await settingsRepository.getEnabledPeriods()
             minWordCount = try await settingsRepository.getMinWordCount()
             showNotifications = try await settingsRepository.shouldShowNotifications()
-            ghostwriterEnabled = ghostwriterSettingsEnabled && (try await settingsRepository.isGhostwriterEnabled())
+            ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
             exportEnabled = try await settingsRepository.getCustomExportEnabled()
-            serverSchedule = ghostwriterSettingsEnabled ? (try await settingsRepository.getGhostwriterSchedule()) : nil
+            serverSchedule = try await settingsRepository.getGhostwriterSchedule()
             if let bookmark = try await settingsRepository.getCustomExportBookmark() {
                 exportFolderURL = try resolveExportBookmark(bookmark)
             }

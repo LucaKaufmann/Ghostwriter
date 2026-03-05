@@ -336,9 +336,7 @@ fun SettingsScreen(
             SettingsSection(title = "Manual Generation") {
                 ManualGenerationInput(
                     isGenerating = uiState.isGenerating,
-                    ghostwriterEnabled = ghostwriterSettingsEnabled &&
-                        uiState.ghostwriterEnabled &&
-                        uiState.ghostwriterUrl.isNotBlank(),
+                    ghostwriterEnabled = uiState.ghostwriterEnabled && uiState.ghostwriterUrl.isNotBlank(),
                     progress = uiState.ghostwriterProgress,
                     error = uiState.ghostwriterError,
                     onRunNow = viewModel::runDigestNow
