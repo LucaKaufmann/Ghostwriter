@@ -20,7 +20,13 @@ data class Digest(
     /** Returns true if this digest was downloaded from Ghostwriter */
     val isFromGhostwriter: Boolean get() = remoteId != null
 
-    val isProcessing: Boolean get() = !isComplete && errorMessage.isNullOrBlank()
+    private val isTransientLocalScheduledDigest: Boolean
+        get() = !isFromGhostwriter &&
+                triggerType == TriggerType.SCHEDULED &&
+                articleCount == 0 &&
+                errorMessage.isNullOrBlank()
+
+    val isProcessing: Boolean get() = (!isComplete && errorMessage.isNullOrBlank()) || isTransientLocalScheduledDigest
     val isFailed: Boolean get() = !isComplete && !errorMessage.isNullOrBlank()
 
     /** Returns a display-friendly period name */

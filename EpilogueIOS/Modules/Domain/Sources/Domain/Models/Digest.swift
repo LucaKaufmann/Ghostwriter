@@ -85,3 +85,24 @@ public final class Digest {
         self.articles = articles
     }
 }
+
+public extension Digest {
+    var isFromGhostwriter: Bool {
+        remoteId != nil
+    }
+
+    var isProcessing: Bool {
+        (!isComplete && (errorMessage?.isEmpty ?? true)) || isTransientLocalScheduledDigest
+    }
+
+    var isFailed: Bool {
+        !isComplete && !(errorMessage?.isEmpty ?? true)
+    }
+
+    private var isTransientLocalScheduledDigest: Bool {
+        !isFromGhostwriter &&
+        triggerType == .scheduled &&
+        articleCount == 0 &&
+        (errorMessage?.isEmpty ?? true)
+    }
+}

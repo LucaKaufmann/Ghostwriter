@@ -12,6 +12,7 @@ import Domain
 
 struct DigestDetailView: View {
     let digest: Digest
+    @AppStorage("eink_mode") private var einkMode = false
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, yyyy"
@@ -24,20 +25,35 @@ struct DigestDetailView: View {
 
     var body: some View {
         Group {
-            if digest.isComplete {
+            if digest.isProcessing {
+                VStack(spacing: 12) {
+                    if einkMode {
+                        Image(systemName: "hourglass")
+                            .font(.title2)
+                    } else {
+                        ProgressView()
+                    }
+                    Text("Processing…")
+                        .font(.headline)
+                    Text("Check back in a moment.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+            } else if digest.isComplete {
                 EinkReaderView(
                     articles: orderedArticles,
                     epubFilePath: digest.epubFilePath,
                     remoteDigestId: digest.remoteId
                 )
-            } else if let error = digest.errorMessage, !error.isEmpty {
+            } else if digest.isFailed {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .font(.title2)
                     Text("Digest generation failed")
                         .font(.headline)
-                    Text(error)
+                    Text(digest.errorMessage ?? "Unknown error")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -45,10 +61,9 @@ struct DigestDetailView: View {
                 .padding()
             } else {
                 VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Digest is being created…")
+                    Text("Digest generation failed")
                         .font(.headline)
-                    Text("Check back in a moment.")
+                    Text("Unknown error")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
