@@ -19,9 +19,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -109,7 +111,7 @@ fun DigestDetailScreen(
                     }
                 },
                 actions = {
-                    uiState.digest?.takeIf { it.isComplete }?.let {
+                    uiState.digest?.takeIf { it.isComplete && !it.isProcessing }?.let {
                         IconButton(onClick = { viewModel.openInExternalReader() }) {
                             Icon(
                                 imageVector = Icons.Default.OpenInNew,
@@ -150,7 +152,7 @@ fun DigestDetailScreen(
             }
             else -> {
                 val digest = uiState.digest!!
-                if (!digest.isComplete) {
+                if (digest.isProcessing) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -162,27 +164,46 @@ fun DigestDetailScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            if (digest.isProcessing) {
-                                Text(
-                                    text = "Digest is being created…",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = "Check back in a moment.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                            if (einkMode) {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassEmpty,
+                                    contentDescription = null
                                 )
                             } else {
-                                Text(
-                                    text = "Digest generation failed",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = digest.errorMessage ?: "Unknown error",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
+                                CircularProgressIndicator()
                             }
+                            Text(
+                                text = "Processing…",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = "Check back in a moment.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else if (!digest.isComplete) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Digest generation failed",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = digest.errorMessage ?: "Unknown error",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 } else {

@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -45,8 +46,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.Digest
-import com.example.epilogue.domain.model.TriggerType
 import com.example.epilogue.service.DigestSyncWorker
+import com.example.epilogue.ui.LocalEinkMode
 import com.example.epilogue.ui.components.SyncStatusIndicator
 import java.io.File
 import java.text.SimpleDateFormat
@@ -66,6 +67,7 @@ fun HistoryScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val digests by viewModel.digests.collectAsState()
+    val einkMode = LocalEinkMode.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Show error in snackbar
@@ -170,7 +172,8 @@ fun HistoryScreen(
                             onDownload = { viewModel.downloadEpub(digest) },
                             onDownloadPdf = { viewModel.downloadPdf(digest) },
                             showPdfDownload = uiState.pdfDownloadsEnabled,
-                            isDownloading = uiState.downloadingDigestIds.contains(digest.id)
+                            isDownloading = uiState.downloadingDigestIds.contains(digest.id),
+                            einkMode = einkMode
                         )
                     }
                 }
@@ -218,6 +221,7 @@ fun DigestHistoryItem(
     onDownloadPdf: () -> Unit,
     showPdfDownload: Boolean,
     isDownloading: Boolean,
+    einkMode: Boolean,
     modifier: Modifier = Modifier
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
@@ -225,11 +229,12 @@ fun DigestHistoryItem(
     val epubExists = remember(digest.epubFilePath, isDownloading) {
         digest.epubFilePath.isNotBlank() && File(digest.epubFilePath).exists()
     }
+    val isReady = digest.isComplete && !digest.isProcessing
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(enabled = digest.isComplete, onClick = onClick),
+            .clickable(enabled = isReady, onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -278,12 +283,19 @@ fun DigestHistoryItem(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.height(14.dp),
-                            strokeWidth = 2.dp
-                        )
+                        if (einkMode) {
+                            Icon(
+                                imageVector = Icons.Default.HourglassEmpty,
+                                contentDescription = null
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                modifier = Modifier.height(14.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
                         Text(
-                            text = "Creating digest…",
+                            text = "Processing…",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -331,7 +343,7 @@ fun DigestHistoryItem(
 
             // Action buttons
             Row {
-                if (digest.isFromGhostwriter && showPdfDownload && digest.isComplete) {
+                if (digest.isFromGhostwriter && showPdfDownload && isReady) {
                     TextButton(
                         onClick = onDownloadPdf,
                         enabled = !isDownloading
@@ -339,14 +351,14 @@ fun DigestHistoryItem(
                         Text(if (isDownloading) "Downloading..." else "PDF")
                     }
                 }
-                if (digest.isFromGhostwriter && !epubExists && digest.isComplete) {
+                if (digest.isFromGhostwriter && !epubExists && isReady) {
                     TextButton(
                         onClick = onDownload,
                         enabled = !isDownloading
                     ) {
                         Text(if (isDownloading) "Downloading..." else "Download")
                     }
-                } else if (digest.isComplete) {
+                } else if (isReady) {
                     IconButton(onClick = onOpenExternal) {
                         Icon(
                             imageVector = Icons.Default.OpenInNew,
