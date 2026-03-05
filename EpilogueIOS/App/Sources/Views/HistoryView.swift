@@ -15,6 +15,7 @@ struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
     @Query(sort: \Digest.generatedAt, order: .reverse) private var digests: [Digest]
+    @AppStorage("eink_mode") private var einkMode = false
     @State private var digestToDelete: Digest?
     @State private var digestToShare: Digest?
     @State private var downloadingDigestIDs: Set<UUID> = []
@@ -44,10 +45,18 @@ struct HistoryView: View {
                                 NavigationLink {
                                     DigestDetailView(digest: digest)
                                 } label: {
-                                    DigestRow(digest: digest, epubAvailable: epubAvailable)
+                                    DigestRow(
+                                        digest: digest,
+                                        epubAvailable: epubAvailable,
+                                        einkMode: einkMode
+                                    )
                                 }
                             } else {
-                                DigestRow(digest: digest, epubAvailable: epubAvailable)
+                                DigestRow(
+                                    digest: digest,
+                                    epubAvailable: epubAvailable,
+                                    einkMode: einkMode
+                                )
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
@@ -259,6 +268,7 @@ struct HistoryView: View {
 struct DigestRow: View {
     let digest: Digest
     let epubAvailable: Bool
+    let einkMode: Bool
 
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -298,9 +308,14 @@ struct DigestRow: View {
 
                 if lifecycle == .processing {
                     HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Creating digest…")
+                        if einkMode {
+                            Image(systemName: "hourglass")
+                                .font(.caption)
+                        } else {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text("Processing…")
                             .font(.caption)
                     }
                 } else {
@@ -347,13 +362,16 @@ private enum DigestLifecycleState {
 
 private extension Digest {
     var lifecycleState: DigestLifecycleState {
+        if isProcessing {
+            return .processing
+        }
+        if isFailed {
+            return .failed
+        }
         if isComplete {
             return .completed
         }
-        if let message = errorMessage, !message.isEmpty {
-            return .failed
-        }
-        return .processing
+        return .failed
     }
 }
 
