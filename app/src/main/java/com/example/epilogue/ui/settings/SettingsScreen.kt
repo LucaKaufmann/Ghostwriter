@@ -61,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.text.HtmlCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.epilogue.config.FeatureFlags
 import com.example.epilogue.data.remote.ghostwriter.DigestStatusResponse
 import com.example.epilogue.data.remote.ghostwriter.HealthResponse
 import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
@@ -77,6 +78,8 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val ghostwriterSettingsEnabled = FeatureFlags.ghostwriterSettingsEnabled
+    val showGhostwriterSettings = ghostwriterSettingsEnabled || uiState.ghostwriterEnabled
 
     // SAF directory picker launcher
     val directoryPickerLauncher = rememberLauncherForActivityResult(
@@ -234,99 +237,101 @@ fun SettingsScreen(
 
             Divider()
 
-            // Ghostwriter Backend Section
-            SettingsSection(title = "Ghostwriter Backend") {
-                GhostwriterInput(
-                    enabled = uiState.ghostwriterEnabled,
-                    downloadEpubsOnSync = uiState.ghostwriterDownloadEpubsOnSync,
-                    url = uiState.ghostwriterUrl,
-                    apiKey = uiState.ghostwriterApiKey,
-                    isTesting = uiState.ghostwriterTesting,
-                    configActionRunning = uiState.configActionRunning,
-                    integrationActionRunning = uiState.integrationActionRunning,
-                    includePodcastsInDigest = uiState.includePodcastsInDigest,
-                    includeYoutubeInDigest = uiState.includeYoutubeInDigest,
-                    coverEnabled = uiState.coverEnabled,
-                    coverOverlayEnabled = uiState.coverOverlayEnabled,
-                    coverProvider = uiState.coverProvider,
-                    coverQuality = uiState.coverQuality,
-                    coverPrompt = uiState.coverPrompt,
-                    mediaRefreshing = uiState.mediaRefreshing,
-                    mediaTriggering = uiState.mediaTriggering,
-                    podcastFeedCount = uiState.podcastFeedCount,
-                    youtubeFeedCount = uiState.youtubeFeedCount,
-                    podcastFeeds = uiState.podcastFeeds,
-                    youtubeFeeds = uiState.youtubeFeeds,
-                    mediaStatus = uiState.mediaStatus,
-                    recentMediaItems = uiState.recentMediaItems,
-                    mediaItemDetailLoading = uiState.mediaItemDetailLoading,
-                    mediaItemDetail = uiState.mediaItemDetail,
-                    newlyCreatedAuthToken = uiState.newlyCreatedAuthToken,
-                    logsRefreshing = uiState.logsRefreshing,
-                    logFiles = uiState.logFiles,
-                    health = uiState.ghostwriterHealth,
-                    wallabagIntegration = uiState.wallabagIntegration,
-                    newslettersIntegration = uiState.newslettersIntegration,
-                    authTokensLoading = uiState.authTokensLoading,
-                    authTokensActionRunning = uiState.authTokensActionRunning,
-                    authTokens = uiState.authTokens,
-                    authTokenCreateName = uiState.authTokenCreateName,
-                    onEnabledChange = viewModel::updateGhostwriterEnabled,
-                    onUrlChange = viewModel::updateGhostwriterUrl,
-                    onSaveUrl = viewModel::saveGhostwriterUrl,
-                    onApiKeyChange = viewModel::updateGhostwriterApiKey,
-                    onSaveApiKey = viewModel::saveGhostwriterApiKey,
-                    onDownloadEpubsOnSyncChange = viewModel::updateGhostwriterDownloadEpubsOnSync,
-                    onTestConnection = viewModel::testGhostwriterConnection,
-                    onIncludePodcastsInDigestChange = viewModel::updateIncludePodcastsInDigest,
-                    onIncludeYoutubeInDigestChange = viewModel::updateIncludeYoutubeInDigest,
-                    onCoverEnabledChange = viewModel::updateCoverEnabled,
-                    onCoverOverlayEnabledChange = viewModel::updateCoverOverlayEnabled,
-                    onCoverProviderChange = viewModel::updateCoverProvider,
-                    onCoverQualityChange = viewModel::updateCoverQuality,
-                    onCoverPromptChange = viewModel::updateCoverPrompt,
-                    onSaveCoverPrompt = viewModel::saveCoverPrompt,
-                    onPreviewWallabag = viewModel::previewWallabag,
-                    onPreviewNewsletters = viewModel::previewNewsletters,
-                    onClearWallabagSeen = viewModel::clearWallabagSeen,
-                    onClearNewslettersSeen = viewModel::clearNewslettersSeen,
-                    onRefreshMediaStatus = viewModel::refreshMediaOverview,
-                    onTriggerMediaProcessing = viewModel::triggerMediaProcessing,
-                    onCreatePodcastFeed = viewModel::createPodcastFeed,
-                    onCreateYoutubeFeed = viewModel::createYouTubeFeed,
-                    onToggleMediaFeedActive = viewModel::updateMediaFeedActive,
-                    onUpdateMediaFeedMode = viewModel::updateMediaFeedMode,
-                    onUpdateMediaFeedMaxItems = viewModel::updateMediaFeedMaxItems,
-                    onDeleteMediaFeed = viewModel::deleteMediaFeed,
-                    onOpenMediaItemDetail = viewModel::loadMediaItemDetail,
-                    onRefreshLogs = viewModel::refreshLogFiles,
-                    onRefreshAuthTokens = viewModel::refreshAuthTokens,
-                    onAuthTokenCreateNameChange = viewModel::updateAuthTokenCreateName,
-                    onCreateAuthToken = viewModel::createAuthToken,
-                    onRevokeAuthToken = viewModel::revokeAuthToken,
-                    onDismissMediaItemDetail = viewModel::clearMediaItemDetail,
-                    onDismissCreatedAuthToken = viewModel::clearNewlyCreatedAuthToken,
-                    onStartNewsletterOAuth = {
-                        val base = uiState.ghostwriterUrl.trim()
-                        if (base.isNotBlank()) {
-                            val withoutSlash = base.trimEnd('/')
-                            val apiBase = if (withoutSlash.endsWith("/api")) {
-                                withoutSlash
-                            } else {
-                                "$withoutSlash/api"
-                            }
-                            val oauthUrl = "$apiBase/newsletters/oauth/start"
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl))
-                                )
+            if (showGhostwriterSettings) {
+                // Ghostwriter Backend Section
+                SettingsSection(title = "Ghostwriter Backend") {
+                    GhostwriterInput(
+                        enabled = uiState.ghostwriterEnabled,
+                        downloadEpubsOnSync = uiState.ghostwriterDownloadEpubsOnSync,
+                        url = uiState.ghostwriterUrl,
+                        apiKey = uiState.ghostwriterApiKey,
+                        isTesting = uiState.ghostwriterTesting,
+                        configActionRunning = uiState.configActionRunning,
+                        integrationActionRunning = uiState.integrationActionRunning,
+                        includePodcastsInDigest = uiState.includePodcastsInDigest,
+                        includeYoutubeInDigest = uiState.includeYoutubeInDigest,
+                        coverEnabled = uiState.coverEnabled,
+                        coverOverlayEnabled = uiState.coverOverlayEnabled,
+                        coverProvider = uiState.coverProvider,
+                        coverQuality = uiState.coverQuality,
+                        coverPrompt = uiState.coverPrompt,
+                        mediaRefreshing = uiState.mediaRefreshing,
+                        mediaTriggering = uiState.mediaTriggering,
+                        podcastFeedCount = uiState.podcastFeedCount,
+                        youtubeFeedCount = uiState.youtubeFeedCount,
+                        podcastFeeds = uiState.podcastFeeds,
+                        youtubeFeeds = uiState.youtubeFeeds,
+                        mediaStatus = uiState.mediaStatus,
+                        recentMediaItems = uiState.recentMediaItems,
+                        mediaItemDetailLoading = uiState.mediaItemDetailLoading,
+                        mediaItemDetail = uiState.mediaItemDetail,
+                        newlyCreatedAuthToken = uiState.newlyCreatedAuthToken,
+                        logsRefreshing = uiState.logsRefreshing,
+                        logFiles = uiState.logFiles,
+                        health = uiState.ghostwriterHealth,
+                        wallabagIntegration = uiState.wallabagIntegration,
+                        newslettersIntegration = uiState.newslettersIntegration,
+                        authTokensLoading = uiState.authTokensLoading,
+                        authTokensActionRunning = uiState.authTokensActionRunning,
+                        authTokens = uiState.authTokens,
+                        authTokenCreateName = uiState.authTokenCreateName,
+                        onEnabledChange = viewModel::updateGhostwriterEnabled,
+                        onUrlChange = viewModel::updateGhostwriterUrl,
+                        onSaveUrl = viewModel::saveGhostwriterUrl,
+                        onApiKeyChange = viewModel::updateGhostwriterApiKey,
+                        onSaveApiKey = viewModel::saveGhostwriterApiKey,
+                        onDownloadEpubsOnSyncChange = viewModel::updateGhostwriterDownloadEpubsOnSync,
+                        onTestConnection = viewModel::testGhostwriterConnection,
+                        onIncludePodcastsInDigestChange = viewModel::updateIncludePodcastsInDigest,
+                        onIncludeYoutubeInDigestChange = viewModel::updateIncludeYoutubeInDigest,
+                        onCoverEnabledChange = viewModel::updateCoverEnabled,
+                        onCoverOverlayEnabledChange = viewModel::updateCoverOverlayEnabled,
+                        onCoverProviderChange = viewModel::updateCoverProvider,
+                        onCoverQualityChange = viewModel::updateCoverQuality,
+                        onCoverPromptChange = viewModel::updateCoverPrompt,
+                        onSaveCoverPrompt = viewModel::saveCoverPrompt,
+                        onPreviewWallabag = viewModel::previewWallabag,
+                        onPreviewNewsletters = viewModel::previewNewsletters,
+                        onClearWallabagSeen = viewModel::clearWallabagSeen,
+                        onClearNewslettersSeen = viewModel::clearNewslettersSeen,
+                        onRefreshMediaStatus = viewModel::refreshMediaOverview,
+                        onTriggerMediaProcessing = viewModel::triggerMediaProcessing,
+                        onCreatePodcastFeed = viewModel::createPodcastFeed,
+                        onCreateYoutubeFeed = viewModel::createYouTubeFeed,
+                        onToggleMediaFeedActive = viewModel::updateMediaFeedActive,
+                        onUpdateMediaFeedMode = viewModel::updateMediaFeedMode,
+                        onUpdateMediaFeedMaxItems = viewModel::updateMediaFeedMaxItems,
+                        onDeleteMediaFeed = viewModel::deleteMediaFeed,
+                        onOpenMediaItemDetail = viewModel::loadMediaItemDetail,
+                        onRefreshLogs = viewModel::refreshLogFiles,
+                        onRefreshAuthTokens = viewModel::refreshAuthTokens,
+                        onAuthTokenCreateNameChange = viewModel::updateAuthTokenCreateName,
+                        onCreateAuthToken = viewModel::createAuthToken,
+                        onRevokeAuthToken = viewModel::revokeAuthToken,
+                        onDismissMediaItemDetail = viewModel::clearMediaItemDetail,
+                        onDismissCreatedAuthToken = viewModel::clearNewlyCreatedAuthToken,
+                        onStartNewsletterOAuth = {
+                            val base = uiState.ghostwriterUrl.trim()
+                            if (base.isNotBlank()) {
+                                val withoutSlash = base.trimEnd('/')
+                                val apiBase = if (withoutSlash.endsWith("/api")) {
+                                    withoutSlash
+                                } else {
+                                    "$withoutSlash/api"
+                                }
+                                val oauthUrl = "$apiBase/newsletters/oauth/start"
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl))
+                                    )
+                                }
                             }
                         }
-                    }
-                )
-            }
+                    )
+                }
 
-            Divider()
+                Divider()
+            }
 
             // Manual Run Section
             SettingsSection(title = "Manual Generation") {
