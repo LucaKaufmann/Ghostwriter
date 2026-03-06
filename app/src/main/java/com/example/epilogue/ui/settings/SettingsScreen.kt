@@ -79,6 +79,7 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val ghostwriterSettingsEnabled = FeatureFlags.ghostwriterSettingsEnabled
+    val showGhostwriterSettings = ghostwriterSettingsEnabled || uiState.ghostwriterEnabled
 
     // SAF directory picker launcher
     val directoryPickerLauncher = rememberLauncherForActivityResult(
@@ -236,7 +237,7 @@ fun SettingsScreen(
 
             Divider()
 
-            if (ghostwriterSettingsEnabled) {
+            if (showGhostwriterSettings) {
                 // Ghostwriter Backend Section
                 SettingsSection(title = "Ghostwriter Backend") {
                     GhostwriterInput(

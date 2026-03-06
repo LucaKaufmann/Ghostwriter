@@ -37,7 +37,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if ghostwriterSettingsEnabled {
+                if ghostwriterSettingsEnabled || ghostwriterEnabled {
                     // MARK: - Ghostwriter Sync
                     Section {
                         NavigationLink {
