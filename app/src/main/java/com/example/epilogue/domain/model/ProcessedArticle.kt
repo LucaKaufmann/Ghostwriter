@@ -7,5 +7,7 @@ data class ProcessedArticle(
     val originalUrl: String,
     val isSummary: Boolean,
     val feedUrl: String = "",
-    val feedName: String = ""
+    val feedName: String = "",
+    val publishedAt: Long? = null,
+    val wordCount: Int = 0
 )

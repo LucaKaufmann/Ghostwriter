@@ -23,6 +23,7 @@ import OSLog
 public final class FeedSyncService {
     private let settingsRepository: SettingsRepositoryProtocol
     private let feedRepository: FeedRepositoryProtocol
+    private let sharedSyncBridge: SharedFeedSyncBridge
     private let logger = Logger(subsystem: "com.epilogue", category: "FeedSync")
 
     public init(
@@ -31,6 +32,10 @@ public final class FeedSyncService {
     ) {
         self.settingsRepository = settingsRepository
         self.feedRepository = feedRepository
+        self.sharedSyncBridge = makeSharedFeedSyncBridge(
+            settingsRepository: settingsRepository,
+            feedRepository: feedRepository
+        )
     }
 
     /// Perform bi-directional feed sync with Ghostwriter
@@ -40,48 +45,21 @@ public final class FeedSyncService {
             return
         }
 
-        let client = try await createClient()
-
         logger.info("Starting feed sync with Ghostwriter")
+        let syncState = tracker?.beginInterval("Feed Sync (shared)")
+        let outcome = try await sharedSyncBridge.sync()
+        if let syncState { tracker?.endInterval("Feed Sync (shared)", state: syncState) }
 
-        // Step 1: PUSH - Sync local feeds to server
-        let pushState = tracker?.beginInterval("Feed Push (in sync)")
-        try await pushLocalFeeds(client: client, tracker: tracker)
-        if let pushState { tracker?.endInterval("Feed Push (in sync)", state: pushState) }
-
-        // Step 2: PULL - Get changes from server
-        let lastSyncTime = try await settingsRepository.getLastFeedSyncTime()
-        logger.info("Pulling feed changes since: \(lastSyncTime?.description ?? "initial sync")")
-
-        let pullState = tracker?.beginInterval("Feed Pull")
-        let changes = try await client.getFeedChanges(since: lastSyncTime)
-        if let pullState { tracker?.endInterval("Feed Pull", state: pullState) }
-
-        // Step 3: Apply server feeds locally
-        if !changes.feeds.isEmpty {
-            let serverFeeds = changes.feeds.map { convertResponseToFeed($0) }
-            logger.info("Applying \(serverFeeds.count) feeds from server")
-            try await feedRepository.upsertAll(serverFeeds)
+        switch outcome {
+        case let .success(pushed, updatedFeeds, deletedFeeds):
+            logger.info(
+                "Feed sync completed: pushed=\(pushed), updated=\(updatedFeeds), deleted=\(deletedFeeds)"
+            )
+        case let .error(message):
+            throw GhostwriterError.httpError(statusCode: 500, message: message)
+        case .notConfigured:
+            logger.debug("Ghostwriter not configured, skipping feed sync")
         }
-
-        // Step 4: Apply tombstones (delete locally)
-        if !changes.tombstones.isEmpty {
-            let tombstoneURLs = changes.tombstones.map { $0.url }
-            logger.info("Applying \(tombstoneURLs.count) tombstones (deleting local feeds)")
-            try await feedRepository.deleteByURLs(tombstoneURLs)
-        }
-
-        // Step 5: Clear locallyModified flags
-        try await feedRepository.clearAllLocallyModified()
-
-        // Step 6: Update sync timestamp
-        if let serverTime = changes.serverTimestamp.toISO8601Date() {
-            try await settingsRepository.setLastFeedSyncTime(serverTime)
-        } else {
-            try await settingsRepository.setLastFeedSyncTime(Date())
-        }
-
-        logger.info("Feed sync completed: \(changes.feeds.count) feeds updated, \(changes.tombstones.count) deleted")
     }
 
     /// Push local feeds to the server

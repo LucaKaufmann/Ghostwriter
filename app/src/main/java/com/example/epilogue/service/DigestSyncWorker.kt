@@ -12,11 +12,16 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.codable.epilogue.R
+import com.example.epilogue.data.remote.ghostwriter.DigestResponse
 import com.example.epilogue.data.remote.ghostwriter.SyncDigest
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
 import com.example.epilogue.data.repository.SettingsRepository
+import com.example.epilogue.shared.ghostwriter.DigestArticleResponse as SharedDigestArticleResponse
+import com.example.epilogue.shared.sync.DigestSyncPlan
+import com.example.epilogue.shared.sync.DigestSyncUseCase
+import com.example.epilogue.shared.sync.SyncPortResult
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.async
@@ -31,7 +36,7 @@ import java.util.TimeZone
 
 /**
  * WorkManager worker that syncs digests from Ghostwriter backend.
- * Checks for new completed digests and downloads them to the device.
+ * Sync planning logic is in shared KMP DigestSyncUseCase.
  */
 @HiltWorker
 class DigestSyncWorker @AssistedInject constructor(
@@ -40,7 +45,8 @@ class DigestSyncWorker @AssistedInject constructor(
     private val ghostwriterRepository: GhostwriterRepository,
     private val digestRepository: DigestRepository,
     private val settingsRepository: SettingsRepository,
-    private val epubExporter: EpubExporter
+    private val epubExporter: EpubExporter,
+    private val digestSyncUseCase: DigestSyncUseCase
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -62,12 +68,6 @@ class DigestSyncWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         Log.i(TAG, "Starting digest sync from Ghostwriter (attempt ${runAttemptCount})")
 
-        // Check if Ghostwriter is configured
-        if (!settingsRepository.isGhostwriterConfigured()) {
-            Log.i(TAG, "Ghostwriter not configured, skipping sync")
-            return Result.success()
-        }
-
         try {
             setForeground(createForegroundInfo())
         } catch (e: IllegalStateException) {
@@ -75,13 +75,34 @@ class DigestSyncWorker @AssistedInject constructor(
         }
 
         return try {
-            // Try combined sync first, fall back to individual calls
-            val result = tryCombinedSync()
-            if (result != null) {
-                result
-            } else {
-                Log.w(TAG, "Combined sync failed, falling back to individual calls")
-                doWorkLegacy()
+            when (val plan = digestSyncUseCase.planSync()) {
+                is DigestSyncPlan.NotConfigured -> {
+                    Log.i(TAG, "Ghostwriter not configured, skipping sync")
+                    Result.success()
+                }
+
+                is DigestSyncPlan.Error -> {
+                    Log.e(TAG, "Failed to create digest sync plan: ${plan.message}")
+                    retryOrFail()
+                }
+
+                is DigestSyncPlan.Combined -> {
+                    val processedCount = downloadDigestsParallel(
+                        digests = plan.digests.map { it.toApp() },
+                        shouldDownloadEpubs = plan.shouldDownloadEpubs
+                    )
+                    Log.i(TAG, "Processed $processedCount new digests via combined sync")
+                    settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())
+                    runRemoteEpubCleanup()
+                    Result.success()
+                }
+
+                is DigestSyncPlan.Legacy -> {
+                    processLegacyDigests(
+                        digests = plan.digests.map { it.toApp() },
+                        shouldDownloadEpubs = plan.shouldDownloadEpubs
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error syncing digests", e)
@@ -89,53 +110,6 @@ class DigestSyncWorker @AssistedInject constructor(
         }
     }
 
-    /**
-     * Try using the combined /sync endpoint.
-     * Returns null if it fails (so caller can fall back to legacy).
-     */
-    private suspend fun tryCombinedSync(): Result? {
-        val existingRemoteIds = digestRepository.getAllRemoteIds()
-        val lastFeedSyncTime = settingsRepository.getLastFeedSyncTime()
-        val feedSince = if (lastFeedSyncTime > 0) lastFeedSyncTime else null
-
-        val syncResult = ghostwriterRepository.performSync(feedSince, existingRemoteIds)
-
-        return when (syncResult) {
-            is GhostwriterResult.Success -> {
-                val syncData = syncResult.data
-                val newDigests = syncData.digests.newDigests
-                val shouldDownloadEpubs = settingsRepository.shouldDownloadGhostwriterEpubsOnSync()
-
-                Log.i(
-                    TAG,
-                    "Combined sync: ${newDigests.size} new digests " +
-                            if (shouldDownloadEpubs) "to download" else "to index only"
-                )
-
-                val processedCount = downloadDigestsParallel(
-                    digests = newDigests,
-                    shouldDownloadEpubs = shouldDownloadEpubs
-                )
-
-                Log.i(TAG, "Processed $processedCount new digests via combined sync")
-                settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())
-                runRemoteEpubCleanup()
-                Result.success()
-            }
-            is GhostwriterResult.Error -> {
-                Log.w(TAG, "Combined sync endpoint failed: ${syncResult.message}")
-                null // Signal to fall back
-            }
-            is GhostwriterResult.NotConfigured -> {
-                Log.i(TAG, "Ghostwriter not configured")
-                Result.success()
-            }
-        }
-    }
-
-    /**
-     * Download or index digests in parallel with a concurrency limit of 3.
-     */
     private suspend fun downloadDigestsParallel(
         digests: List<SyncDigest>,
         shouldDownloadEpubs: Boolean
@@ -163,10 +137,6 @@ class DigestSyncWorker @AssistedInject constructor(
         return processedCount
     }
 
-    /**
-     * Download a single digest EPUB and save it with embedded articles.
-     * Returns true if successful.
-     */
     private suspend fun downloadAndSaveDigest(digest: SyncDigest): Boolean {
         val downloadResult = ghostwriterRepository.downloadDigest(digest.filename)
 
@@ -182,7 +152,6 @@ class DigestSyncWorker @AssistedInject constructor(
                     System.currentTimeMillis()
                 }
 
-                // Articles are already in the sync response
                 val articles = digest.articles.ifEmpty { null }
 
                 digestRepository.saveRemoteDigest(
@@ -194,15 +163,11 @@ class DigestSyncWorker @AssistedInject constructor(
                     articles = articles
                 )
 
-                // Export to custom directory if configured
                 when (val exportResult = epubExporter.exportToCustomDirectory(file)) {
-                    is ExportResult.Success ->
-                        Log.i(TAG, "Exported to custom directory")
-                    is ExportResult.PermissionRevoked ->
-                        Log.w(TAG, "Custom export permission revoked")
-                    is ExportResult.Error ->
-                        Log.e(TAG, "Custom export failed: ${exportResult.message}")
-                    ExportResult.NotConfigured -> { /* No-op */ }
+                    is ExportResult.Success -> Log.i(TAG, "Exported to custom directory")
+                    is ExportResult.PermissionRevoked -> Log.w(TAG, "Custom export permission revoked")
+                    is ExportResult.Error -> Log.e(TAG, "Custom export failed: ${exportResult.message}")
+                    ExportResult.NotConfigured -> { }
                 }
 
                 true
@@ -218,10 +183,6 @@ class DigestSyncWorker @AssistedInject constructor(
         }
     }
 
-    /**
-     * Save digest metadata/articles without downloading the EPUB file.
-     * The EPUB path still points to where the file will be downloaded on demand.
-     */
     private suspend fun saveDigestMetadataOnly(digest: SyncDigest): Boolean {
         return try {
             val generatedAt = try {
@@ -250,118 +211,96 @@ class DigestSyncWorker @AssistedInject constructor(
         }
     }
 
-    /**
-     * Legacy sync using individual API calls (fallback).
-     */
-    private suspend fun doWorkLegacy(): Result {
-        val digestsResult = ghostwriterRepository.listDigests()
-        val shouldDownloadEpubs = settingsRepository.shouldDownloadGhostwriterEpubsOnSync()
+    private suspend fun processLegacyDigests(
+        digests: List<DigestResponse>,
+        shouldDownloadEpubs: Boolean
+    ): Result {
+        Log.i(
+            TAG,
+            "Legacy sync: ${digests.size} new digests " +
+                if (shouldDownloadEpubs) "to download" else "to index only"
+        )
 
-        return when (digestsResult) {
-            is GhostwriterResult.Success -> {
-                val remoteDigests = digestsResult.data
-                val existingRemoteIds = digestRepository.getAllRemoteIds().toSet()
-
-                val newDigests = remoteDigests.filter { digest ->
-                    digest.status == "completed" &&
-                    digest.id !in existingRemoteIds
+        var processedCount = 0
+        for (digest in digests) {
+            if (!shouldDownloadEpubs) {
+                val generatedAt = try {
+                    digest.completedAt?.let { dateFormat.parse(it)?.time }
+                        ?: System.currentTimeMillis()
+                } catch (e: Exception) {
+                    System.currentTimeMillis()
                 }
 
-                Log.i(
-                    TAG,
-                    "Legacy sync: ${newDigests.size} new digests " +
-                            if (shouldDownloadEpubs) "to download" else "to index only"
+                val articlesResult = digestSyncUseCase.getDigestArticles(digest.id)
+                val articles = when (articlesResult) {
+                    is SyncPortResult.Success -> articlesResult.data.articles.map { it.toApp() }
+                    is SyncPortResult.Error,
+                    is SyncPortResult.NotConfigured -> null
+                }
+
+                digestRepository.saveRemoteDigest(
+                    remoteId = digest.id,
+                    epubFilePath = getExpectedEpubPath(digest.filename),
+                    articleCount = digest.articleCount,
+                    generatedAt = generatedAt,
+                    period = digest.period,
+                    articles = articles
                 )
+                processedCount++
+                continue
+            }
 
-                var processedCount = 0
-                for (digest in newDigests) {
-                    if (!shouldDownloadEpubs) {
-                        val generatedAt = try {
-                            digest.completedAt?.let { dateFormat.parse(it)?.time }
-                                ?: System.currentTimeMillis()
-                        } catch (e: Exception) {
-                            System.currentTimeMillis()
-                        }
+            val downloadResult = ghostwriterRepository.downloadDigest(digest.filename)
 
-                        val articlesResult = ghostwriterRepository.getDigestArticles(digest.id)
-                        val articles = when (articlesResult) {
-                            is GhostwriterResult.Success -> articlesResult.data.articles
-                            is GhostwriterResult.Error -> null
-                            is GhostwriterResult.NotConfigured -> null
-                        }
+            when (downloadResult) {
+                is GhostwriterResult.Success -> {
+                    val file = downloadResult.data
 
-                        digestRepository.saveRemoteDigest(
-                            remoteId = digest.id,
-                            epubFilePath = getExpectedEpubPath(digest.filename),
-                            articleCount = digest.articleCount,
-                            generatedAt = generatedAt,
-                            period = digest.period,
-                            articles = articles
-                        )
-                        processedCount++
-                        continue
+                    val generatedAt = try {
+                        digest.completedAt?.let { dateFormat.parse(it)?.time }
+                            ?: System.currentTimeMillis()
+                    } catch (e: Exception) {
+                        System.currentTimeMillis()
                     }
 
-                    val downloadResult = ghostwriterRepository.downloadDigest(digest.filename)
-
-                    when (downloadResult) {
-                        is GhostwriterResult.Success -> {
-                            val file = downloadResult.data
-
-                            val generatedAt = try {
-                                digest.completedAt?.let { dateFormat.parse(it)?.time }
-                                    ?: System.currentTimeMillis()
-                            } catch (e: Exception) {
-                                System.currentTimeMillis()
-                            }
-
-                            val articlesResult = ghostwriterRepository.getDigestArticles(digest.id)
-                            val articles = when (articlesResult) {
-                                is GhostwriterResult.Success -> articlesResult.data.articles
-                                is GhostwriterResult.Error -> null
-                                is GhostwriterResult.NotConfigured -> null
-                            }
-
-                            digestRepository.saveRemoteDigest(
-                                remoteId = digest.id,
-                                epubFilePath = file.absolutePath,
-                                articleCount = digest.articleCount,
-                                generatedAt = generatedAt,
-                                period = digest.period,
-                                articles = articles
-                            )
-
-                            when (val exportResult = epubExporter.exportToCustomDirectory(file)) {
-                                is ExportResult.Success -> Log.i(TAG, "Exported to custom directory")
-                                is ExportResult.PermissionRevoked -> Log.w(TAG, "Custom export permission revoked")
-                                is ExportResult.Error -> Log.e(TAG, "Custom export failed: ${exportResult.message}")
-                                ExportResult.NotConfigured -> { }
-                            }
-
-                            processedCount++
-                        }
-                        is GhostwriterResult.Error -> {
-                            Log.e(TAG, "Failed to download ${digest.filename}: ${downloadResult.message}")
-                        }
-                        is GhostwriterResult.NotConfigured -> {
-                            Log.e(TAG, "Ghostwriter not configured during download")
-                        }
+                    val articlesResult = digestSyncUseCase.getDigestArticles(digest.id)
+                    val articles = when (articlesResult) {
+                        is SyncPortResult.Success -> articlesResult.data.articles.map { it.toApp() }
+                        is SyncPortResult.Error,
+                        is SyncPortResult.NotConfigured -> null
                     }
+
+                    digestRepository.saveRemoteDigest(
+                        remoteId = digest.id,
+                        epubFilePath = file.absolutePath,
+                        articleCount = digest.articleCount,
+                        generatedAt = generatedAt,
+                        period = digest.period,
+                        articles = articles
+                    )
+
+                    when (val exportResult = epubExporter.exportToCustomDirectory(file)) {
+                        is ExportResult.Success -> Log.i(TAG, "Exported to custom directory")
+                        is ExportResult.PermissionRevoked -> Log.w(TAG, "Custom export permission revoked")
+                        is ExportResult.Error -> Log.e(TAG, "Custom export failed: ${exportResult.message}")
+                        ExportResult.NotConfigured -> { }
+                    }
+
+                    processedCount++
                 }
-
-                Log.i(TAG, "Legacy sync processed $processedCount digests")
-                settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())
-                runRemoteEpubCleanup()
-                Result.success()
-            }
-            is GhostwriterResult.Error -> {
-                Log.e(TAG, "Failed to list digests: ${digestsResult.message}")
-                retryOrFail()
-            }
-            is GhostwriterResult.NotConfigured -> {
-                Result.success()
+                is GhostwriterResult.Error -> {
+                    Log.e(TAG, "Failed to download ${digest.filename}: ${downloadResult.message}")
+                }
+                is GhostwriterResult.NotConfigured -> {
+                    Log.e(TAG, "Ghostwriter not configured during download")
+                }
             }
         }
+
+        Log.i(TAG, "Legacy sync processed $processedCount digests")
+        settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())
+        runRemoteEpubCleanup()
+        return Result.success()
     }
 
     private fun retryOrFail(): Result {
@@ -382,9 +321,6 @@ class DigestSyncWorker @AssistedInject constructor(
         return File(documentsDir, filename).absolutePath
     }
 
-    /**
-     * Remove stale downloaded remote EPUB files while keeping digest metadata.
-     */
     private suspend fun runRemoteEpubCleanup() {
         val deletedCount = digestRepository.cleanupStaleRemoteEpubFiles(REMOTE_EPUB_RETENTION_MILLIS)
         if (deletedCount > 0) {
@@ -432,3 +368,45 @@ class DigestSyncWorker @AssistedInject constructor(
         notificationManager.createNotificationChannel(channel)
     }
 }
+
+private fun com.example.epilogue.shared.ghostwriter.SyncDigest.toApp(): SyncDigest = SyncDigest(
+    id = id,
+    filename = filename,
+    availableFormats = availableFormats,
+    period = period,
+    status = status,
+    stage = stage,
+    articleCount = articleCount,
+    errorMessage = errorMessage,
+    createdAt = createdAt,
+    completedAt = completedAt,
+    articles = articles.map { it.toApp() }
+)
+
+private fun com.example.epilogue.shared.ghostwriter.DigestResponse.toApp(): DigestResponse = DigestResponse(
+    id = id,
+    filename = filename,
+    availableFormats = availableFormats,
+    period = period,
+    status = status,
+    stage = stage,
+    articleCount = articleCount,
+    errorMessage = errorMessage,
+    createdAt = createdAt,
+    completedAt = completedAt
+)
+
+private fun SharedDigestArticleResponse.toApp(): com.example.epilogue.data.remote.ghostwriter.DigestArticleResponse =
+    com.example.epilogue.data.remote.ghostwriter.DigestArticleResponse(
+        id = id,
+        title = title,
+        url = url,
+        mode = mode,
+        wordCount = wordCount,
+        content = content,
+        contentHtml = contentHtml,
+        author = author,
+        feedTitle = feedTitle,
+        sortOrder = sortOrder,
+        aiFailed = aiFailed
+    )
