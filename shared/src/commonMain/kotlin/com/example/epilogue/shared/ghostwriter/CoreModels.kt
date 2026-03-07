@@ -128,6 +128,11 @@ data class DigestArticlesResponse(
 )
 
 @Serializable
+data class DigestListResponse(
+    @SerialName("digests") val digests: List<DigestResponse>
+)
+
+@Serializable
 data class DigestArticleSourceResponse(
     @SerialName("digest_id") val digestId: String,
     @SerialName("article_id") val articleId: String,

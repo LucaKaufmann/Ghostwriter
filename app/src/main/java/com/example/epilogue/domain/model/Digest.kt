@@ -17,6 +17,8 @@ data class Digest(
     val isComplete: Boolean = true,
     val errorMessage: String? = null
 ) {
+    val deepDiveCount: Int get() = fidelityCount
+
     /** Returns true if this digest was downloaded from Ghostwriter */
     val isFromGhostwriter: Boolean get() = remoteId != null
 

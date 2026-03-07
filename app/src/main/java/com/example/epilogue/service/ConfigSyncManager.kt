@@ -2,317 +2,78 @@ package com.example.epilogue.service
 
 import android.util.Log
 import com.example.epilogue.data.remote.ghostwriter.ClientConfigResponse
-import com.example.epilogue.data.repository.GhostwriterRepository
-import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
-import com.example.epilogue.data.repository.SettingsRepository
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
+import com.example.epilogue.shared.ghostwriter.ClientConfigResponse as SharedClientConfigResponse
+import com.example.epilogue.shared.ghostwriter.IntegrationStatus as SharedIntegrationStatus
+import com.example.epilogue.shared.sync.ConfigSyncUseCase
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Manages configuration sync between the app and Ghostwriter backend.
- *
- * Sync happens on app startup with last-write-wins conflict resolution:
- * - If server config is newer, apply server config locally
- * - If local config is newer, push local config to server
+ * Android wrapper around shared KMP config sync logic.
  */
 @Singleton
 class ConfigSyncManager @Inject constructor(
-    private val settingsRepository: SettingsRepository,
-    private val ghostwriterRepository: GhostwriterRepository
+    private val configSyncUseCase: ConfigSyncUseCase
 ) {
     companion object {
         private const val TAG = "ConfigSyncManager"
     }
 
-    /**
-     * Sync configuration with the server.
-     * Should be called on app startup when Ghostwriter is enabled.
-     *
-     * @return true if sync was successful, false otherwise
-     */
-    suspend fun syncConfig(): Boolean = withContext(Dispatchers.IO) {
-        if (!settingsRepository.isGhostwriterConfigured()) {
-            Log.d(TAG, "Ghostwriter not configured, skipping config sync")
-            return@withContext false
-        }
-
-        Log.i(TAG, "Starting config sync...")
-
-        // Get server config
-        val serverResult = ghostwriterRepository.getConfig()
-        when (serverResult) {
-            is GhostwriterResult.Success -> {
-                val serverConfig = serverResult.data
-                val localUpdatedAt = settingsRepository.getConfigUpdatedAt()
-
-                if (localUpdatedAt == null) {
-                    // First sync - apply server config
-                    Log.i(TAG, "First sync, applying server config")
-                    applyServerConfig(serverConfig)
-                    return@withContext true
-                }
-
-                // Compare timestamps
-                val serverUpdatedAt = serverConfig.updatedAt
-                if (serverUpdatedAt == null) {
-                    // Server doesn't provide updated_at, just apply
-                    Log.i(TAG, "Server has no updated_at, applying server config")
-                    applyServerConfig(serverConfig)
-                    return@withContext true
-                }
-                val serverTime = parseTimestamp(serverUpdatedAt)
-                val localTime = parseTimestamp(localUpdatedAt)
-
-                when {
-                    serverTime > localTime -> {
-                        // Server is newer - apply server config
-                        Log.i(TAG, "Server config is newer, applying")
-                        applyServerConfig(serverConfig)
-                    }
-                    localTime > serverTime -> {
-                        // Local is newer - push to server
-                        Log.i(TAG, "Local config is newer, pushing to server")
-                        pushLocalConfig(localUpdatedAt)
-                    }
-                    else -> {
-                        Log.i(TAG, "Config is in sync")
-                    }
-                }
-                return@withContext true
-            }
-            is GhostwriterResult.Error -> {
-                Log.e(TAG, "Failed to get server config: ${serverResult.message}")
-                return@withContext false
-            }
-            is GhostwriterResult.NotConfigured -> {
-                Log.d(TAG, "Ghostwriter not configured")
-                return@withContext false
-            }
+    suspend fun syncConfig(): Boolean {
+        return try {
+            configSyncUseCase.syncConfig()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed syncing config", e)
+            false
         }
     }
 
-    /**
-     * Apply server configuration to local settings.
-     */
-    private suspend fun applyServerConfig(config: ClientConfigResponse) {
-        // Prefer current hour/minute fields, fallback to legacy HH:mm strings.
-        val morning = resolveTime(
-            hour = config.morningHour,
-            minute = config.morningMinute,
-            legacyTime = config.scheduleMorning,
-            defaultHour = 7,
-            defaultMinute = 0
-        )
-        val noon = resolveTime(
-            hour = config.noonHour,
-            minute = config.noonMinute,
-            legacyTime = config.scheduleNoon,
-            defaultHour = 12,
-            defaultMinute = 0
-        )
-        val evening = resolveTime(
-            hour = config.eveningHour,
-            minute = config.eveningMinute,
-            legacyTime = config.scheduleEvening,
-            defaultHour = 18,
-            defaultMinute = 0
-        )
-
-        // Store schedule times locally for display in the UI
-        settingsRepository.setGhostwriterSchedule(
-            morningHour = morning.first,
-            morningMinute = morning.second,
-            noonHour = noon.first,
-            noonMinute = noon.second,
-            eveningHour = evening.first,
-            eveningMinute = evening.second,
-            timezone = config.timezone
-        )
-
-        config.minWordCount?.let { settingsRepository.setMinWordCount(it) }
-
-        // Save the server's updated_at timestamp
-        config.updatedAt?.let { settingsRepository.setConfigUpdatedAt(it) }
-
-        Log.i(TAG, "Applied server config: schedule times synced, timezone=${config.timezone}")
-    }
-
-    /**
-     * Parse "HH:mm" time string into hour and minute.
-     */
-    private fun parseTime(timeString: String?): Pair<Int, Int>? {
-        if (timeString == null) return null
-        val parts = timeString.split(":")
-        if (parts.size != 2) return null
-        val hour = parts[0].toIntOrNull() ?: return null
-        val minute = parts[1].toIntOrNull() ?: return null
-        return Pair(hour, minute)
-    }
-
-    /**
-     * Resolve a schedule time from v2 hour/minute fields or legacy HH:mm strings.
-     */
-    private fun resolveTime(
-        hour: Int?,
-        minute: Int?,
-        legacyTime: String?,
-        defaultHour: Int,
-        defaultMinute: Int
-    ): Pair<Int, Int> {
-        if (hour != null && minute != null) {
-            return Pair(hour, minute)
-        }
-        return parseTime(legacyTime) ?: Pair(defaultHour, defaultMinute)
-    }
-
-    /**
-     * Push local configuration to the server.
-     */
-    private suspend fun pushLocalConfig(localUpdatedAt: String) {
-        val schedule = settingsRepository.getGhostwriterSchedule()
-        val minWordCount = settingsRepository.getMinWordCount()
-        val result = ghostwriterRepository.updateConfig(
-            minWordCount = minWordCount,
-            morningHour = schedule?.morningHour,
-            morningMinute = schedule?.morningMinute,
-            noonHour = schedule?.noonHour,
-            noonMinute = schedule?.noonMinute,
-            eveningHour = schedule?.eveningHour,
-            eveningMinute = schedule?.eveningMinute,
-            timezone = schedule?.timezone,
-            // Legacy payload for older server builds.
-            scheduleMorning = schedule?.let { String.format("%02d:%02d", it.morningHour, it.morningMinute) },
-            scheduleNoon = schedule?.let { String.format("%02d:%02d", it.noonHour, it.noonMinute) },
-            scheduleEvening = schedule?.let { String.format("%02d:%02d", it.eveningHour, it.eveningMinute) },
-            clientUpdatedAt = localUpdatedAt
-        )
-
-        when (result) {
-            is GhostwriterResult.Success -> {
-                // Update local timestamp to match server
-                settingsRepository.setConfigUpdatedAt(result.data.updatedAt)
-                Log.i(TAG, "Pushed local config to server")
-            }
-            is GhostwriterResult.Error -> {
-                if (result.code == 409) {
-                    // Conflict - server was modified by another client
-                    // Re-fetch and apply server config (server wins in conflict)
-                    Log.w(TAG, "Conflict detected, re-fetching server config")
-                    val refetchResult = ghostwriterRepository.getConfig()
-                    if (refetchResult is GhostwriterResult.Success) {
-                        applyServerConfig(refetchResult.data)
-                    }
-                } else {
-                    Log.e(TAG, "Failed to push config: ${result.message}")
-                }
-            }
-            is GhostwriterResult.NotConfigured -> {
-                Log.d(TAG, "Ghostwriter not configured")
-            }
-        }
-    }
-
-    /**
-     * Apply a pre-fetched config response (e.g., from the combined sync endpoint).
-     * Skips the server fetch and applies directly.
-     *
-     * @return true if applied successfully
-     */
-    suspend fun applyPreFetchedConfig(config: ClientConfigResponse): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val localUpdatedAt = settingsRepository.getConfigUpdatedAt()
-
-            if (localUpdatedAt == null) {
-                applyServerConfig(config)
-                return@withContext true
-            }
-
-            val serverUpdatedAt = config.updatedAt ?: run {
-                applyServerConfig(config)
-                return@withContext true
-            }
-
-            val serverTime = parseTimestamp(serverUpdatedAt)
-            val localTime = parseTimestamp(localUpdatedAt)
-
-            if (serverTime >= localTime) {
-                applyServerConfig(config)
-            }
-            // If local is newer, don't overwrite - the normal syncConfig() will push later
-
-            true
+    suspend fun applyPreFetchedConfig(config: ClientConfigResponse): Boolean {
+        return try {
+            configSyncUseCase.applyPreFetchedConfig(config.toShared())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply pre-fetched config", e)
             false
         }
     }
 
-    /**
-     * Push a specific setting change to the server immediately.
-     * Called when user changes a synced setting.
-     */
-    suspend fun pushMinWordCount(count: Int) = withContext(Dispatchers.IO) {
-        if (!settingsRepository.isGhostwriterConfigured()) {
-            Log.d(TAG, "Ghostwriter not configured, skipping min_word_count push")
-            return@withContext
-        }
-
-        val localUpdatedAt = settingsRepository.getConfigUpdatedAt()
-        val result = ghostwriterRepository.updateConfig(
-            minWordCount = count,
-            clientUpdatedAt = localUpdatedAt
-        )
-
-        when (result) {
-            is GhostwriterResult.Success -> {
-                settingsRepository.setConfigUpdatedAt(result.data.updatedAt)
-                Log.i(TAG, "Synced min_word_count to Ghostwriter: $count")
-            }
-            is GhostwriterResult.Error -> {
-                if (result.code == 409) {
-                    Log.w(TAG, "Config conflict while syncing min_word_count, re-fetching")
-                    val refetchResult = ghostwriterRepository.getConfig()
-                    if (refetchResult is GhostwriterResult.Success) {
-                        applyServerConfig(refetchResult.data)
-                    }
-                } else {
-                    Log.e(TAG, "Failed syncing min_word_count: ${result.message}")
-                }
-            }
-            is GhostwriterResult.NotConfigured -> {
-                Log.d(TAG, "Ghostwriter not configured")
-            }
-        }
-    }
-
-    /**
-     * Parse ISO 8601 timestamp to milliseconds.
-     */
-    private fun parseTimestamp(timestamp: String): Long {
-        return try {
-            val formats = listOf(
-                "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
-                "yyyy-MM-dd'T'HH:mm:ss.SSS",
-                "yyyy-MM-dd'T'HH:mm:ss"
-            )
-            for (pattern in formats) {
-                try {
-                    val sdf = SimpleDateFormat(pattern, Locale.US)
-                    sdf.timeZone = TimeZone.getTimeZone("UTC")
-                    return sdf.parse(timestamp)?.time ?: 0L
-                } catch (e: Exception) {
-                    continue
-                }
-            }
-            0L
+    suspend fun pushMinWordCount(count: Int) {
+        try {
+            configSyncUseCase.pushMinWordCount(count)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse timestamp: $timestamp", e)
-            0L
+            Log.e(TAG, "Failed syncing min_word_count", e)
         }
     }
 }
+
+private fun ClientConfigResponse.toShared(): SharedClientConfigResponse = SharedClientConfigResponse(
+    minWordCount = minWordCount,
+    morningHour = morningHour,
+    morningMinute = morningMinute,
+    noonHour = noonHour,
+    noonMinute = noonMinute,
+    eveningHour = eveningHour,
+    eveningMinute = eveningMinute,
+    timezone = timezone,
+    scheduleMorning = scheduleMorning,
+    scheduleNoon = scheduleNoon,
+    scheduleEvening = scheduleEvening,
+    whisperProvider = whisperProvider,
+    whisperModel = whisperModel,
+    whisperTimeoutMinutes = whisperTimeoutMinutes,
+    mediaProcessingIntervalHours = mediaProcessingIntervalHours,
+    includePodcastsInDigest = includePodcastsInDigest,
+    includeYoutubeInDigest = includeYoutubeInDigest,
+    pdfEnabled = pdfEnabled,
+    pdfPageSize = pdfPageSize,
+    coverEnabled = coverEnabled,
+    coverProvider = coverProvider,
+    coverQuality = coverQuality,
+    coverPrompt = coverPrompt,
+    coverOverlayEnabled = coverOverlayEnabled,
+    coverOpenAiApiKey = coverOpenAiApiKey,
+    coverGeminiApiKey = coverGeminiApiKey,
+    updatedAt = updatedAt,
+    wallabag = wallabag?.let { SharedIntegrationStatus(enabled = it.enabled, label = it.label) },
+    newsletters = newsletters?.let { SharedIntegrationStatus(enabled = it.enabled, label = it.label) }
+)
