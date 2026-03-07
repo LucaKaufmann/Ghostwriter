@@ -50,7 +50,7 @@ class DigestSyncUseCase(
         return when (legacy) {
             is SyncPortResult.Success -> {
                 val existing = existingRemoteIds.toSet()
-                val newDigests = legacy.data.filter { digest ->
+                val newDigests = legacy.data.digests.filter { digest ->
                     digest.status == "completed" && digest.id !in existing
                 }
                 DigestSyncPlan.Legacy(

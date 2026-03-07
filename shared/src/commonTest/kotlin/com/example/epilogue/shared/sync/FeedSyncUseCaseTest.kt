@@ -2,6 +2,7 @@ package com.example.epilogue.shared.sync
 
 import com.example.epilogue.shared.domain.Feed
 import com.example.epilogue.shared.domain.ProcessingMode
+import com.example.epilogue.shared.ghostwriter.DigestListResponse
 import com.example.epilogue.shared.ghostwriter.FeedChangesResponse
 import com.example.epilogue.shared.ghostwriter.FeedResponse
 import com.example.epilogue.shared.ghostwriter.FeedSyncRequest
@@ -120,7 +121,7 @@ class FeedSyncUseCaseTest {
         override suspend fun getFeedChanges(since: String?): SyncPortResult<FeedChangesResponse> = feedChangesResult
 
         override suspend fun performSync(feedSince: String?, digestIds: String?) = SyncPortResult.NotConfigured
-        override suspend fun listDigests() = SyncPortResult.NotConfigured
+        override suspend fun listDigests(): SyncPortResult<DigestListResponse> = SyncPortResult.NotConfigured
         override suspend fun getDigestArticles(digestId: String) = SyncPortResult.NotConfigured
     }
 }

@@ -2,6 +2,7 @@ package com.example.epilogue.shared.sync
 
 import com.example.epilogue.shared.ghostwriter.ClientConfigResponse
 import com.example.epilogue.shared.ghostwriter.ClientConfigUpdateRequest
+import com.example.epilogue.shared.ghostwriter.DigestListResponse
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -139,7 +140,7 @@ class ConfigSyncUseCaseTest {
         override suspend fun syncFeeds(feeds: List<com.example.epilogue.shared.ghostwriter.FeedSyncRequest>) = SyncPortResult.NotConfigured
         override suspend fun getFeedChanges(since: String?) = SyncPortResult.NotConfigured
         override suspend fun performSync(feedSince: String?, digestIds: String?) = SyncPortResult.NotConfigured
-        override suspend fun listDigests() = SyncPortResult.NotConfigured
+        override suspend fun listDigests(): SyncPortResult<DigestListResponse> = SyncPortResult.NotConfigured
         override suspend fun getDigestArticles(digestId: String) = SyncPortResult.NotConfigured
     }
 }

@@ -20,8 +20,40 @@ struct SharedFeedSyncResult {
 }
 
 enum SharedDigestSyncPlan {
-    case combined(digests: [GWSyncDigest], shouldDownloadEpubs: Bool)
-    case legacy(digests: [GWDigestResponse], shouldDownloadEpubs: Bool)
+    struct SyncArticle {
+        let id: String
+        let title: String
+        let url: String
+        let mode: String
+        let wordCount: Int
+        let content: String
+        let contentHTML: String?
+        let author: String?
+        let feedTitle: String
+        let sortOrder: Int
+    }
+
+    struct CombinedDigest {
+        let id: String
+        let filename: String
+        let period: String
+        let articleCount: Int
+        let createdAt: String
+        let completedAt: String?
+        let articles: [SyncArticle]
+    }
+
+    struct LegacyDigest {
+        let id: String
+        let filename: String
+        let period: String
+        let articleCount: Int
+        let createdAt: String
+        let completedAt: String?
+    }
+
+    case combined(digests: [CombinedDigest], shouldDownloadEpubs: Bool)
+    case legacy(digests: [LegacyDigest], shouldDownloadEpubs: Bool)
     case error(message: String)
     case notConfigured
 }
@@ -37,15 +69,15 @@ final class SharedConfigSyncBridge {
     }
 
     func syncConfig() async throws -> Bool {
-        try await useCase.syncConfig()
+        (try await useCase.syncConfig()).boolValue
     }
 
     func applyPreFetchedConfig(_ config: GWClientConfigResponse) async throws -> Bool {
-        try await useCase.applyPreFetchedConfig(config: toSharedConfigResponse(config))
+        (try await useCase.applyPreFetchedConfig(config: toSharedConfigResponse(config))).boolValue
     }
 
     func pushMinWordCount(_ count: Int) async throws -> Bool {
-        try await useCase.pushMinWordCount(count: Int32(count))
+        (try await useCase.pushMinWordCount(count: Int32(count))).boolValue
     }
 }
 
@@ -71,15 +103,15 @@ final class SharedFeedSyncBridge {
     func sync() async throws -> SharedFeedSyncResult.Kind {
         let outcome = try await useCase.sync()
         switch outcome {
-        case let success as FeedSyncOutcomeSuccess:
+        case let success as FeedSyncOutcome.Success:
             return .success(
                 pushed: success.pushed,
                 updatedFeeds: Int(success.updatedFeeds),
                 deletedFeeds: Int(success.deletedFeeds)
             )
-        case let error as FeedSyncOutcomeError:
+        case let error as FeedSyncOutcome.Error:
             return .error(message: error.message)
-        case _ as FeedSyncOutcomeNotConfigured:
+        case _ as FeedSyncOutcome.NotConfigured:
             return .notConfigured
         default:
             return .error(message: "Unexpected feed sync outcome")
@@ -101,19 +133,51 @@ final class SharedDigestSyncBridge {
     func planSync() async throws -> SharedDigestSyncPlan {
         let plan = try await useCase.planSync()
         switch plan {
-        case let combined as DigestSyncPlanCombined:
+        case let combined as DigestSyncPlan.Combined:
             return .combined(
-                digests: combined.digests.map(fromSharedSyncDigest),
+                digests: combined.digests.map { digest in
+                    SharedDigestSyncPlan.CombinedDigest(
+                        id: digest.id,
+                        filename: digest.filename,
+                        period: digest.period,
+                        articleCount: Int(digest.articleCount),
+                        createdAt: digest.createdAt,
+                        completedAt: digest.completedAt,
+                        articles: digest.articles.map { article in
+                            SharedDigestSyncPlan.SyncArticle(
+                                id: article.id,
+                                title: article.title,
+                                url: article.url,
+                                mode: article.mode,
+                                wordCount: Int(article.wordCount),
+                                content: article.content,
+                                contentHTML: article.contentHtml,
+                                author: article.author,
+                                feedTitle: article.feedTitle,
+                                sortOrder: Int(article.sortOrder)
+                            )
+                        }
+                    )
+                },
                 shouldDownloadEpubs: combined.shouldDownloadEpubs
             )
-        case let legacy as DigestSyncPlanLegacy:
+        case let legacy as DigestSyncPlan.Legacy:
             return .legacy(
-                digests: legacy.digests.map(fromSharedDigestResponse),
+                digests: legacy.digests.map { digest in
+                    SharedDigestSyncPlan.LegacyDigest(
+                        id: digest.id,
+                        filename: digest.filename,
+                        period: digest.period,
+                        articleCount: Int(digest.articleCount),
+                        createdAt: digest.createdAt,
+                        completedAt: digest.completedAt
+                    )
+                },
                 shouldDownloadEpubs: legacy.shouldDownloadEpubs
             )
-        case let error as DigestSyncPlanError:
+        case let error as DigestSyncPlan.Error:
             return .error(message: error.message)
-        case _ as DigestSyncPlanNotConfigured:
+        case _ as DigestSyncPlan.NotConfigured:
             return .notConfigured
         default:
             return .error(message: "Unexpected digest sync plan")
@@ -424,15 +488,13 @@ private final class IOSGhostwriterSyncPortAdapter: NSObject, GhostwriterSyncPort
         }
     }
 
-    func listDigests(completionHandler: @escaping (SyncPortResult<NSArray>?, Error?) -> Void) {
+    func listDigests(completionHandler: @escaping (SyncPortResult<EpilogueShared.DigestListResponse>?, Error?) -> Void) {
         Task {
             do {
                 let client = try await makeClient()
                 let response = try await client.listDigests(limit: 200, offset: 0, status: nil)
-                let boxed = response.map(toSharedDigestResponse) as NSArray
-                let success = SyncPortResultSuccess<NSArray>(data: boxed)
-                let typed = unsafeBitCast(success, to: SyncPortResult<NSArray>.self)
-                completionHandler(typed, nil)
+                let wrapped = EpilogueShared.DigestListResponse(digests: response.map(toSharedDigestResponse))
+                completionHandler(SyncPortResultSuccess(data: wrapped), nil)
             } catch {
                 completionHandler(mapErrorToResult(error), nil)
             }
@@ -647,52 +709,6 @@ private func toSharedDigestResponse(_ response: GWDigestResponse) -> EpilogueSha
         errorMessage: response.errorMessage,
         createdAt: response.createdAt,
         completedAt: response.completedAt
-    )
-}
-
-func fromSharedDigestResponse(_ response: EpilogueShared.DigestResponse) -> GWDigestResponse {
-    GWDigestResponse(
-        id: response.id,
-        filename: response.filename,
-        availableFormats: response.availableFormats,
-        period: response.period,
-        status: response.status,
-        stage: response.stage,
-        articleCount: Int(response.articleCount),
-        errorMessage: response.errorMessage,
-        createdAt: response.createdAt,
-        completedAt: response.completedAt,
-        downloadedAt: nil
-    )
-}
-
-func fromSharedSyncDigest(_ digest: EpilogueShared.SyncDigest) -> GWSyncDigest {
-    GWSyncDigest(
-        id: digest.id,
-        filename: digest.filename,
-        availableFormats: digest.availableFormats,
-        period: digest.period,
-        status: digest.status,
-        stage: digest.stage,
-        articleCount: Int(digest.articleCount),
-        errorMessage: digest.errorMessage,
-        createdAt: digest.createdAt,
-        completedAt: digest.completedAt,
-        articles: digest.articles.map { article in
-            DigestArticleResponse(
-                id: article.id,
-                title: article.title,
-                url: article.url,
-                mode: article.mode,
-                wordCount: Int(article.wordCount),
-                content: article.content,
-                contentHTML: article.contentHtml,
-                author: article.author,
-                feedTitle: article.feedTitle,
-                sortOrder: Int(article.sortOrder),
-                aiFailed: article.aiFailed
-            )
-        }
     )
 }
 
