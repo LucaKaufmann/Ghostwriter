@@ -12,37 +12,20 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.codable.epilogue.R
-import com.example.epilogue.data.remote.ghostwriter.FeedResponse
-import com.example.epilogue.data.repository.FeedRepository
-import com.example.epilogue.data.repository.GhostwriterRepository
-import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
-import com.example.epilogue.data.repository.SettingsRepository
-import com.example.epilogue.domain.model.Feed
-import com.example.epilogue.domain.model.ProcessingMode
+import com.example.epilogue.shared.sync.FeedSyncOutcome
+import com.example.epilogue.shared.sync.FeedSyncUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
 
 /**
  * WorkManager worker that performs bi-directional feed sync with Ghostwriter.
- *
- * Sync flow:
- * 1. PUSH: Sync local feeds to server (existing syncFeeds API)
- * 2. PULL: Get changes from server (new getFeedChanges API)
- * 3. Apply server feeds locally (upsert)
- * 4. Apply tombstones (delete locally)
- * 5. Clear locallyModified flags
- * 6. Update lastFeedSyncTimestamp
+ * Core sync logic is implemented in shared KMP FeedSyncUseCase.
  */
 @HiltWorker
 class FeedSyncWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val ghostwriterRepository: GhostwriterRepository,
-    private val feedRepository: FeedRepository,
-    private val settingsRepository: SettingsRepository
+    private val feedSyncUseCase: FeedSyncUseCase
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -56,18 +39,8 @@ class FeedSyncWorker @AssistedInject constructor(
         const val MAX_RETRY_ATTEMPTS = 3
     }
 
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }
-
     override suspend fun doWork(): Result {
         Log.i(TAG, "Starting feed sync with Ghostwriter (attempt ${runAttemptCount})")
-
-        // Check if Ghostwriter is configured
-        if (!settingsRepository.isGhostwriterConfigured()) {
-            Log.i(TAG, "Ghostwriter not configured, skipping sync")
-            return Result.success()
-        }
 
         try {
             setForeground(createForegroundInfo())
@@ -76,130 +49,29 @@ class FeedSyncWorker @AssistedInject constructor(
         }
 
         return try {
-            // Step 1: PUSH - Sync local feeds to server
-            val pushResult = pushLocalFeeds()
-            if (!pushResult) {
-                Log.w(TAG, "Push phase failed, continuing with pull")
-            }
-
-            // Step 2: PULL - Get changes from server
-            val lastSyncTime = settingsRepository.getLastFeedSyncTime()
-            val sinceTimestamp = if (lastSyncTime > 0) lastSyncTime else null
-
-            Log.i(TAG, "Pulling feed changes since: ${sinceTimestamp ?: "initial sync"}")
-
-            val changesResult = ghostwriterRepository.getFeedChanges(sinceTimestamp)
-
-            when (changesResult) {
-                is GhostwriterResult.Success -> {
-                    val changes = changesResult.data
-
-                    // Step 3: Apply server feeds locally
-                    val serverFeeds = changes.feeds.map { response ->
-                        convertResponseToFeed(response)
-                    }
-
-                    if (serverFeeds.isNotEmpty()) {
-                        Log.i(TAG, "Applying ${serverFeeds.size} feeds from server")
-                        feedRepository.upsertAll(serverFeeds)
-                    }
-
-                    // Step 4: Apply tombstones (delete locally)
-                    val tombstoneUrls = changes.tombstones.map { it.url }
-                    if (tombstoneUrls.isNotEmpty()) {
-                        Log.i(TAG, "Applying ${tombstoneUrls.size} tombstones (deleting local feeds)")
-                        feedRepository.deleteByUrls(tombstoneUrls)
-                    }
-
-                    // Step 5: Clear locallyModified flags
-                    feedRepository.clearAllLocallyModified()
-
-                    // Step 6: Update lastFeedSyncTimestamp
-                    val serverTimestamp = parseServerTimestamp(changes.serverTimestamp)
-                    settingsRepository.setLastFeedSyncTime(serverTimestamp)
-
-                    Log.i(TAG, "Feed sync completed: ${serverFeeds.size} feeds updated, ${tombstoneUrls.size} deleted")
+            when (val outcome = feedSyncUseCase.sync()) {
+                is FeedSyncOutcome.Success -> {
+                    Log.i(
+                        TAG,
+                        "Feed sync completed: pushed=${outcome.pushed}, " +
+                            "updated=${outcome.updatedFeeds}, deleted=${outcome.deletedFeeds}"
+                    )
                     Result.success()
                 }
-                is GhostwriterResult.Error -> {
-                    Log.e(TAG, "Failed to get feed changes: ${changesResult.message}")
+
+                is FeedSyncOutcome.NotConfigured -> {
+                    Log.i(TAG, "Ghostwriter not configured, skipping sync")
+                    Result.success()
+                }
+
+                is FeedSyncOutcome.Error -> {
+                    Log.e(TAG, "Feed sync failed: ${outcome.message}")
                     retryOrFail()
-                }
-                is GhostwriterResult.NotConfigured -> {
-                    Log.i(TAG, "Ghostwriter not configured")
-                    Result.success()
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error syncing feeds", e)
             retryOrFail()
-        }
-    }
-
-    /**
-     * Push local feeds to the server.
-     * Returns true if successful.
-     */
-    private suspend fun pushLocalFeeds(): Boolean {
-        val localFeeds = feedRepository.getAllFeedsList()
-
-        if (localFeeds.isEmpty()) {
-            Log.i(TAG, "No local feeds to push")
-            return true
-        }
-
-        val result = ghostwriterRepository.syncFeeds(localFeeds)
-        return when (result) {
-            is GhostwriterResult.Success -> {
-                Log.i(TAG, "Pushed ${result.data.synced} feeds to server")
-                true
-            }
-            is GhostwriterResult.Error -> {
-                Log.e(TAG, "Failed to push feeds: ${result.message}")
-                false
-            }
-            is GhostwriterResult.NotConfigured -> {
-                Log.w(TAG, "Ghostwriter not configured during push")
-                false
-            }
-        }
-    }
-
-    /**
-     * Convert a FeedResponse from the API to a Feed domain model.
-     */
-    private fun convertResponseToFeed(response: FeedResponse): Feed {
-        val mode = when (response.mode) {
-            "summarize" -> ProcessingMode.BRIEFING
-            else -> ProcessingMode.FIDELITY
-        }
-
-        val serverUpdatedAt = try {
-            dateFormat.parse(response.updatedAt)?.time ?: System.currentTimeMillis()
-        } catch (e: Exception) {
-            System.currentTimeMillis()
-        }
-
-        return Feed(
-            url = response.url,
-            name = response.title,
-            mode = mode,
-            maxArticles = response.maxArticles,
-            isEnabled = response.isActive,
-            serverUpdatedAt = serverUpdatedAt,
-            locallyModified = false  // Server data is authoritative
-        )
-    }
-
-    /**
-     * Parse the server timestamp from ISO 8601 format to milliseconds.
-     */
-    private fun parseServerTimestamp(timestamp: String): Long {
-        return try {
-            dateFormat.parse(timestamp)?.time ?: System.currentTimeMillis()
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse server timestamp: $timestamp", e)
-            System.currentTimeMillis()
         }
     }
 
