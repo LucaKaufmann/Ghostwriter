@@ -24,112 +24,7 @@ struct HistoryView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if digests.isEmpty {
-                    // Empty state matching Android
-                    VStack(spacing: 8) {
-                        Spacer()
-                        Text("No digests yet")
-                            .font(.title2)
-                        Text("Generate your first digest from Settings")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                } else {
-                    List {
-                        ForEach(digests) { digest in
-                            let epubAvailable = hasLocalEPUB(digest)
-                            let lifecycle = digest.lifecycleState
-                            if lifecycle == .completed {
-                                NavigationLink {
-                                    DigestDetailView(digest: digest)
-                                } label: {
-                                    DigestRow(
-                                        digest: digest,
-                                        epubAvailable: epubAvailable,
-                                        einkMode: einkMode
-                                    )
-                                }
-                            } else {
-                                DigestRow(
-                                    digest: digest,
-                                    epubAvailable: epubAvailable,
-                                    einkMode: einkMode
-                                )
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    digestToDelete = digest
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            .swipeActions(edge: .leading) {
-                                if let remoteId = digest.remoteId {
-                                    if pdfDownloadsEnabled {
-                                        Button {
-                                            downloadDigestPdf(digest, remoteId: remoteId)
-                                        } label: {
-                                            if downloadingDigestIDs.contains(digest.id) {
-                                                Label("Downloading", systemImage: "hourglass")
-                                            } else {
-                                                Label("PDF", systemImage: "doc.richtext")
-                                            }
-                                        }
-                                        .tint(.orange)
-                                    }
-
-                                    if !epubAvailable {
-                                        Button {
-                                            downloadDigest(digest, remoteId: remoteId)
-                                        } label: {
-                                            if downloadingDigestIDs.contains(digest.id) {
-                                                Label("Downloading", systemImage: "hourglass")
-                                            } else {
-                                                Label("EPUB", systemImage: "arrow.down.circle")
-                                            }
-                                        }
-                                        .tint(.green)
-                                    } else {
-                                        if lifecycle == .completed {
-                                            Button {
-                                                digestToShare = digest
-                                            } label: {
-                                                Label("Share", systemImage: "square.and.arrow.up")
-                                            }
-                                            .tint(.gray)
-
-                                            Button {
-                                                openInReader(digest)
-                                            } label: {
-                                                Label("Open", systemImage: "book")
-                                            }
-                                            .tint(.blue)
-                                        }
-                                    }
-                                } else {
-                                    if lifecycle == .completed {
-                                        Button {
-                                            digestToShare = digest
-                                        } label: {
-                                            Label("Share", systemImage: "square.and.arrow.up")
-                                        }
-                                        .tint(.gray)
-
-                                        Button {
-                                            openInReader(digest)
-                                        } label: {
-                                            Label("Open", systemImage: "book")
-                                        }
-                                        .tint(.blue)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            historyContent
             .navigationTitle("Digest History")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -178,6 +73,115 @@ struct HistoryView: View {
                 Text(statusMessage ?? "")
             }
         }
+    }
+
+    @ViewBuilder
+    private var historyContent: some View {
+        if digests.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                Text("No digests yet")
+                    .font(.title2)
+                Text("Generate your first digest from Settings")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+        } else {
+            List {
+                ForEach(digests) { digest in
+                    digestRow(digest)
+                }
+            }
+        }
+    }
+
+    private func digestRow(_ digest: Digest) -> some View {
+        let epubAvailable = hasLocalEPUB(digest)
+        let lifecycle = digest.lifecycleState
+        let baseRow: AnyView = {
+            if lifecycle == .completed {
+                return AnyView(
+                    NavigationLink {
+                        DigestDetailView(digest: digest)
+                    } label: {
+                        DigestRow(digest: digest, epubAvailable: epubAvailable, einkMode: einkMode)
+                    }
+                )
+            } else {
+                return AnyView(
+                    DigestRow(digest: digest, epubAvailable: epubAvailable, einkMode: einkMode)
+                )
+            }
+        }()
+
+        return AnyView(
+            baseRow
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        digestToDelete = digest
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+                .swipeActions(edge: .leading) {
+                    if let remoteId = digest.remoteId {
+                        if pdfDownloadsEnabled {
+                            Button {
+                                downloadDigestPdf(digest, remoteId: remoteId)
+                            } label: {
+                                if downloadingDigestIDs.contains(digest.id) {
+                                    Label("Downloading", systemImage: "hourglass")
+                                } else {
+                                    Label("PDF", systemImage: "doc.richtext")
+                                }
+                            }
+                            .tint(.orange)
+                        }
+
+                        if !epubAvailable {
+                            Button {
+                                downloadDigest(digest, remoteId: remoteId)
+                            } label: {
+                                if downloadingDigestIDs.contains(digest.id) {
+                                    Label("Downloading", systemImage: "hourglass")
+                                } else {
+                                    Label("EPUB", systemImage: "arrow.down.circle")
+                                }
+                            }
+                            .tint(.green)
+                        } else if lifecycle == .completed {
+                            Button {
+                                digestToShare = digest
+                            } label: {
+                                Label("Share", systemImage: "square.and.arrow.up")
+                            }
+                            .tint(.gray)
+
+                            Button {
+                                openInReader(digest)
+                            } label: {
+                                Label("Open", systemImage: "book")
+                            }
+                            .tint(.blue)
+                        }
+                    } else if lifecycle == .completed {
+                        Button {
+                            digestToShare = digest
+                        } label: {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                        }
+                        .tint(.gray)
+
+                        Button {
+                            openInReader(digest)
+                        } label: {
+                            Label("Open", systemImage: "book")
+                        }
+                        .tint(.blue)
+                    }
+                }
+        )
     }
 
     private func deleteDigest(_ digest: Digest) {
