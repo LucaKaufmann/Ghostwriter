@@ -147,9 +147,9 @@ class ConfigSyncUseCase(
                 eveningHour = schedule?.eveningHour,
                 eveningMinute = schedule?.eveningMinute,
                 timezone = schedule?.timezone,
-                scheduleMorning = schedule?.let { "%02d:%02d".format(it.morningHour, it.morningMinute) },
-                scheduleNoon = schedule?.let { "%02d:%02d".format(it.noonHour, it.noonMinute) },
-                scheduleEvening = schedule?.let { "%02d:%02d".format(it.eveningHour, it.eveningMinute) },
+                scheduleMorning = schedule?.let { formatTime(it.morningHour, it.morningMinute) },
+                scheduleNoon = schedule?.let { formatTime(it.noonHour, it.noonMinute) },
+                scheduleEvening = schedule?.let { formatTime(it.eveningHour, it.eveningMinute) },
                 clientUpdatedAt = localUpdatedAt
             )
         )
@@ -188,5 +188,9 @@ class ConfigSyncUseCase(
             return hour to minute
         }
         return parseTime(legacyTime) ?: (defaultHour to defaultMinute)
+    }
+
+    private fun formatTime(hour: Int, minute: Int): String {
+        return "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}"
     }
 }
