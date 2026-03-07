@@ -93,7 +93,8 @@ android {
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -189,6 +190,7 @@ dependencies {
     implementation("io.ktor:ktor-client-content-negotiation:2.3.12")
     implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.12")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("com.google.errorprone:error_prone_annotations:2.28.0")
 
     // RSS Parsing
     implementation("com.prof18.rssparser:rssparser:6.0.6")
@@ -201,6 +203,7 @@ dependencies {
     implementation("io.documentnode:epub4j-core:4.2.1") {
         exclude(group = "org.slf4j")
         exclude(group = "xmlpull")
+        exclude(group = "net.sf.kxml", module = "kxml2")
     }
     implementation("org.slf4j:slf4j-android:1.7.36")
 
