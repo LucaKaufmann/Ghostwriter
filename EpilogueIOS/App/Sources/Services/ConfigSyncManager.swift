@@ -79,8 +79,7 @@ public final class ConfigSyncManager {
         if success {
             logger.info("Pushed min_word_count to server: \(count)")
         } else {
-            logger.warning("Shared min_word_count push returned false, triggering config re-sync")
-            _ = try await sync()
+            logger.warning("Shared min_word_count push failed; keeping local value for retry")
         }
     }
 

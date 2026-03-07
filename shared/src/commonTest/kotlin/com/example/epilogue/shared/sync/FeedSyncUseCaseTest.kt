@@ -59,6 +59,33 @@ class FeedSyncUseCaseTest {
         assertEquals("https://local.feed", ghostwriter.lastSyncedFeeds.first().url)
     }
 
+    @Test
+    fun sync_doesNotClearLocalFlagsWhenPushFails() = runTest {
+        val settings = FakeSettingsPort()
+        val feedStore = FakeFeedStorePort(
+            feeds = listOf(
+                Feed(url = "https://local.feed", name = "Local", mode = ProcessingMode.FIDELITY, locallyModified = true)
+            )
+        )
+        val ghostwriter = FakeGhostwriterSyncPort(
+            syncFeedsResult = SyncPortResult.Error("push failed"),
+            feedChangesResult = SyncPortResult.Success(
+                FeedChangesResponse(
+                    feeds = emptyList(),
+                    tombstones = emptyList(),
+                    serverTimestamp = "2026-03-07T10:00:00Z"
+                )
+            )
+        )
+
+        val useCase = FeedSyncUseCase(settings, feedStore, ghostwriter)
+        val outcome = useCase.sync()
+
+        val success = assertIs<FeedSyncOutcome.Success>(outcome)
+        assertEquals(false, success.pushed)
+        assertEquals(0, feedStore.clearLocalModifiedCalls)
+    }
+
     private class FakeSettingsPort : SettingsPort {
         var lastFeedSyncMillis: Long? = null
 

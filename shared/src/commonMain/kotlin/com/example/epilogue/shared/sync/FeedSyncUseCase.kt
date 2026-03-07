@@ -47,7 +47,9 @@ class FeedSyncUseCase(
                     feedStore.deleteByUrls(tombstoneUrls)
                 }
 
-                feedStore.clearAllLocallyModified()
+                if (pushed) {
+                    feedStore.clearAllLocallyModified()
+                }
 
                 val parsedServerTime = parseIso8601ToEpochMillis(changes.serverTimestamp)
                 settings.setLastFeedSyncTimeMillis(parsedServerTime ?: nowProviderMillis())
