@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
+    id("com.github.triplet.play")
 }
 
 val releaseVersionCode = (
@@ -17,6 +18,18 @@ val releaseVersionName = (
     providers.gradleProperty("EPILOGUE_VERSION_NAME").orNull
         ?: System.getenv("EPILOGUE_VERSION_NAME")
         ?: "1.0.0"
+)
+
+val playCredentialsPath = (
+    providers.gradleProperty("EPILOGUE_PLAY_CREDENTIALS").orNull
+        ?: System.getenv("EPILOGUE_PLAY_CREDENTIALS")
+        ?: ""
+)
+
+val playTrack = (
+    providers.gradleProperty("EPILOGUE_PLAY_TRACK").orNull
+        ?: System.getenv("EPILOGUE_PLAY_TRACK")
+        ?: "internal"
 )
 
 val keystorePropertiesFile = rootProject.file("keystore.properties")
@@ -33,6 +46,11 @@ fun keystoreValue(key: String): String =
 val releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
     val normalized = taskName.lowercase()
     normalized.contains("release")
+}
+
+val playPublishTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    val normalized = taskName.lowercase()
+    normalized.contains("publish") && normalized.contains("release")
 }
 
 if (releaseTaskRequested && !keystorePropertiesFile.exists()) {
@@ -111,6 +129,19 @@ android {
             isReturnDefaultValues = true
         }
     }
+}
+
+play {
+    if (playPublishTaskRequested && playCredentialsPath.isBlank()) {
+        throw GradleException(
+            "Missing Play service account credentials path. Set EPILOGUE_PLAY_CREDENTIALS."
+        )
+    }
+    if (playCredentialsPath.isNotBlank()) {
+        serviceAccountCredentials.set(file(playCredentialsPath))
+    }
+    track.set(playTrack)
+    defaultToAppBundles.set(true)
 }
 
 dependencies {

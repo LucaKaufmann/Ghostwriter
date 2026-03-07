@@ -102,6 +102,8 @@ struct EpilogueApp: App {
                     await ghostwriterCoordinator.performFullSync()
 
                     await runForegroundDigestMaintenance()
+                    // Ensure background requests exist even before the first background transition.
+                    scheduleAllBackgroundWork()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     guard !launchOptions.isEnabled else { return }
@@ -121,9 +123,15 @@ struct EpilogueApp: App {
     }
 
     private func scheduleAllBackgroundWork() {
-        backgroundTaskManager?.scheduleBackgroundTasks()
         localDigestScheduler?.scheduleFeedRefresh()
         Task {
+            let ghostwriterEnabled = (try? await settingsRepository.isGhostwriterEnabled()) ?? false
+            if ghostwriterEnabled {
+                backgroundTaskManager?.scheduleBackgroundTasks()
+            } else {
+                backgroundTaskManager?.cancelBackgroundTasks()
+            }
+
             await localDigestScheduler?.scheduleOvernightDigest()
         }
     }

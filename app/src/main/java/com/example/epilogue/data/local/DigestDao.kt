@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Transaction
+import com.example.epilogue.domain.model.TriggerType
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -129,4 +130,14 @@ interface DigestDao {
      */
     @Query("SELECT EXISTS(SELECT 1 FROM digests WHERE generatedAt >= :sinceTime AND articleCount = :articleCount)")
     suspend fun existsRecentDigest(sinceTime: Long, articleCount: Int): Boolean
+
+    @Query(
+        "SELECT generatedAt FROM digests " +
+            "WHERE triggerType = :triggerType AND period = :period " +
+            "ORDER BY generatedAt DESC LIMIT 1"
+    )
+    suspend fun getLatestDigestTimestampForPeriod(
+        triggerType: TriggerType,
+        period: String
+    ): Long?
 }

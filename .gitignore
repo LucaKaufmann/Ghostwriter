@@ -107,6 +107,9 @@ tasks/
 secrets.properties
 *.pem
 *.p12
+play-service-account.json
+play-service-account-*.json
+*service-account*.json
 
 # Claude Code local settings
 .claude/

@@ -32,6 +32,7 @@ class SettingsRepository @Inject constructor(
         private const val KEY_SCHEDULE_MINUTE = "schedule_minute"  // Legacy, for migration
         private const val KEY_SCHEDULE_PERIODS = "schedule_periods"
         private const val KEY_SCHEDULE_MIGRATED = "schedule_migrated"
+        private const val KEY_SCHEDULE_LAST_CATCH_UP_DATE_PREFIX = "schedule_last_catch_up_date_"
         private const val KEY_MIN_WORD_COUNT = "min_word_count"
         private const val KEY_EINK_MODE = "eink_mode"
         private const val KEY_CUSTOM_EXPORT_URI = "custom_export_uri"
@@ -202,8 +203,27 @@ class SettingsRepository @Inject constructor(
             currentPeriods.add(period)
         } else {
             currentPeriods.remove(period)
+            prefs.edit()
+                .remove("${KEY_SCHEDULE_LAST_CATCH_UP_DATE_PREFIX}${period.name}")
+                .apply()
         }
         setSchedulePeriods(currentPeriods)
+    }
+
+    /**
+     * Stores the last date (YYYY-MM-DD) when a catch-up run was enqueued for a period.
+     */
+    suspend fun setLastCatchUpDate(period: DigestPeriod, date: String) = withContext(Dispatchers.IO) {
+        prefs.edit()
+            .putString("${KEY_SCHEDULE_LAST_CATCH_UP_DATE_PREFIX}${period.name}", date)
+            .apply()
+    }
+
+    /**
+     * Returns the last date (YYYY-MM-DD) when a catch-up run was enqueued for a period.
+     */
+    fun getLastCatchUpDate(period: DigestPeriod): String? {
+        return prefs.getString("${KEY_SCHEDULE_LAST_CATCH_UP_DATE_PREFIX}${period.name}", null)
     }
 
     /**

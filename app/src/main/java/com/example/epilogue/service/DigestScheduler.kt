@@ -11,9 +11,14 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.DigestPeriod
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -31,17 +36,42 @@ import javax.inject.Singleton
 @Singleton
 class DigestScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val digestRepository: DigestRepository
 ) {
 
     companion object {
         private const val TAG = "DigestScheduler"
         private const val WORK_NAME_PREFIX = "daily_digest_"
+        private const val CATCH_UP_WORK_NAME_PREFIX = "daily_digest_catchup_"
+        private const val CATCH_UP_TAG = "catch_up"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
         private const val SYNC_WORK_NAME = "digest_sync_periodic"
         private const val SYNC_INTERVAL_MINUTES = 30L
         private const val FEED_SYNC_WORK_NAME = "feed_sync_periodic"
         private const val FEED_SYNC_INTERVAL_MINUTES = 15L
+        private val CATCH_UP_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
+
+        internal fun shouldEnqueueCatchUp(
+            now: ZonedDateTime,
+            periodHour: Int,
+            latestScheduledDigestTimeMillis: Long?
+        ): Boolean {
+            val scheduledTimeToday = now.toLocalDate()
+                .atTime(periodHour, 0)
+                .atZone(now.zone)
+            if (now.isBefore(scheduledTimeToday)) {
+                return false
+            }
+
+            if (latestScheduledDigestTimeMillis == null) {
+                return true
+            }
+
+            val latestScheduledDigestTime = Instant.ofEpochMilli(latestScheduledDigestTimeMillis)
+                .atZone(now.zone)
+            return latestScheduledDigestTime.isBefore(scheduledTimeToday)
+        }
     }
 
     private val workManager: WorkManager
@@ -61,6 +91,10 @@ class DigestScheduler @Inject constructor(
      */
     private fun getWorkName(period: DigestPeriod): String {
         return "$WORK_NAME_PREFIX${period.name}"
+    }
+
+    private fun getCatchUpWorkName(period: DigestPeriod, date: LocalDate): String {
+        return "$CATCH_UP_WORK_NAME_PREFIX${period.name}_${date.format(CATCH_UP_DATE_FORMAT)}"
     }
 
     /**
@@ -108,7 +142,7 @@ class DigestScheduler @Inject constructor(
 
         workManager.enqueueUniquePeriodicWork(
             getWorkName(period),
-            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
+            ExistingPeriodicWorkPolicy.UPDATE,
             periodicWorkRequest
         )
 
@@ -144,6 +178,51 @@ class DigestScheduler @Inject constructor(
             schedulePeriod(period)
         } else {
             cancelPeriod(period)
+        }
+    }
+
+    /**
+     * Enqueues catch-up work for periods whose scheduled time has already passed today
+     * but no scheduled digest has been generated yet. Runs once per period per day.
+     */
+    suspend fun enqueueMissedPeriodCatchUps() {
+        if (settingsRepository.isGhostwriterConfigured()) {
+            Log.d(TAG, "Ghostwriter configured, skipping local catch-up checks")
+            return
+        }
+
+        val now = ZonedDateTime.now()
+        val today = now.toLocalDate()
+        val selectedPeriods = settingsRepository.getSchedulePeriods()
+
+        for (period in selectedPeriods) {
+            val lastCatchUpDate = settingsRepository.getLastCatchUpDate(period)
+            if (lastCatchUpDate == today.toString()) {
+                continue
+            }
+
+            val latestScheduledDigestTime = digestRepository.getLatestScheduledDigestTimeForPeriod(period)
+            if (!shouldEnqueueCatchUp(now, period.hour, latestScheduledDigestTime)) {
+                continue
+            }
+
+            val inputData = Data.Builder()
+                .putString(DailyDigestWorker.KEY_PERIOD, period.name)
+                .build()
+
+            val catchUpRequest = OneTimeWorkRequestBuilder<DailyDigestWorker>()
+                .setConstraints(workConstraints)
+                .setInputData(inputData)
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .addTag(DailyDigestWorker.TAG)
+                .addTag(period.name)
+                .addTag(CATCH_UP_TAG)
+                .build()
+
+            val workName = getCatchUpWorkName(period, today)
+            workManager.enqueueUniqueWork(workName, ExistingWorkPolicy.KEEP, catchUpRequest)
+            settingsRepository.setLastCatchUpDate(period, today.toString())
+            Log.i(TAG, "Enqueued catch-up digest for ${period.name} (workName=$workName)")
         }
     }
 

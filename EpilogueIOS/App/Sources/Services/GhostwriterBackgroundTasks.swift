@@ -52,6 +52,12 @@ public final class GhostwriterBackgroundTaskManager {
         scheduleDigestSync()
     }
 
+    /// Cancel any pending Ghostwriter sync requests.
+    public func cancelBackgroundTasks() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: GhostwriterBackgroundTask.feedSync)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: GhostwriterBackgroundTask.digestSync)
+    }
+
     /// Schedule feed sync task
     public func scheduleFeedSync() {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: GhostwriterBackgroundTask.feedSync)

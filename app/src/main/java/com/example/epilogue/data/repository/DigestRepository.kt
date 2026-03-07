@@ -7,6 +7,7 @@ import com.example.epilogue.data.local.DigestEntity
 import com.example.epilogue.data.remote.ghostwriter.DigestArticleResponse
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.DigestArticle
+import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessedArticle
 import com.example.epilogue.domain.model.TriggerType
@@ -282,6 +283,16 @@ class DigestRepository @Inject constructor(
      */
     suspend fun updateDigestEpubPath(digestId: Long, epubFilePath: String) {
         digestDao.updateEpubFilePath(digestId, epubFilePath)
+    }
+
+    /**
+     * Returns the timestamp of the most recent locally scheduled digest for the given period.
+     */
+    suspend fun getLatestScheduledDigestTimeForPeriod(period: DigestPeriod): Long? {
+        return digestDao.getLatestDigestTimestampForPeriod(
+            triggerType = TriggerType.SCHEDULED,
+            period = period.name.lowercase()
+        )
     }
 
     /**

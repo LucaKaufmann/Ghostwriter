@@ -48,6 +48,22 @@ actor AsyncExecutionGate {
     }
 }
 
+/// Prevents overlapping scheduled digest generations (e.g. foreground catch-up
+/// racing with a BGProcessing handler).
+actor DigestGenerationGate {
+    private var inProgress = false
+
+    func tryStart() -> Bool {
+        guard !inProgress else { return false }
+        inProgress = true
+        return true
+    }
+
+    func finish() {
+        inProgress = false
+    }
+}
+
 // MARK: - LocalDigestScheduler
 
 public final class LocalDigestScheduler: Sendable {
@@ -58,6 +74,7 @@ public final class LocalDigestScheduler: Sendable {
     private let feedRepository: FeedRepositoryProtocol
     private let digestRepository: DigestRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
+    private let generationGate = DigestGenerationGate()
     private let logger = Logger(subsystem: "com.epilogue", category: "LocalScheduler")
     private let catchUpGate = AsyncExecutionGate()
 
@@ -99,7 +116,7 @@ public final class LocalDigestScheduler: Sendable {
     // MARK: - Scheduling
 
     /// Schedule overnight digest generation (BGProcessingTask).
-    /// Targets 2 hours before the earliest enabled period, requires charging + network.
+    /// Targets 2 hours before the next enabled period, requires charging + network.
     public func scheduleOvernightDigest() async {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.digestTaskIdentifier)
 
@@ -116,26 +133,23 @@ public final class LocalDigestScheduler: Sendable {
                 return
             }
 
-            // Find earliest period for tomorrow
-            let earliestPeriod = enabledPeriods.min(by: {
-                ($0.hour, $0.minute) < ($1.hour, $1.minute)
-            })!
-
-            let calendar = Calendar.current
-            let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
-            var components = calendar.dateComponents([.year, .month, .day], from: tomorrow)
-            components.hour = earliestPeriod.hour
-            components.minute = earliestPeriod.minute
-            let nextDigestTime = calendar.date(from: components)!
+            let now = Date()
+            guard let nextDigestTime = nextScheduledDigestTime(from: now, periods: enabledPeriods) else {
+                logger.warning("Could not compute next digest window — skipping overnight schedule")
+                return
+            }
 
             let request = BGProcessingTaskRequest(identifier: Self.digestTaskIdentifier)
-            // 2 hours before earliest period to give iOS scheduling room
-            request.earliestBeginDate = nextDigestTime.addingTimeInterval(-2 * 3600)
+            // 2 hours before the next digest window to give iOS scheduling room
+            let desiredBegin = nextDigestTime.addingTimeInterval(-2 * 3600)
+            request.earliestBeginDate = max(desiredBegin, now.addingTimeInterval(60))
             request.requiresNetworkConnectivity = true
             request.requiresExternalPower = true
 
             try BGTaskScheduler.shared.submit(request)
-            logger.info("Scheduled overnight digest generation before \(nextDigestTime)")
+            logger.info(
+                "Scheduled overnight digest generation: next window \(nextDigestTime), earliest begin \(request.earliestBeginDate ?? nextDigestTime)"
+            )
         } catch {
             logger.error("Failed to schedule overnight digest: \(error.localizedDescription)")
         }
@@ -186,12 +200,18 @@ public final class LocalDigestScheduler: Sendable {
                 )
                 guard !hasDigestForLatestPeriod else { return }
 
-                logger.info("Catch-up: generating missed digest for \(latestElapsedPeriod.rawValue)")
-                let generator = try await buildDigestGenerator()
-                let digest = try await generator.generateDigest(
-                    triggerType: .scheduled,
-                    period: latestElapsedPeriod.rawValue
-                )
+                guard let digest = try await withGenerationLock({
+                    logger.info("Catch-up: generating missed digest for \(latestElapsedPeriod.rawValue)")
+                    let generator = try await buildDigestGenerator()
+                    return try await generator.generateDigest(
+                        triggerType: .scheduled,
+                        period: latestElapsedPeriod.rawValue
+                    )
+                }) else {
+                    logger.info("Catch-up skipped: another scheduled digest generation is already running")
+                    return
+                }
+
                 logger.info("Catch-up digest complete: \(digest.articleCount) articles")
 
                 await exportIfConfigured(digest: digest)
@@ -232,11 +252,17 @@ public final class LocalDigestScheduler: Sendable {
                     ($0.hour, $0.minute) < ($1.hour, $1.minute)
                 })
 
-            let generator = try await self.buildDigestGenerator()
-            let digest = try await generator.generateDigest(
-                triggerType: .scheduled,
-                period: periodToGenerate?.rawValue
-            )
+            guard let digest = try await self.withGenerationLock({
+                let generator = try await self.buildDigestGenerator()
+                return try await generator.generateDigest(
+                    triggerType: .scheduled,
+                    period: periodToGenerate?.rawValue
+                )
+            }) else {
+                self.logger.info("Overnight digest skipped: another scheduled generation is already running")
+                return false
+            }
+
             self.logger.info("Overnight digest complete: \(digest.articleCount) articles")
             await self.exportIfConfigured(digest: digest)
             await self.scheduleMorningNotification(for: digest)
@@ -333,9 +359,18 @@ public final class LocalDigestScheduler: Sendable {
         content.sound = .default
         content.categoryIdentifier = "DIGEST_READY"
 
-        var dateComponents = DateComponents()
-        dateComponents.hour = earliest.hour
-        dateComponents.minute = earliest.minute
+        let now = Date()
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: now)
+        components.hour = earliest.hour
+        components.minute = earliest.minute
+        components.second = 0
+
+        let scheduledToday = Calendar.current.date(from: components) ?? now
+        let fireDate = scheduledToday > now ? scheduledToday : now.addingTimeInterval(60)
+        let dateComponents = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: fireDate
+        )
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
         let request = UNNotificationRequest(
@@ -484,6 +519,52 @@ public final class LocalDigestScheduler: Sendable {
         components.minute = period.minute
         components.second = 0
         return calendar.date(from: components)
+    }
+
+    /// Returns the next enabled digest period occurrence from a reference date.
+    /// If an enabled period is still ahead today, uses today's window; otherwise tomorrow's earliest.
+    private func nextScheduledDigestTime(from now: Date, periods: Set<DigestPeriod>) -> Date? {
+        guard !periods.isEmpty else { return nil }
+
+        let calendar = Calendar.current
+        let todayCandidates = periods.compactMap { period -> Date? in
+            var components = calendar.dateComponents([.year, .month, .day], from: now)
+            components.hour = period.hour
+            components.minute = period.minute
+            components.second = 0
+            return calendar.date(from: components)
+        }
+
+        if let nextToday = todayCandidates.filter({ $0 >= now }).min() {
+            return nextToday
+        }
+
+        guard let earliest = periods.min(by: { ($0.hour, $0.minute) < ($1.hour, $1.minute) }) else {
+            return nil
+        }
+
+        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) else {
+            return nil
+        }
+
+        var components = calendar.dateComponents([.year, .month, .day], from: tomorrow)
+        components.hour = earliest.hour
+        components.minute = earliest.minute
+        components.second = 0
+        return calendar.date(from: components)
+    }
+
+    private func withGenerationLock<T>(_ operation: @Sendable () async throws -> T) async throws -> T? {
+        guard await generationGate.tryStart() else { return nil }
+
+        do {
+            let result = try await operation()
+            await generationGate.finish()
+            return result
+        } catch {
+            await generationGate.finish()
+            throw error
+        }
     }
 
     func buildDigestGenerator() async throws -> DigestGenerator {

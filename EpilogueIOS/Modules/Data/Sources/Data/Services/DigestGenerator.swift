@@ -171,14 +171,16 @@ public final class DigestGenerator {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         let dateString = formatter.string(from: date)
+        let suffix = UUID().uuidString.prefix(8)
 
         if let period {
             let slug = period.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }
             if !slug.isEmpty {
-                return "Epilogue_\(dateString)_\(slug).epub"
+                return "Epilogue_\(dateString)_\(slug)_\(suffix).epub"
             }
         }
-        return "Epilogue_\(dateString).epub"
+
+        return "Epilogue_\(dateString)_\(suffix).epub"
     }
 }
 

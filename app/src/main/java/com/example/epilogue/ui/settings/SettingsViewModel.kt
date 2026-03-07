@@ -437,6 +437,9 @@ class SettingsViewModel @Inject constructor(
             if (enabled && settingsRepository.isGhostwriterConfigured()) {
                 // Cancel local scheduled generation - backend handles it
                 digestScheduler.cancelAllPeriods()
+                // Start periodic feed sync and perform immediate sync
+                digestScheduler.scheduleFeedSync()
+                digestScheduler.syncFeedsNow()
                 // Start periodic digest sync and perform initial sync
                 digestScheduler.scheduleDigestSync()
                 digestScheduler.syncDigestsNow()
@@ -446,8 +449,10 @@ class SettingsViewModel @Inject constructor(
             } else if (!enabled) {
                 // Stop periodic digest sync when Ghostwriter is disabled
                 digestScheduler.cancelDigestSync()
+                digestScheduler.cancelFeedSync()
                 // Re-enable local scheduled generation
                 digestScheduler.scheduleAllPeriods()
+                digestScheduler.enqueueMissedPeriodCatchUps()
             }
         }
     }
