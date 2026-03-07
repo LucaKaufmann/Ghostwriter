@@ -134,6 +134,7 @@ xcodebuild -workspace Epilogue.xcworkspace -scheme Epilogue build
 ## Development Commands
 
 - Android release build: `./gradlew assembleRelease`
+- Android Google Play upload (local script): `scripts/upload_play_release.sh --version-code 42 --version-name 1.0.0 --track internal`
 - Android tests: `./gradlew test`
 - iOS workspace generation: `cd EpilogueIOS && tuist install && tuist generate`
 - Ghostwriter backend tests: `cd ghostwriter && pytest`

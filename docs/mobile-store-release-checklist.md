@@ -40,10 +40,15 @@ This document captures the executable release workflow for both mobile apps.
 ## 3. Android Build + Upload
 
 1. Create `keystore.properties` from `keystore.properties.example`.
-2. Build release bundle:
-   - `JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" ./gradlew clean :shared:assembleEpilogueSharedXCFramework :app:test :app:lintRelease :app:bundleRelease`
-3. Upload `.aab` (`app/build/outputs/bundle/release/`) to Play Console Internal Testing.
-4. Validate Play pre-launch report and policy status before production rollout.
+2. Create a Google Play service account JSON key with at least `Release Manager` access to `com.codable.epilogue`.
+3. Save that key locally, for example:
+   - `mkdir -p ~/.config/epilogue`
+   - `cp ~/Downloads/play-service-account.json ~/.config/epilogue/play-service-account.json`
+4. Trigger local build + upload script:
+   - `JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" scripts/upload_play_release.sh --version-code 42 --version-name 1.0.0 --track internal`
+5. Optional fast path (skip local checks):
+   - `scripts/upload_play_release.sh --version-code 42 --version-name 1.0.0 --track internal --skip-checks`
+6. Validate Play pre-launch report and policy status before production rollout.
 
 ## 4. iOS Build + Upload (ASC CLI)
 

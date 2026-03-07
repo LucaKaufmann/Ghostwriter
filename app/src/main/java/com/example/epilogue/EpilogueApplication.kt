@@ -46,6 +46,11 @@ class EpilogueApplication : Application(), Configuration.Provider {
         } else {
             // Schedule local digest generation for all selected periods
             digestScheduler.scheduleAllPeriods()
+            digestScheduler.cancelFeedSync()
+            digestScheduler.cancelDigestSync()
+            applicationScope.launch {
+                digestScheduler.enqueueMissedPeriodCatchUps()
+            }
         }
     }
 
