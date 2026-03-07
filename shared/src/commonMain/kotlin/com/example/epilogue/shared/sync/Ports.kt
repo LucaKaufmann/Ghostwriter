@@ -4,6 +4,7 @@ import com.example.epilogue.shared.domain.Feed
 import com.example.epilogue.shared.ghostwriter.ClientConfigResponse
 import com.example.epilogue.shared.ghostwriter.ClientConfigUpdateRequest
 import com.example.epilogue.shared.ghostwriter.DigestArticlesResponse
+import com.example.epilogue.shared.ghostwriter.DigestListResponse
 import com.example.epilogue.shared.ghostwriter.DigestResponse
 import com.example.epilogue.shared.ghostwriter.FeedChangesResponse
 import com.example.epilogue.shared.ghostwriter.FeedSyncRequest
@@ -66,6 +67,6 @@ interface GhostwriterSyncPort {
     suspend fun getFeedChanges(since: String?): SyncPortResult<FeedChangesResponse>
 
     suspend fun performSync(feedSince: String?, digestIds: String?): SyncPortResult<SyncResponse>
-    suspend fun listDigests(): SyncPortResult<List<DigestResponse>>
+    suspend fun listDigests(): SyncPortResult<DigestListResponse>
     suspend fun getDigestArticles(digestId: String): SyncPortResult<DigestArticlesResponse>
 }

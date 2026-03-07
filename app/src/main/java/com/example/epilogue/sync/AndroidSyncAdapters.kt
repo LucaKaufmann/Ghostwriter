@@ -19,6 +19,7 @@ import com.example.epilogue.shared.ghostwriter.ClientConfigUpdateRequest as Shar
 import com.example.epilogue.shared.ghostwriter.DigestArticleResponse as SharedDigestArticleResponse
 import com.example.epilogue.shared.ghostwriter.DigestArticlesResponse as SharedDigestArticlesResponse
 import com.example.epilogue.shared.ghostwriter.DigestResponse as SharedDigestResponse
+import com.example.epilogue.shared.ghostwriter.DigestListResponse as SharedDigestListResponse
 import com.example.epilogue.shared.ghostwriter.FeedChangesResponse as SharedFeedChangesResponse
 import com.example.epilogue.shared.ghostwriter.FeedResponse as SharedFeedResponse
 import com.example.epilogue.shared.ghostwriter.FeedSyncRequest as SharedFeedSyncRequest
@@ -212,9 +213,11 @@ class AndroidGhostwriterSyncPort @Inject constructor(
         }
     }
 
-    override suspend fun listDigests(): SyncPortResult<List<SharedDigestResponse>> {
+    override suspend fun listDigests(): SyncPortResult<SharedDigestListResponse> {
         return when (val result = ghostwriterRepository.listDigests()) {
-            is GhostwriterRepository.GhostwriterResult.Success -> SyncPortResult.Success(result.data.map { it.toShared() })
+            is GhostwriterRepository.GhostwriterResult.Success -> SyncPortResult.Success(
+                SharedDigestListResponse(digests = result.data.map { it.toShared() })
+            )
             is GhostwriterRepository.GhostwriterResult.Error -> SyncPortResult.Error(result.message, result.code)
             is GhostwriterRepository.GhostwriterResult.NotConfigured -> SyncPortResult.NotConfigured
         }

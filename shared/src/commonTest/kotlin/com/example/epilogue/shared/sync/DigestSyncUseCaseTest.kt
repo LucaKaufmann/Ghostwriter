@@ -1,6 +1,7 @@
 package com.example.epilogue.shared.sync
 
 import com.example.epilogue.shared.ghostwriter.DigestArticleResponse
+import com.example.epilogue.shared.ghostwriter.DigestListResponse
 import com.example.epilogue.shared.ghostwriter.DigestResponse
 import com.example.epilogue.shared.ghostwriter.SyncDigest
 import com.example.epilogue.shared.ghostwriter.SyncDigestsSection
@@ -66,7 +67,8 @@ class DigestSyncUseCaseTest {
         val ghostwriter = FakeGhostwriterSyncPort(
             performSyncResult = SyncPortResult.Error("nope"),
             listDigestsResult = SyncPortResult.Success(
-                listOf(
+                DigestListResponse(
+                    digests = listOf(
                     DigestResponse(
                         id = "known-1",
                         filename = "known.epub",
@@ -82,6 +84,7 @@ class DigestSyncUseCaseTest {
                         status = "completed",
                         articleCount = 2,
                         createdAt = "2026-03-07T10:00:00Z"
+                    )
                     )
                 )
             )
@@ -118,7 +121,7 @@ class DigestSyncUseCaseTest {
 
     private class FakeGhostwriterSyncPort(
         private val performSyncResult: SyncPortResult<SyncResponse>,
-        private val listDigestsResult: SyncPortResult<List<DigestResponse>> = SyncPortResult.NotConfigured
+        private val listDigestsResult: SyncPortResult<DigestListResponse> = SyncPortResult.NotConfigured
     ) : GhostwriterSyncPort {
         override suspend fun getConfig() = SyncPortResult.NotConfigured
 
@@ -133,7 +136,7 @@ class DigestSyncUseCaseTest {
         override suspend fun performSync(feedSince: String?, digestIds: String?): SyncPortResult<SyncResponse> =
             performSyncResult
 
-        override suspend fun listDigests(): SyncPortResult<List<DigestResponse>> = listDigestsResult
+        override suspend fun listDigests(): SyncPortResult<DigestListResponse> = listDigestsResult
 
         override suspend fun getDigestArticles(digestId: String) = SyncPortResult.NotConfigured
     }
