@@ -15,17 +15,17 @@ services:
       - API_KEY=${GHOSTWRITER_API_KEY:-}
 
       # AI Provider (openai, gemini, ollama)
-      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
 
       # OpenAI config
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-nano}
 
       # Gemini config
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash-lite}
 
-      # Ollama config (default: use sidecar)
+      # Ollama config (used with --profile with-ollama)
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
 
@@ -67,17 +67,11 @@ services:
       - ghostwriter_data:/app/data
       - ghostwriter_epubs:/app/output
       - ghostwriter_logs:/app/logs
-    depends_on:
-      ollama:
-        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    profiles:
-      - default
-      - with-ollama
 
   ghostwriter-dev:
     build:
@@ -96,17 +90,17 @@ services:
       - API_KEY=${GHOSTWRITER_API_KEY:-}
 
       # AI Provider (openai, gemini, ollama)
-      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
 
       # OpenAI config
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-nano}
 
       # Gemini config
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash-lite}
 
-      # Ollama config (default: use sidecar)
+      # Ollama config (used with --profile with-ollama)
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
 
@@ -148,9 +142,6 @@ services:
       - ghostwriter_dev_data:/app/data
       - ghostwriter_dev_epubs:/app/output
       - ghostwriter_dev_logs:/app/logs
-    depends_on:
-      ollama:
-        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -159,7 +150,7 @@ services:
     profiles:
       - dev
 
-  # Local Ollama sidecar (optional)
+  # Local Ollama sidecar (opt-in: docker compose --profile with-ollama up -d)
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -177,7 +168,6 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     profiles:
-      - default
       - with-ollama
 
 volumes:

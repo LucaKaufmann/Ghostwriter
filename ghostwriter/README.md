@@ -8,7 +8,7 @@ RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts artic
 - **Wallabag Integration** - Include saved articles from a Wallabag instance
 - **RSS/Atom Feed Aggregation** - Parse and deduplicate articles from multiple feeds
 - **Content Extraction** - Clean article extraction via Trafilatura
-- **AI Summarization** - Provider-agnostic AI via LiteLLM (OpenAI, Gemini, Ollama)
+- **AI Summarization** - Provider-agnostic AI via LiteLLM (OpenAI, Gemini, or local Ollama)
 - **EPUB Generation** - Compile articles into e-reader friendly digests
 - **Scheduled Jobs** - Automatic morning/noon/evening digest generation
 - **REST API** - Full API for feed management and digest downloads
@@ -20,26 +20,21 @@ RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts artic
 ```bash
 # Clone and configure
 cp .env.example .env
-# Edit .env with your settings
+# Edit .env — set AI_PROVIDER and your API key (e.g. OPENAI_API_KEY)
 
-# Start with local Ollama
+# Start Ghostwriter
 docker compose up -d
-
-# Pull the Ollama model (first time only)
-docker exec ollama ollama pull llama3.2
 
 # Verify health
 curl http://localhost:8080/health
 ```
 
-### Cloud AI Only (No Ollama)
+To use local Ollama instead of a cloud AI provider:
 
 ```bash
-# Set your API key
-export OPENAI_API_KEY=sk-...
-
-# Start without Ollama
-docker compose -f docker-compose.cloud.yml up -d
+# Set AI_PROVIDER=ollama in .env, then:
+docker compose --profile with-ollama up -d
+docker exec ollama ollama pull llama3.2
 ```
 
 ### Local Development
@@ -49,8 +44,8 @@ docker compose -f docker-compose.cloud.yml up -d
 pip install -r requirements.txt
 
 # Set environment
-export AI_PROVIDER=ollama
-export OLLAMA_BASE_URL=http://localhost:11434
+export AI_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
 
 # Run
 uvicorn app.main:app --reload --port 8080
@@ -104,7 +99,7 @@ All configuration via environment variables. See `.env.example` for full list.
 
 ```bash
 # AI Provider: openai, gemini, ollama
-AI_PROVIDER=ollama
+AI_PROVIDER=openai
 
 # Transcription (local whisper.cpp and/or OpenAI Whisper API)
 WHISPER_CPP_BINARY=/usr/local/bin/whisper-cli
@@ -282,4 +277,4 @@ app/
 
 ## License
 
-MIT
+[GPL-3.0](../LICENSE)
