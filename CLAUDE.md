@@ -331,7 +331,7 @@ Store OpenAI API key in `EncryptedSharedPreferences`.
 
 ## Ghostwriter Backend
 
-The `ghostwriter/` directory contains a Python FastAPI backend that runs on a server (Synology NAS) to generate digests remotely.
+The `ghostwriter/` directory contains a Python FastAPI backend that runs on a self-hosted server to generate digests remotely.
 
 ### Local Development
 
@@ -341,9 +341,9 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8080
 ```
 
-### Docker Build & Deploy (Synology DS920+)
+### Docker Build & Deploy
 
-**Important:** The Synology DS920+ uses an Intel x86_64 CPU (linux/amd64). When building on Apple Silicon (M1/M2/M3), you must specify the target platform explicitly.
+**Important:** If your server uses a different architecture than your dev machine (e.g., x86_64 server, ARM Mac), specify the target platform explicitly.
 
 Build the Docker image:
 ```bash
@@ -351,24 +351,24 @@ cd ghostwriter
 docker build --platform linux/amd64 -t ghostwriter:latest -t ghostwriter:$(date +%Y%m%d) .
 ```
 
-Save as tar for transfer to NAS:
+Save as tar for transfer to server:
 ```bash
 docker save ghostwriter:latest | gzip > ghostwriter.tar.gz
 ```
 
-Transfer to Synology and load:
+Transfer to your server and load:
 ```bash
-# Copy to NAS (via SSH, SMB, or Synology web UI)
+# Copy to server (via SSH, SMB, etc.)
 scp ghostwriter.tar.gz user@your-server:/path/to/docker/
 
-# SSH into NAS and load image
+# SSH into server and load image
 ssh user@your-server
-docker load < /path/to/ghostwriter.tar.gz
+docker load < /path/to/docker/ghostwriter.tar.gz
 ```
 
-Run with docker-compose on the NAS:
+Run with docker-compose on the server:
 ```bash
-cd /path/to/ghostwriter
+cd /path/to/docker/ghostwriter
 docker-compose up -d
 ```
 
@@ -516,8 +516,7 @@ docker exec -it ghostwriter tail -100 /app/logs/ghostwriter.log
 # Copy logs to host
 docker cp ghostwriter:/app/logs/. ./ghostwriter-logs/
 
-# On Synology, logs volume is at:
-# /path/to/ghostwriter_logs/
+# If using named Docker volumes, check your Docker data directory for ghostwriter_logs
 ```
 
 **Using logs for debugging:**

@@ -161,9 +161,7 @@ def downgrade() -> None:
 
 Migrations run automatically on container start (`entrypoint.sh` → `alembic upgrade head`).
 
-- Deploy to Pi: `./ghostwriter/deploy.sh pi`
-- Deploy to Synology: `./ghostwriter/deploy.sh synology`
-- Deploy to Mac (dev): `./ghostwriter/deploy.sh mac`
+- Deploy: `./ghostwriter/deploy.sh <target>` (see deploy script for available targets)
 
 ## Security & Configuration Tips
 - Do not commit secrets. Use `ghostwriter/.env` from `.env.example` and keep credentials local.
