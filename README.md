@@ -1,13 +1,17 @@
-# Epilogue
+<p align="center">
+  <img src="Ghostwriter_banner.png" alt="Ghostwriter" />
+</p>
 
-Epilogue is a cross-platform RSS-to-EPUB workflow for focused reading — with optional AI-narrated podcast generation.
+# Ghostwriter
 
-- Mobile apps (Android + iOS) manage feeds and read digests.
+Ghostwriter is the repository for a cross-platform RSS-to-EPUB workflow for focused reading, with optional AI-narrated podcast generation.
+
+- Epilogue mobile apps (Android + iOS) manage feeds and read digests.
 - Ghostwriter (self-hosted backend) generates digests, runs schedules, syncs across devices, and produces podcast episodes from your content.
 
 If you want to try the project quickly, start with Ghostwriter.
 
-## Why Epilogue
+## Why Ghostwriter
 
 - Build a daily reading digest from RSS/Atom feeds.
 - `Fidelity` mode for full-article extraction.
@@ -20,8 +24,8 @@ If you want to try the project quickly, start with Ghostwriter.
 
 ## Project Layout
 
-- `app/`: Android app (Kotlin, Compose, Room, WorkManager).
-- `EpilogueIOS/`: iOS app (Swift, SwiftUI, Tuist modules).
+- `app/`: Epilogue Android app (Kotlin, Compose, Room, WorkManager).
+- `EpilogueIOS/`: Epilogue iOS app (Swift, SwiftUI, Tuist modules).
 - `ghostwriter/`: FastAPI backend + Svelte web UI, including podcast generation pipeline and TTS integration.
 - `docs/`, `examples/`: project docs and sample files.
 
