@@ -10,8 +10,8 @@ Measures timing for each phase:
 Usage:
     python scripts/benchmark_sync.py --base-url http://localhost:8080 --token gw_xxx
 
-    # Against the NAS
-    python scripts/benchmark_sync.py --base-url http://synology:8158 --token gw_xxx
+    # Against a remote server
+    python scripts/benchmark_sync.py --base-url http://your-server:8080 --token gw_xxx
 
     # Repeat N times and show stats
     python scripts/benchmark_sync.py --base-url http://localhost:8080 --token gw_xxx -n 5

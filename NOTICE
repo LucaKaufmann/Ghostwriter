@@ -1,0 +1,42 @@
+Ghostwriter
+Copyright (c) 2026 Luca Kaufmann
+
+This project is licensed under the GNU General Public License v3.0.
+See LICENSE for details.
+
+This project includes or depends on the following third-party software:
+
+---
+
+## Python Backend (ghostwriter/)
+
+- **trafilatura** - GPL 3.0
+  https://github.com/adbar/trafilatura
+  Used for web content extraction. The backend's use of this library means
+  the backend component is subject to GPL 3.0 obligations when distributed.
+
+- **ebooklib** - AGPL 3.0
+  https://github.com/aerkalov/ebooklib
+  Used for EPUB generation.
+
+## Android App (app/)
+
+- **Readability4J** - Apache 2.0
+  https://github.com/nicholasnet/Readability4J
+
+- **Jsoup** - MIT
+  https://jsoup.org/
+
+- **RSS-Parser** - Apache 2.0
+  https://github.com/nicholasnet/RSS-Parser
+
+## iOS App (EpilogueIOS/)
+
+- **FeedKit** - MIT
+  https://github.com/nmdias/FeedKit
+
+- **SwiftSoup** - MIT
+  https://github.com/scinfu/SwiftSoup
+
+- **ZIPFoundation** - MIT
+  https://github.com/weichsel/ZIPFoundation

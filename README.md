@@ -145,11 +145,10 @@ xcodebuild -workspace Epilogue.xcworkspace -scheme Epilogue build
 - Ghostwriter frontend type checks: `cd ghostwriter/frontend && npm run check`
 - Ghostwriter frontend production build: `cd ghostwriter/frontend && npm run build`
 
-## Notes Before Open Sourcing
-
-- A root `LICENSE` file is not present yet. Add one before publishing publicly.
-- Screenshots and demo media are not included yet; adding them will improve first impressions.
-
 ## Contributing
 
-Contributions are welcome. For now, use small focused PRs with clear test notes.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE). See [NOTICE](NOTICE) for third-party attribution.
