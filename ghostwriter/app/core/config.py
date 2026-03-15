@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # AI Provider Configuration
     ai_provider: Literal["openai", "gemini", "ollama"] = Field(
-        default="ollama", description="AI provider selection"
+        default="openai", description="AI provider selection"
     )
 
     # OpenAI
@@ -146,7 +146,7 @@ class Settings(BaseSettings):
         Get the LiteLLM model string based on the configured provider.
 
         Returns:
-            The model string in LiteLLM format (e.g., 'gemini/gemini-1.5-flash').
+            The model string in LiteLLM format (e.g., 'gemini/gemini-2.0-flash-lite').
         """
         if self.ai_provider == "openai":
             return self.openai_model
