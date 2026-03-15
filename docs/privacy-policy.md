@@ -77,5 +77,4 @@ We may update this Privacy Policy from time to time. Updated versions will be po
 
 For privacy questions, open an issue at:
 
-https://github.com/LucaKaufmann/Epilogue/issues
-
+https://github.com/LucaKaufmann/Ghostwriter/issues

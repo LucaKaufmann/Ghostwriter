@@ -46,9 +46,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/epilogue"
-Documentation = "https://github.com/your-org/epilogue#readme"
-Repository = "https://github.com/your-org/epilogue"
+Homepage = "https://github.com/LucaKaufmann/Ghostwriter"
+Documentation = "https://github.com/LucaKaufmann/Ghostwriter#readme"
+Repository = "https://github.com/LucaKaufmann/Ghostwriter"
 
 [build-system]
 requires = ["hatchling"]
