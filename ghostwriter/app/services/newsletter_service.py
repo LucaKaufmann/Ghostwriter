@@ -188,6 +188,29 @@ class NewsletterService:
                         pass
                     return new_data["access_token"]
 
+                # Refresh failed — log details
+                logger.warning(
+                    "Gmail token refresh failed: %d %s",
+                    resp.status_code,
+                    resp.text,
+                )
+
+                if resp.status_code in (400, 401):
+                    # Irrecoverable: token revoked or expired (invalid_grant).
+                    # Delete stale token so is_configured() returns False,
+                    # signalling re-auth is needed.
+                    try:
+                        os.remove(self._token_path)
+                        logger.info("Deleted stale Gmail token file")
+                    except OSError:
+                        pass
+                    raise RuntimeError(
+                        "Gmail refresh token expired or revoked. "
+                        "Re-authenticate via /newsletters/oauth/init"
+                    )
+
+                # Transient error (5xx etc.) — fall through to stale token as best-effort
+
         return token_data["access_token"]
 
     async def fetch_newsletters(self) -> tuple[list[ExtractedArticle], list[str]]:
