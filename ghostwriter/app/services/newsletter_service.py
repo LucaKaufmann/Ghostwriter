@@ -206,7 +206,7 @@ class NewsletterService:
                         pass
                     raise RuntimeError(
                         "Gmail refresh token expired or revoked. "
-                        "Re-authenticate via /newsletters/oauth/init"
+                        "Re-authenticate via /newsletters/oauth/start"
                     )
 
                 # Transient error (5xx etc.) — fall through to stale token as best-effort
