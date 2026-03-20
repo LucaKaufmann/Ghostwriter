@@ -15,19 +15,25 @@ RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts artic
 
 ## Quick Start
 
-### With Docker (Recommended)
+### With Docker From GHCR (Recommended)
 
 ```bash
 # Clone and configure
+git clone https://github.com/LucaKaufmann/Ghostwriter.git
+cd Ghostwriter/ghostwriter
 cp .env.example .env
 # Edit .env — set AI_PROVIDER and your API key (e.g. OPENAI_API_KEY)
 
-# Start Ghostwriter
+# Pull and start Ghostwriter
+docker compose pull
 docker compose up -d
 
 # Verify health
 curl http://localhost:8080/health
 ```
+
+The default compose file pulls the published image from `ghcr.io/lucakaufmann/ghostwriter:latest`.
+Stable releases are published from git tags named `ghostwriter-vX.Y.Z`.
 
 To use local Ollama instead of a cloud AI provider:
 
@@ -36,6 +42,27 @@ To use local Ollama instead of a cloud AI provider:
 docker compose --profile with-ollama up -d
 docker exec ollama ollama pull llama3.2
 ```
+
+### Upgrade a GHCR Deployment
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Persistent state lives in the named volumes `ghostwriter_data`, `ghostwriter_epubs`, and `ghostwriter_logs`.
+Runtime configuration comes from `ghostwriter/.env`, which Compose passes into the container with the paths `/app/data`, `/app/output`, and `/app/logs`.
+
+### Build From Local Source With Compose
+
+Use the dev override if you want to build the image from your checked-out source instead of pulling GHCR:
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+This keeps the same runtime configuration and volumes as the published-image setup, but the image is built locally and tagged `ghostwriter:dev`.
 
 ### Local Development
 
@@ -50,6 +77,13 @@ export OPENAI_API_KEY=sk-...
 # Run
 uvicorn app.main:app --reload --port 8080
 ```
+
+### Supported Container Platforms
+
+Published Ghostwriter images target:
+
+- `linux/amd64`
+- `linux/arm64`
 
 ### PDF Rendering Dependencies
 
@@ -198,7 +232,7 @@ Ghostwriter includes a built-in web interface for managing feeds, viewing digest
 
 ### Accessing the Web UI
 
-After starting Ghostwriter, open `http://localhost:8080` in your browser. You'll be prompted for your API token (the `API_KEY` environment variable).
+After starting Ghostwriter, open `http://localhost:8080` in your browser. On a fresh install, create the first user account in the setup flow. Existing users can then sign in and create API tokens for mobile clients from Settings.
 
 ### Features
 
@@ -230,6 +264,20 @@ npm run build
 ```
 
 The built files are output to `frontend/build/` and served by FastAPI.
+
+## Container Images
+
+- Registry: `ghcr.io/lucakaufmann/ghostwriter`
+- Stable tags: `ghostwriter-vX.Y.Z` git releases publish `X.Y.Z`, `X.Y`, `X`, and `latest`
+- Traceability tag: each published release also includes a `sha-<commit>` image tag
+
+For conservative deployments, pin `GHOSTWRITER_VERSION` in `.env` or your shell before running Compose:
+
+```bash
+export GHOSTWRITER_VERSION=1.2.3
+docker compose pull
+docker compose up -d
+```
 
 ## Wallabag Integration
 

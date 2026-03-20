@@ -55,6 +55,7 @@ Adjust timezone, schedule, and other settings as needed. For podcast generation,
 ### 2. Start Ghostwriter
 
 ```bash
+docker compose pull
 docker compose up -d
 ```
 
@@ -81,6 +82,20 @@ docker compose --profile with-ollama up -d
 
 # Pull a model (first run only)
 docker exec ollama ollama pull llama3.2
+```
+
+## Ghostwriter Releases
+
+Ghostwriter Docker images are published to `ghcr.io/lucakaufmann/ghostwriter`.
+Stable container releases come from git tags named `ghostwriter-vX.Y.Z`, which publish versioned tags plus `latest`.
+
+To run the published image from the repo checkout:
+
+```bash
+cd ghostwriter
+cp .env.example .env
+docker compose pull
+docker compose up -d
 ```
 
 ## Ghostwriter Local Development
