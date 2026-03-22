@@ -145,8 +145,14 @@ jobs:
             REPOSITORY_URL=${{ github.server_url }}/${{ github.repository }}
 
       - name: Attest build provenance
+        if: github.event.repository.private == false
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ steps.prep.outputs.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+      - name: Skip provenance attestation for private repositories
+        if: github.event.repository.private == true
+        run: |
+          echo "Skipping provenance attestation because GitHub does not support persisting attestations for private repositories."
