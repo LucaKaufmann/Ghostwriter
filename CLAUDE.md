@@ -462,8 +462,10 @@ with op.batch_alter_table("my_table") as batch_op:
 - `POST /config/wallabag/preview` - Preview Wallabag articles
 - `POST /config/wallabag/clear-seen` - Clear Wallabag seen article history
 - `GET /newsletters/status` - Newsletter integration status
-- `POST /newsletters/oauth/init` - Start Gmail OAuth flow
-- `POST /newsletters/oauth/callback` - Exchange OAuth code for token
+- `GET /newsletters/oauth/start` - Start Gmail OAuth flow (browser redirect)
+- `POST /newsletters/oauth/init` - Get OAuth consent URL (for manual/API flow)
+- `GET /newsletters/oauth/callback` - OAuth callback from Google (browser)
+- `POST /newsletters/oauth/callback` - Exchange OAuth code for token (API)
 - `POST /newsletters/preview` - Preview newsletter articles
 - `POST /config/newsletters/clear-seen` - Clear newsletter seen article history
 
@@ -553,6 +555,7 @@ npm run check            # TypeScript & Svelte type checking
 - `/digests` - Digest history (filter by status/period, download EPUB, view articles)
 - `/settings` - Schedules, API tokens, Wallabag config, newsletter OAuth, activity logs
 - `/newsletters` - Newsletter integration setup
+- `/sources/*` - Modular integration pages (feeds, newsletters, media)
 
 **Key Files:**
 - API client: `src/lib/api/client.ts`
