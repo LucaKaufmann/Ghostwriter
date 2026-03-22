@@ -90,6 +90,7 @@ ELEVENLABS_DEFAULT_HOST_A_VOICE = "iP95p4xoKVk53GoZ742B"
 ELEVENLABS_DEFAULT_HOST_B_VOICE = "XrExE9yKIg1WjnnlVkGX"
 SCRIPT_BRIEF_CHUNK_SIZE = 3
 SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
+MIN_EPISODE_DURATION_SECONDS = 30
 SCRIPT_SYSTEM_PROMPT = """You are a podcast script writer for concise daily briefings.
 Hard rules:
 - Output only dialogue lines in this exact format: [HOST_A]: ... or [HOST_B]: ...
@@ -1081,6 +1082,20 @@ class PodcastDigestService:
             else:
                 audio_result = await self.generate_audio(episode_id, segments, runtime_prefs)
 
+            if (
+                audio_result.duration_seconds is not None
+                and audio_result.duration_seconds < MIN_EPISODE_DURATION_SECONDS
+            ):
+                # Clean up the too-short audio file
+                audio_path = Path(audio_result.audio_path)
+                if audio_path.exists():
+                    audio_path.unlink()
+                raise RuntimeError(
+                    f"Generated audio is only {audio_result.duration_seconds}s, "
+                    f"below the {MIN_EPISODE_DURATION_SECONDS}s minimum. "
+                    f"Most TTS segments likely failed."
+                )
+
             with Session(engine) as session:
                 episode = session.get(PodcastEpisode, episode_id)
                 if episode is None:
@@ -1811,6 +1826,7 @@ class PodcastDigestService:
         synthesized_chars = 0
 
         if provider == "elevenlabs":
+            await self._check_elevenlabs_quota(prefs, len(cleaned))
             # ElevenLabs handles long text natively — single API call
             normalized = self._normalize_tts_segment_text(
                 cleaned,
@@ -1829,14 +1845,14 @@ class PodcastDigestService:
                     "timestamp_utc": datetime.utcnow().isoformat() + "Z",
                 },
             )
-            audio_bytes = await self._synthesize_segment_with_retry(
+            audio_bytes, tts_error = await self._synthesize_segment_with_retry(
                 text=normalized,
                 voice=voice,
                 provider=provider,
                 prefs=prefs,
             )
             if not audio_bytes:
-                raise RuntimeError("TTS failed for solo script")
+                raise RuntimeError(f"TTS failed for solo script: {tts_error}")
             final_path.write_bytes(audio_bytes)
             synthesized_chars = len(cleaned)
         else:
@@ -1865,14 +1881,14 @@ class PodcastDigestService:
                             "timestamp_utc": datetime.utcnow().isoformat() + "Z",
                         },
                     )
-                    audio_bytes = await self._synthesize_segment_with_retry(
+                    audio_bytes, tts_error = await self._synthesize_segment_with_retry(
                         text=normalized,
                         voice=voice,
                         provider=provider,
                         prefs=prefs,
                     )
                     if not audio_bytes:
-                        logger.warning("Skipping solo TTS chunk %d after retries", idx)
+                        logger.warning("Skipping solo TTS chunk %d after retries: %s", idx, tts_error)
                         continue
                     path = Path(tmpdir) / f"chunk_{idx:04d}.mp3"
                     path.write_bytes(audio_bytes)
@@ -2397,6 +2413,9 @@ class PodcastDigestService:
                 )
                 for segment in segments
             ]
+            total_chars = sum(len(t) for t in normalized_segment_texts)
+            if provider == "elevenlabs":
+                await self._check_elevenlabs_quota(prefs, total_chars)
             for index, segment in enumerate(segments, start=1):
                 normalized_text = normalized_segment_texts[index - 1]
                 preferred_voice = (
@@ -2428,7 +2447,7 @@ class PodcastDigestService:
                         "timestamp_utc": datetime.utcnow().isoformat() + "Z",
                     },
                 )
-                audio_bytes = await self._synthesize_segment_with_retry(
+                audio_bytes, tts_error = await self._synthesize_segment_with_retry(
                     text=normalized_text,
                     voice=voice,
                     provider=provider,
@@ -2450,9 +2469,15 @@ class PodcastDigestService:
                             "speaker": segment.speaker,
                             "voice": voice,
                             "provider": provider,
+                            "error": tts_error,
                             "timestamp_utc": datetime.utcnow().isoformat() + "Z",
                         },
                     )
+                    # Abort early on quota exhaustion — retrying won't help
+                    if tts_error and "quota_exceeded" in tts_error:
+                        raise RuntimeError(
+                            f"ElevenLabs quota exhausted during audio generation: {tts_error}"
+                        )
                     continue
                 path = Path(tmpdir) / f"segment_{index:04d}.mp3"
                 path.write_bytes(audio_bytes)
@@ -2515,6 +2540,47 @@ class PodcastDigestService:
             synthesized_chars=synthesized_chars,
         )
 
+    async def _check_elevenlabs_quota(
+        self,
+        prefs: PodcastGenerationPreferences,
+        required_chars: int,
+    ) -> None:
+        """Pre-flight check: verify ElevenLabs account has enough character quota."""
+        api_key = (prefs.elevenlabs_api_key or "").strip()
+        if not api_key:
+            return  # Will fail later with a clear missing-key error
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+                response = await client.get(
+                    "https://api.elevenlabs.io/v1/user/subscription",
+                    headers={"xi-api-key": api_key},
+                )
+                if response.status_code != 200:
+                    logger.warning(
+                        "ElevenLabs quota check failed (HTTP %s), proceeding anyway",
+                        response.status_code,
+                    )
+                    return
+                data = response.json()
+                limit = data.get("character_limit", 0)
+                used = data.get("character_count", 0)
+                remaining = max(0, limit - used)
+                if required_chars > remaining:
+                    raise RuntimeError(
+                        f"ElevenLabs quota insufficient: {remaining} credits remaining, "
+                        f"~{required_chars} required for this episode. "
+                        f"Quota resets at the start of the next billing cycle."
+                    )
+                logger.info(
+                    "ElevenLabs quota check passed: %d remaining, ~%d required",
+                    remaining,
+                    required_chars,
+                )
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.warning("ElevenLabs quota pre-check failed: %s, proceeding anyway", exc)
+
     async def _synthesize_segment_with_retry(
         self,
         *,
@@ -2524,12 +2590,16 @@ class PodcastDigestService:
         prefs: PodcastGenerationPreferences,
         previous_text: str | None = None,
         next_text: str | None = None,
-    ) -> bytes:
-        """Generate one TTS segment with bounded retries."""
+    ) -> tuple[bytes, str | None]:
+        """Generate one TTS segment with bounded retries.
+
+        Returns (audio_bytes, error_message). On success error_message is None.
+        On failure audio_bytes is empty and error_message describes the last error.
+        """
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                return await self._synthesize_segment(
+                audio = await self._synthesize_segment(
                     text=text,
                     voice=voice,
                     provider=provider,
@@ -2537,6 +2607,7 @@ class PodcastDigestService:
                     previous_text=previous_text,
                     next_text=next_text,
                 )
+                return audio, None
             except Exception as exc:
                 last_error = exc
                 logger.warning(
@@ -2547,8 +2618,9 @@ class PodcastDigestService:
                 )
                 if attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
+        error_msg = str(last_error)[:300] if last_error else "unknown error"
         logger.error("%s TTS failed after retries: %s", provider, last_error)
-        return b""
+        return b"", error_msg
 
     @staticmethod
     def _append_tts_debug_entry(path: Path, payload: dict[str, Any]) -> None:
