@@ -5,6 +5,7 @@ RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts artic
 ## Features
 
 - **Web UI** - Modern, responsive dashboard for configuration and monitoring
+- **Gmail Newsletters** - Include newsletter emails from a Gmail label via OAuth
 - **Wallabag Integration** - Include saved articles from a Wallabag instance
 - **RSS/Atom Feed Aggregation** - Parse and deduplicate articles from multiple feeds
 - **Content Extraction** - Clean article extraction via Trafilatura
@@ -263,6 +264,88 @@ During each digest run, the pipeline:
 3. Optionally summarizes via AI (if `WALLABAG_MODE=summarize`)
 4. Adds them as a "Saved Articles" section at the end of the EPUB
 5. Archives each article in Wallabag and applies the configured tag
+
+## Gmail Newsletter Integration
+
+Ghostwriter can fetch unread emails from a Gmail label and include them in your digest. Emails are cleaned for e-ink (tracking pixels, scripts, and unsubscribe footers are stripped), then marked as read after processing.
+
+### 1. Create a Google Cloud OAuth App
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a new project (or select an existing one).
+2. Navigate to **APIs & Services** → **Library**, search for **Gmail API**, and click **Enable**.
+3. Go to **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth client ID**.
+   - Application type: **Web application**
+   - Name: anything (e.g. "Ghostwriter")
+   - Authorized redirect URIs: add your Ghostwriter callback URL:
+     ```
+     https://your-ghostwriter-host/newsletters/oauth/callback
+     ```
+     For local development, also add `http://localhost:8080/newsletters/oauth/callback`.
+4. Copy the **Client ID** and **Client Secret**.
+5. Go to **APIs & Services** → **OAuth consent screen**:
+   - Add the Gmail scope: `https://www.googleapis.com/auth/gmail.modify`
+   - Add yourself (and any other users) as **Test users** if the app is in "Testing" status
+
+> **Important: Publishing status and token expiry**
+>
+> Google Cloud apps in **"Testing"** status have refresh tokens that expire after **7 days**. This means you'll need to re-authenticate weekly. To avoid this, publish your OAuth app to **"Production"** status (under OAuth consent screen → Publishing status). Since Ghostwriter only requests the `gmail.modify` scope, Google may require a brief verification process.
+
+### 2. Configure Environment Variables
+
+Set these in your `.env` or Docker environment:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GMAIL_CLIENT_ID` | Yes | — | OAuth client ID from step 1 |
+| `GMAIL_CLIENT_SECRET` | Yes | — | OAuth client secret from step 1 |
+| `GMAIL_LABEL` | No | `Ghostwriter` | Gmail label to fetch newsletters from |
+| `GMAIL_MAX_ARTICLES` | No | `20` | Maximum emails to include per digest |
+
+If `GMAIL_CLIENT_ID` or `GMAIL_CLIENT_SECRET` are empty, the integration is disabled.
+
+### 3. Create a Gmail Label and Filter
+
+In Gmail, create a label matching your `GMAIL_LABEL` value (default: **Ghostwriter**), then set up filters to automatically label incoming newsletters:
+
+1. Open a newsletter email → click the three dots → **Filter messages like these**
+2. Set the **From** address, click **Create filter**
+3. Check **Apply the label** → select your label (e.g. "Ghostwriter")
+4. Optionally check **Also apply filter to matching conversations** and **Skip the Inbox**
+
+Repeat for each newsletter you want included in your digest.
+
+### 4. Connect Gmail via the Web UI
+
+1. Open the Ghostwriter web UI and go to **Newsletters** (or **Settings** → **Newsletters**)
+2. Click **Connect Gmail** — a popup opens with the Google consent screen
+3. Sign in and grant Ghostwriter access to read and modify your email
+4. The popup closes automatically and the status updates to **Connected**
+
+You can also trigger the OAuth flow programmatically via `POST /newsletters/oauth/init`, which returns an `auth_url` to open in a browser.
+
+### 5. Test the Integration
+
+Click **Preview** in the Newsletters page (or call `POST /newsletters/preview`) to fetch matching emails without marking them as read. This lets you verify the label and filters are working before running a real digest.
+
+### How it Works
+
+During each digest run, the pipeline:
+
+1. Refreshes the OAuth access token using the stored refresh token
+2. Queries Gmail for unread messages with the configured label
+3. Parses each email from raw MIME format and cleans the HTML
+4. Deduplicates against previously seen emails
+5. Adds them to the digest alongside RSS and Wallabag articles
+6. Marks all fetched emails as read via the Gmail batch API
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `401 Unauthorized` in logs | Refresh token expired (common with "Testing" apps) | Re-connect Gmail via the web UI. Consider publishing the OAuth app to "Production". |
+| No emails fetched | Label doesn't match or no unread emails | Check `GMAIL_LABEL` matches exactly. Verify emails have the label and are unread. |
+| `configured: false` in status | OAuth token was deleted after auth failure | Re-connect Gmail via the web UI. |
+| Emails not cleaned well | Newsletter uses unusual HTML layout | Open an issue with the newsletter name — cleaning heuristics can be improved. |
 
 ## Architecture
 
