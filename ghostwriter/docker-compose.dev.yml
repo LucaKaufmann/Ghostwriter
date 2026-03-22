@@ -1,0 +1,7 @@
+services:
+  ghostwriter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghostwriter:dev
+    pull_policy: never

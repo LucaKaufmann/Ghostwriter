@@ -61,7 +61,22 @@ RUN git clone --depth=1 https://github.com/ggml-org/whisper.cpp /opt/whisper && 
 # Stage 3: Runtime
 FROM python:3.11-slim AS runtime
 
+ARG VERSION=dev
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG REPOSITORY_URL=https://github.com/LucaKaufmann/Ghostwriter
+
 WORKDIR /app
+
+LABEL org.opencontainers.image.title="Ghostwriter" \
+      org.opencontainers.image.description="Self-hosted RSS digest generation and podcast publishing service for Epilogue." \
+      org.opencontainers.image.url="${REPOSITORY_URL}" \
+      org.opencontainers.image.source="${REPOSITORY_URL}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.licenses="GPL-3.0" \
+      org.opencontainers.image.vendor="Luca Kaufmann"
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \

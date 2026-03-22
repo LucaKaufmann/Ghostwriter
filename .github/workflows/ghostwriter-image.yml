@@ -1,0 +1,152 @@
+name: Ghostwriter Image
+
+on:
+  pull_request:
+    paths:
+      - "ghostwriter/**"
+      - ".github/workflows/ghostwriter-image.yml"
+  push:
+    tags:
+      - "ghostwriter-v*"
+  workflow_dispatch:
+
+concurrency:
+  group: ghostwriter-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Ghostwriter image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Derive image metadata
+        id: prep
+        run: |
+          owner_lc="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${owner_lc}/ghostwriter" >> "${GITHUB_OUTPUT}"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
+
+      - name: Compute image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.prep.outputs.image }}
+          tags: |
+            type=match,pattern=^ghostwriter-v(\d+\.\d+\.\d+)$,group=1
+            type=match,pattern=^ghostwriter-v(\d+\.\d+)\.\d+$,group=1
+            type=match,pattern=^ghostwriter-v(\d+)\.\d+\.\d+$,group=1
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/ghostwriter-v') }}
+            type=sha,format=short,prefix=sha-
+
+      - name: Build amd64 validation image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ghostwriter
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ghostwriter-ci:validate
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.prep.outputs.build_date }}
+            REPOSITORY_URL=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Smoke test container health endpoint
+        run: |
+          docker rm -f ghostwriter-smoke >/dev/null 2>&1 || true
+          docker run -d --name ghostwriter-smoke -p 18080:8080 ghostwriter-ci:validate
+          trap 'docker logs ghostwriter-smoke; docker rm -f ghostwriter-smoke >/dev/null 2>&1 || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18080/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Ghostwriter health endpoint never became ready" >&2
+          exit 1
+
+  publish:
+    name: Publish Ghostwriter image
+    if: startsWith(github.ref, 'refs/tags/ghostwriter-v')
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Derive image metadata
+        id: prep
+        run: |
+          owner_lc="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${owner_lc}/ghostwriter" >> "${GITHUB_OUTPUT}"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
+
+      - name: Compute image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.prep.outputs.image }}
+          tags: |
+            type=match,pattern=^ghostwriter-v(\d+\.\d+\.\d+)$,group=1
+            type=match,pattern=^ghostwriter-v(\d+\.\d+)\.\d+$,group=1
+            type=match,pattern=^ghostwriter-v(\d+)\.\d+\.\d+$,group=1
+            type=raw,value=latest,enable=true
+            type=sha,format=short,prefix=sha-
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ghostwriter
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.prep.outputs.build_date }}
+            REPOSITORY_URL=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.prep.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
