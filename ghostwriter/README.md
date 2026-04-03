@@ -1,6 +1,6 @@
 # Ghostwriter
 
-RSS digest generation service for Epilogue. Aggregates RSS feeds, extracts article content, generates AI summaries, and compiles them into daily EPUB digests.
+Ghostwriter is a self-hosted backend and web UI for aggregating feeds, extracting article content, generating AI summaries, and compiling daily EPUB digests. It can also sync feeds and digest data with Epilogue and other clients via its API.
 
 ## Features
 
