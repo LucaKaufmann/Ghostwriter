@@ -803,7 +803,7 @@ fun GhostwriterInput(
                     value = url,
                     onValueChange = onUrlChange,
                     label = { Text("Server URL") },
-                    placeholder = { Text("http://your-server-ip:8080") },
+                    placeholder = { Text("https://ghostwriter.example.com") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     leadingIcon = {
