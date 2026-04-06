@@ -34,7 +34,7 @@ If you want to try the project quickly, start with Ghostwriter.
 ### Prerequisites
 
 - Docker + Docker Compose
-- An API key for [OpenAI](https://platform.openai.com/api-keys) or [Google Gemini](https://aistudio.google.com/apikey)
+- An API key for [OpenAI](https://platform.openai.com/api-keys) or [Google Gemini](https://aistudio.google.com/apikey), unless you use Ollama
 
 ### 1. Configure Environment
 
@@ -43,19 +43,24 @@ cd ghostwriter
 cp .env.example .env
 ```
 
-Edit `.env` and set your AI provider credentials:
+Edit `.env` and set the one provider credential you want to use. Most users only need:
 
 ```bash
-AI_PROVIDER=openai          # or: gemini, ollama
-OPENAI_API_KEY=sk-...       # required for openai provider
+OPENAI_API_KEY=sk-...
 ```
 
-Adjust timezone, schedule, and other settings as needed. For podcast generation, configure your ElevenLabs API key and TTS preferences in the web UI under Settings.
+Optional but useful:
+
+```bash
+TIMEZONE=Europe/Helsinki
+# JWT_SECRET=...  # recommended if you want logins to survive restarts
+```
+
+For Gemini or Ollama, switch to the alternative provider block already shown in [`ghostwriter/.env.example`](ghostwriter/.env.example). For podcast generation, configure your ElevenLabs API key and TTS preferences in the web UI under Settings.
 
 ### 2. Start Ghostwriter
 
 ```bash
-docker compose pull
 docker compose up -d
 ```
 
@@ -77,7 +82,7 @@ On first run:
 To use a local Ollama instance instead of a cloud API:
 
 ```bash
-# Set AI_PROVIDER=ollama in .env, then:
+# Switch to the Ollama block in .env, then:
 docker compose --profile with-ollama up -d
 
 # Pull a model (first run only)

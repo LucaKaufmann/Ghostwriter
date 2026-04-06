@@ -23,10 +23,10 @@ Ghostwriter is a self-hosted backend and web UI for aggregating feeds, extractin
 git clone https://github.com/LucaKaufmann/Ghostwriter.git
 cd Ghostwriter/ghostwriter
 cp .env.example .env
-# Edit .env — set AI_PROVIDER and your API key (e.g. OPENAI_API_KEY)
+# Edit .env and set the one provider credential you want to use
+# Most users only need: OPENAI_API_KEY=sk-...
 
-# Pull and start Ghostwriter
-docker compose pull
+# Start Ghostwriter
 docker compose up -d
 
 # Verify health
@@ -36,10 +36,23 @@ curl http://localhost:8080/health
 The default compose file pulls the published image from `ghcr.io/lucakaufmann/ghostwriter:latest`.
 Stable releases are published from git tags named `ghostwriter-vX.Y.Z`.
 
+The example `.env` is intentionally minimal. For a first run, you usually only need:
+
+```bash
+OPENAI_API_KEY=sk-...
+```
+
+Optional but useful:
+
+```bash
+TIMEZONE=Europe/Helsinki
+# JWT_SECRET=...  # keep logins valid across container restarts
+```
+
 To use local Ollama instead of a cloud AI provider:
 
 ```bash
-# Set AI_PROVIDER=ollama in .env, then:
+# Switch the provider block in .env, then:
 docker compose --profile with-ollama up -d
 docker exec ollama ollama pull llama3.2
 ```
@@ -128,33 +141,29 @@ For host-based local development (outside Docker), ensure these system libraries
 
 ## Configuration
 
-All configuration via environment variables. See `.env.example` for full list.
+All configuration is via environment variables. `.env.example` intentionally contains only the minimum first-run settings so new users can get the service running quickly.
 
-### Key Settings
+Everything else falls back to built-in defaults from [`app/core/config.py`](app/core/config.py). Override additional settings only when you need to change behavior for your deployment.
+
+### Common Overrides
 
 ```bash
-# AI Provider: openai, gemini, ollama
-AI_PROVIDER=openai
-
-# Transcription (local whisper.cpp and/or OpenAI Whisper API)
-WHISPER_CPP_BINARY=/usr/local/bin/whisper-cli
-WHISPER_MODELS_DIR=/app/data/models/whisper
-WHISPER_TRANSCRIPTION_TIMEOUT_SECONDS=300
-OPENAI_WHISPER_TIMEOUT_SECONDS=120
+# Timezone for scheduled digests
+TIMEZONE=Europe/Helsinki
 
 # Scheduling (24h format)
 SCHEDULE_MORNING=07:00
+SCHEDULE_NOON=12:00
 SCHEDULE_EVENING=18:00
 
-# Authentication (see below)
+# Keep auth sessions valid across restarts
 JWT_SECRET=your-secret-key-for-jwt-tokens
 
-# Security / networking
+# Public deployment hardening
 ALLOW_PRIVATE_HOSTS=false
 CORS_ALLOW_ORIGINS=https://ghostwriter.example.com
 ENABLE_API_DOCS=false
 TRUSTED_PROXY_HOSTS=203.0.113.10/32
-AUTH_RATE_LIMIT_ENABLED=true
 ```
 
 ### whisper.cpp Binary Override (ARM / Raspberry Pi)
