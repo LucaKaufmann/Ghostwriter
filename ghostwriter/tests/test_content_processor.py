@@ -99,3 +99,29 @@ async def test_parse_feed_respects_max_entries(monkeypatch):
 
     assert len(articles) == 1
     assert articles[0].url == "https://example.com/1"
+
+
+@pytest.mark.asyncio
+async def test_parse_feed_preserves_filter_metadata(monkeypatch):
+    settings = Settings(allow_private_hosts=True)
+    processor = ContentProcessor(settings=settings)
+
+    entries = [
+        {
+            "id": "s1",
+            "link": "https://example.com/sponsored-post",
+            "title": "Partner Post",
+            "summary": "Presented by Example Co.",
+            "content": [{"value": "<p>Sponsored by Example Co.</p>"}],
+            "tags": [{"term": "Sponsored"}, {"term": "Cloud"}],
+        }
+    ]
+    feed = SimpleNamespace(bozo=False, entries=entries)
+    monkeypatch.setattr("feedparser.parse", lambda *_args, **_kwargs: feed)
+
+    articles = await processor.parse_feed("https://example.com/feed.xml")
+
+    assert len(articles) == 1
+    assert articles[0].summary == "Presented by Example Co."
+    assert articles[0].content == "<p>Sponsored by Example Co.</p>"
+    assert articles[0].tags == ["Sponsored", "Cloud"]

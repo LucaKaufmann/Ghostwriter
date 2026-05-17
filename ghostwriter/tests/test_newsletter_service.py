@@ -102,6 +102,46 @@ def test_parse_email_falls_back_to_html_if_plain_missing(tmp_path) -> None:
     assert "<!--" not in article.content
 
 
+def test_parse_email_strips_sponsored_plain_text_block(tmp_path) -> None:
+    service = NewsletterService(Settings(data_dir=str(tmp_path)))
+    msg = {
+        "id": "plain-sponsored",
+        "raw": _build_raw_email(
+            subject="Daily Newsletter",
+            sender="Updates <updates@example.com>",
+            plain_text=(
+                "Lead story about a product launch.\n\n"
+                "Sponsored by Example Co: Use code SAVE20 today.\n\n"
+                "Second editorial paragraph with useful context."
+            ),
+        ),
+    }
+
+    article = service._parse_email(msg)
+
+    assert article is not None
+    assert "Lead story" in article.content
+    assert "Second editorial" in article.content
+    assert "Sponsored by" not in article.content
+    assert "SAVE20" not in article.content
+
+
+def test_parse_email_drops_promotional_newsletter(tmp_path) -> None:
+    service = NewsletterService(Settings(data_dir=str(tmp_path)))
+    msg = {
+        "id": "promo-only",
+        "raw": _build_raw_email(
+            subject="Sponsored: Save 40% today",
+            sender="Deals <deals@example.com>",
+            plain_text="Sponsored by Example Co. Use code SAVE40 for 40% off.",
+        ),
+    }
+
+    article = service._parse_email(msg)
+
+    assert article is None
+
+
 def test_fetch_newsletters_continues_when_one_message_parse_fails(
     monkeypatch,
     tmp_path,

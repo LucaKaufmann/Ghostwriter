@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
@@ -13,18 +14,21 @@ from sqlmodel import Session, select
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging import digest_logger
-from app.models.digest import Digest, DigestArticle
 from app.models.client_config import ClientConfig
+from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
 from app.models.manual_cover import ManualCover
 from app.models.media_item import MediaItem
 from app.models.seen_article import SeenArticle
+from app.services.article_eligibility_filter import (
+    ArticleEligibilityFilter,
+    ArticleEligibilityResult,
+)
 from app.services.content_processor import ContentProcessor, ExtractedArticle
 from app.services.cover_image_service import CoverImage, CoverImageService
 from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
 from app.services.media_processor import MediaProcessor
-from app.services.markdown_utils import markdown_to_html_basic
 from app.services.newsletter_service import NewsletterService
 from app.services.wallabag_service import WallabagService
 
@@ -80,6 +84,7 @@ class BinderyPipeline:
         self.digest_id = digest_id
         self.settings = get_settings()
         self.content_processor = ContentProcessor(self.settings)
+        self.article_filter = ArticleEligibilityFilter()
         self.llm_service = LLMService(self.settings)
         self.cover_image_service = CoverImageService(self.settings)
         self.media_processor = MediaProcessor(self.settings)
@@ -163,19 +168,15 @@ class BinderyPipeline:
         self._ensure_synthetic_feeds()
 
         # Get digest info for logging and current client config
-        whisper_provider = "local"
-        whisper_model = "base.en"
-        whisper_timeout_seconds: int | None = None
         digest_filename: str | None = None
+        min_word_count = 0
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
             period = digest.period if digest else "manual"
             digest_filename = digest.filename if digest else None
             client_config = session.exec(select(ClientConfig)).first()
             if client_config:
-                whisper_provider = client_config.whisper_provider or "local"
-                whisper_model = client_config.whisper_model or "base.en"
-                whisper_timeout_seconds = client_config.whisper_timeout_minutes * 60
+                min_word_count = client_config.min_word_count
 
         try:
             await self._update_stage("fetching")
@@ -218,7 +219,10 @@ class BinderyPipeline:
                     digest_logger.feed_fetch_started(feed.title, feed.url)
 
                     try:
-                        articles, total_in_feed = await self._fetch_feed(feed)
+                        articles, total_in_feed = await self._fetch_feed(
+                            feed,
+                            queue_seen=_queue_seen,
+                        )
                         async with articles_lock:
                             all_articles.extend(articles)
                         fetch_time_ms = int((time.time() - feed_start) * 1000)
@@ -281,6 +285,30 @@ class BinderyPipeline:
 
                             plain = re.sub(r"<[^>]+>", "", content)
                             word_count = ContentProcessor.count_words(plain)
+                            eligibility = self.article_filter.check_extracted(
+                                url=wb["url"],
+                                title=wb["title"],
+                                content=plain,
+                                author=wb.get("domain_name"),
+                                source="Wallabag",
+                            )
+                            if not eligibility.eligible:
+                                self._log_filtered_article("wallabag", wb["title"], wb["url"], eligibility)
+                                await _queue_seen(wb_feed_id, guid, wb["url"], wb["title"])
+                                continue
+                            if min_word_count > 0 and word_count < min_word_count:
+                                self._log_filtered_article(
+                                    "wallabag",
+                                    wb["title"],
+                                    wb["url"],
+                                    ArticleEligibilityResult(
+                                        eligible=False,
+                                        reason="below_min_word_count",
+                                        confidence=1.0,
+                                    ),
+                                )
+                                await _queue_seen(wb_feed_id, guid, wb["url"], wb["title"])
+                                continue
 
                             wallabag_articles.append(
                                 ExtractedArticle(
@@ -339,6 +367,30 @@ class BinderyPipeline:
                     nl_feed_id = self._get_synthetic_feed_id("newsletter")
                     for nl in nl_raw:
                         if not await self._is_seen(nl_feed_id, nl.guid):
+                            eligibility = self.article_filter.check_extracted(
+                                url=nl.url,
+                                title=nl.title,
+                                content=nl.content,
+                                author=nl.author,
+                                source="Newsletter",
+                            )
+                            if not eligibility.eligible:
+                                self._log_filtered_article("newsletter", nl.title, nl.url, eligibility)
+                                await _queue_seen(nl_feed_id, nl.guid, nl.url, nl.title)
+                                continue
+                            if min_word_count > 0 and nl.word_count < min_word_count:
+                                self._log_filtered_article(
+                                    "newsletter",
+                                    nl.title,
+                                    nl.url,
+                                    ArticleEligibilityResult(
+                                        eligible=False,
+                                        reason="below_min_word_count",
+                                        confidence=1.0,
+                                    ),
+                                )
+                                await _queue_seen(nl_feed_id, nl.guid, nl.url, nl.title)
+                                continue
                             newsletter_articles.append(nl)
                             await _queue_seen(nl_feed_id, nl.guid, nl.url, nl.title)
                 except Exception as e:
@@ -355,7 +407,7 @@ class BinderyPipeline:
                 digest_logger.pipeline_no_articles(
                     str(self.digest_id), "No new articles found across all feeds"
                 )
-                await self._complete(0)
+                await self._complete(0, seen_articles=seen_articles)
                 return
 
             # Cap total articles
@@ -426,6 +478,40 @@ class BinderyPipeline:
 
                     original_word_count = ContentProcessor.count_words(content)
                     word_count = original_word_count
+                    eligibility = self.article_filter.check_extracted(
+                        url=parsed_article.url,
+                        title=parsed_article.title,
+                        content=content,
+                        author=parsed_article.author,
+                        source=feed.title,
+                    )
+                    if not eligibility.eligible:
+                        self._log_filtered_article("rss_extracted", parsed_article.title, parsed_article.url, eligibility)
+                        await _queue_seen(
+                            feed.id,
+                            parsed_article.guid,
+                            parsed_article.url,
+                            parsed_article.title,
+                        )
+                        return
+                    if min_word_count > 0 and word_count < min_word_count:
+                        self._log_filtered_article(
+                            "rss_extracted",
+                            parsed_article.title,
+                            parsed_article.url,
+                            ArticleEligibilityResult(
+                                eligible=False,
+                                reason="below_min_word_count",
+                                confidence=1.0,
+                            ),
+                        )
+                        await _queue_seen(
+                            feed.id,
+                            parsed_article.guid,
+                            parsed_article.url,
+                            parsed_article.title,
+                        )
+                        return
 
                     # Step 3: AI summarization if feed mode is "summarize"
                     if feed.mode == "summarize":
@@ -438,6 +524,24 @@ class BinderyPipeline:
                             content_type="article",
                         )
                         if not ai_failed:
+                            if LLMService.is_promotional_sentinel(summary_content):
+                                self._log_filtered_article(
+                                    "rss_summary",
+                                    parsed_article.title,
+                                    parsed_article.url,
+                                    ArticleEligibilityResult(
+                                        eligible=False,
+                                        reason="llm_promotional_sentinel",
+                                        confidence=1.0,
+                                    ),
+                                )
+                                await _queue_seen(
+                                    feed.id,
+                                    parsed_article.guid,
+                                    parsed_article.url,
+                                    parsed_article.title,
+                                )
+                                return
                             content = summary_content
                             is_summary = True
                             word_count = ContentProcessor.count_words(content)
@@ -515,6 +619,18 @@ class BinderyPipeline:
                             source="Wallabag",
                         )
                         if not ai_failed:
+                            if LLMService.is_promotional_sentinel(summary_content):
+                                self._log_filtered_article(
+                                    "wallabag_summary",
+                                    article.title,
+                                    article.url,
+                                    ArticleEligibilityResult(
+                                        eligible=False,
+                                        reason="llm_promotional_sentinel",
+                                        confidence=1.0,
+                                    ),
+                                )
+                                return
                             result = ExtractedArticle(
                                 guid=article.guid,
                                 url=article.url,
@@ -557,6 +673,18 @@ class BinderyPipeline:
                             source="Newsletter",
                         )
                         if not ai_failed:
+                            if LLMService.is_promotional_sentinel(summary_content):
+                                self._log_filtered_article(
+                                    "newsletter_summary",
+                                    article.title,
+                                    article.url,
+                                    ArticleEligibilityResult(
+                                        eligible=False,
+                                        reason="llm_promotional_sentinel",
+                                        confidence=1.0,
+                                    ),
+                                )
+                                return
                             result = ExtractedArticle(
                                 guid=article.guid,
                                 url=article.url,
@@ -603,7 +731,7 @@ class BinderyPipeline:
                     completed_items = session.exec(
                         select(MediaItem)
                         .where(MediaItem.status == "completed")
-                        .where(MediaItem.consumed_at == None)
+                        .where(MediaItem.consumed_at.is_(None))
                         .where(MediaItem.content_type.in_(types_to_include))
                         .order_by(MediaItem.created_at)
                     ).all()
@@ -794,7 +922,7 @@ class BinderyPipeline:
             active_manual_cover: ManualCover | None = None
             if not ai_enabled:
                 active_manual_cover = session.exec(
-                    select(ManualCover).where(ManualCover.is_active == True)
+                    select(ManualCover).where(ManualCover.is_active.is_(True))
                 ).first()
 
         if not ai_enabled:
@@ -866,10 +994,18 @@ class BinderyPipeline:
     async def _get_active_feeds(self) -> list[Feed]:
         """Get all active feeds."""
         with Session(engine) as session:
-            statement = select(Feed).where(Feed.is_active == True).order_by(Feed.title)
+            statement = (
+                select(Feed)
+                .where(Feed.is_active.is_(True))
+                .order_by(Feed.title)
+            )
             return list(session.exec(statement).all())
 
-    async def _fetch_feed(self, feed: Feed) -> tuple[list[tuple[Feed, any]], int]:
+    async def _fetch_feed(
+        self,
+        feed: Feed,
+        queue_seen: Callable[[UUID, str, str, str], Awaitable[None]] | None = None,
+    ) -> tuple[list[tuple[Feed, any]], int]:
         """
         Fetch and filter articles from a feed.
 
@@ -886,12 +1022,69 @@ class BinderyPipeline:
 
         # Filter out already seen articles
         new_articles = []
+        filtered_reasons: dict[str, int] = {}
         for article in parsed:
             if not await self._is_seen(feed.id, article.guid):
+                eligibility = self.article_filter.check(
+                    url=article.url,
+                    title=article.title,
+                    summary=article.summary,
+                    content=article.content,
+                    tags=article.tags,
+                    author=article.author,
+                    source=feed.title,
+                )
+                if not eligibility.eligible:
+                    self._log_filtered_article("rss_feed", article.title, article.url, eligibility)
+                    reason = eligibility.reason or "promotional"
+                    filtered_reasons[reason] = filtered_reasons.get(reason, 0) + 1
+                    if queue_seen:
+                        await queue_seen(feed.id, article.guid, article.url, article.title)
+                    else:
+                        await self._mark_seen(feed.id, article)
+                    continue
                 new_articles.append((feed, article))
 
-        logger.info(f"Feed {feed.title}: {total_count} total, {len(new_articles)} new")
+        if filtered_reasons:
+            digest_logger.info(
+                f"Feed filtered {sum(filtered_reasons.values())} candidates: {feed.title}",
+                component="feeds",
+                event="candidates_filtered",
+                context={
+                    "digest_id": str(self.digest_id),
+                    "feed_title": feed.title,
+                    "filtered_count": sum(filtered_reasons.values()),
+                    "reasons": filtered_reasons,
+                },
+            )
+
+        logger.info(
+            f"Feed {feed.title}: {total_count} total, {len(new_articles)} new"
+        )
         return new_articles, total_count
+
+    def _log_filtered_article(
+        self,
+        source_type: str,
+        title: str,
+        url: str,
+        result: ArticleEligibilityResult,
+    ) -> None:
+        """Log a filtered candidate without storing raw content."""
+
+        digest_logger.info(
+            f"Filtered article candidate: {title[:80]}",
+            component="articles",
+            event="filtered",
+            context={
+                "digest_id": str(self.digest_id),
+                "source_type": source_type,
+                "title": title,
+                "url": url,
+                "reason": result.reason,
+                "confidence": result.confidence,
+            },
+        )
 
     async def _is_seen(self, feed_id: UUID, guid: str) -> bool:
         """Check if an article has been seen recently."""
@@ -1129,8 +1322,6 @@ async def generate_digest(
     Returns:
         The digest ID if started, None if a job is already running.
     """
-    settings = get_settings()
-
     with Session(engine) as session:
         # Check for running jobs (with 30-minute stale lock timeout)
         stale_cutoff = datetime.utcnow() - timedelta(minutes=30)
