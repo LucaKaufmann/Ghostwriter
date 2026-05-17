@@ -129,6 +129,55 @@ def _create_episode(
     return episode
 
 
+def _test_podcast_preferences(**overrides) -> PodcastGenerationPreferences:
+    values = {
+        "topic_weights": {"general": 1.0},
+        "boost_sources": [],
+        "boost_keywords": [],
+        "filter_keywords": [],
+        "preferred_length_minutes": 15,
+        "script_model": None,
+        "script_timeout_seconds": 60,
+        "style": "casual",
+        "tts_provider": "openai",
+        "openai_tts_model": "tts-1",
+        "openai_api_key": None,
+        "elevenlabs_model_id": "eleven_turbo_v2_5",
+        "elevenlabs_api_key": None,
+        "elevenlabs_output_format": "mp3_44100_128",
+        "host_a_voice": "alloy",
+        "host_b_voice": "echo",
+        "host_count": 2,
+    }
+    values.update(overrides)
+    return PodcastGenerationPreferences(**values)
+
+
+def _podcast_test_article(
+    *,
+    title: str,
+    content: str,
+    feed_title: str = "Source",
+    word_count: int | None = None,
+    sort_order: int = 0,
+) -> DigestArticle:
+    return DigestArticle(
+        digest_id=uuid4(),
+        feed_id=uuid4(),
+        title=title,
+        url=f"https://example.com/{uuid4()}",
+        mode="raw",
+        word_count=word_count if word_count is not None else len(content.split()),
+        ai_failed=False,
+        processing_ms=10,
+        content=content,
+        author="Reporter",
+        feed_title=feed_title,
+        sort_order=sort_order,
+        content_type="article",
+    )
+
+
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
     """Create an API token and return auth headers for protected endpoints."""
@@ -593,6 +642,117 @@ def test_eleven_v3_prompt_guidance_includes_sparse_audio_tag_rules():
     assert "Keep tags sparse and intentional" in system_prompt
 
 
+def test_article_scoring_prefers_podcast_worthy_source_material():
+    flat = _podcast_test_article(
+        title="Company posts routine update",
+        content="The company posted a routine update with minor changes.",
+        word_count=45,
+    )
+    rich = _podcast_test_article(
+        title="New AI rollout: why customers are pushing back",
+        content=(
+            "The company announced a new AI rollout in 2026, but customers and critics "
+            "raised concerns because the change could affect billing, privacy, and support. "
+            "Revenue was $42.5 million last quarter, a 17% increase, while support tickets "
+            "rose 31%. Analysts said the tradeoff is speed versus trust, and the result "
+            "might shape how similar products launch later this year. "
+        )
+        * 10,
+        word_count=850,
+    )
+    filtered = _test_podcast_preferences(filter_keywords=["privacy"])
+    prefs = _test_podcast_preferences()
+
+    flat_score = podcast_service.score_article(
+        article=flat,
+        prefs=prefs,
+        feedback_profile={},
+    )
+    rich_score = podcast_service.score_article(
+        article=rich,
+        prefs=prefs,
+        feedback_profile={},
+    )
+    filtered_score = podcast_service.score_article(
+        article=rich,
+        prefs=filtered,
+        feedback_profile={},
+    )
+
+    assert rich_score > flat_score * 3
+    assert filtered_score == 0
+
+
+def test_balanced_article_selection_keeps_one_source_from_dominating():
+    dominant = [
+        _podcast_test_article(
+            title=f"Dominant story {index}",
+            content="New data shows a concrete 25% change and explains why it matters. " * 20,
+            feed_title="Dominant",
+            sort_order=index,
+        )
+        for index in range(5)
+    ]
+    alternatives = [
+        _podcast_test_article(
+            title="Different source one",
+            content="A surprising result creates debate because it could affect readers. " * 20,
+            feed_title="Alternative One",
+            sort_order=10,
+        ),
+        _podcast_test_article(
+            title="Different source two",
+            content="A first-time launch reveals a concrete tradeoff with 14 teams involved. " * 20,
+            feed_title="Alternative Two",
+            sort_order=11,
+        ),
+    ]
+    scored = [
+        (10.0 - index, index, article)
+        for index, article in enumerate([*dominant, *alternatives])
+    ]
+
+    selected = podcast_service._select_balanced_articles(scored, target_count=4)
+    selected_sources = [article.feed_title for article in selected]
+
+    assert selected_sources.count("Dominant") == 2
+    assert "Alternative One" in selected_sources
+    assert "Alternative Two" in selected_sources
+
+
+def test_brief_parser_and_renderer_preserve_richer_podcast_context():
+    raw = """
+    {
+      "briefs": [
+        {
+          "index": 1,
+          "title": "AI rollout",
+          "summary": "A company launched a new AI feature.",
+          "key_points": ["Launch starts in June", "Customers can opt out"],
+          "explainers": ["Opt-out means users keep the old workflow"],
+          "why_it_matters": "It changes how customers interact with support.",
+          "tension": "The company wants speed while customers want control.",
+          "specific_details": ["31% more support tickets", "$42.5 million in revenue"],
+          "listener_angle": "Listeners may see this in tools they use daily.",
+          "follow_up_question": "Does faster automation justify less control?",
+          "banter_hook": "Everyone loves an opt-out hidden three menus deep."
+        }
+      ]
+    }
+    """
+
+    briefs = podcast_service._parse_chunk_briefs_json(raw)
+    block = podcast_service._render_briefs_block(briefs)
+
+    assert briefs[0]["specific_details"] == [
+        "31% more support tickets",
+        "$42.5 million in revenue",
+    ]
+    assert "Why it matters: It changes how customers interact with support." in block
+    assert "Tension: The company wants speed while customers want control." in block
+    assert "Follow-up question: Does faster automation justify less control?" in block
+
+
 def test_queue_episode_generation_finds_existing_episode(monkeypatch):
     monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
@@ -669,21 +829,10 @@ async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(monk
 
     monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
 
-    prefs = PodcastGenerationPreferences(
-        topic_weights={"general": 1.0},
-        boost_sources=[],
-        boost_keywords=[],
-        filter_keywords=[],
-        preferred_length_minutes=15,
-        script_model=None,
-        script_timeout_seconds=60,
-        style="casual",
+    prefs = _test_podcast_preferences(
         tts_provider="elevenlabs",
-        openai_tts_model="tts-1",
-        openai_api_key=None,
         elevenlabs_model_id="eleven_v3",
         elevenlabs_api_key="xi-test-key",
-        elevenlabs_output_format="mp3_44100_128",
         host_a_voice="voice_a",
         host_b_voice="voice_b",
     )
@@ -729,21 +878,10 @@ async def test_elevenlabs_non_v3_synthesis_includes_context(monkeypatch):
 
     monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
 
-    prefs = PodcastGenerationPreferences(
-        topic_weights={"general": 1.0},
-        boost_sources=[],
-        boost_keywords=[],
-        filter_keywords=[],
-        preferred_length_minutes=15,
-        script_model=None,
-        script_timeout_seconds=60,
-        style="casual",
+    prefs = _test_podcast_preferences(
         tts_provider="elevenlabs",
-        openai_tts_model="tts-1",
-        openai_api_key=None,
         elevenlabs_model_id="eleven_turbo_v2_5",
         elevenlabs_api_key="xi-test-key",
-        elevenlabs_output_format="mp3_44100_128",
         host_a_voice="voice_a",
         host_b_voice="voice_b",
     )
@@ -909,7 +1047,7 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
     _create_digest_with_articles(article_count=1, completed_at=old_time)
 
     # Create a schedule with last_run_at after the old digest
-    last_run = datetime.utcnow() - timedelta(hours=1)
+    last_run = datetime.utcnow()
     with Session(engine) as session:
         sched = PodcastSchedule(
             name="Filter Test",
@@ -930,7 +1068,10 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
     assert result is None
 
     # Create a new digest after last_run_at
-    new_digest_id, _ = _create_digest_with_articles(article_count=2)
+    new_digest_id, _ = _create_digest_with_articles(
+        article_count=2,
+        completed_at=last_run + timedelta(seconds=1),
+    )
 
     # Now it should find the new digest and generate
     result = podcast_service.generate_episode_for_schedule(schedule_id)

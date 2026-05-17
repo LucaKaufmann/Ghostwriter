@@ -91,6 +91,50 @@ ELEVENLABS_DEFAULT_HOST_B_VOICE = "XrExE9yKIg1WjnnlVkGX"
 SCRIPT_BRIEF_CHUNK_SIZE = 3
 SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
 MIN_EPISODE_DURATION_SECONDS = 30
+SOURCE_DIVERSITY_TARGET_FRACTION = 0.35
+CONCRETE_DETAIL_RE = re.compile(
+    r"(\b\d+(?:[.,]\d+)?\b|[$]\s?\d+|\b\d+%|\b20\d{2}\b|\"[^\"]{12,}\"|\*[^\*]{12,}\*)"
+)
+PODCAST_TENSION_KEYWORDS = (
+    "but",
+    "however",
+    "although",
+    "despite",
+    "debate",
+    "controversy",
+    "critic",
+    "risk",
+    "concern",
+    "tradeoff",
+    "tension",
+    "challenge",
+)
+PODCAST_IMPLICATION_KEYWORDS = (
+    "because",
+    "means",
+    "could",
+    "might",
+    "impact",
+    "implication",
+    "consequence",
+    "therefore",
+    "so that",
+    "as a result",
+    "why it matters",
+)
+PODCAST_NOVELTY_KEYWORDS = (
+    "new",
+    "first",
+    "launch",
+    "unveil",
+    "reveal",
+    "announce",
+    "discover",
+    "breakthrough",
+    "exclusive",
+    "unexpected",
+    "surprising",
+)
 SCRIPT_SYSTEM_PROMPT = """You are a podcast script writer for concise daily briefings.
 Hard rules:
 - Output only dialogue lines in this exact format: [HOST_A]: ... or [HOST_B]: ...
@@ -103,8 +147,8 @@ SCRIPT_BRIEF_SYSTEM_PROMPT = """You create compact editorial briefs from source 
 Hard rules:
 - Return valid JSON only.
 - JSON object shape: {"briefs":[...]}.
-- Each brief must include: index, title, summary, key_points, explainers, banter_hook.
-- key_points and explainers are arrays of short strings.
+- Each brief must include: index, title, summary, key_points, explainers, why_it_matters, tension, specific_details, listener_angle, follow_up_question, banter_hook.
+- key_points, explainers, and specific_details are arrays of short strings.
 - Do not invent facts that are not in provided content."""
 SCRIPT_BRIEF_PROMPT_TEMPLATE = """Create article briefs for podcast writing.
 
@@ -124,6 +168,11 @@ Output JSON only with this shape:
       "summary": "...",
       "key_points": ["...", "..."],
       "explainers": ["...", "..."],
+      "why_it_matters": "...",
+      "tension": "...",
+      "specific_details": ["...", "..."],
+      "listener_angle": "...",
+      "follow_up_question": "...",
       "banter_hook": "..."
     }}
   ]
@@ -144,7 +193,10 @@ Article briefs:
 
 Requirements:
 - Provide 8-14 ordered outline beats.
-- Each beat should include: topic focus, which host leads, and one callback/depth angle.
+- Lead with the strongest hook, tension, or listener-relevant question.
+- Group related articles into coherent segments when that creates a better arc.
+- Each beat should include: topic focus, which host leads, one callback/depth angle, and one concrete detail to mention.
+- Contrast stories where useful instead of giving every item the same recap treatment.
 - Ensure all article indexes are covered at least once.
 - Include an opening and closing beat."""
 SCRIPT_PROMPT_TEMPLATE = """Create an English conversational podcast script.
@@ -168,12 +220,14 @@ Requirements:
 - Cover each listed article brief index at least once.
 - Include a short opening and short closing.
 - Keep each line 1-3 sentences, but vary rhythm (some punchy, some more detailed).
+- Open segments with stakes, tension, or a specific detail, not generic phrases like "next up" or "this article says."
 - Add natural conversational texture:
   - Use small callbacks ("as you mentioned earlier", "building on that").
   - Include clarifying questions and direct answers.
   - Add occasional playful banter or gentle teasing between hosts.
   - When jargon appears, one host should briefly explain it in plain language.
-- For at least 4 topics, have one host go one level deeper with concrete implications, examples, or tradeoffs.
+- For at least 4 topics, have one host go one level deeper with concrete implications, examples, tradeoffs, or why a listener should care.
+- Use specific_details, tension, listener_angle, and follow_up_question from the briefs when available.
 - Avoid repetitive sentence templates and "headline summary" cadence on every line.
 - Return 30-80 total lines, depending on length target.
 - Output format must be only:
@@ -200,7 +254,9 @@ Article briefs:
 
 Requirements:
 - Provide 6-10 ordered outline beats.
-- Each beat should include: topic focus, depth angle, and transition hook to the next beat.
+- Lead with the strongest hook, tension, or listener-relevant question.
+- Group related articles into coherent segments when that creates a better arc.
+- Each beat should include: topic focus, depth angle, transition hook to the next beat, and one concrete detail to mention.
 - Ensure all article indexes are covered at least once.
 - Include an opening and closing beat.
 - Design for a single narrator — no co-host dynamics."""
@@ -225,11 +281,13 @@ Requirements:
 - Use [pause] between major topic transitions for natural breath pauses.
 - Use ellipses (...) for brief thinking pauses within sentences.
 - Vary paragraph length (2-5 sentences each).
+- Open segments with stakes, tension, or a specific detail, not generic phrases like "next up" or "this article says."
 - Add natural monologue texture:
   - Use rhetorical questions to engage the listener.
   - Include "thinking out loud" moments and self-corrections.
-  - Go one level deeper on at least 3 topics with concrete implications or examples.
+  - Go one level deeper on at least 3 topics with concrete implications, examples, tradeoffs, or why a listener should care.
   - Use transitions that feel organic ("Speaking of which...", "Now here's where it gets interesting...").
+- Use specific_details, tension, listener_angle, and follow_up_question from the briefs when available.
 - Aim for 6-15 paragraphs depending on length target.
 - Do not use any [HOST_A] or [HOST_B] tags — this is a solo show.
 """
@@ -1199,7 +1257,7 @@ class PodcastDigestService:
 
         scored.sort(key=lambda row: (-row[0], row[1]))
         target_count = max(8, min(20, prefs.preferred_length_minutes + 4))
-        selected = [row[2] for row in scored[:target_count]]
+        selected = self._select_balanced_articles(scored, target_count)
         logger.info(
             "Podcast article selection summary",
             extra={
@@ -1211,6 +1269,39 @@ class PodcastDigestService:
                 "selected_count": len(selected),
             },
         )
+        return selected
+
+    @staticmethod
+    def _select_balanced_articles(
+        scored_articles: list[tuple[float, int, DigestArticle]],
+        target_count: int,
+    ) -> list[DigestArticle]:
+        """Pick top articles while avoiding one source dominating the episode."""
+        if target_count <= 0:
+            return []
+        source_cap = max(2, int(target_count * SOURCE_DIVERSITY_TARGET_FRACTION))
+        selected: list[DigestArticle] = []
+        selected_ids: set[UUID] = set()
+        source_counts: dict[str, int] = {}
+
+        for _, _, article in scored_articles:
+            source = (article.feed_title or "").strip().lower()
+            if source and source_counts.get(source, 0) >= source_cap:
+                continue
+            selected.append(article)
+            selected_ids.add(article.id)
+            if source:
+                source_counts[source] = source_counts.get(source, 0) + 1
+            if len(selected) >= target_count:
+                return selected
+
+        for _, _, article in scored_articles:
+            if article.id in selected_ids:
+                continue
+            selected.append(article)
+            if len(selected) >= target_count:
+                break
+
         return selected
 
     def _build_feedback_profile(
@@ -1253,7 +1344,10 @@ class PodcastDigestService:
         """Score one article against preferences and past feedback."""
         score = 1.0
         topic = self._infer_topic(article)
-        topic_weight = prefs.topic_weights.get(topic, prefs.topic_weights.get("general", 0.5))
+        default_topic_weight = 0.5 if prefs.topic_weights else 1.0
+        topic_weight = prefs.topic_weights.get(
+            topic, prefs.topic_weights.get("general", default_topic_weight)
+        )
         score *= max(topic_weight, 0.0)
 
         source = (article.feed_title or "").strip().lower()
@@ -1261,14 +1355,26 @@ class PodcastDigestService:
         if source and source in boosted_sources:
             score *= 1.5
 
-        text = f"{article.title} {article.content[:800]}".lower()
-        for keyword in prefs.boost_keywords:
-            if keyword.lower() in text:
-                score *= 1.3
-
+        title_text = (article.title or "").lower()
+        text = f"{article.title} {article.content[:2200]}".lower()
         for keyword in prefs.filter_keywords:
             if keyword.lower() in text:
-                score *= 0.1
+                return 0.0
+
+        for keyword in prefs.boost_keywords:
+            normalized_keyword = keyword.lower()
+            if normalized_keyword in title_text:
+                score *= 1.45
+            elif normalized_keyword in text:
+                score *= 1.3
+
+        score *= self._content_depth_multiplier(article)
+        score *= self._podcast_interest_multiplier(article)
+
+        if article.content_type in {"podcast", "youtube"}:
+            score *= 1.08
+        if article.ai_failed:
+            score *= 0.85
 
         if source and source in feedback_profile:
             up, down = feedback_profile[source]
@@ -1278,6 +1384,46 @@ class PodcastDigestService:
                 score *= max(0.6, min(1.4, 1.0 + (bias * 0.4)))
 
         return score
+
+    @staticmethod
+    def _content_depth_multiplier(article: DigestArticle) -> float:
+        """Favor articles with enough source material for a useful spoken segment."""
+        content = re.sub(r"\s+", " ", article.content or "").strip()
+        word_count = article.word_count or len(content.split())
+        char_count = len(content)
+        if word_count < 60 or char_count < 300:
+            return 0.45
+        if word_count < 150 or char_count < 800:
+            return 0.75
+        if word_count >= 1800 or char_count >= 9000:
+            return 1.22
+        if word_count >= 700 or char_count >= 3500:
+            return 1.12
+        return 1.0
+
+    @staticmethod
+    def _podcast_interest_multiplier(article: DigestArticle) -> float:
+        """Estimate whether a story has details, tension, and implications for audio."""
+        text = re.sub(
+            r"\s+",
+            " ",
+            f"{article.title or ''}. {article.content[:3000] or ''}",
+        ).lower()
+        signals = 0
+        if CONCRETE_DETAIL_RE.search(text):
+            signals += 1
+        if any(keyword in text for keyword in PODCAST_TENSION_KEYWORDS):
+            signals += 1
+        if any(keyword in text for keyword in PODCAST_IMPLICATION_KEYWORDS):
+            signals += 1
+        if any(keyword in text for keyword in PODCAST_NOVELTY_KEYWORDS):
+            signals += 1
+        if "?" in (article.title or "") or ":" in (article.title or ""):
+            signals += 1
+
+        if signals == 0:
+            return 0.78
+        return min(1.55, 0.9 + (signals * 0.14))
 
     def _infer_topic(self, article: DigestArticle) -> str:
         """Infer a rough topic category from title/content keywords."""
@@ -1679,12 +1825,12 @@ class PodcastDigestService:
         """Build one-shot solo prompt as fallback if chunked generation fails."""
         articles_block_lines: list[str] = []
         for index, article in enumerate(articles, start=1):
-            clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:500]
+            clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:1200]
             articles_block_lines.append(
                 f"{index}. {article.title}\n"
                 f"Source: {article.feed_title}\n"
                 f"URL: {article.url}\n"
-                f"Key points: {clean_snippet}"
+                f"Source detail for context, stakes, and examples: {clean_snippet}"
             )
         articles_block = "\n\n".join(articles_block_lines)
         return SCRIPT_SOLO_PROMPT_TEMPLATE.format(
@@ -2127,6 +2273,15 @@ class PodcastDigestService:
                 for point in item.get("explainers", [])
                 if isinstance(point, str) and point.strip()
             ][:3]
+            specific_details = [
+                str(point).strip()
+                for point in item.get("specific_details", [])
+                if isinstance(point, str) and point.strip()
+            ][:4]
+            why_it_matters = str(item.get("why_it_matters", "")).strip()
+            tension = str(item.get("tension", "")).strip()
+            listener_angle = str(item.get("listener_angle", "")).strip()
+            follow_up_question = str(item.get("follow_up_question", "")).strip()
             banter_hook = str(item.get("banter_hook", "")).strip()
             if not summary:
                 continue
@@ -2137,6 +2292,11 @@ class PodcastDigestService:
                     "summary": summary,
                     "key_points": key_points,
                     "explainers": explainers,
+                    "why_it_matters": why_it_matters,
+                    "tension": tension,
+                    "specific_details": specific_details,
+                    "listener_angle": listener_angle,
+                    "follow_up_question": follow_up_question,
                     "banter_hook": banter_hook,
                 }
             )
@@ -2153,6 +2313,11 @@ class PodcastDigestService:
             "summary": summary,
             "key_points": [],
             "explainers": [],
+            "why_it_matters": "",
+            "tension": "",
+            "specific_details": [],
+            "listener_angle": "",
+            "follow_up_question": "",
             "banter_hook": "",
         }
 
@@ -2163,11 +2328,17 @@ class PodcastDigestService:
         for brief in briefs:
             key_points = "; ".join(brief.get("key_points") or [])
             explainers = "; ".join(brief.get("explainers") or [])
+            specific_details = "; ".join(brief.get("specific_details") or [])
             lines.append(
                 f"[{brief['index']}] {brief.get('title','')}\n"
                 f"Summary: {brief.get('summary','')}\n"
                 f"Key points: {key_points}\n"
                 f"Explainers: {explainers}\n"
+                f"Why it matters: {brief.get('why_it_matters','')}\n"
+                f"Tension: {brief.get('tension','')}\n"
+                f"Specific details: {specific_details}\n"
+                f"Listener angle: {brief.get('listener_angle','')}\n"
+                f"Follow-up question: {brief.get('follow_up_question','')}\n"
                 f"Banter hook: {brief.get('banter_hook','')}"
             )
         return "\n\n".join(lines)
@@ -2230,12 +2401,12 @@ class PodcastDigestService:
         """Build legacy one-shot prompt as fallback if chunked generation fails."""
         articles_block_lines: list[str] = []
         for index, article in enumerate(articles, start=1):
-            clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:500]
+            clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:1200]
             articles_block_lines.append(
                 f"{index}. {article.title}\n"
                 f"Source: {article.feed_title}\n"
                 f"URL: {article.url}\n"
-                f"Key points: {clean_snippet}"
+                f"Source detail for context, stakes, and examples: {clean_snippet}"
             )
         articles_block = "\n\n".join(articles_block_lines)
         return SCRIPT_PROMPT_TEMPLATE.format(
