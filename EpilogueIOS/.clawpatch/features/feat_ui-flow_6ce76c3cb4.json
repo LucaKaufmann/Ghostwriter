@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_6ce76c3cb4",
+  "title": "Reader And Digest UI",
+  "summary": "User-facing digest, reading, history, feed list, and sync status views.\n\nAgent mapper reason: These SwiftUI screens form the main reading workflow and share domain models and app-level navigation context.",
+  "kind": "ui-flow",
+  "source": "agent-mapper",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "App/Sources/Views/FeedListView.swift",
+      "symbol": "FeedListView",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "App/Sources/Views/FeedListView.swift",
+      "reason": "Primary feed browsing UI."
+    },
+    {
+      "path": "App/Sources/Views/DigestDetailView.swift",
+      "reason": "Digest detail presentation and reading entry point."
+    },
+    {
+      "path": "App/Sources/Views/EinkReaderView.swift",
+      "reason": "Reader-focused UI for e-ink style reading."
+    },
+    {
+      "path": "App/Sources/Views/HistoryView.swift",
+      "reason": "Historical digest or reading activity UI."
+    },
+    {
+      "path": "App/Sources/Views/SyncStatusBanner.swift",
+      "reason": "Shared UI surface for sync state feedback."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "App/Sources/ContentView.swift",
+      "reason": "Hosts or navigates to these views."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/Digest.swift",
+      "reason": "Digest data displayed by the views."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/Feed.swift",
+      "reason": "Feed data displayed by the views."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/ProcessedArticle.swift",
+      "reason": "Article data displayed by reader and digest screens."
+    },
+    {
+      "path": "App/Tests/EpilogueTests.swift",
+      "reason": "nearby test"
+    },
+    {
+      "path": "App/UITests/EpilogueScreenshotTests.swift",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "App/Tests/EpilogueTests.swift",
+      "command": null
+    },
+    {
+      "path": "App/UITests/EpilogueScreenshotTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "agent-mapped",
+    "ios",
+    "swiftui",
+    "reader",
+    "feeds",
+    "digests"
+  ],
+  "trustBoundaries": [
+    "user-input",
+    "concurrency"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-6ce76c3cb4-abd4_52ab5ba6e6",
+    "fnd_sig-feat-ui-flow-6ce76c3cb4-4c2d_46bf373d5a",
+    "fnd_sig-feat-ui-flow-6ce76c3cb4-a0a0_337bf8b128"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T11:04:04.940Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T11:04:04.940Z"
+}

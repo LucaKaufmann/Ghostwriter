@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_cc1eadbcb0",
+  "title": "Kotlin Android role external client shared/src",
+  "summary": "Kotlin android external client group shared/src with 6 files, classified from Kotlin code evidence.",
+  "kind": "service",
+  "source": "kotlin-android-role-external-client",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "shared/build.gradle.kts",
+      "symbol": "shared/src",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "shared/src/androidMain/kotlin/com/example/epilogue/shared/ghostwriter/PlatformHttpClient.android.kt",
+      "reason": "kotlin external client evidence: external client import io.ktor.client.HttpClient; external client import io.ktor.client.engine.okhttp.OkHttp; external client import io.ktor.client.plugins.HttpRequestRetry; external client import io.ktor.client.plugins.HttpTimeout; external client import io.ktor.client.plugins.contentnegotiation.ContentNegotiation"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/ghostwriter/GhostwriterApiClient.kt",
+      "reason": "kotlin external client evidence: external client import io.ktor.client.HttpClient; external client import io.ktor.client.call.body; external client import io.ktor.client.request.delete; external client import io.ktor.client.request.get; external client import io.ktor.client.request.header; external client import io.ktor.client.request.parameter; external client import io.ktor.client.request.post; external client import io.ktor.client.request.put; external client import io.ktor.client.request.setBody"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/ghostwriter/GhostwriterClientHandle.kt",
+      "reason": "kotlin external client evidence: external client import io.ktor.client.HttpClient"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/ghostwriter/PlatformHttpClient.kt",
+      "reason": "kotlin external client evidence: external client import io.ktor.client.HttpClient"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/com/example/epilogue/shared/ghostwriter/GhostwriterApiClientTest.kt",
+      "reason": "kotlin external client evidence: external client import io.ktor.client.HttpClient; external client import io.ktor.client.engine.mock.MockEngine; external client import io.ktor.client.engine.mock.respond; external client import io.ktor.client.plugins.contentnegotiation.ContentNegotiation"
+    },
+    {
+      "path": "shared/src/iosMain/kotlin/com/example/epilogue/shared/ghostwriter/PlatformHttpClient.ios.kt",
+      "reason": "kotlin external client evidence: external client import io.ktor.client.HttpClient; external client import io.ktor.client.engine.darwin.Darwin; external client import io.ktor.client.plugins.HttpRequestRetry; external client import io.ktor.client.plugins.HttpTimeout; external client import io.ktor.client.plugins.contentnegotiation.ContentNegotiation"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android",
+    "kotlin",
+    "android",
+    "network"
+  ],
+  "trustBoundaries": [
+    "network",
+    "external-api",
+    "serialization"
+  ],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:22:21.689Z"
+}

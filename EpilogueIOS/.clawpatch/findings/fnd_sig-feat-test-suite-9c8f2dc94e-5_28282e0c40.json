@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-test-suite-9c8f2dc94e-5_28282e0c40",
+  "featureId": "feat_test-suite_9c8f2dc94e",
+  "title": "Screenshot reset launch option is not forwarded to the app under UI tests",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "App/Sources/Services/ScreenshotLaunchOptions.swift",
+      "startLine": 20,
+      "endLine": 26,
+      "symbol": "ScreenshotLaunchOptions.current",
+      "quote": "let resetData = environment[\"EPILOGUE_SCREENSHOT_RESET\"]?.lowercased() != \"false\""
+    },
+    {
+      "path": "App/UITests/EpilogueScreenshotTests.swift",
+      "startLine": 12,
+      "endLine": 18,
+      "symbol": "EpilogueScreenshotTests.setUpWithError",
+      "quote": null
+    },
+    {
+      "path": "scripts/capture_screenshots.sh",
+      "startLine": 61,
+      "endLine": 68,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "ScreenshotLaunchOptions defines EPILOGUE_SCREENSHOT_RESET as an app launch environment contract, but the UI test only forwards fixture and output environment values into XCUIApplication.launchEnvironment. The capture script starts xcodebuild with fixture/output variables and has no reset forwarding path, so EPILOGUE_SCREENSHOT_RESET=false can be visible to the test runner while the launched app still defaults resetData to true and clears data.",
+  "reproduction": "Run the screenshot UI test through scripts/capture_screenshots.sh with EPILOGUE_SCREENSHOT_RESET=false and pre-existing simulator data. Because setUpWithError does not copy that variable into app.launchEnvironment, the app evaluates resetData with no environment override and clears existing Feed/Digest records.",
+  "recommendation": "Forward EPILOGUE_SCREENSHOT_RESET from the test process into app.launchEnvironment, and have capture_screenshots.sh preserve/pass the variable alongside EPILOGUE_SCREENSHOT_FIXTURE_PATH.",
+  "whyTestsDoNotAlreadyCoverThis": "The included test never sets EPILOGUE_SCREENSHOT_RESET=false and does not assert preservation of pre-existing data.",
+  "suggestedRegressionTest": "Add a UI or launch-options test that sets EPILOGUE_SCREENSHOT_RESET=false, launches screenshot mode, and verifies existing data is not cleared.",
+  "minimumFixScope": "Update EpilogueScreenshotTests.setUpWithError and scripts/capture_screenshots.sh to propagate EPILOGUE_SCREENSHOT_RESET.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-test-suite-9c8f2dc94e_5c809c99d9",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:03:54.392Z",
+  "updatedAt": "2026-05-18T11:03:54.392Z"
+}

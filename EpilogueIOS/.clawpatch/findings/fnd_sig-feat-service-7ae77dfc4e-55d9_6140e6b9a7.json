@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-7ae77dfc4e-55d9_6140e6b9a7",
+  "featureId": "feat_service_7ae77dfc4e",
+  "title": "Malformed OpenAI-compatible responses are surfaced as decoder errors instead of domain errors",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "Modules/AIServices/Sources/AIServices/Services/OpenAIService.swift",
+      "startLine": 52,
+      "endLine": 56,
+      "symbol": "OpenAIService.summarize",
+      "quote": "let openAIResponse = try JSONDecoder().decode(OpenAIResponse.self, from: data)"
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/AIServiceProtocol.swift",
+      "startLine": 39,
+      "endLine": 46,
+      "symbol": "AIServiceError",
+      "quote": "case invalidResponse"
+    }
+  ],
+  "reasoning": "For successful HTTP statuses, the service directly propagates JSONDecoder errors. That leaks Foundation decoding failures through the domain protocol instead of normalizing bad or incompatible provider payloads to AIServiceError.invalidResponse. Callers handling AIServiceError.invalidResponse for external API schema problems will miss these failures, even though the domain error exists for exactly this class of response issue.",
+  "reproduction": "Return HTTP 200 with a JSON body such as {\"choices\":[{}]}. summarize will throw DecodingError.keyNotFound instead of AIServiceError.invalidResponse.",
+  "recommendation": "Wrap response decoding in do/catch and throw AIServiceError.invalidResponse for decoding failures or otherwise validate the decoded payload before returning.",
+  "whyTestsDoNotAlreadyCoverThis": "The tests only cover initialization, missing API key, and empty-key validation. They do not inject a URLSession response for successful HTTP status with malformed JSON.",
+  "suggestedRegressionTest": "Add a mocked URLSession test that returns 200 with malformed or schema-incompatible JSON and assert summarize throws AIServiceError.invalidResponse.",
+  "minimumFixScope": "Modules/AIServices/Sources/AIServices/Services/OpenAIService.swift: update the 200...299 branch in summarize and add a corresponding OpenAIServiceTests case.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-service-7ae77dfc4e_55d94bb65c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:00:50.854Z",
+  "updatedAt": "2026-05-18T11:00:50.854Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-39be3cbb00-8fe46_2fb78ce1bd",
+  "featureId": "feat_config_39be3cbb00",
+  "title": "Failed cover-quality saves roll back to the wrong value",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/settings/SettingsViewModel.kt",
+      "startLine": 688,
+      "endLine": 697,
+      "symbol": "SettingsViewModel.updateCoverQuality",
+      "quote": "state.copy(coverQuality = when (quality) {"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/settings/SettingsViewModel.kt",
+      "startLine": 780,
+      "endLine": 785,
+      "symbol": "SettingsViewModel.updateGhostwriterConfig",
+      "quote": "rollbackUpdate(it).copy("
+    }
+  ],
+  "reasoning": "updateCoverQuality computes rollback from the requested value instead of the previous UI/server value. For example, if the current quality is low and the user selects high, a non-409 update failure rolls the UI back to medium, not low. That leaves the settings screen showing a value that neither the user successfully saved nor the server currently has.",
+  "reproduction": "Set coverQuality to low, make ghostwriterRepository.updateConfig return a non-409 Error while calling updateCoverQuality(\"high\"), and observe the final UI state becomes medium.",
+  "recommendation": "Capture the previous SettingsUiState before applying the optimistic update and restore that value on failure, or refetch server config for all update failures where the authoritative state is uncertain.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided, and a repo search found no tests covering SettingsViewModel cover config rollback behavior.",
+  "suggestedRegressionTest": "Add a SettingsViewModel test that starts with coverQuality low, makes updateConfig fail, calls updateCoverQuality(\"high\"), and asserts coverQuality is still low with an error message.",
+  "minimumFixScope": "SettingsViewModel.updateCoverQuality and the rollback contract in updateGhostwriterConfig.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-config-39be3cbb00_8fe46686c3",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:24:54.470Z",
+  "updatedAt": "2026-05-18T10:24:54.470Z"
+}

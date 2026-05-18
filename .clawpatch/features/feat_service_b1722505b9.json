@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_b1722505b9",
+  "title": "Kotlin Android role data boundary app/src/main/java/com/example/epilogue/data/repository",
+  "summary": "Kotlin android data boundary group app/src/main/java/com/example/epilogue/data/repository with 5 files, classified from Kotlin code evidence.",
+  "kind": "service",
+  "source": "kotlin-android-role-data-boundary",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue/data/repository",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/ArticleRepository.kt",
+      "reason": "kotlin data boundary evidence: path segment data boundary"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/DigestRepository.kt",
+      "reason": "kotlin data boundary evidence: path segment data boundary"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/FeedRepository.kt",
+      "reason": "kotlin data boundary evidence: path segment data boundary"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt",
+      "reason": "kotlin data boundary evidence: path segment data boundary"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/SettingsRepository.kt",
+      "reason": "kotlin data boundary evidence: path segment data boundary"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android",
+    "kotlin",
+    "android",
+    "data"
+  ],
+  "trustBoundaries": [
+    "database",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-service-b1722505b9-5540_5412dd5c31",
+    "fnd_sig-feat-service-b1722505b9-c9a9_8afb168647",
+    "fnd_sig-feat-service-b1722505b9-71a6_2250f12842",
+    "fnd_sig-feat-service-b1722505b9-08e8_a41fe62576"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T102229-d372f4",
+      "kind": "review",
+      "summary": "4 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T10:25:00.860Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:25:00.860Z"
+}

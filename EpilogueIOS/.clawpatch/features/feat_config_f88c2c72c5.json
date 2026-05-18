@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_config_f88c2c72c5",
+  "title": "Tuist Workspace And Module Configuration",
+  "summary": "Workspace, project manifests, shared Tuist templates, and Swift package manifest.\n\nAgent mapper reason: Target manifests and shared templates determine module boundaries, dependencies, and build behavior, so they form a coherent infrastructure review slice.",
+  "kind": "config",
+  "source": "agent-mapper",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "Workspace.swift",
+      "symbol": null,
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Workspace.swift",
+      "reason": "Top-level Tuist workspace composition."
+    },
+    {
+      "path": "Tuist/Package.swift",
+      "reason": "Tuist package dependencies and plugin setup."
+    },
+    {
+      "path": "Tuist/ProjectDescriptionHelpers/Project+Templates.swift",
+      "reason": "Shared project template helpers."
+    },
+    {
+      "path": "App/Project.swift",
+      "reason": "App target manifest."
+    },
+    {
+      "path": "Modules/AIServices/Project.swift",
+      "reason": "AIServices target manifest."
+    },
+    {
+      "path": "Modules/ContentProcessing/Project.swift",
+      "reason": "ContentProcessing target manifest."
+    },
+    {
+      "path": "Modules/Data/Project.swift",
+      "reason": "Data target manifest."
+    },
+    {
+      "path": "Modules/Domain/Project.swift",
+      "reason": "Domain target manifest."
+    },
+    {
+      "path": "Modules/EPUBGeneration/Project.swift",
+      "reason": "EPUBGeneration target manifest."
+    },
+    {
+      "path": "Modules/GhostwriterClient/Project.swift",
+      "reason": "GhostwriterClient target manifest."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "README.md",
+      "reason": "Repository setup and build documentation."
+    },
+    {
+      "path": "ExportOptions-AppStore.plist",
+      "reason": "Release configuration affected by target setup."
+    },
+    {
+      "path": "Makefile",
+      "reason": "Build command wrapper that may invoke Tuist or xcodebuild."
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "agent-mapped",
+    "tuist",
+    "swiftpm",
+    "workspace",
+    "build-config"
+  ],
+  "trustBoundaries": [
+    "filesystem",
+    "process-exec"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-config-f88c2c72c5-ef940_a651297ac9"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T11:00:15.288Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T11:00:15.288Z"
+}

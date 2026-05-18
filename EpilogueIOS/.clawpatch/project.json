@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "projectId": "prj_git-github-com-lucakaufmann-ghos_2aa52944cb",
+  "name": "Ghostwriter",
+  "rootPath": "/Users/luca/.codex/worktrees/29b4/Epilogue/EpilogueIOS",
+  "git": {
+    "remoteUrl": "git@github.com:LucaKaufmann/Ghostwriter.git",
+    "defaultBranch": "main",
+    "currentBranch": "codex/clawpatch-fixes",
+    "headSha": "24e38d03eb4fd463601b34e008c37e908e255565"
+  },
+  "detected": {
+    "languages": [
+      "swift"
+    ],
+    "frameworks": [],
+    "packageManagers": [
+      "swiftpm"
+    ],
+    "commands": {
+      "typecheck": null,
+      "lint": null,
+      "format": null,
+      "test": null
+    }
+  },
+  "createdAt": "2026-05-18T10:55:48.377Z",
+  "updatedAt": "2026-05-18T10:55:48.377Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-3065d25cf0-697f_72af4dc797",
+  "featureId": "feat_service_3065d25cf0",
+  "title": "Sharing an EPUB starts a chooser without FLAG_ACTIVITY_NEW_TASK from an application context",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/history/HistoryViewModel.kt",
+      "startLine": 34,
+      "endLine": 40,
+      "symbol": "HistoryViewModel constructor",
+      "quote": "@ApplicationContext private val context: Context"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/history/HistoryViewModel.kt",
+      "startLine": 149,
+      "endLine": 156,
+      "symbol": "HistoryViewModel.shareDigest",
+      "quote": "val intent = Intent(Intent.ACTION_SEND).apply { ... addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) } ... context.startActivity(Intent.createChooser(intent, \"Share EPUB\"))"
+    }
+  ],
+  "reasoning": "The injected context is the application context, so the Intent passed to startActivity must carry FLAG_ACTIVITY_NEW_TASK. The code adds that flag to the nested ACTION_SEND intent, but startActivity receives the chooser intent returned by Intent.createChooser, which is a separate Intent. On devices that enforce this, sharing an existing EPUB throws and falls into the generic failure path instead of opening the share sheet.",
+  "reproduction": "Call shareDigest with an existing EPUB while HistoryViewModel is using the injected application context. The chooser intent lacks FLAG_ACTIVITY_NEW_TASK, so startActivity can throw AndroidRuntimeException and set the UI error to a generic share failure.",
+  "recommendation": "Create the chooser first, add FLAG_ACTIVITY_NEW_TASK to the chooser intent, and preserve URI grant flags on the chooser as needed before calling context.startActivity.",
+  "whyTestsDoNotAlreadyCoverThis": "No HistoryViewModel tests were found, and existing tests do not exercise external share intents from an application context.",
+  "suggestedRegressionTest": "Add a HistoryViewModel test with a fake Context that records the exact Intent passed to startActivity and assert shareDigest starts a chooser Intent containing FLAG_ACTIVITY_NEW_TASK and the expected stream grant.",
+  "minimumFixScope": "HistoryViewModel.shareDigest chooser construction.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-service-3065d25cf0_697f31844d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:25:02.624Z",
+  "updatedAt": "2026-05-18T10:25:02.624Z"
+}

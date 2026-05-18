@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-39be3cbb00-1a00a_e00d2dac38",
+  "featureId": "feat_config_39be3cbb00",
+  "title": "Manual Ghostwriter completion downloads whichever digest is latest",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/settings/SettingsViewModel.kt",
+      "startLine": 211,
+      "endLine": 217,
+      "symbol": "SettingsViewModel.runDigestViaGhostwriter",
+      "quote": "val digestId = triggerResult.data.id"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/settings/SettingsViewModel.kt",
+      "startLine": 258,
+      "endLine": 262,
+      "symbol": "SettingsViewModel.pollDigestStatus",
+      "quote": "downloadLatestDigest()"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/settings/SettingsViewModel.kt",
+      "startLine": 295,
+      "endLine": 300,
+      "symbol": "SettingsViewModel.downloadLatestDigest",
+      "quote": "val latestResult = ghostwriterRepository.getLatestDigest()"
+    }
+  ],
+  "reasoning": "The manual flow correctly receives and polls a specific digestId, but after that digest reports completed it discards the id and asks for the latest completed digest. If another digest completes between the status response and the latest lookup, the app can download the wrong EPUB while reporting the manual run as completed. The same codebase already has an ID-based download path in HistoryViewModel, so this flow should keep using the digest id it triggered.",
+  "reproduction": "Trigger a manual Ghostwriter digest, have getDigestStatus(digestId) return completed, then have getLatestDigest return a different, newer digest filename before downloadDigest is called.",
+  "recommendation": "Pass the completed digestId into the download step and use an ID-addressed download or fetch the digest metadata for that exact id before downloading; avoid using latest as a proxy for the completed job.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided, and a repo search found no SettingsViewModel tests for manual Ghostwriter digest completion or ID preservation.",
+  "suggestedRegressionTest": "Add a SettingsViewModel test where the triggered digest id differs from the repository's latest digest and assert the ViewModel downloads by the triggered id rather than the latest filename.",
+  "minimumFixScope": "SettingsViewModel.pollDigestStatus and downloadLatestDigest, plus the repository call they use for the final download.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-config-39be3cbb00_1a00af0018",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:24:54.470Z",
+  "updatedAt": "2026-05-18T10:24:54.470Z"
+}

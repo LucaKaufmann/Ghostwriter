@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_7ae77dfc4e",
+  "title": "OpenAI AI Service",
+  "summary": "AI service implementation backed by OpenAI-compatible requests.\n\nAgent mapper reason: The OpenAI service is a bounded external API adapter with a clear domain protocol and dedicated tests.",
+  "kind": "service",
+  "source": "agent-mapper",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "Modules/AIServices/Sources/AIServices/Services/OpenAIService.swift",
+      "symbol": "OpenAIService",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Modules/AIServices/Sources/AIServices/Services/OpenAIService.swift",
+      "reason": "Concrete AI service implementation."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "Modules/AIServices/Project.swift",
+      "reason": "Module target definition and dependencies."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/AIServiceProtocol.swift",
+      "reason": "Domain interface implemented by the service."
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Services/DigestGenerator.swift",
+      "reason": "Likely consumer of AI summaries or generation."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Enums/ProcessingMode.swift",
+      "reason": "Controls how AI processing may be performed."
+    },
+    {
+      "path": "Modules/AIServices/Tests/AIServicesTests/OpenAIServiceTests.swift",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "Modules/AIServices/Tests/AIServicesTests/OpenAIServiceTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "agent-mapped",
+    "ai",
+    "openai",
+    "network"
+  ],
+  "trustBoundaries": [
+    "network",
+    "external-api",
+    "secrets",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-service-7ae77dfc4e-55d9_6140e6b9a7",
+    "fnd_sig-feat-service-7ae77dfc4e-0d8a_038663a818"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T11:00:50.857Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T11:00:50.857Z"
+}

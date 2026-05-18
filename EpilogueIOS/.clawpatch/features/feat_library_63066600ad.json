@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_63066600ad",
+  "title": "Data Persistence And Repositories",
+  "summary": "Persistence controller and repository implementations for articles, digests, feeds, and settings.\n\nAgent mapper reason: Repository behavior is inseparable from the persistence stack and domain repository contracts, and multiple dedicated tests cover this slice.",
+  "kind": "library",
+  "source": "agent-mapper",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "Modules/Data/Sources/Data/Persistence/PersistenceController.swift",
+      "symbol": "PersistenceController",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Modules/Data/Sources/Data/Persistence/PersistenceController.swift",
+      "reason": "Local persistence stack setup."
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/ArticleRepository.swift",
+      "reason": "Article persistence implementation."
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/DigestRepository.swift",
+      "reason": "Digest persistence implementation."
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/FeedRepository.swift",
+      "reason": "Feed persistence implementation."
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/SettingsRepository.swift",
+      "reason": "Settings persistence implementation."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "Modules/Data/Project.swift",
+      "reason": "Module target definition and dependencies."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/ArticleRepositoryProtocol.swift",
+      "reason": "Article repository contract."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/DigestRepositoryProtocol.swift",
+      "reason": "Digest repository contract."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/FeedRepositoryProtocol.swift",
+      "reason": "Feed repository contract."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/SettingsRepositoryProtocol.swift",
+      "reason": "Settings repository contract."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/Digest.swift",
+      "reason": "Persisted digest domain model."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/Feed.swift",
+      "reason": "Persisted feed domain model."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/ProcessedArticle.swift",
+      "reason": "Persisted article domain model."
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/DigestRepositoryTests.swift",
+      "reason": "nearby test"
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/FeedRepositoryTests.swift",
+      "reason": "nearby test"
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/SettingsRepositoryTests.swift",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "Modules/Data/Tests/DataTests/DigestRepositoryTests.swift",
+      "command": null
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/FeedRepositoryTests.swift",
+      "command": null
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/SettingsRepositoryTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "agent-mapped",
+    "data",
+    "persistence",
+    "repositories"
+  ],
+  "trustBoundaries": [
+    "database",
+    "filesystem",
+    "concurrency"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-63066600ad-d95d_abed6c1acb",
+    "fnd_sig-feat-library-63066600ad-d866_ea3adb632f",
+    "fnd_sig-feat-library-63066600ad-dcab_7838506d73",
+    "fnd_sig-feat-library-63066600ad-e457_fc80e6935a"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "4 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T11:01:09.117Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T11:01:09.117Z"
+}

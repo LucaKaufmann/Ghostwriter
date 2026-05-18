@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-63066600ad-d95d_abed6c1acb",
+  "featureId": "feat_library_63066600ad",
+  "title": "All-feeds article fetch is stubbed and always returns no articles",
+  "category": "api-contract",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/ArticleRepositoryProtocol.swift",
+      "startLine": 14,
+      "endLine": 16,
+      "symbol": "ArticleRepositoryProtocol.fetchAndProcessArticles",
+      "quote": "Fetches and processes articles from all enabled feeds"
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/ArticleRepository.swift",
+      "startLine": 32,
+      "endLine": 36,
+      "symbol": "ArticleRepository.fetchAndProcessArticles",
+      "quote": "return []"
+    }
+  ],
+  "reasoning": "The protocol promises that this repository fetches and processes articles from all enabled feeds, but the implementation is a hard-coded stub. Any caller using the main orchestration method will successfully receive an empty list even when feeds exist, causing digest generation to silently skip all content.",
+  "reproduction": "Create enabled feeds, then call ArticleRepository.fetchAndProcessArticles(); it returns [] without reading feeds or invoking the parser/extractor.",
+  "recommendation": "Inject or otherwise provide access to the feed repository, fetch enabled feeds, process each feed, and return the combined processed articles. Until implemented, avoid returning a successful empty result for unsupported behavior.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked tests cover digest, feed, and settings repositories only; there is no ArticleRepository test for the all-feeds entrypoint.",
+  "suggestedRegressionTest": "Add an ArticleRepository test with a fake feed repository and parser proving fetchAndProcessArticles() processes enabled feeds and returns their articles.",
+  "minimumFixScope": "Modules/Data/Sources/Data/Repositories/ArticleRepository.swift plus the constructor/dependency wiring needed to access enabled feeds.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-63066600ad_d95d9cbcc8",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:01:09.115Z",
+  "updatedAt": "2026-05-18T11:01:09.115Z"
+}

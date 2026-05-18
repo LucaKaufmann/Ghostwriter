@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-0cbc1351b4-3b66f_499d435457",
+  "featureId": "feat_config_0cbc1351b4",
+  "title": "Clearing all digest periods is not durable",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/SettingsRepository.kt",
+      "startLine": 170,
+      "endLine": 174,
+      "symbol": "getSchedulePeriods",
+      "quote": "if (periodsString.isNullOrEmpty()) { ... return setOf(DigestPeriod.EVENING) }"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/SettingsRepository.kt",
+      "startLine": 190,
+      "endLine": 194,
+      "symbol": "setSchedulePeriods",
+      "quote": "val periodsString = periods.joinToString(\",\") { it.name }"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/SettingsRepository.kt",
+      "startLine": 200,
+      "endLine": 210,
+      "symbol": "toggleSchedulePeriod",
+      "quote": "currentPeriods.remove(period) ... setSchedulePeriods(currentPeriods)"
+    }
+  ],
+  "reasoning": "Disabling the final selected period stores an explicit empty string, but the reader treats both null and empty as the default Evening schedule. That means a user can appear to disable all scheduled digests, but after settings reload or schedule reconciliation the repository reports Evening as selected again and can re-enable work unexpectedly.",
+  "reproduction": "With the schedule migrated and only EVENING selected, call toggleSchedulePeriod(DigestPeriod.EVENING, false), then call getSchedulePeriods(); it returns setOf(DigestPeriod.EVENING) instead of emptySet().",
+  "recommendation": "Distinguish an unset preference from an explicitly empty selection. For example, default to Evening only when the key is absent, and return emptySet() when KEY_SCHEDULE_PERIODS is present but blank.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked SettingsRepository tests were present; the existing tests found in this area exercise other services or the shared adapter, not empty schedule persistence.",
+  "suggestedRegressionTest": "Add a SettingsRepository test that disables the only selected DigestPeriod and asserts getSchedulePeriods() returns emptySet() across a fresh repository instance using the same SharedPreferences.",
+  "minimumFixScope": "SettingsRepository schedule serialization/deserialization plus a focused regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260518T103214-5b9661",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original file and core methods still exist at the same path, now around SettingsRepository.kt:164-197. setSchedulePeriods still serializes an empty set as an empty string, and toggleSchedulePeriod still persists the updated set after removing the period, but getSchedulePeriods now delegates to parseSchedulePeriodsPreference. That parser defaults to EVENING only when the stored value is null; an explicit blank string falls through and parses to emptySet(), so the reported reproduction no longer returns EVENING. A focused regression test also exists in SettingsRepositoryTest.kt:17-22 asserting parseSchedulePeriodsPreference(\"\") returns emptySet(). I attempted to run the focused test, but Gradle could not create its wrapper lock file under the read-only sandbox, so execution was not possible in this environment.",
+      "commands": [
+        "rg -n \"getSchedulePeriods|setSchedulePeriods|toggleSchedulePeriod|KEY_SCHEDULE_PERIODS|DigestPeriod\" app/src/main/java app/src/test app/src/androidTest",
+        "sed -n '130,230p' app/src/main/java/com/example/epilogue/data/repository/SettingsRepository.kt",
+        "rg --files app/src/test app/src/androidTest | rg 'Settings|Repository|Digest|Schedule'",
+        "sed -n '500,545p' app/src/main/java/com/example/epilogue/data/repository/SettingsRepository.kt",
+        "sed -n '1,220p' app/src/test/java/com/example/epilogue/data/repository/SettingsRepositoryTest.kt",
+        "sed -n '90,215p' app/src/main/java/com/example/epilogue/service/DigestScheduler.kt",
+        "rg -n \"parseSchedulePeriodsPreference|empty|schedule_periods|setSchedulePeriods|toggleSchedulePeriod\" app/src/test app/src/main/java",
+        "./gradlew test --tests com.example.epilogue.data.repository.SettingsRepositoryTest",
+        "nl -ba app/src/main/java/com/example/epilogue/data/repository/SettingsRepository.kt | sed -n '160,200p;520,538p'",
+        "nl -ba app/src/test/java/com/example/epilogue/data/repository/SettingsRepositoryTest.kt | sed -n '1,80p'"
+      ],
+      "createdAt": "2026-05-18T10:33:08.672Z"
+    }
+  ],
+  "signature": "sig_feat-config-0cbc1351b4_3b66f459c4",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-config-0cbc1351b4-3_e86c1edf3b"
+  ],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:25:08.347Z",
+  "updatedAt": "2026-05-18T10:33:08.672Z"
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2ea2896cb1-8734_b36bee4943",
+  "featureId": "feat_library_2ea2896cb1",
+  "title": "EPUB ZIP creation does not enforce the required mimetype entry layout",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift",
+      "startLine": 59,
+      "endLine": 60,
+      "symbol": "createEPUBStructure",
+      "quote": "// Create mimetype file (must be first and uncompressed)"
+    },
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift",
+      "startLine": 338,
+      "endLine": 351,
+      "symbol": "createZIPArchive",
+      "quote": "try fileManager.zipItem(at: source, to: destination)"
+    },
+    {
+      "path": "Modules/EPUBGeneration/Tests/EPUBGenerationTests/EPUBBuilderTests.swift",
+      "startLine": 52,
+      "endLine": 57,
+      "symbol": "testGenerateEPUB",
+      "quote": null
+    }
+  ],
+  "reasoning": "The code documents the EPUB requirement that mimetype be first and uncompressed, but then delegates the whole directory to generic ZIP creation without explicitly adding mimetype first or controlling per-entry compression/layout. That can produce an EPUB that exists on disk but fails EPUB readers or validators. The linked test only asserts the destination file exists, so it would pass even for an invalid archive layout.",
+  "reproduction": null,
+  "recommendation": "Build the archive explicitly with ZIPFoundation Archive APIs: add the root-level mimetype entry first with no compression, then add META-INF and OEBPS entries relative to the EPUB root with the desired compression. Add archive-layout assertions to tests.",
+  "whyTestsDoNotAlreadyCoverThis": "The test never inspects ZIP entries, entry order, compression method, or root-relative paths; it only verifies FileManager sees a file at the returned URL.",
+  "suggestedRegressionTest": "After generation, open the EPUB as a ZIP archive and assert the first entry is exactly mimetype, its contents are application/epub+zip, it is stored uncompressed, and META-INF/container.xml and OEBPS/content.opf are root-relative entries.",
+  "minimumFixScope": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift createZIPArchive plus EPUBBuilderTests archive-structure assertions.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-2ea2896cb1_87349078ae",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:00:55.572Z",
+  "updatedAt": "2026-05-18T11:00:55.572Z"
+}

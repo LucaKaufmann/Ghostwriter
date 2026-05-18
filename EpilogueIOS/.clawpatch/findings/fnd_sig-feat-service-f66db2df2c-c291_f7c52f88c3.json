@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-f66db2df2c-c291_f7c52f88c3",
+  "featureId": "feat_service_f66db2df2c",
+  "title": "Concurrent keychain saves can lose or reject the final value",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Modules/Data/Sources/Data/Services/KeychainService.swift",
+      "startLine": 12,
+      "endLine": 13,
+      "symbol": "KeychainService",
+      "quote": "public final class KeychainService: Sendable"
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Services/KeychainService.swift",
+      "startLine": 30,
+      "endLine": 31,
+      "symbol": "KeychainService.save(_:forKey:)",
+      "quote": "try? delete(forKey: key)"
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Services/KeychainService.swift",
+      "startLine": 43,
+      "endLine": 47,
+      "symbol": "KeychainService.save(_:forKey:)",
+      "quote": "guard status == errSecSuccess else {\n            throw KeychainError.unableToSave(status: status)\n        }"
+    }
+  ],
+  "reasoning": "The service advertises Sendable and can be called from concurrent tasks, but save is implemented as delete-then-add. Two concurrent saves for the same key can interleave as delete/delete/add/add, causing one caller to fail with errSecDuplicateItem, or delete/add/delete/add, temporarily removing the secret and making readers observe nil. This is a real race at the API boundary because no actor, lock, or atomic SecItemUpdate/add fallback protects the compound operation.",
+  "reproduction": "Run two concurrent tasks that call KeychainService.save different values for the same key while a third task retrieves the key; depending on interleaving, one save can throw unableToSave(errSecDuplicateItem) or a retrieve can observe nil between delete and add.",
+  "recommendation": "Make save atomic: try SecItemAdd first, and on errSecDuplicateItem call SecItemUpdate without deleting; or serialize all operations behind an actor/lock. Do not ignore delete errors during a write path.",
+  "whyTestsDoNotAlreadyCoverThis": "The included DigestGeneratorTests exercise only digest filename generation and EPUB output. There are no KeychainService tests, and no test performs concurrent same-key writes or read-during-write behavior.",
+  "suggestedRegressionTest": "Add a KeychainService concurrency test using a unique serviceName/key that launches many concurrent save calls for the same key, asserts no duplicate-item errors escape, and verifies the final value is one of the written values and never nil after successful completion.",
+  "minimumFixScope": "Update KeychainService.save(_:forKey:) to use add-or-update semantics atomically, and add focused tests for same-key concurrent writes.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-service-f66db2df2c_c2917e2442",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:00:46.950Z",
+  "updatedAt": "2026-05-18T11:00:46.950Z"
+}

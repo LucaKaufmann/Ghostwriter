@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-63066600ad-d866_ea3adb632f",
+  "featureId": "feat_library_63066600ad",
+  "title": "Bulk article processing hides per-article failures as success",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/ArticleRepository.swift",
+      "startLine": 49,
+      "endLine": 53,
+      "symbol": "ArticleRepository.fetchAndProcessArticles(from:)",
+      "quote": "try? await self.processArticle(article, mode: feed.mode)"
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/ArticleRepository.swift",
+      "startLine": 112,
+      "endLine": 115,
+      "symbol": "ArticleRepository.processBriefingMode",
+      "quote": "throw ArticleProcessingError.aiServiceUnavailable"
+    }
+  ],
+  "reasoning": "fetchAndProcessArticles(from:) is async throws, and processArticle has meaningful errors such as missing AI configuration and content that is too short. The task group converts every thrown error to nil, so a feed can fail entirely and still return [] as a successful result. That makes configuration and extraction failures indistinguishable from a feed with no usable articles.",
+  "reproduction": "Call fetchAndProcessArticles(from:) for a briefing-mode feed while aiService is nil. processArticle throws aiServiceUnavailable, but the bulk method returns an empty array without throwing.",
+  "recommendation": "Decide the intended failure policy explicitly. If feed processing should fail on infrastructure/configuration errors, remove try? and propagate errors. If individual article filtering is intended, catch only expected filter errors and surface or log unexpected failures.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests exercise ArticleRepository failure paths or distinguish filtered articles from processing failures.",
+  "suggestedRegressionTest": "Add tests proving briefing mode without an AI service throws from fetchAndProcessArticles(from:), or, if partial success is intended, that only documented filter errors are skipped while unexpected errors are reported.",
+  "minimumFixScope": "Modules/Data/Sources/Data/Repositories/ArticleRepository.swift.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-63066600ad_d8668ebcde",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:01:09.115Z",
+  "updatedAt": "2026-05-18T11:01:09.115Z"
+}

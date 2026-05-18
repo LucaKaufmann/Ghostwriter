@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_042f96c90d",
+  "title": "Content Processing Library",
+  "summary": "Feed parsing, parser protocol conformance, and article content extraction.\n\nAgent mapper reason: Feed parsing and content extraction are adjacent ingestion concerns with shared domain contracts and dedicated tests.",
+  "kind": "library",
+  "source": "agent-mapper",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "Modules/ContentProcessing/Sources/ContentProcessing/Services/FeedParser.swift",
+      "symbol": "FeedParser",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Modules/ContentProcessing/Sources/ContentProcessing/Services/FeedParser.swift",
+      "reason": "RSS or feed parsing implementation."
+    },
+    {
+      "path": "Modules/ContentProcessing/Sources/ContentProcessing/Extensions/FeedParser+Protocol.swift",
+      "reason": "Adapter between parser implementation and domain protocol."
+    },
+    {
+      "path": "Modules/ContentProcessing/Sources/ContentProcessing/Services/ContentExtractor.swift",
+      "reason": "Article content extraction implementation."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "Modules/ContentProcessing/Project.swift",
+      "reason": "Module target definition and dependencies."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/ContentProcessingProtocols.swift",
+      "reason": "Domain contract implemented by this module."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/Feed.swift",
+      "reason": "Feed model produced or consumed by parsing."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/ProcessedArticle.swift",
+      "reason": "Processed article model produced by extraction."
+    },
+    {
+      "path": "Modules/ContentProcessing/Tests/ContentProcessingTests/FeedParserTests.swift",
+      "reason": "nearby test"
+    },
+    {
+      "path": "Modules/ContentProcessing/Tests/ContentProcessingTests/ContentExtractorTests.swift",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "Modules/ContentProcessing/Tests/ContentProcessingTests/FeedParserTests.swift",
+      "command": null
+    },
+    {
+      "path": "Modules/ContentProcessing/Tests/ContentProcessingTests/ContentExtractorTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "agent-mapped",
+    "content-processing",
+    "rss",
+    "parsing",
+    "extraction"
+  ],
+  "trustBoundaries": [
+    "network",
+    "serialization",
+    "user-input"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-042f96c90d-7e27_ead2d7c6dd"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T10:59:50.358Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T10:59:50.358Z"
+}

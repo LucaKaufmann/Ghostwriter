@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-06ccb6398a-7e4b2_d3842911b5",
+  "featureId": "feat_config_06ccb6398a",
+  "title": "WorkManager debug logging is enabled for release builds",
+  "category": "build-release",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/EpilogueApplication.kt",
+      "startLine": 81,
+      "endLine": 85,
+      "symbol": "EpilogueApplication.workManagerConfiguration",
+      "quote": "override val workManagerConfiguration: Configuration\n        get() = Configuration.Builder()\n            .setWorkerFactory(workerFactory)\n            .setMinimumLoggingLevel(android.util.Log.DEBUG)\n            .build()"
+    }
+  ],
+  "reasoning": "The application-level WorkManager configuration unconditionally sets DEBUG logging. Because this provider is used for all build variants, release builds will also emit WorkManager debug logs, increasing production log noise and potentially exposing worker names and scheduling state in logcat. This should be gated by build type or raised for non-debug builds.",
+  "reproduction": null,
+  "recommendation": "Use a build-type conditional such as `if (BuildConfig.DEBUG) Log.DEBUG else Log.INFO` or omit the override for release builds.",
+  "whyTestsDoNotAlreadyCoverThis": "There are no linked tests for `EpilogueApplication` or WorkManager configuration; existing scheduler tests only cover delay and catch-up decision helpers.",
+  "suggestedRegressionTest": "Add a unit or Robolectric test that constructs the application WorkManager configuration for a release-like build and asserts the minimum logging level is not DEBUG.",
+  "minimumFixScope": "Update only `EpilogueApplication.workManagerConfiguration` to choose the logging level based on build type.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-config-06ccb6398a_7e4b2836a6",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:24:09.859Z",
+  "updatedAt": "2026-05-18T10:24:09.859Z"
+}

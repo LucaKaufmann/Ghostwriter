@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2ea2896cb1-fd63_65a1b96d95",
+  "featureId": "feat_library_2ea2896cb1",
+  "title": "Unescaped article and feed metadata can make chapter XHTML invalid",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift",
+      "startLine": 265,
+      "endLine": 279,
+      "symbol": "createFeedSectionChapter",
+      "quote": "<title>\\(feedName)</title>"
+    },
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift",
+      "startLine": 289,
+      "endLine": 304,
+      "symbol": "createChapter",
+      "quote": "let authorHTML = article.author.isEmpty ? \"\" : \"<p class=\\\"author\\\">By \\(article.author)</p>\\n    \""
+    },
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift",
+      "startLine": 329,
+      "endLine": 335,
+      "symbol": "escapeXML",
+      "quote": null
+    },
+    {
+      "path": "Modules/EPUBGeneration/Tests/EPUBGenerationTests/EPUBBuilderTests.swift",
+      "startLine": 26,
+      "endLine": 45,
+      "symbol": "testGenerateEPUB",
+      "quote": null
+    }
+  ],
+  "reasoning": "Chapter XHTML interpolates feedName, article.title, article.author, and article.originalUrl directly into XML text and attributes. Values containing &, <, >, or quotes will produce malformed XHTML, and hostile metadata can inject markup into the generated EPUB. The builder already has escapeXML and uses it for NCX labels, but not for the XHTML chapter files. The existing test only uses benign metadata, so it does not contradict this issue.",
+  "reproduction": null,
+  "recommendation": "Escape text nodes for feed names, titles, and authors; escape attribute values for hrefs and validate URL schemes. Keep article.content handling separate: either require trusted XHTML or sanitize/convert it before embedding.",
+  "whyTestsDoNotAlreadyCoverThis": "testGenerateEPUB only checks that an .epub file exists after using simple ASCII sample data; it never unzips the archive or parses generated XHTML with XML-sensitive characters.",
+  "suggestedRegressionTest": "Generate an EPUB with feedName/title/author containing &, <, and quotes plus an originalUrl with query-string ampersands; unzip it and parse every .xhtml file as XML, asserting the escaped text and href round-trip correctly.",
+  "minimumFixScope": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift XHTML generation helpers and EPUBBuilderTests coverage for escaped metadata.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-2ea2896cb1_fd631a1612",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:00:55.572Z",
+  "updatedAt": "2026-05-18T11:00:55.572Z"
+}

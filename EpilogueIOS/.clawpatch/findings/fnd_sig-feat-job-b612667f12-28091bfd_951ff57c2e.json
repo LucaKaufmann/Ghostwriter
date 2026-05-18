@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-job-b612667f12-28091bfd_951ff57c2e",
+  "featureId": "feat_job_b612667f12",
+  "title": "Later same-day BGProcessing runs can generate the previous digest period",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "App/Sources/Services/LocalDigestScheduler.swift",
+      "startLine": 136,
+      "endLine": 145,
+      "symbol": "LocalDigestScheduler.scheduleOvernightDigest",
+      "quote": "guard let nextDigestTime = nextScheduledDigestTime(from: now, periods: enabledPeriods) ... desiredBegin = nextDigestTime.addingTimeInterval(-2 * 3600)"
+    },
+    {
+      "path": "App/Sources/Services/LocalDigestScheduler.swift",
+      "startLine": 538,
+      "endLine": 539,
+      "symbol": "LocalDigestScheduler.nextScheduledDigestTime",
+      "quote": "if let nextToday = todayCandidates.filter({ $0 >= now }).min() { return nextToday }"
+    },
+    {
+      "path": "App/Sources/Services/LocalDigestScheduler.swift",
+      "startLine": 249,
+      "endLine": 260,
+      "symbol": "LocalDigestScheduler.handleOvernightDigestTask",
+      "quote": "let periodToGenerate = Self.latestElapsedPeriod(now: now, periods: enabledPeriods) ?? enabledPeriods.min(...)"
+    }
+  ],
+  "reasoning": "Scheduling targets the next upcoming enabled period, including periods later today, and asks iOS to begin two hours before that window. But when the task actually runs before a later window, the handler labels the digest with the latest already-elapsed period. With morning/noon/evening enabled, an evening pre-generation launched at 16:30 will generate a NOON digest, then schedule a ready notification for the evening slot. Catch-up after 18:00 will not count that NOON digest as covering EVENING, so users can get a wrong ready notification and then a duplicate foreground generation.",
+  "reproduction": "Enable noon and evening digests. At 15:00, schedule overnight digest; nextScheduledDigestTime is 18:00 and earliestBeginDate is 16:00. If iOS launches the BGProcessing task at 16:30, latestElapsedPeriod returns .noon, so generateDigest receives period: \"NOON\" instead of \"EVENING\".",
+  "recommendation": "Either schedule BGProcessing only for tomorrow's earliest period as the design describes, or persist/pass the intended target period from scheduling into the handler. If the handler must infer at runtime, choose the next upcoming period when running within the lead window, and only fall back to latest elapsed for delayed executions after the due time.",
+  "whyTestsDoNotAlreadyCoverThis": "LocalDigestSchedulerTests cover latestElapsedPeriod itself, but they do not cover the interaction between nextScheduledDigestTime, lead-time scheduling, and handleOvernightDigestTask period selection.",
+  "suggestedRegressionTest": "Expose/test a pure helper that resolves the generation period for a BGProcessing launch. Assert that with periods [.morning, .noon, .evening], a launch at 16:30 for an 18:00 scheduled window selects .evening, while a delayed launch after 18:00 also selects .evening.",
+  "minimumFixScope": "LocalDigestScheduler scheduling/period-selection logic and focused helper tests.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-job-b612667f12_28091bfd3d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:01:18.332Z",
+  "updatedAt": "2026-05-18T11:01:18.332Z"
+}

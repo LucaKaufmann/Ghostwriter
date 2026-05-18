@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_config_a3d12fd675",
+  "title": "Kotlin Android role dependency injection app/src/main/java/com/example/epilogue/service",
+  "summary": "Kotlin android dependency injection group app/src/main/java/com/example/epilogue/service with 7 files, classified from Kotlin code evidence.",
+  "kind": "config",
+  "source": "kotlin-android-role-dependency-injection",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue/service",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/BootReceiver.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection annotation @AndroidEntryPoint; dependency injection import dagger.hilt.android.AndroidEntryPoint"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DailyDigestWorker.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection import dagger.assisted.Assisted; dependency injection import dagger.assisted.AssistedInject"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestScheduler.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection import dagger.hilt.android.qualifiers.ApplicationContext"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection import dagger.assisted.Assisted; dependency injection import dagger.assisted.AssistedInject"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/EpubExporter.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection import dagger.hilt.android.qualifiers.ApplicationContext"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/EpubGenerator.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection import dagger.hilt.android.qualifiers.ApplicationContext"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/FeedSyncWorker.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection import dagger.assisted.Assisted; dependency injection import dagger.assisted.AssistedInject"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/DigestSchedulerTest.kt",
+      "reason": "associated gradle test"
+    },
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/EpubGeneratorTest.kt",
+      "reason": "associated gradle test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/DigestSchedulerTest.kt",
+      "command": null
+    },
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/EpubGeneratorTest.kt",
+      "command": null
+    }
+  ],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android",
+    "kotlin",
+    "android",
+    "di"
+  ],
+  "trustBoundaries": [
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-config-a3d12fd675-c47cd_a641a2b4c2",
+    "fnd_sig-feat-config-a3d12fd675-8431d_acf552171b",
+    "fnd_sig-feat-config-a3d12fd675-a5228_23f082a1d2",
+    "fnd_sig-feat-config-a3d12fd675-b6e95_262612c51e",
+    "fnd_sig-feat-config-a3d12fd675-647b3_db83b13bb2"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T102229-d372f4",
+      "kind": "review",
+      "summary": "5 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T10:24:34.914Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:24:34.914Z"
+}

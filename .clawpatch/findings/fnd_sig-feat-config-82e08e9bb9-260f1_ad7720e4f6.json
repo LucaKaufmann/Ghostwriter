@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-82e08e9bb9-260f1_ad7720e4f6",
+  "featureId": "feat_config_82e08e9bb9",
+  "title": "Malformed user-configurable Ghostwriter URLs fail during Retrofit construction",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/NetworkModule.kt",
+      "startLine": 48,
+      "endLine": 50,
+      "symbol": "GhostwriterApiFactory",
+      "quote": "Factory for creating GhostwriterApi instances with dynamic base URLs.\n * This is needed because the Ghostwriter URL is user-configurable."
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/NetworkModule.kt",
+      "startLine": 61,
+      "endLine": 64,
+      "symbol": "GhostwriterApiFactory.create",
+      "quote": "fun create(baseUrl: String): GhostwriterApi {\n        // Normalize URL and ensure /api/ path\n        val trimmedUrl = baseUrl.trimEnd('/')\n        val normalizedUrl = if (trimmedUrl.endsWith(\"/api\")) \"$trimmedUrl/\" else \"$trimmedUrl/api/\""
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/NetworkModule.kt",
+      "startLine": 72,
+      "endLine": 76,
+      "symbol": "GhostwriterApiFactory.create",
+      "quote": "val retrofit = Retrofit.Builder()\n            .baseUrl(normalizedUrl)\n            .client(okHttpClient)\n            .addConverterFactory(GsonConverterFactory.create())\n            .build()"
+    }
+  ],
+  "reasoning": "The module documents this URL as user-configurable, but create only appends /api/ before passing it to Retrofit.baseUrl. Retrofit requires a syntactically valid absolute base URL, so values such as an empty scheme, stray whitespace, or a non-HTTP string throw IllegalArgumentException during client creation rather than producing a controlled configuration error. This is especially risky because DI exposes a factory intended for dynamic settings rather than a compile-time constant URL.",
+  "reproduction": "Call GhostwriterApiFactory(OkHttpClient()).create(\"localhost:8080\") or create(\"not a url\"); Retrofit baseUrl validation throws before any API call can return a user-facing NotConfigured or connection error.",
+  "recommendation": "Validate and canonicalize the base URL before building Retrofit. Use HttpUrl parsing, trim whitespace, require http/https, append the api path structurally, and return/throw a domain-specific configuration error that callers can surface without crashing.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for NetworkModule or URL normalization, and the discovered tests include SharedGhostwriterAdapter coverage but not GhostwriterApiFactory invalid-input behavior.",
+  "suggestedRegressionTest": "Add tests for GhostwriterApiFactory URL handling: valid host with and without /api succeeds, invalid strings are rejected with a controlled exception/result, and whitespace is normalized predictably.",
+  "minimumFixScope": "NetworkModule.kt GhostwriterApiFactory URL normalization and error contract.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-config-82e08e9bb9_260f1f67f2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:24:38.860Z",
+  "updatedAt": "2026-05-18T10:24:38.860Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-63066600ad-dcab_7838506d73",
+  "featureId": "feat_library_63066600ad",
+  "title": "Midnight cannot be persisted as the legacy scheduled hour",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/SettingsRepository.swift",
+      "startLine": 121,
+      "endLine": 124,
+      "symbol": "SettingsRepository.getScheduledHour",
+      "quote": "return hour == 0 ? Defaults.scheduledHour : hour"
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/SettingsRepository.swift",
+      "startLine": 127,
+      "endLine": 132,
+      "symbol": "SettingsRepository.setScheduledHour",
+      "quote": "guard hour >= 0 && hour <= 23"
+    }
+  ],
+  "reasoning": "setScheduledHour accepts 0 as valid, but getScheduledHour treats any stored integer value of 0 as missing and returns the default 6. Users or legacy callers cannot set a midnight schedule even though the setter validates it as allowed.",
+  "reproduction": "Call setScheduledHour(0), then getScheduledHour(); the result is 6 instead of 0.",
+  "recommendation": "Use object(forKey:) to distinguish an absent value from a stored 0, matching the pattern already used for minWordCount and showNotifications.",
+  "whyTestsDoNotAlreadyCoverThis": "SettingsRepositoryTests only verifies the default and setting hour 14; it does not test the valid boundary value 0.",
+  "suggestedRegressionTest": "Extend testScheduledHour with setScheduledHour(0) and expect getScheduledHour() == 0.",
+  "minimumFixScope": "Modules/Data/Sources/Data/Repositories/SettingsRepository.swift and Modules/Data/Tests/DataTests/SettingsRepositoryTests.swift.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-63066600ad_dcab6f2b8d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:01:09.115Z",
+  "updatedAt": "2026-05-18T11:01:09.115Z"
+}

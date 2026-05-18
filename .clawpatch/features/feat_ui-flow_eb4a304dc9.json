@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_eb4a304dc9",
+  "title": "Gradle source app/src/main/java/com/example/epilogue/config",
+  "summary": "Gradle source group app/src/main/java/com/example/epilogue/config with 1 files.",
+  "kind": "ui-flow",
+  "source": "gradle-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue/config",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/config/FeatureFlags.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/config"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android"
+  ],
+  "trustBoundaries": [
+    "filesystem",
+    "process-exec"
+  ],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:22:21.689Z"
+}

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_bd1603f78c",
+  "title": "Kotlin Android role data boundary app/src/main/java/com/example/epilogue/data/local",
+  "summary": "Kotlin android data boundary group app/src/main/java/com/example/epilogue/data/local with 7 files, classified from Kotlin code evidence.",
+  "kind": "service",
+  "source": "kotlin-android-role-data-boundary",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue/data/local",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/local/Converters.kt",
+      "reason": "kotlin data boundary evidence: Room import androidx.room.TypeConverter"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/local/DigestArticleEntity.kt",
+      "reason": "kotlin data boundary evidence: Room annotation @Entity; Room import androidx.room.Entity; Room import androidx.room.ForeignKey; Room import androidx.room.Index; Room import androidx.room.PrimaryKey"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/local/DigestDao.kt",
+      "reason": "kotlin data boundary evidence: Room annotation @Dao; Room import androidx.room.Dao; Room import androidx.room.Delete; Room import androidx.room.Insert; Room import androidx.room.Query; Room import androidx.room.Transaction"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/local/DigestEntity.kt",
+      "reason": "kotlin data boundary evidence: Room annotation @Entity; Room import androidx.room.Entity; Room import androidx.room.PrimaryKey"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/local/EpilogueDatabase.kt",
+      "reason": "kotlin data boundary evidence: Room annotation @Database; Room import androidx.room.Database; Room import androidx.room.RoomDatabase; Room import androidx.room.TypeConverters; inherits Room type RoomDatabase"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/local/FeedDao.kt",
+      "reason": "kotlin data boundary evidence: Room annotation @Dao; Room import androidx.room.Dao; Room import androidx.room.Delete; Room import androidx.room.Insert; Room import androidx.room.OnConflictStrategy; Room import androidx.room.Query; Room import androidx.room.Update"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/local/FeedEntity.kt",
+      "reason": "kotlin data boundary evidence: Room annotation @Entity; Room import androidx.room.Entity; Room import androidx.room.PrimaryKey"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android",
+    "kotlin",
+    "android",
+    "data"
+  ],
+  "trustBoundaries": [
+    "database",
+    "serialization"
+  ],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:22:21.689Z"
+}

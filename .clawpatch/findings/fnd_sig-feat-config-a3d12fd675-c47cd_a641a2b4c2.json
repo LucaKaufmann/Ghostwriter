@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-a3d12fd675-c47cd_a641a2b4c2",
+  "featureId": "feat_config_a3d12fd675",
+  "title": "Digest sync records success even when downloads fail",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "startLine": 89,
+      "endLine": 97,
+      "symbol": "DigestSyncWorker.doWork",
+      "quote": "settingsRepository.setLastDigestSyncTime(System.currentTimeMillis())"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "startLine": 175,
+      "endLine": 181,
+      "symbol": "DigestSyncWorker.downloadAndSaveDigest",
+      "quote": "false"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "startLine": 300,
+      "endLine": 303,
+      "symbol": "DigestSyncWorker.processLegacyDigests",
+      "quote": "return Result.success()"
+    }
+  ],
+  "reasoning": "Both combined and legacy digest sync paths can encounter per-digest download failures, but still return WorkManager success and advance the last digest sync timestamp. If sync planning uses that timestamp as a watermark, failed digests can be skipped permanently; even without that, WorkManager is told no retry is needed after a partial sync failure.",
+  "reproduction": null,
+  "recommendation": "Track failed digest downloads/saves and return retry or failure when any required digest fails. Only advance the last sync time after all required digests have been persisted, or persist a per-digest cursor that cannot skip failed items.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests only cover scheduler delay helpers and a local EPUB test helper; there is no DigestSyncWorker test for partial download failures or watermark advancement.",
+  "suggestedRegressionTest": "Add a DigestSyncWorker test where planSync returns two digests, one download succeeds and one returns GhostwriterResult.Error, then assert Result.retry() is returned and setLastDigestSyncTime is not called.",
+  "minimumFixScope": "DigestSyncWorker combined and legacy result handling around per-digest failures and last-sync timestamp updates.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-config-a3d12fd675_c47cdd79c0",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:24:34.912Z",
+  "updatedAt": "2026-05-18T10:24:34.912Z"
+}

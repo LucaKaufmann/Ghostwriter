@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_e4f55c1e47",
+  "title": "Gradle source shared/src/commonMain",
+  "summary": "Gradle source group shared/src/commonMain with 11 files.",
+  "kind": "ui-flow",
+  "source": "gradle-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "shared/build.gradle.kts",
+      "symbol": "shared/src/commonMain",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/SharedModule.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/domain/CoreDomainModels.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/ghostwriter/CoreModels.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/ghostwriter/GhostwriterApiClient.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/ghostwriter/GhostwriterClientHandle.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/ghostwriter/PlatformHttpClient.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/sync/ConfigSyncUseCase.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/sync/DigestSyncUseCase.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/sync/FeedSyncUseCase.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/sync/Ports.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/com/example/epilogue/shared/sync/TimestampParsing.kt",
+      "reason": "gradle source group shared/src/commonMain"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android"
+  ],
+  "trustBoundaries": [
+    "filesystem",
+    "process-exec"
+  ],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:22:21.689Z"
+}

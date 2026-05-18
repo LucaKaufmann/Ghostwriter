@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-release-f46ddda4e4-dc27_738e0e56eb",
+  "featureId": "feat_release_f46ddda4e4",
+  "title": "Makefile builds the debug XCFramework while the app target requires the release XCFramework",
+  "category": "build-release",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "Makefile",
+      "startLine": 3,
+      "endLine": 3,
+      "symbol": "XCFRAMEWORK_DIR",
+      "quote": "XCFRAMEWORK_DIR := ../shared/build/XCFrameworks/debug/EpilogueShared.xcframework"
+    },
+    {
+      "path": "Makefile",
+      "startLine": 14,
+      "endLine": 19,
+      "symbol": "generate/build",
+      "quote": "generate: $(XCFRAMEWORK_DIR)\n\ntuist generate\n\nbuild: $(XCFRAMEWORK_DIR)\n\ntuist build"
+    },
+    {
+      "path": "App/Project.swift",
+      "startLine": 49,
+      "endLine": 49,
+      "symbol": "Epilogue target dependencies",
+      "quote": ".xcframework(path: \"../../shared/build/XCFrameworks/release/EpilogueShared.xcframework\")"
+    }
+  ],
+  "reasoning": "The top-level release/build entrypoints only ensure the debug XCFramework exists, but the Tuist app target references the release XCFramework. On a clean checkout, `make generate` or `make build` can successfully build `../shared/build/XCFrameworks/debug/EpilogueShared.xcframework` and then fail during project generation/build because `../shared/build/XCFrameworks/release/EpilogueShared.xcframework` is still missing. This is especially risky for release packaging because the automation gives a false prerequisite and can leave CI or local release builds depending on stale release artifacts.",
+  "reproduction": "From a clean tree, remove `../shared/build/XCFrameworks`, then run `make build`. The Makefile prerequisite creates/checks the debug path, while Tuist resolves the release path declared in `App/Project.swift`.",
+  "recommendation": "Align the Makefile prerequisite with the path used by Tuist. Either set `XCFRAMEWORK_DIR` to `../shared/build/XCFrameworks/release/EpilogueShared.xcframework` and invoke the release KMP XCFramework task, or update the Tuist dependency to match the artifact intentionally produced for the build configuration.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests or release validation commands exercise a clean checkout `make build`/`make generate` path with the XCFramework directory absent.",
+  "suggestedRegressionTest": "Add a CI release packaging smoke test that deletes `../shared/build/XCFrameworks`, runs the intended Makefile build/generate target, and verifies the XCFramework path referenced by Tuist exists before `tuist generate`.",
+  "minimumFixScope": "Makefile XCFramework path/task and, if needed, the matching Tuist XCFramework dependency path.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-release-f46ddda4e4_dc27f88268",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:00:16.435Z",
+  "updatedAt": "2026-05-18T11:00:16.435Z"
+}

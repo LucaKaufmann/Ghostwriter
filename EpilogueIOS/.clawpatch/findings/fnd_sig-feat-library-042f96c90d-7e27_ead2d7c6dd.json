@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-042f96c90d-7e27_ead2d7c6dd",
+  "featureId": "feat_library_042f96c90d",
+  "title": "Feed parser tests reference a type that the module does not define",
+  "category": "build-release",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "Modules/ContentProcessing/Sources/ContentProcessing/Services/FeedParser.swift",
+      "startLine": 14,
+      "endLine": 14,
+      "symbol": "EpilogueFeedParser",
+      "quote": "public final class EpilogueFeedParser: Sendable {"
+    },
+    {
+      "path": "Modules/ContentProcessing/Sources/ContentProcessing/Extensions/FeedParser+Protocol.swift",
+      "startLine": 12,
+      "endLine": 12,
+      "symbol": "FeedParserProtocol conformance",
+      "quote": "extension EpilogueFeedParser: FeedParserProtocol {}"
+    },
+    {
+      "path": "Modules/ContentProcessing/Tests/ContentProcessingTests/FeedParserTests.swift",
+      "startLine": 17,
+      "endLine": 17,
+      "symbol": "FeedParserTests.testInitialization",
+      "quote": "let parser = FeedParser()"
+    },
+    {
+      "path": "Modules/ContentProcessing/Tests/ContentProcessingTests/FeedParserTests.swift",
+      "startLine": 23,
+      "endLine": 23,
+      "symbol": "FeedParserTests.testInvalidURL",
+      "quote": "let parser = FeedParser()"
+    }
+  ],
+  "reasoning": "The implementation exposes EpilogueFeedParser and attaches the domain protocol conformance to that type, but the linked tests instantiate FeedParser. With the included files, there is no FeedParser type or typealias in the ContentProcessing module, so the test target will fail to compile before any behavior is exercised.",
+  "reproduction": "Build the ContentProcessingTests target; Swift should report that FeedParser cannot be found in scope at the two test instantiation sites.",
+  "recommendation": "Align the public type name with the tests and feature entrypoint. Either rename EpilogueFeedParser to FeedParser and update the protocol extension, or add a public typealias FeedParser = EpilogueFeedParser if the prefixed name must remain the implementation name.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked tests expose the mismatch, but they cannot run because the test target fails during compilation.",
+  "suggestedRegressionTest": "Keep the existing FeedParserTests compiling and add a CI/build step for the ContentProcessingTests target so API-name drift is caught before merge.",
+  "minimumFixScope": "ContentProcessing feed parser public type declaration and its protocol conformance adapter, plus any call sites if choosing a rename instead of a typealias.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-042f96c90d_7e27000233",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T10:59:50.357Z",
+  "updatedAt": "2026-05-18T10:59:50.357Z"
+}

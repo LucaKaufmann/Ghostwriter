@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-b1722505b9-71a6_2250f12842",
+  "featureId": "feat_service_b1722505b9",
+  "title": "Digest downloads trust filenames as filesystem paths",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt",
+      "startLine": 531,
+      "endLine": 545,
+      "symbol": "GhostwriterRepository.downloadDigest",
+      "quote": "suspend fun downloadDigest(filename: String): GhostwriterResult<File> = withContext(Dispatchers.IO) {\n        if (shouldUseSharedClient()) {\n            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured\n            return@withContext try {\n                val bytes = shared.downloadDigest(filename)\n\n                // Save to the app's documents directory\n                val documentsDir = File(context.getExternalFilesDir(null), \"Epilogue\")\n                if (!documentsDir.exists()) {\n                    documentsDir.mkdirs()\n                }\n\n                val outputFile = File(documentsDir, filename)\n                outputFile.outputStream().use { output ->\n                    output.write(bytes)\n                }"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt",
+      "startLine": 561,
+      "endLine": 573,
+      "symbol": "GhostwriterRepository.downloadDigest",
+      "quote": "val response = api.downloadDigest(getAuthHeader(), filename)\n\n            if (response.isSuccessful && response.body() != null) {\n                // Save to the app's documents directory\n                val documentsDir = File(context.getExternalFilesDir(null), \"Epilogue\")\n                if (!documentsDir.exists()) {\n                    documentsDir.mkdirs()\n                }\n\n                val outputFile = File(documentsDir, filename)\n                response.body()!!.byteStream().use { input ->\n                    outputFile.outputStream().use { output ->\n                        input.copyTo(output)"
+    }
+  ],
+  "reasoning": "filename crosses the Ghostwriter/backend boundary and is reused directly as a child path. Path separators or an absolute path can escape the intended Epilogue download directory or overwrite another app-accessible file, depending on platform path handling and app storage permissions.",
+  "reproduction": "Call downloadDigest with a filename such as ../other-file.epub or an absolute path and observe that File(documentsDir, filename) does not enforce containment in documentsDir.",
+  "recommendation": "Reject absolute paths and path separators, normalize to a safe basename, and verify outputFile.canonicalPath remains inside documentsDir.canonicalPath before writing. Consider writing to a temp file and atomically renaming after validation.",
+  "whyTestsDoNotAlreadyCoverThis": "The only discovered download test targets SharedGhostwriterAdapter raw bytes, not GhostwriterRepository filesystem path validation.",
+  "suggestedRegressionTest": "Add a GhostwriterRepository download test that passes traversal and absolute filenames and asserts the repository rejects them before opening an output stream.",
+  "minimumFixScope": "GhostwriterRepository downloadDigest and downloadDigestById output path construction.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260518T103441-9006fd",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists, but the unsafe File(documentsDir, filename) writes in GhostwriterRepository.downloadDigest are no longer present at the cited locations. Both shared-client and Retrofit branches now call resolveDigestOutputFile(documentsDir, filename) before opening the output stream, and downloadDigestById also uses the same helper for outputFilename. The helper rejects blank names, '/', '\\\\', '.', '..', non-basename values, and verifies the canonical output path stays under the canonical Epilogue directory. A current regression test file exists for accepting safe basenames and rejecting traversal/absolute paths. I attempted the focused Gradle test, but the read-only sandbox prevented Gradle from opening its wrapper lock file, so runtime verification could not complete in this environment.",
+      "commands": [
+        "nl -ba app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt | sed -n '500,620p'",
+        "rg -n \"downloadDigest|downloadDigestById|File\\(documentsDir|canonical|basename|sanitize|safe\" app/src/main/java app/src/test -S",
+        "rg --files app/src/test app/src/androidTest | rg 'Ghostwriter|Digest|Repository|Download|Test'",
+        "nl -ba app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt | sed -n '620,660p'",
+        "nl -ba app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt | sed -n '1900,1945p'",
+        "nl -ba app/src/test/java/com/example/epilogue/data/repository/GhostwriterRepositoryTest.kt | sed -n '1,120p'",
+        "rg -n \"File\\([^\\n]*,\\s*(filename|outputFilename)|outputStream\\(\\)|copyTo\\(output\\)|downloadDigest\\(\" app/src/main/java/com/example/epilogue -S",
+        "./gradlew testDebugUnitTest --tests 'com.example.epilogue.data.repository.GhostwriterRepositoryTest'"
+      ],
+      "createdAt": "2026-05-18T10:36:41.495Z"
+    }
+  ],
+  "signature": "sig_feat-service-b1722505b9_71a6105054",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:25:00.858Z",
+  "updatedAt": "2026-05-18T10:36:41.495Z"
+}

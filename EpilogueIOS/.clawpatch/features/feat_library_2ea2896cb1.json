@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_2ea2896cb1",
+  "title": "EPUB Generation Library",
+  "summary": "EPUB builder implementation and stylesheet generation.\n\nAgent mapper reason: EPUB output correctness depends on builder logic and stylesheet structure, and the module has a dedicated test suite.",
+  "kind": "library",
+  "source": "agent-mapper",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift",
+      "symbol": "EPUBBuilder",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift",
+      "reason": "Builds EPUB artifacts from domain content."
+    },
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Styling/EPUBStylesheet.swift",
+      "reason": "Defines EPUB styling used by generated books."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "Modules/EPUBGeneration/Project.swift",
+      "reason": "Module target definition and dependencies."
+    },
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Resources/.gitkeep",
+      "reason": "Resource directory placeholder for EPUB generation assets."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/EPUBBuilderProtocol.swift",
+      "reason": "Domain contract implemented by EPUB builder."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/Digest.swift",
+      "reason": "Primary content source for EPUB generation."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/DigestArticle.swift",
+      "reason": "Article content embedded in EPUB output."
+    },
+    {
+      "path": "Modules/EPUBGeneration/Tests/EPUBGenerationTests/EPUBBuilderTests.swift",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "Modules/EPUBGeneration/Tests/EPUBGenerationTests/EPUBBuilderTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "agent-mapped",
+    "epub",
+    "export",
+    "content-generation"
+  ],
+  "trustBoundaries": [
+    "filesystem",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-2ea2896cb1-fd63_65a1b96d95",
+    "fnd_sig-feat-library-2ea2896cb1-8734_b36bee4943",
+    "fnd_sig-feat-library-2ea2896cb1-9aef_df471e94e7"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T11:00:55.573Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T11:00:55.573Z"
+}

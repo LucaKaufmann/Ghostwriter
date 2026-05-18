@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-5a85f79846-6d15_664eccd86d",
+  "featureId": "feat_service_5a85f79846",
+  "title": "Partially saved remote digests are never repaired on later syncs",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "App/Sources/Services/DigestSyncService.swift",
+      "startLine": 503,
+      "endLine": 522,
+      "symbol": "DigestSyncService.processLegacyPlannedDigests",
+      "quote": "logger.error(\"Failed to fetch articles for digest \\(digest.id): \\(error.localizedDescription)\")"
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/DigestRepository.swift",
+      "startLine": 152,
+      "endLine": 155,
+      "symbol": "DigestRepository.saveRemoteDigest",
+      "quote": "if let existingDigest = try await getDigestByRemoteId(remoteId) { return existingDigest }"
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/DigestRepository.swift",
+      "startLine": 129,
+      "endLine": 134,
+      "symbol": "DigestRepository.getAllRemoteIds",
+      "quote": "return digests.compactMap { $0.remoteId }"
+    },
+    {
+      "path": "App/Sources/Services/GhostwriterSyncCoordinator.swift",
+      "startLine": 167,
+      "endLine": 174,
+      "symbol": "GhostwriterSyncCoordinator.tryCombinedSync",
+      "quote": "knownDigestIds: knownDigestIds"
+    }
+  ],
+  "reasoning": "When article fetching fails, the service logs the error but still saves a complete remote digest with nil articles. From then on getAllRemoteIds reports that remoteId as known, combined sync asks the server to exclude it, and saveRemoteDigest refuses to update an existing digest even if richer data is later available. A transient article fetch failure can permanently leave the local digest without article content.",
+  "reproduction": "During legacy digest sync, make getDigestArticles fail for a digest after the EPUB download succeeds. The digest is saved without articles; a later sync or saveRemoteDigest call with articles for the same remoteId returns the existing record unchanged.",
+  "recommendation": "Do not mark a digest fully synced when article fetch fails, or allow saveRemoteDigest to merge missing fields and append/replace articles for existing remote IDs. Track article-sync completeness separately from remoteId presence if the server exclusion list depends on local completeness.",
+  "whyTestsDoNotAlreadyCoverThis": "DigestRepositoryTests exercise generic create/update/delete/retention paths but do not cover saveRemoteDigest idempotency, missing articles, or retrying a previously partial remote digest.",
+  "suggestedRegressionTest": "Add a repository test that calls saveRemoteDigest once with articles nil and again with articles populated for the same remoteId, expecting the existing digest to gain those articles or remain marked incomplete for retry.",
+  "minimumFixScope": "DigestRepository.saveRemoteDigest update semantics plus DigestSyncService retry/completeness handling for article fetch failures.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-service-5a85f79846_6d152feefe",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:03:12.769Z",
+  "updatedAt": "2026-05-18T11:03:12.769Z"
+}

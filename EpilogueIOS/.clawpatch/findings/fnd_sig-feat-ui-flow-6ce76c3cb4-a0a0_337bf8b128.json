@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-6ce76c3cb4-a0a0_337bf8b128",
+  "featureId": "feat_ui-flow_6ce76c3cb4",
+  "title": "Plain-text angle brackets are treated as HTML markup",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/ProcessedArticle.swift",
+      "startLine": 19,
+      "endLine": 21,
+      "symbol": "ProcessedArticle.content",
+      "quote": "/// Processed content (HTML or Markdown)\n    public let content: String"
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/ProcessedArticle.swift",
+      "startLine": 53,
+      "endLine": 66,
+      "symbol": "ProcessedArticle.toDigestArticle(contentType:orderIndex:)",
+      "quote": "DigestArticle(\n            title: title,\n            author: author,\n            content: content,"
+    },
+    {
+      "path": "App/Sources/Views/DigestDetailView.swift",
+      "startLine": 166,
+      "endLine": 174,
+      "symbol": "ArticleCard.plainTextPreview",
+      "quote": "let stripped = article.content\n            .replacingOccurrences(of: \"<[^>]+>\", with: \"\", options: .regularExpression)"
+    },
+    {
+      "path": "App/Sources/Views/EinkReaderView.swift",
+      "startLine": 148,
+      "endLine": 160,
+      "symbol": "TextPaginator.buildArticleBody(html:)",
+      "quote": "// Don't escape < and > since we already have <strong>/<em> tags\n            htmlContent = \"<p>\" + processed\n                .replacingOccurrences(of: \"&(?!amp;|lt;|gt;|quot;|#)\", with: \"&amp;\", options: .regularExpression)"
+    },
+    {
+      "path": "App/Sources/Views/EinkReaderView.swift",
+      "startLine": 198,
+      "endLine": 200,
+      "symbol": "TextPaginator.buildArticleBody(html:)",
+      "quote": "string: html.replacingOccurrences(of: \"<[^>]+>\", with: \"\", options: .regularExpression)"
+    }
+  ],
+  "reasoning": "The domain allows article content to be HTML or Markdown, but the UI uses tag-stripping regexes and wraps plain text into HTML without escaping raw '<' and '>' characters. Markdown/plain text such as 'List<String>', '2 < 3', or quoted XML can be stripped or misparsed in previews and the reader, corrupting the article text in the core reading flow.",
+  "reproduction": "Create a processed article whose content is Markdown/plain text containing 'List<String>' or '2 < 3 and x > y', then view it in DigestDetailView/EinkReaderView; the preview or rendered reader text can drop or reinterpret the bracketed content.",
+  "recommendation": "Separate trusted HTML from plain Markdown/text before rendering. For plain text, escape &, <, and > before adding generated tags, or build an AttributedString directly from text/Markdown instead of regex-based HTML wrapping. Avoid regex tag stripping for user-visible previews unless the content is known HTML.",
+  "whyTestsDoNotAlreadyCoverThis": "The included unit test is a placeholder and the screenshot test only validates navigation with fixture content; neither asserts content fidelity for Markdown/plain-text articles with angle brackets.",
+  "suggestedRegressionTest": "Add a reader formatting test that renders an article containing 'List<String>' and '2 < 3' and asserts those exact strings are present in the preview and paginated reader text.",
+  "minimumFixScope": "ArticleCard.plainTextPreview and TextPaginator.buildArticleBody content escaping/parsing logic.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-ui-flow-6ce76c3cb4_a0a0fc8345",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:04:04.932Z",
+  "updatedAt": "2026-05-18T11:04:04.932Z"
+}

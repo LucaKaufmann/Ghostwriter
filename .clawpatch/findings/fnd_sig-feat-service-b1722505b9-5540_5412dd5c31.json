@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-b1722505b9-5540_5412dd5c31",
+  "featureId": "feat_service_b1722505b9",
+  "title": "Recent digest dedupe can drop valid digests with the same article count",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/DigestRepository.kt",
+      "startLine": 160,
+      "endLine": 164,
+      "symbol": "DigestRepository.saveDigest",
+      "quote": "val recentCutoff = System.currentTimeMillis() - (5 * 60 * 1000) // 5 minutes\n        if (digestDao.existsRecentDigest(recentCutoff, articles.size)) {\n            Log.d(\"DigestRepository\", \"Similar digest (${articles.size} articles) created recently, skipping\")\n            return -1\n        }"
+    }
+  ],
+  "reasoning": "The duplicate guard keys only on time window and article count. Two legitimate manual or scheduled digests created within five minutes with the same number of articles but different feeds, URLs, or content will make the second save return -1 and skip persistence entirely.",
+  "reproduction": "Create one digest with N articles, then create another different digest with N articles within five minutes; saveDigest returns -1 before comparing content or source identity.",
+  "recommendation": "Deduplicate using a stable digest identity or content fingerprint, or remove this repository-level heuristic and rely on caller/job idempotency. At minimum include trigger type, period, feed set, article URLs, and content identity in the duplicate check.",
+  "whyTestsDoNotAlreadyCoverThis": "No repository tests were linked, and the existing test search did not find DigestRepository coverage for saveDigest duplicate behavior.",
+  "suggestedRegressionTest": "Add a DigestRepository test where existsRecentDigest would match by count but article URLs differ, and assert the second digest is still inserted.",
+  "minimumFixScope": "DigestRepository.saveDigest plus the DAO query/API used for duplicate detection.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-service-b1722505b9_55407e66c8",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:25:00.858Z",
+  "updatedAt": "2026-05-18T10:25:00.858Z"
+}

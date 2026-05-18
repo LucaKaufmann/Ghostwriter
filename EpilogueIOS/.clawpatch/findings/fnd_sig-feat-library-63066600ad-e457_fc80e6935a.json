@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-63066600ad-e457_fc80e6935a",
+  "featureId": "feat_library_63066600ad",
+  "title": "Update methods only save already-tracked SwiftData objects",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/FeedRepository.swift",
+      "startLine": 54,
+      "endLine": 57,
+      "symbol": "FeedRepository.updateFeed",
+      "quote": "Feed is already tracked by the context, just save"
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/DigestRepository.swift",
+      "startLine": 49,
+      "endLine": 52,
+      "symbol": "DigestRepository.updateDigest",
+      "quote": "Digest is already tracked by the context, just save"
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/FeedRepositoryProtocol.swift",
+      "startLine": 22,
+      "endLine": 23,
+      "symbol": "FeedRepositoryProtocol.updateFeed",
+      "quote": "Updates an existing feed"
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/DigestRepositoryProtocol.swift",
+      "startLine": 22,
+      "endLine": 23,
+      "symbol": "DigestRepositoryProtocol.updateDigest",
+      "quote": "Updates an existing digest"
+    }
+  ],
+  "reasoning": "The public repository protocols accept a model and promise to update an existing entity, but both implementations only call save() and rely on the passed object already being tracked by the same ModelContext. Passing a detached object, an object from another context, or a freshly constructed value with the same identity will not update the persisted row as the protocol suggests.",
+  "reproduction": "Persist a Feed, create a separate Feed with the same url and changed properties, call updateFeed(_:) on it, then fetch by url; the stored feed remains unchanged because the repository never looks it up or applies fields.",
+  "recommendation": "Either make the contract explicit that update requires a tracked object from this repository context, or implement updates by fetching the persisted entity by id/url and copying mutable fields before saving.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked update tests mutate the exact object that was inserted into the same context, so they only cover the tracked-object path.",
+  "suggestedRegressionTest": "Add update tests that pass a detached Feed/Digest with the same identifier and assert the stored entity is updated, or add tests documenting that detached updates are rejected with a clear error.",
+  "minimumFixScope": "Modules/Data/Sources/Data/Repositories/FeedRepository.swift, Modules/Data/Sources/Data/Repositories/DigestRepository.swift, and their repository tests.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-63066600ad_e4575ea4e9",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:01:09.115Z",
+  "updatedAt": "2026-05-18T11:01:09.115Z"
+}

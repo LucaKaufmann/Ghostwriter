@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_config_06ccb6398a",
+  "title": "Kotlin Android role dependency injection app/src/main/java/com/example/epilogue",
+  "summary": "Kotlin android dependency injection group app/src/main/java/com/example/epilogue with 1 files, classified from Kotlin code evidence.",
+  "kind": "config",
+  "source": "kotlin-android-role-dependency-injection",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/EpilogueApplication.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection annotation @HiltAndroidApp; dependency injection import dagger.hilt.android.HiltAndroidApp"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android",
+    "kotlin",
+    "android",
+    "di"
+  ],
+  "trustBoundaries": [
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-config-06ccb6398a-7e4b2_d3842911b5"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T102229-d372f4",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T10:24:09.860Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:24:09.860Z"
+}

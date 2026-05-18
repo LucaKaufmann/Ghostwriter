@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-8b0550483d-0ecd_be9f650b4a",
+  "featureId": "feat_library_8b0550483d",
+  "title": "Default shared-client path bypasses GhostwriterError normalization",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "Modules/GhostwriterClient/Project.swift",
+      "startLine": 4,
+      "endLine": 8,
+      "symbol": null,
+      "quote": "let project = Project.frameworkModule(\n    name: \"GhostwriterClient\",\n    dependencies: [\n        .xcframework(path: \"../../../shared/build/XCFrameworks/release/EpilogueShared.xcframework\")\n    ]"
+    },
+    {
+      "path": "Modules/GhostwriterClient/Sources/GhostwriterClient/GhostwriterClient.swift",
+      "startLine": 78,
+      "endLine": 83,
+      "symbol": "GhostwriterClient.defaultUseSharedClient",
+      "quote": "public static var defaultUseSharedClient: Bool {\n        if let value = UserDefaults.standard.object(forKey: sharedClientEnabledDefaultsKey) as? Bool {\n            return value\n        }\n        return true\n    }"
+    },
+    {
+      "path": "Modules/GhostwriterClient/Sources/GhostwriterClient/GhostwriterClient.swift",
+      "startLine": 134,
+      "endLine": 142,
+      "symbol": "GhostwriterClient.init",
+      "quote": "if useSharedClient {\n            self.sharedHandle = GhostwriterClientHandle.companion.create(\n                baseUrl: self.baseURL.absoluteString,\n                apiKey: apiKey\n            )\n        } else {\n            self.sharedHandle = nil\n        }"
+    },
+    {
+      "path": "Modules/GhostwriterClient/Sources/GhostwriterClient/GhostwriterClient.swift",
+      "startLine": 772,
+      "endLine": 799,
+      "symbol": "GhostwriterClient.updateConfig",
+      "quote": "if let sharedHandle {\n            let sharedRequest = EpilogueShared.ClientConfigUpdateRequest(\n...\n            let sharedResponse = try await sharedHandle.client.updateConfig(request: sharedRequest)"
+    },
+    {
+      "path": "Modules/GhostwriterClient/Sources/GhostwriterClient/GhostwriterClient.swift",
+      "startLine": 1379,
+      "endLine": 1399,
+      "symbol": "GhostwriterClient.handleHTTPStatus",
+      "quote": "private func handleHTTPStatus(_ response: HTTPURLResponse, data: Data) throws {\n        switch response.statusCode {\n...\n        case 409:\n...\n            throw GhostwriterError.conflict(message: message)"
+    },
+    {
+      "path": "Modules/GhostwriterClient/Tests/GhostwriterClientTests/GhostwriterClientTests.swift",
+      "startLine": 203,
+      "endLine": 214,
+      "symbol": "GhostwriterClientTests.testGhostwriterErrorDescriptions",
+      "quote": "func testGhostwriterErrorDescriptions() {\n        let notConfigured = GhostwriterError.notConfigured\n...\n        let conflict = GhostwriterError.conflict(message: \"Modified by another client\")\n        XCTAssertTrue(conflict.errorDescription?.contains(\"Conflict\") ?? false)\n    }"
+    }
+  ],
+  "reasoning": "The module always depends on EpilogueShared and the client defaults to using it, but shared-client calls are made directly with no translation into the public GhostwriterError enum. The fallback URLSession path maps 401/404/409/429 into GhostwriterError, so the same public method can throw different error domains depending on the default feature flag. Callers that catch GhostwriterError.conflict, unauthorized, or rateLimited will work only on the fallback path.",
+  "reproduction": "With EpilogueShared importable and default settings, instantiate GhostwriterClient normally, make updateConfig receive a 409 response through the shared client, and observe that the thrown error is the shared/Kotlin exception instead of GhostwriterError.conflict.",
+  "recommendation": "Add a single shared-error translator and wrap every sharedHandle call, or route shared transport failures through the same status-to-GhostwriterError mapping used by handleHTTPStatus. Include network failures as GhostwriterError.networkError as well.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked tests only assert static error descriptions and model decoding; they do not exercise HTTP failure paths or the default shared-client branch.",
+  "suggestedRegressionTest": "Add tests for useSharedClient true and false that simulate 401, 409, and 429 responses and assert the public Swift API throws GhostwriterError.unauthorized, GhostwriterError.conflict or digestInProgress as appropriate, and GhostwriterError.rateLimited.",
+  "minimumFixScope": "GhostwriterClient shared-transport error wrapping plus tests for error parity across shared and URLSession transports.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-8b0550483d_0ecd574b5b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:03:35.572Z",
+  "updatedAt": "2026-05-18T11:03:35.572Z"
+}

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_3065d25cf0",
+  "title": "Kotlin Android role view model app/src",
+  "summary": "Kotlin android view model group app/src with 4 files, classified from Kotlin code evidence.",
+  "kind": "service",
+  "source": "kotlin-android-role-view-model",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/feed/FeedViewModel.kt",
+      "reason": "kotlin view model evidence: annotation @HiltViewModel; Android ViewModel import androidx.lifecycle.ViewModel; inherits Android ViewModel type ViewModel"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/history/DigestDetailViewModel.kt",
+      "reason": "kotlin view model evidence: annotation @HiltViewModel; Android ViewModel import androidx.lifecycle.ViewModel; inherits Android ViewModel type ViewModel"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/history/HistoryViewModel.kt",
+      "reason": "kotlin view model evidence: annotation @HiltViewModel; Android ViewModel import androidx.lifecycle.ViewModel; inherits Android ViewModel type ViewModel"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/settings/SettingsViewModel.kt",
+      "reason": "kotlin view model evidence: annotation @HiltViewModel; Android ViewModel import androidx.lifecycle.ViewModel; inherits Android ViewModel type ViewModel"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android",
+    "kotlin",
+    "android",
+    "view-model"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-service-3065d25cf0-4125_5a388a4f94",
+    "fnd_sig-feat-service-3065d25cf0-319b_b469847dc1",
+    "fnd_sig-feat-service-3065d25cf0-697f_72af4dc797"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T102229-d372f4",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T10:25:02.625Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:25:02.625Z"
+}

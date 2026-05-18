@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_job_b612667f12",
+  "title": "Background Digest Jobs",
+  "summary": "Background task registration and local digest scheduling/generation services.\n\nAgent mapper reason: Background task handling and digest scheduling have shared timing, lifecycle, and persistence risks, and the scheduler has direct tests.",
+  "kind": "job",
+  "source": "agent-mapper",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "App/Sources/Services/GhostwriterBackgroundTasks.swift",
+      "symbol": "GhostwriterBackgroundTasks",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "App/Sources/Services/GhostwriterBackgroundTasks.swift",
+      "reason": "Registers and handles iOS background tasks."
+    },
+    {
+      "path": "App/Sources/Services/LocalDigestScheduler.swift",
+      "reason": "Schedules local digest generation work."
+    },
+    {
+      "path": "App/Sources/Services/LocalDigestService.swift",
+      "reason": "Executes local digest generation workflow."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "Modules/Data/Sources/Data/Services/DigestGenerator.swift",
+      "reason": "Underlying digest generation implementation."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Enums/DigestPeriod.swift",
+      "reason": "Scheduling period model."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Enums/TriggerType.swift",
+      "reason": "Trigger source model for digest generation."
+    },
+    {
+      "path": "docs/background-digest-implementation-plan.md",
+      "reason": "Implementation plan for background digest behavior."
+    },
+    {
+      "path": "docs/oracle-review-background-plan.md",
+      "reason": "Review context for background execution design."
+    },
+    {
+      "path": "App/Tests/LocalDigestSchedulerTests.swift",
+      "reason": "nearby test"
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/DigestGeneratorTests.swift",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "App/Tests/LocalDigestSchedulerTests.swift",
+      "command": null
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/DigestGeneratorTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "agent-mapped",
+    "background-tasks",
+    "digest",
+    "scheduler",
+    "ios"
+  ],
+  "trustBoundaries": [
+    "concurrency",
+    "permissions",
+    "database"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-job-b612667f12-15a94f60_35922a0e5e",
+    "fnd_sig-feat-job-b612667f12-28091bfd_951ff57c2e",
+    "fnd_sig-feat-job-b612667f12-a1940c18_d429576e60",
+    "fnd_sig-feat-job-b612667f12-03a651a7_a44285b305"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "4 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T11:01:18.334Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T11:01:18.334Z"
+}

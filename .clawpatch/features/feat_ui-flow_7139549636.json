@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_7139549636",
+  "title": "Gradle source app/src/main/java/com/example/epilogue/service#1",
+  "summary": "Gradle source group app/src/main/java/com/example/epilogue/service#1 with 12 files.",
+  "kind": "ui-flow",
+  "source": "gradle-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue/service#1",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/BootReceiver.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/ConfigSyncManager.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/ContentAnalyzer.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/ContentProcessor.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DailyDigestWorker.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestScheduler.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/EpubExporter.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/EpubGenerator.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/FeedSyncWorker.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/OpenAIService.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/PromotionalContentFilter.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/service#1"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/ContentProcessorTest.kt",
+      "reason": "associated gradle test"
+    },
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/DigestSchedulerTest.kt",
+      "reason": "associated gradle test"
+    },
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/EpubGeneratorTest.kt",
+      "reason": "associated gradle test"
+    },
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/OpenAIServiceTest.kt",
+      "reason": "associated gradle test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/ContentProcessorTest.kt",
+      "command": null
+    },
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/DigestSchedulerTest.kt",
+      "command": null
+    },
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/EpubGeneratorTest.kt",
+      "command": null
+    },
+    {
+      "path": "app/src/test/java/com/example/epilogue/service/OpenAIServiceTest.kt",
+      "command": null
+    }
+  ],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android"
+  ],
+  "trustBoundaries": [
+    "filesystem",
+    "process-exec"
+  ],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:22:21.689Z"
+}

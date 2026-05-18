@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-39be3cbb00-0bb81_3b57a68e2c",
+  "featureId": "feat_config_39be3cbb00",
+  "title": "EPUB sharing launches a chooser without a new-task flag",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/history/HistoryViewModel.kt",
+      "startLine": 34,
+      "endLine": 40,
+      "symbol": "HistoryViewModel constructor",
+      "quote": "@ApplicationContext private val context: Context"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/history/HistoryViewModel.kt",
+      "startLine": 149,
+      "endLine": 156,
+      "symbol": "HistoryViewModel.shareDigest",
+      "quote": "context.startActivity(Intent.createChooser(intent, \"Share EPUB\"))"
+    }
+  ],
+  "reasoning": "HistoryViewModel injects an ApplicationContext, so any activity launch needs FLAG_ACTIVITY_NEW_TASK on the exact Intent passed to startActivity. shareDigest puts the flag on the nested ACTION_SEND intent, then wraps it in a new chooser Intent and starts that chooser without adding FLAG_ACTIVITY_NEW_TASK. On devices that enforce the application-context launch contract, sharing fails with an AndroidRuntimeException that is caught and surfaced as an error instead of opening the share sheet.",
+  "reproduction": "Call shareDigest for an existing EPUB from HistoryViewModel; the chooser Intent created at line 156 is the launched intent and does not carry FLAG_ACTIVITY_NEW_TASK.",
+  "recommendation": "Create the chooser in a local variable, add FLAG_ACTIVITY_NEW_TASK and FLAG_GRANT_READ_URI_PERMISSION to the chooser or launch from an Activity context/event owned by the UI layer.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided, and a repo search found no HistoryViewModel or share intent tests.",
+  "suggestedRegressionTest": "Add a Robolectric or intent-factory unit test asserting the launched chooser Intent includes FLAG_ACTIVITY_NEW_TASK when shareDigest is invoked with an ApplicationContext.",
+  "minimumFixScope": "HistoryViewModel.shareDigest.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-config-39be3cbb00_0bb8190bc6",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:24:54.470Z",
+  "updatedAt": "2026-05-18T10:24:54.470Z"
+}

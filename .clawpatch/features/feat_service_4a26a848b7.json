@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_4a26a848b7",
+  "title": "Kotlin Android role data boundary app/src/main/java/com/example/epilogue/data/remote",
+  "summary": "Kotlin android data boundary group app/src/main/java/com/example/epilogue/data/remote with 3 files, classified from Kotlin code evidence.",
+  "kind": "service",
+  "source": "kotlin-android-role-data-boundary",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue/data/remote",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/remote/ghostwriter/GhostwriterModels.kt",
+      "reason": "kotlin data boundary evidence: path segment data boundary"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/remote/ghostwriter/SyncModels.kt",
+      "reason": "kotlin data boundary evidence: path segment data boundary"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/remote/openai/OpenAIModels.kt",
+      "reason": "kotlin data boundary evidence: path segment data boundary"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android",
+    "kotlin",
+    "android",
+    "data"
+  ],
+  "trustBoundaries": [
+    "database",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-service-4a26a848b7-6687_9a34985074"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T102229-d372f4",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T10:23:00.653Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:23:00.653Z"
+}

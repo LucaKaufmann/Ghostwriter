@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-0829e54173-ce88_f5c23d9b28",
+  "featureId": "feat_ui-flow_0829e54173",
+  "title": "Notification setting toggle is never saved",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "App/Sources/Views/SettingsView.swift",
+      "startLine": 213,
+      "endLine": 216,
+      "symbol": "SettingsView.body",
+      "quote": "Toggle(\"Show Digest Completion\", isOn: $showNotifications)"
+    },
+    {
+      "path": "App/Sources/Views/SettingsView.swift",
+      "startLine": 335,
+      "endLine": 341,
+      "symbol": "SettingsView.loadSettings",
+      "quote": "showNotifications = try await settingsRepository.shouldShowNotifications()"
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/SettingsRepositoryProtocol.swift",
+      "startLine": 77,
+      "endLine": 81,
+      "symbol": "SettingsRepositoryProtocol",
+      "quote": "func setShouldShowNotifications(_ enabled: Bool) async throws"
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/SettingsRepositoryTests.swift",
+      "startLine": 112,
+      "endLine": 119,
+      "symbol": "SettingsRepositoryTests.testNotificationsPreference",
+      "quote": "try await repository.setShouldShowNotifications(false)"
+    }
+  ],
+  "reasoning": "SettingsView loads the notification preference from SettingsRepository and the protocol/repository tests establish that it is meant to be persisted, but the UI toggle only mutates local @State. Leaving and re-entering Settings reloads the stored value, and any services reading the repository never see the user's change.",
+  "reproduction": "Open Settings, turn off Show Digest Completion, leave the screen, and reopen Settings. The toggle returns to the previously persisted value because no setter is called.",
+  "recommendation": "Use a Binding setter that calls settingsRepository.setShouldShowNotifications(_:) and reverts or surfaces an error if persistence fails.",
+  "whyTestsDoNotAlreadyCoverThis": "The included repository test verifies the persistence API directly, but there is no SettingsView test that toggles the UI and asserts the repository value changes. App/Tests/EpilogueTests.swift is a placeholder.",
+  "suggestedRegressionTest": "Add a SettingsView interaction test with a mock SettingsRepositoryProtocol that toggles Show Digest Completion and expects setShouldShowNotifications(false) to be invoked.",
+  "minimumFixScope": "App/Sources/Views/SettingsView.swift notification toggle binding.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-ui-flow-0829e54173_ce88e39f3a",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:03:06.469Z",
+  "updatedAt": "2026-05-18T11:03:06.469Z"
+}

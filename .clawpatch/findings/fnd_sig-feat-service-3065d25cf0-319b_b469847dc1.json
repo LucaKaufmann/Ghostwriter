@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-3065d25cf0-319b_b469847dc1",
+  "featureId": "feat_service_3065d25cf0",
+  "title": "Local digest run registers observeForever observers that are never removed",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/settings/SettingsViewModel.kt",
+      "startLine": 152,
+      "endLine": 171,
+      "symbol": "SettingsViewModel.runDigestLocally",
+      "quote": "digestScheduler.getImmediateWorkInfo().observeForever { workInfos -> ... }"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/ui/settings/SettingsViewModel.kt",
+      "startLine": 159,
+      "endLine": 169,
+      "symbol": "SettingsViewModel.runDigestLocally",
+      "quote": "when (workInfo.state) { WorkInfo.State.SUCCEEDED -> ... }"
+    }
+  ],
+  "reasoning": "observeForever is not lifecycle-bound. Every local Run Digest action adds a permanent observer that captures the ViewModel and continues receiving WorkManager updates until explicitly removed. Repeated runs can duplicate completion/failure handling, and old ViewModels can be retained after the settings screen is destroyed.",
+  "reproduction": "Run a local digest twice from settings, then complete the immediate WorkManager work. Both observeForever callbacks remain registered and can update state for later immediate work events.",
+  "recommendation": "Observe WorkManager from the UI with lifecycle ownership, or store the Observer and call removeObserver after a terminal state and in onCleared. Prefer converting the LiveData to a Flow collected in viewModelScope if that matches the app's coroutine style.",
+  "whyTestsDoNotAlreadyCoverThis": "There are no SettingsViewModel tests, and no test asserts observer cleanup or repeated local digest runs.",
+  "suggestedRegressionTest": "Add a fake DigestScheduler exposing controllable LiveData, call runDigestNow twice in local mode, emit a terminal WorkInfo, and assert only the active run updates state and the observer count returns to zero after completion/onCleared.",
+  "minimumFixScope": "SettingsViewModel.runDigestLocally observer management.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-service-3065d25cf0_319bab9225",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:25:02.624Z",
+  "updatedAt": "2026-05-18T10:25:02.624Z"
+}

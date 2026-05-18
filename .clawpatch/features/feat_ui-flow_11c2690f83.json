@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_11c2690f83",
+  "title": "Gradle source app/src/main/java/com/example/epilogue/di",
+  "summary": "Gradle source group app/src/main/java/com/example/epilogue/di with 4 files.",
+  "kind": "ui-flow",
+  "source": "gradle-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue/di",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/DatabaseModule.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/di"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/NetworkModule.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/di"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/OpenAIModule.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/di"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/SyncModule.kt",
+      "reason": "gradle source group app/src/main/java/com/example/epilogue/di"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android"
+  ],
+  "trustBoundaries": [
+    "filesystem",
+    "process-exec"
+  ],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:22:21.689Z"
+}

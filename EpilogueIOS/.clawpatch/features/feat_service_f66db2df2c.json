@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_f66db2df2c",
+  "title": "Digest Generation And Secrets",
+  "summary": "Local digest generation service and secure keychain storage.\n\nAgent mapper reason: Digest generation and keychain access are service-level data concerns with security and external AI dependency implications.",
+  "kind": "service",
+  "source": "agent-mapper",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "Modules/Data/Sources/Data/Services/DigestGenerator.swift",
+      "symbol": "DigestGenerator",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Modules/Data/Sources/Data/Services/DigestGenerator.swift",
+      "reason": "Generates digest content from local data and AI/content inputs."
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Services/KeychainService.swift",
+      "reason": "Stores and retrieves sensitive local values."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/Digest.swift",
+      "reason": "Generated digest domain model."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Models/DigestArticle.swift",
+      "reason": "Generated digest article model."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Protocols/AIServiceProtocol.swift",
+      "reason": "AI generation dependency contract."
+    },
+    {
+      "path": "Modules/Domain/Sources/Domain/Enums/ProcessingMode.swift",
+      "reason": "Generation mode input."
+    },
+    {
+      "path": "App/Sources/Services/LocalDigestService.swift",
+      "reason": "App-level consumer of digest generation."
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/DigestGeneratorTests.swift",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "Modules/Data/Tests/DataTests/DigestGeneratorTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "agent-mapped",
+    "digest",
+    "generation",
+    "keychain"
+  ],
+  "trustBoundaries": [
+    "secrets",
+    "database",
+    "external-api",
+    "concurrency"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-service-f66db2df2c-c291_f7c52f88c3"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T11:00:46.950Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T11:00:46.950Z"
+}

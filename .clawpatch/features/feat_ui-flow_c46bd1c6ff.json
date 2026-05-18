@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_c46bd1c6ff",
+  "title": "Gradle source shared/src/commonTest",
+  "summary": "Gradle source group shared/src/commonTest with 7 files.",
+  "kind": "ui-flow",
+  "source": "gradle-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "shared/build.gradle.kts",
+      "symbol": "shared/src/commonTest",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "shared/src/commonTest/kotlin/com/example/epilogue/shared/SharedModuleInfoTest.kt",
+      "reason": "gradle source group shared/src/commonTest"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/com/example/epilogue/shared/ghostwriter/CoreModelsSerializationTest.kt",
+      "reason": "gradle source group shared/src/commonTest"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/com/example/epilogue/shared/ghostwriter/GhostwriterApiClientTest.kt",
+      "reason": "gradle source group shared/src/commonTest"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/com/example/epilogue/shared/sync/ConfigSyncUseCaseTest.kt",
+      "reason": "gradle source group shared/src/commonTest"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/com/example/epilogue/shared/sync/DigestSyncUseCaseTest.kt",
+      "reason": "gradle source group shared/src/commonTest"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/com/example/epilogue/shared/sync/FeedSyncUseCaseTest.kt",
+      "reason": "gradle source group shared/src/commonTest"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/com/example/epilogue/shared/sync/TimestampParsingTest.kt",
+      "reason": "gradle source group shared/src/commonTest"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android"
+  ],
+  "trustBoundaries": [
+    "filesystem",
+    "process-exec"
+  ],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:22:21.689Z"
+}

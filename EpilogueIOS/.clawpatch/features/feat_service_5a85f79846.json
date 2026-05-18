@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_5a85f79846",
+  "title": "Ghostwriter Sync Orchestration",
+  "summary": "App-level synchronization coordination for feeds, digests, config, heartbeat, aliases, and performance tracking.\n\nAgent mapper reason: These app services collaborate to pull remote state into local storage and expose sync state, so correctness depends on reviewing them as one orchestration slice.",
+  "kind": "service",
+  "source": "agent-mapper",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "App/Sources/Services/GhostwriterSyncCoordinator.swift",
+      "symbol": "GhostwriterSyncCoordinator",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "App/Sources/Services/GhostwriterSyncCoordinator.swift",
+      "reason": "Central coordinator for Ghostwriter sync workflows."
+    },
+    {
+      "path": "App/Sources/Services/SharedSyncUseCaseFactory.swift",
+      "reason": "Constructs shared sync dependencies and use cases."
+    },
+    {
+      "path": "App/Sources/Services/FeedSyncService.swift",
+      "reason": "Synchronizes feed data."
+    },
+    {
+      "path": "App/Sources/Services/DigestSyncService.swift",
+      "reason": "Synchronizes digest data."
+    },
+    {
+      "path": "App/Sources/Services/ConfigSyncManager.swift",
+      "reason": "Synchronizes remote configuration."
+    },
+    {
+      "path": "App/Sources/Services/HeartbeatService.swift",
+      "reason": "Tracks service health or connectivity."
+    },
+    {
+      "path": "App/Sources/Services/SyncPerformanceTracker.swift",
+      "reason": "Measures sync performance and status."
+    },
+    {
+      "path": "App/Sources/Services/GhostwriterNativeAliases.swift",
+      "reason": "Bridges native naming or type aliases used by sync code."
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "Modules/GhostwriterClient/Sources/GhostwriterClient/GhostwriterClient.swift",
+      "reason": "Remote API client used by sync services."
+    },
+    {
+      "path": "Modules/GhostwriterClient/Sources/GhostwriterClient/Models/SyncModels.swift",
+      "reason": "Sync request and response models."
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/FeedRepository.swift",
+      "reason": "Local feed persistence for sync results."
+    },
+    {
+      "path": "Modules/Data/Sources/Data/Repositories/DigestRepository.swift",
+      "reason": "Local digest persistence for sync results."
+    },
+    {
+      "path": "docs/background-digest-implementation-plan.md",
+      "reason": "Design context for background digest and sync behavior."
+    },
+    {
+      "path": "Modules/GhostwriterClient/Tests/GhostwriterClientTests/GhostwriterClientTests.swift",
+      "reason": "nearby test"
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/FeedRepositoryTests.swift",
+      "reason": "nearby test"
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/DigestRepositoryTests.swift",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "Modules/GhostwriterClient/Tests/GhostwriterClientTests/GhostwriterClientTests.swift",
+      "command": null
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/FeedRepositoryTests.swift",
+      "command": null
+    },
+    {
+      "path": "Modules/Data/Tests/DataTests/DigestRepositoryTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "agent-mapped",
+    "sync",
+    "ghostwriter",
+    "ios",
+    "network"
+  ],
+  "trustBoundaries": [
+    "network",
+    "external-api",
+    "database",
+    "serialization",
+    "concurrency"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-service-5a85f79846-60bd_a616589b43",
+    "fnd_sig-feat-service-5a85f79846-ac2e_8cfa840c0d",
+    "fnd_sig-feat-service-5a85f79846-6d15_664eccd86d"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T105835-38b83a",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T11:03:12.770Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:58:21.464Z",
+  "updatedAt": "2026-05-18T11:03:12.770Z"
+}

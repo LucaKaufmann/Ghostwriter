@@ -167,21 +167,7 @@ class SettingsRepository @Inject constructor(
             migrateScheduleSettings()
         }
 
-        val periodsString = prefs.getString(KEY_SCHEDULE_PERIODS, null)
-        if (periodsString.isNullOrEmpty()) {
-            // Default to Evening if nothing selected
-            return setOf(DigestPeriod.EVENING)
-        }
-
-        return periodsString.split(",")
-            .mapNotNull { name ->
-                try {
-                    DigestPeriod.valueOf(name)
-                } catch (e: IllegalArgumentException) {
-                    null
-                }
-            }
-            .toSet()
+        return parseSchedulePeriodsPreference(prefs.getString(KEY_SCHEDULE_PERIODS, null))
     }
 
     /**
@@ -531,4 +517,21 @@ class SettingsRepository @Inject constructor(
             timezone = timezone
         )
     }
+}
+
+internal fun parseSchedulePeriodsPreference(periodsString: String?): Set<DigestPeriod> {
+    if (periodsString == null) {
+        // Default to Evening only when the preference has never been written.
+        return setOf(DigestPeriod.EVENING)
+    }
+
+    return periodsString.split(",")
+        .mapNotNull { name ->
+            try {
+                DigestPeriod.valueOf(name)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        }
+        .toSet()
 }

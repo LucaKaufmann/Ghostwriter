@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-0cbc1351b4-0c21b_8e5692145c",
+  "featureId": "feat_config_0cbc1351b4",
+  "title": "Shared client cache can close an adapter while another call is using it",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt",
+      "startLine": 63,
+      "endLine": 75,
+      "symbol": "GhostwriterRepository",
+      "quote": "@Singleton ... private var cachedSharedAdapter: SharedGhostwriterAdapter? = null"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt",
+      "startLine": 114,
+      "endLine": 132,
+      "symbol": "getSharedAdapter",
+      "quote": "cachedSharedAdapter?.close()"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt",
+      "startLine": 145,
+      "endLine": 149,
+      "symbol": "checkHealth",
+      "quote": "val shared = getSharedAdapter() ... shared.checkHealth()"
+    }
+  ],
+  "reasoning": "The singleton repository keeps mutable shared-client cache fields with no synchronization or in-flight usage tracking. A coroutine can obtain the cached adapter and start a request, while another coroutine enters getSharedAdapter after the URL or API key changes and closes that same adapter before replacing it. Because closing the adapter closes the underlying client, the first in-flight request can fail nondeterministically.",
+  "reproduction": "Start a shared-client request such as checkHealth(), concurrently change the Ghostwriter URL or API key and invoke another repository method. The second call can close the adapter returned to the first call while the first call is still awaiting network I/O.",
+  "recommendation": "Guard shared adapter replacement with a concurrency strategy that prevents closing in-use clients. Options include a Mutex plus reference-counted leases, deferring old-client close until no calls are active, or recreating per config without immediately closing handles that may still be in use.",
+  "whyTestsDoNotAlreadyCoverThis": "No repository-level concurrency tests were included; adapter tests exercise request mapping and byte returns, not cache replacement under concurrent repository calls.",
+  "suggestedRegressionTest": "Add a coroutine test with a fake SharedGhostwriterAdapter factory that blocks one request, changes settings, triggers a second request, and asserts the first adapter is not closed until its request completes.",
+  "minimumFixScope": "GhostwriterRepository shared-adapter cache lifecycle and a focused concurrent replacement regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-config-0cbc1351b4_0c21bf355c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:25:08.347Z",
+  "updatedAt": "2026-05-18T10:25:08.347Z"
+}

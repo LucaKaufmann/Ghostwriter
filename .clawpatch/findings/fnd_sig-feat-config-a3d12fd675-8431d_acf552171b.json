@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-a3d12fd675-8431d_acf552171b",
+  "featureId": "feat_config_a3d12fd675",
+  "title": "Parallel digest sync shares a non-thread-safe date parser",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "startLine": 64,
+      "endLine": 66,
+      "symbol": "DigestSyncWorker.dateFormat",
+      "quote": "private val dateFormat = SimpleDateFormat(\"yyyy-MM-dd'T'HH:mm:ss\", Locale.US)"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "startLine": 122,
+      "endLine": 134,
+      "symbol": "DigestSyncWorker.downloadDigestsParallel",
+      "quote": "async"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "startLine": 148,
+      "endLine": 153,
+      "symbol": "DigestSyncWorker.downloadAndSaveDigest",
+      "quote": "dateFormat.parse(it)?.time"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/service/DigestSyncWorker.kt",
+      "startLine": 186,
+      "endLine": 191,
+      "symbol": "DigestSyncWorker.saveDigestMetadataOnly",
+      "quote": "dateFormat.parse(it)?.time"
+    }
+  ],
+  "reasoning": "SimpleDateFormat is mutable and not thread-safe, but the combined sync path parses completion timestamps inside multiple async coroutines. Concurrent parse calls can corrupt parsed values or throw intermittently, causing incorrect generatedAt timestamps or fallback to the current time.",
+  "reproduction": null,
+  "recommendation": "Replace the shared SimpleDateFormat with java.time parsing such as LocalDateTime/Instant with a DateTimeFormatter, or create a parser instance per call inside the coroutine.",
+  "whyTestsDoNotAlreadyCoverThis": "No included test exercises DigestSyncWorker, and none runs timestamp parsing concurrently.",
+  "suggestedRegressionTest": "Add a unit test around the timestamp parsing helper using many concurrent digest sync items with fixed completedAt values and assert all saved generatedAt values match the expected UTC instant.",
+  "minimumFixScope": "DigestSyncWorker timestamp parsing in downloadAndSaveDigest, saveDigestMetadataOnly, and legacy processing.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-config-a3d12fd675_8431ddedbf",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:24:34.912Z",
+  "updatedAt": "2026-05-18T10:24:34.912Z"
+}

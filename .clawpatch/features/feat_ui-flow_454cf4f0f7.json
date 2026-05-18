@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_454cf4f0f7",
+  "title": "Gradle module app",
+  "summary": "Gradle module rooted at app.",
+  "kind": "ui-flow",
+  "source": "gradle-module",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/build.gradle.kts",
+      "reason": "gradle build file"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "app/src/main/AndroidManifest.xml",
+      "reason": "gradle module context"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android"
+  ],
+  "trustBoundaries": [
+    "filesystem",
+    "process-exec"
+  ],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:22:21.689Z"
+}

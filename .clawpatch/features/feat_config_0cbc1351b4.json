@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_config_0cbc1351b4",
+  "title": "Kotlin Android role dependency injection app/src/main/java/com/example/epilogue/data",
+  "summary": "Kotlin android dependency injection group app/src/main/java/com/example/epilogue/data with 2 files, classified from Kotlin code evidence.",
+  "kind": "config",
+  "source": "kotlin-android-role-dependency-injection",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/build.gradle.kts",
+      "symbol": "app/src/main/java/com/example/epilogue/data",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/GhostwriterRepository.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection import dagger.hilt.android.qualifiers.ApplicationContext"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/data/repository/SettingsRepository.kt",
+      "reason": "kotlin dependency injection evidence: dependency injection import dagger.hilt.android.qualifiers.ApplicationContext"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "gradle",
+    "kotlin",
+    "android",
+    "kotlin",
+    "android",
+    "di"
+  ],
+  "trustBoundaries": [
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-config-0cbc1351b4-3b66f_499d435457",
+    "fnd_sig-feat-config-0cbc1351b4-99e7f_180f409275",
+    "fnd_sig-feat-config-0cbc1351b4-0c21b_8e5692145c"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T102229-d372f4",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T10:25:08.348Z"
+    }
+  ],
+  "createdAt": "2026-05-18T10:22:21.689Z",
+  "updatedAt": "2026-05-18T10:25:08.348Z"
+}

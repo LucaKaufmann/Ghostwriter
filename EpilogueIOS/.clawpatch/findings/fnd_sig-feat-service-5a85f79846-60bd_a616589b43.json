@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-5a85f79846-60bd_a616589b43",
+  "featureId": "feat_service_5a85f79846",
+  "title": "Server-controlled digest filenames can escape the digest directory",
+  "category": "security",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Modules/GhostwriterClient/Sources/GhostwriterClient/Models/SyncModels.swift",
+      "startLine": 28,
+      "endLine": 31,
+      "symbol": "SyncDigest.filename",
+      "quote": "public let filename: String"
+    },
+    {
+      "path": "App/Sources/Services/DigestSyncService.swift",
+      "startLine": 136,
+      "endLine": 142,
+      "symbol": "DigestSyncService.downloadAndSaveFromSync",
+      "quote": "let localURL = try saveEPUB(data: epubData, filename: digest.filename)"
+    },
+    {
+      "path": "App/Sources/Services/DigestSyncService.swift",
+      "startLine": 311,
+      "endLine": 320,
+      "symbol": "DigestSyncService.saveFile",
+      "quote": "let fileURL = digestsDirectory.appendingPathComponent(filename)"
+    }
+  ],
+  "reasoning": "Digest filenames arrive from the network and are passed directly into a filesystem path. Because saveFile also removes any existing item before writing, a malicious or compromised Ghostwriter server can use path components such as ../ to write outside the intended Epilogue digest directory and overwrite or delete other files inside the app container.",
+  "reproduction": "Return a sync digest whose filename is ../some-existing-file.epub, then run digest sync with EPUB downloads enabled; saveFile builds the target URL from that value and removes/writes that path.",
+  "recommendation": "Treat remote filenames as display metadata only. Generate local filenames from trusted identifiers, or sanitize to lastPathComponent, reject path separators and dot segments, standardize the target URL, and assert it remains inside digestsDirectory before remove/write.",
+  "whyTestsDoNotAlreadyCoverThis": "The included GhostwriterClient tests only decode a normal filename, and the repository tests use fixed local paths; no test exercises hostile remote filenames or verifies containment under digestsDirectory.",
+  "suggestedRegressionTest": "Add a DigestSyncService/save-file focused test with filenames like ../escape.epub and nested/name.epub, asserting the operation rejects them or stores a sanitized basename inside the digest directory.",
+  "minimumFixScope": "DigestSyncService filename normalization/containment plus tests for every sync/download path that writes digest files.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-service-5a85f79846_60bd868c08",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:03:12.769Z",
+  "updatedAt": "2026-05-18T11:03:12.769Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2ea2896cb1-9aef_df471e94e7",
+  "featureId": "feat_library_2ea2896cb1",
+  "title": "Existing EPUB is deleted before replacement archive is successfully created",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift",
+      "startLine": 338,
+      "endLine": 351,
+      "symbol": "createZIPArchive",
+      "quote": "if fileManager.fileExists(atPath: destination.path) {\n            try fileManager.removeItem(at: destination)\n        }"
+    },
+    {
+      "path": "Modules/EPUBGeneration/Tests/EPUBGenerationTests/EPUBBuilderTests.swift",
+      "startLine": 49,
+      "endLine": 60,
+      "symbol": "testGenerateEPUB",
+      "quote": null
+    }
+  ],
+  "reasoning": "When regenerating to an existing outputPath, the builder removes the previous EPUB before attempting to create the new ZIP. If archive creation then throws, for example due to disk, permission, or ZIP writer failure, the caller receives an error and the previously valid EPUB has already been lost. The test writes to a fresh temp path, so it does not cover replacement failure behavior.",
+  "reproduction": null,
+  "recommendation": "Write the new archive to a unique temporary sibling path first, then atomically replace or move it to outputPath only after ZIP creation succeeds. Preserve the existing file on failure and clean up only the temporary candidate.",
+  "whyTestsDoNotAlreadyCoverThis": "The current generation test uses a non-existing temp output file and does not simulate archive creation failure after an existing destination is present.",
+  "suggestedRegressionTest": "Precreate a destination EPUB, force archive creation to fail via an injectable archive writer or controlled failing destination, and assert the original destination contents still exist unchanged after generateEPUB throws.",
+  "minimumFixScope": "Modules/EPUBGeneration/Sources/EPUBGeneration/Services/EPUBBuilder.swift replacement logic in createZIPArchive and a focused failure-path test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-2ea2896cb1_9aef1e4a1d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T105835-38b83a",
+  "createdAt": "2026-05-18T11:00:55.572Z",
+  "updatedAt": "2026-05-18T11:00:55.572Z"
+}

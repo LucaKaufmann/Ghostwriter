@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260518T103214-5b9661",
+  "command": "revalidate",
+  "args": [
+    "revalidate",
+    "--finding",
+    "fnd_sig-feat-config-0cbc1351b4-3b66f_499d435457",
+    "--no-input"
+  ],
+  "rootPath": "/Users/luca/.codex/worktrees/29b4/Epilogue",
+  "headSha": "24e38d03eb4fd463601b34e008c37e908e255565",
+  "startedAt": "2026-05-18T10:32:14.493Z",
+  "finishedAt": "2026-05-18T10:33:08.687Z",
+  "status": "completed",
+  "claimedFeatureIds": [],
+  "findingIds": [
+    "fnd_sig-feat-config-0cbc1351b4-3b66f_499d435457"
+  ],
+  "patchAttemptIds": [],
+  "errors": []
+}

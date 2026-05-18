@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-service-5f9631bf16-8818_a5ce39e5d7",
+  "featureId": "feat_service_5f9631bf16",
+  "title": "Ghostwriter API cache is not thread-safe",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/NetworkModule.kt",
+      "startLine": 55,
+      "endLine": 68,
+      "symbol": "GhostwriterApiFactory.create",
+      "quote": "private var cachedApi: GhostwriterApi? = null\n    private var cachedBaseUrl: String? = null\n...\n        if (cachedApi != null && cachedBaseUrl == normalizedUrl) {\n            return cachedApi!!\n        }"
+    },
+    {
+      "path": "app/src/main/java/com/example/epilogue/di/NetworkModule.kt",
+      "startLine": 78,
+      "endLine": 81,
+      "symbol": "GhostwriterApiFactory.create",
+      "quote": "cachedApi = retrofit.create(GhostwriterApi::class.java)\n        cachedBaseUrl = normalizedUrl\n\n        return cachedApi!!"
+    }
+  ],
+  "reasoning": "GhostwriterApiFactory is provided as a Singleton and stores mutable cache state in two separate fields without synchronization. Concurrent calls with different base URLs can interleave the cachedApi and cachedBaseUrl assignments, leaving the cache internally inconsistent or returning an API built for a different server than the caller requested. Because this client sends authenticated Ghostwriter requests, the practical impact is requests going to the wrong configured backend after overlapping UI/background operations or a URL change.",
+  "reproduction": "Run two threads repeatedly calling create() with two different MockWebServer base URLs, then invoke getHealth() through each returned API. With an unlucky interleaving, a returned API can target the other server or the cache can hold a mismatched API/baseUrl pair.",
+  "recommendation": "Make cache access atomic. Synchronize create() and clearCache(), or replace the two-field cache with an immutable holder updated under a lock and return the newly created local API instance instead of rereading cachedApi after assignment.",
+  "whyTestsDoNotAlreadyCoverThis": "The included SharedGhostwriterAdapterTest only constructs SharedGhostwriterAdapter with a Ktor MockEngine and does not exercise GhostwriterApiFactory, dynamic Retrofit caching, clearCache(), or concurrent create() calls.",
+  "suggestedRegressionTest": "Add a GhostwriterApiFactory concurrency test using two MockWebServer instances that calls create() from multiple coroutines/threads with both URLs and asserts each returned Retrofit API sends requests to the requested server.",
+  "minimumFixScope": "app/src/main/java/com/example/epilogue/di/NetworkModule.kt",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-service-5f9631bf16_8818f7b0ad",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T102229-d372f4",
+  "createdAt": "2026-05-18T10:25:31.524Z",
+  "updatedAt": "2026-05-18T10:25:31.524Z"
+}
