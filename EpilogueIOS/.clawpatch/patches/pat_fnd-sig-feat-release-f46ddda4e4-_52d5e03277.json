@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-release-f46ddda4e4-_52d5e03277",
+  "findingIds": [
+    "fnd_sig-feat-release-f46ddda4e4-dc27_738e0e56eb"
+  ],
+  "featureIds": [
+    "feat_release_f46ddda4e4"
+  ],
+  "status": "applied",
+  "plan": "Updated the Makefile XCFramework prerequisite to the release artifact path used by the Tuist app target, so `make generate`, `make build`, and `make screenshot` now ensure the required release XCFramework exists.",
+  "filesChanged": [
+    "EpilogueIOS/Makefile"
+  ],
+  "commandsRun": [],
+  "testResults": [],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-05-18T11:23:45.297Z",
+    "finishedAt": "2026-05-18T11:25:02.243Z"
+  },
+  "git": {
+    "baseSha": "0b95e3ced3abf6a460945b7b7a9c1592b661645d",
+    "commitSha": null,
+    "branchName": "codex/clawpatch-fixes",
+    "prUrl": null
+  },
+  "createdAt": "2026-05-18T11:23:45.293Z",
+  "updatedAt": "2026-05-18T11:25:02.243Z"
+}

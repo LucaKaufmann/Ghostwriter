@@ -43,11 +43,35 @@
   "whyTestsDoNotAlreadyCoverThis": "The linked tests expose the mismatch, but they cannot run because the test target fails during compilation.",
   "suggestedRegressionTest": "Keep the existing FeedParserTests compiling and add a CI/build step for the ContentProcessingTests target so API-name drift is caught before merge.",
   "minimumFixScope": "ContentProcessing feed parser public type declaration and its protocol conformance adapter, plus any call sites if choosing a rename instead of a typealias.",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260518T113053-ad039d",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence paths still exist. FeedParser.swift still defines public final class EpilogueFeedParser at line 14, FeedParser+Protocol.swift still conforms EpilogueFeedParser to FeedParserProtocol at line 12, and FeedParserTests.swift still instantiates FeedParser at lines 17 and 23. The current repository now also defines public typealias FeedParser = EpilogueFeedParser at FeedParser.swift line 171, so the test references now resolve to the implementation type. I attempted build/test validation, but this read-only sandbox prevents Tuist from creating required cache/temp files, and xcodebuildmcp discovery found no generated .xcodeproj/.xcworkspace in the repository, so tests could not be executed here. Based on current code, the reported missing FeedParser type is fixed.",
+      "commands": [
+        "pwd && rg --files | rg '(^|/)tasks/(todo|lessons)\\.md$|FeedParser|ContentProcessing|Package\\.swift|Project\\.swift|Workspace\\.swift|Tuist'",
+        "nl -ba Modules/ContentProcessing/Sources/ContentProcessing/Services/FeedParser.swift | sed -n '1,220p'",
+        "nl -ba Modules/ContentProcessing/Sources/ContentProcessing/Extensions/FeedParser+Protocol.swift | sed -n '1,180p'",
+        "nl -ba Modules/ContentProcessing/Tests/ContentProcessingTests/FeedParserTests.swift | sed -n '1,220p'",
+        "rg -n \"\\b(FeedParser|EpilogueFeedParser)\\b|typealias\\s+FeedParser|class\\s+FeedParser|struct\\s+FeedParser|actor\\s+FeedParser|enum\\s+FeedParser\" Modules -S",
+        "xcodebuildmcp --help",
+        "xcodebuildmcp tools",
+        "xcodebuildmcp simulator test --help",
+        "tuist --version",
+        "xcodebuildmcp project-discovery discover-projects --workspace-root /Users/luca/.codex/worktrees/29b4/Epilogue/EpilogueIOS --max-depth 4 --output json",
+        "git status --short && git diff -- Modules/ContentProcessing/Sources/ContentProcessing/Services/FeedParser.swift Modules/ContentProcessing/Sources/ContentProcessing/Extensions/FeedParser+Protocol.swift Modules/ContentProcessing/Tests/ContentProcessingTests/FeedParserTests.swift"
+      ],
+      "createdAt": "2026-05-18T11:32:13.273Z"
+    }
+  ],
   "signature": "sig_feat-library-042f96c90d_7e27000233",
-  "linkedPatchAttemptIds": [],
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-042f96c90d-_7ed971d0b0"
+  ],
   "createdByRunId": "20260518T105835-38b83a",
   "createdAt": "2026-05-18T10:59:50.357Z",
-  "updatedAt": "2026-05-18T10:59:50.357Z"
+  "updatedAt": "2026-05-18T11:32:13.273Z"
 }

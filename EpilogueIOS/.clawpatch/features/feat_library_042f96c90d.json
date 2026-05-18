@@ -76,7 +76,7 @@
     "serialization",
     "user-input"
   ],
-  "status": "needs-fix",
+  "status": "fixed",
   "lock": null,
   "findingIds": [
     "fnd_sig-feat-library-042f96c90d-7e27_ead2d7c6dd"
@@ -94,5 +94,5 @@
     }
   ],
   "createdAt": "2026-05-18T10:58:21.464Z",
-  "updatedAt": "2026-05-18T10:59:50.358Z"
+  "updatedAt": "2026-05-18T11:32:13.286Z"
 }

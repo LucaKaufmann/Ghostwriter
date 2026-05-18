@@ -1,6 +1,6 @@
 JAVA_HOME ?= /Applications/Android Studio.app/Contents/jbr/Contents/Home
 GRADLE := JAVA_HOME="$(JAVA_HOME)" ../gradlew
-XCFRAMEWORK_DIR := ../shared/build/XCFrameworks/debug/EpilogueShared.xcframework
+XCFRAMEWORK_DIR := ../shared/build/XCFrameworks/release/EpilogueShared.xcframework
 
 .PHONY: setup generate build clean xcframework screenshot
 

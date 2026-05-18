@@ -12,6 +12,17 @@ import Data
 import GhostwriterClient
 import OSLog
 
+enum DigestSyncFileError: LocalizedError {
+    case invalidFilename(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .invalidFilename(filename):
+            return "Invalid digest filename: \(filename)"
+        }
+    }
+}
+
 /// Service responsible for syncing digests from Ghostwriter server
 @MainActor
 public final class DigestSyncService {
@@ -188,7 +199,7 @@ public final class DigestSyncService {
     private func saveFromSyncWithoutDownload(_ digest: SyncDigest, tracker: SyncPerformanceTracker? = nil) async -> Bool {
         do {
             let generatedAt = digest.createdAt.toISO8601Date() ?? digest.completedAt?.toISO8601Date() ?? Date()
-            let localURL = expectedEPUBURL(filename: digest.filename)
+            let localURL = try expectedEPUBURL(filename: digest.filename)
 
             let articlesData: [DigestArticleData]? = digest.articles.isEmpty ? nil : digest.articles.map { article in
                 DigestArticleData(
@@ -309,7 +320,7 @@ public final class DigestSyncService {
     }
 
     private func saveFile(data: Data, filename: String) throws -> URL {
-        let fileURL = digestsDirectory.appendingPathComponent(filename)
+        let fileURL = try digestFileURL(filename: filename)
 
         // Remove existing file if present
         if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -324,8 +335,32 @@ public final class DigestSyncService {
         try saveFile(data: data, filename: filename)
     }
 
-    private func expectedEPUBURL(filename: String) -> URL {
-        digestsDirectory.appendingPathComponent(filename)
+    private func expectedEPUBURL(filename: String) throws -> URL {
+        try digestFileURL(filename: filename)
+    }
+
+    private func digestFileURL(filename: String) throws -> URL {
+        try Self.validateDigestFilename(filename)
+
+        let directoryURL = digestsDirectory.standardizedFileURL
+        let fileURL = directoryURL.appendingPathComponent(filename, isDirectory: false).standardizedFileURL
+        let directoryPath = directoryURL.path
+        guard fileURL.path.hasPrefix(directoryPath + "/") else {
+            throw DigestSyncFileError.invalidFilename(filename)
+        }
+        return fileURL
+    }
+
+    nonisolated static func validateDigestFilename(_ filename: String) throws {
+        guard !filename.isEmpty,
+              filename == URL(fileURLWithPath: filename).lastPathComponent,
+              filename != ".",
+              filename != "..",
+              !filename.contains("/"),
+              !filename.contains("\\"),
+              !filename.contains("\0") else {
+            throw DigestSyncFileError.invalidFilename(filename)
+        }
     }
 
     private func convertedFilename(fromEpub filename: String, format: DigestFileFormat) -> String {
@@ -433,7 +468,7 @@ public final class DigestSyncService {
                         settingsRepository: settingsRepository
                     )
                 } else {
-                    localURL = expectedEPUBURL(filename: digest.filename)
+                    localURL = try expectedEPUBURL(filename: digest.filename)
                     logger.info("Indexed digest without EPUB download: \(digest.id)")
                 }
 
@@ -497,7 +532,7 @@ public final class DigestSyncService {
                     if let ioState { tracker?.endInterval("EPUB Write [\(digest.id.prefix(8))]", state: ioState) }
                     await CustomExportHelper.exportIfConfigured(fileURL: localURL, settingsRepository: settingsRepository)
                 } else {
-                    localURL = expectedEPUBURL(filename: digest.filename)
+                    localURL = try expectedEPUBURL(filename: digest.filename)
                 }
 
                 var articlesData: [DigestArticleData]?
@@ -620,7 +655,7 @@ public final class DigestSyncService {
     ) async -> Bool {
         do {
             let generatedAt = digest.createdAt.toISO8601Date() ?? digest.completedAt?.toISO8601Date() ?? Date()
-            let localURL = expectedEPUBURL(filename: digest.filename)
+            let localURL = try expectedEPUBURL(filename: digest.filename)
             let articlesData: [DigestArticleData]? = digest.articles.isEmpty ? nil : digest.articles.map { article in
                 DigestArticleData(
                     id: article.id,

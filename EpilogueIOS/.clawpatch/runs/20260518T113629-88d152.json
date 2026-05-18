@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260518T113629-88d152",
+  "command": "revalidate",
+  "args": [
+    "--root",
+    "/Users/luca/.codex/worktrees/29b4/Epilogue/EpilogueIOS",
+    "revalidate",
+    "--finding",
+    "fnd_sig-feat-release-f46ddda4e4-dc27_738e0e56eb",
+    "--no-input"
+  ],
+  "rootPath": "/Users/luca/.codex/worktrees/29b4/Epilogue/EpilogueIOS",
+  "headSha": "0b95e3ced3abf6a460945b7b7a9c1592b661645d",
+  "startedAt": "2026-05-18T11:36:29.066Z",
+  "finishedAt": "2026-05-18T11:39:32.855Z",
+  "status": "completed",
+  "claimedFeatureIds": [],
+  "findingIds": [
+    "fnd_sig-feat-release-f46ddda4e4-dc27_738e0e56eb"
+  ],
+  "patchAttemptIds": [],
+  "errors": []
+}

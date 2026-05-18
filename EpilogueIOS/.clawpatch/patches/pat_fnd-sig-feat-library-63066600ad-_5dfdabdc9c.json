@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-library-63066600ad-_5dfdabdc9c",
+  "findingIds": [
+    "fnd_sig-feat-library-63066600ad-d95d_abed6c1acb"
+  ],
+  "featureIds": [
+    "feat_library_63066600ad"
+  ],
+  "status": "applied",
+  "plan": "Implemented all-feeds article fetching by injecting an optional FeedRepositoryProtocol into ArticleRepository, fetching enabled feeds, processing each through the existing per-feed path, and throwing a clear error if the dependency is missing instead of returning a stubbed empty result. Added focused ArticleRepository regression tests and wired the existing app construction sites to pass the feed repository. Validation was blocked by the sandbox: no generated Xcode workspace was present, CoreSimulator access failed, Tuist failed on a denied mkdir, and direct Swift typecheck failed because SwiftData macro plugin execution was denied.",
+  "filesChanged": [
+    "EpilogueIOS/App/Sources/Services/LocalDigestScheduler.swift",
+    "EpilogueIOS/App/Sources/Services/LocalDigestService.swift",
+    "EpilogueIOS/Modules/Data/Sources/Data/Repositories/ArticleRepository.swift",
+    "EpilogueIOS/Modules/Data/Tests/DataTests/ArticleRepositoryTests.swift"
+  ],
+  "commandsRun": [],
+  "testResults": [],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-05-18T11:25:16.158Z",
+    "finishedAt": "2026-05-18T11:29:57.388Z"
+  },
+  "git": {
+    "baseSha": "0b95e3ced3abf6a460945b7b7a9c1592b661645d",
+    "commitSha": null,
+    "branchName": "codex/clawpatch-fixes",
+    "prUrl": null
+  },
+  "createdAt": "2026-05-18T11:25:16.153Z",
+  "updatedAt": "2026-05-18T11:29:57.388Z"
+}

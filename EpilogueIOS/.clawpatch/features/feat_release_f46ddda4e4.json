@@ -63,7 +63,7 @@
     "process-exec",
     "secrets"
   ],
-  "status": "needs-fix",
+  "status": "fixed",
   "lock": null,
   "findingIds": [
     "fnd_sig-feat-release-f46ddda4e4-dc27_738e0e56eb"
@@ -81,5 +81,5 @@
     }
   ],
   "createdAt": "2026-05-18T10:58:21.464Z",
-  "updatedAt": "2026-05-18T11:00:16.436Z"
+  "updatedAt": "2026-05-18T11:39:32.854Z"
 }

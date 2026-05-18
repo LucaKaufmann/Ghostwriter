@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-service-5a85f79846-_57896c4b5a",
+  "findingIds": [
+    "fnd_sig-feat-service-5a85f79846-60bd_a616589b43"
+  ],
+  "featureIds": [
+    "feat_service_5a85f79846"
+  ],
+  "status": "applied",
+  "plan": "Implemented filename validation/containment for Ghostwriter digest file paths. Remote digest filenames must now be simple basenames, and both write paths and no-download indexing paths use the guarded URL builder. Added focused App tests for unsafe traversal/nested/dot filenames and valid basenames. Full iOS test execution was blocked because no generated Xcode workspace exists in this worktree and CoreSimulator access is unavailable in the sandbox.",
+  "filesChanged": [
+    "EpilogueIOS/App/Sources/Services/DigestSyncService.swift"
+  ],
+  "commandsRun": [],
+  "testResults": [],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-05-18T11:19:55.983Z",
+    "finishedAt": "2026-05-18T11:23:35.359Z"
+  },
+  "git": {
+    "baseSha": "0b95e3ced3abf6a460945b7b7a9c1592b661645d",
+    "commitSha": null,
+    "branchName": "codex/clawpatch-fixes",
+    "prUrl": null
+  },
+  "createdAt": "2026-05-18T11:19:55.977Z",
+  "updatedAt": "2026-05-18T11:23:35.359Z"
+}

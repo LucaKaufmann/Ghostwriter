@@ -36,11 +36,40 @@
   "whyTestsDoNotAlreadyCoverThis": "App/Tests/EpilogueTests.swift only contains a placeholder assertion, and SettingsRepositoryTests exercise persistence methods but not SettingsView routing or first-time setup visibility.",
   "suggestedRegressionTest": "Add a SwiftUI/view-model test or snapshot that starts with isGhostwriterEnabled=false and asserts that SettingsView still exposes a Ghostwriter settings entry point.",
   "minimumFixScope": "App/Sources/Views/SettingsView.swift conditional rendering for the Ghostwriter settings section.",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260518T113221-19270e",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists, but the blocking condition has changed. App/Sources/Views/SettingsView.swift no longer has `private let ghostwriterSettingsEnabled = false`; it now has `private static let ghostwriterSettingsAvailable = true` and `shouldShowGhostwriterSettings(ghostwriterEnabled:)` returns true when Ghostwriter is disabled. The Ghostwriter section condition now calls that helper, so the NavigationLink to GhostwriterSettingsView is rendered for first-time setup. App/Sources/Views/GhostwriterSettingsView.swift still contains the enable toggle at lines 29-32. There is also a regression test in App/Tests/EpilogueTests.swift asserting `SettingsView.shouldShowGhostwriterSettings(ghostwriterEnabled: false)`. I attempted to run tests with xcodebuildmcp, but execution was blocked by the read-only sandbox/temp-directory EPERM and the generated workspace was not present; the current source and added test source nevertheless directly address the reported reachability bug.",
+      "commands": [
+        "sed -n '1,220p' /Users/luca/.agents/skills/xcodebuildmcp-cli/SKILL.md && pwd && rg --files | rg 'SettingsView|GhostwriterSettingsView|SettingsRepositoryTests|EpilogueTests|Package.swift|Project.swift|Workspace.swift'",
+        "nl -ba App/Sources/Views/SettingsView.swift | sed -n '1,180p'",
+        "nl -ba App/Sources/Views/GhostwriterSettingsView.swift | sed -n '1,180p'",
+        "rg -n \"ghostwriterSettingsEnabled|GhostwriterSettingsView|ghostwriterEnabled|isGhostwriterEnabled|Enable Ghostwriter|Ghostwriter\" App Modules -S",
+        "nl -ba Modules/Data/Tests/DataTests/SettingsRepositoryTests.swift | sed -n '1,220p'",
+        "rg -n \"shouldShowGhostwriterSettings|ghostwriterSettingsAvailable|SettingsView\" App/Tests Modules -S",
+        "nl -ba App/Tests/EpilogueTests.swift | sed -n '1,220p'",
+        "nl -ba App/Sources/Views/SettingsView.swift | sed -n '180,620p'",
+        "nl -ba Modules/Data/Sources/Data/Repositories/SettingsRepository.swift | sed -n '220,330p'",
+        "xcodebuildmcp --help",
+        "xcodebuildmcp tools",
+        "ls -la | sed -n '1,120p' && xcodebuildmcp simulator list-schemes --workspace-path Epilogue.xcworkspace --output json",
+        "git status --short",
+        "git diff -- App/Sources/Views/SettingsView.swift App/Tests/EpilogueTests.swift",
+        "find . -maxdepth 2 -name '*.xcworkspace' -o -name '*.xcodeproj' | sort",
+        "xcodebuildmcp simulator test --workspace-path Epilogue.xcworkspace --scheme Epilogue --simulator-name 'iPhone 16' --output json"
+      ],
+      "createdAt": "2026-05-18T11:34:17.814Z"
+    }
+  ],
   "signature": "sig_feat-ui-flow-0829e54173_6584657982",
-  "linkedPatchAttemptIds": [],
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-ui-flow-0829e54173-_fe04d515db"
+  ],
   "createdByRunId": "20260518T105835-38b83a",
   "createdAt": "2026-05-18T11:03:06.469Z",
-  "updatedAt": "2026-05-18T11:03:06.469Z"
+  "updatedAt": "2026-05-18T11:34:17.814Z"
 }

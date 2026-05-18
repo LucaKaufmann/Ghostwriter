@@ -36,11 +36,35 @@
   "whyTestsDoNotAlreadyCoverThis": "No linked tests or release validation commands exercise a clean checkout `make build`/`make generate` path with the XCFramework directory absent.",
   "suggestedRegressionTest": "Add a CI release packaging smoke test that deletes `../shared/build/XCFrameworks`, runs the intended Makefile build/generate target, and verifies the XCFramework path referenced by Tuist exists before `tuist generate`.",
   "minimumFixScope": "Makefile XCFramework path/task and, if needed, the matching Tuist XCFramework dependency path.",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260518T113629-88d152",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original Makefile evidence no longer exists in the current worktree: Makefile line 3 now sets XCFRAMEWORK_DIR to ../shared/build/XCFrameworks/release/EpilogueShared.xcframework, matching App/Project.swift line 53. The generate/build prerequisites still depend on $(XCFRAMEWORK_DIR), but that prerequisite is now the release path. rg found current Tuist XCFramework dependencies only pointing at release paths. make -n build and make -n generate show the release prerequisite triggers the xcframework target before tuist build/generate. A Gradle dry-run could not execute because the read-only sandbox prevented Gradle wrapper lock creation, but static inspection of Kotlin Gradle plugin 1.9.22 shows XCFramework(\"EpilogueShared\") registers an aggregate assembleEpilogueSharedXCFramework task over all NativeBuildType values, and XCFrameworkTask outputs to build/XCFrameworks/<buildType>/EpilogueShared.xcframework. Therefore the debug-vs-release mismatch described by the finding is fixed in the current repository.",
+      "commands": [
+        "nl -ba Makefile | sed -n '1,80p'",
+        "nl -ba App/Project.swift | sed -n '1,100p'",
+        "rg -n \"XCFrameworks/(debug|release)|EpilogueShared\\\\.xcframework|XCFRAMEWORK_DIR|assemble.*XCFramework|podPublish|make build|make generate\" -S . ../shared 2>/dev/null",
+        "find ../shared/build/XCFrameworks -maxdepth 3 -type d -name 'EpilogueShared.xcframework' -print 2>/dev/null || true",
+        "make -n build",
+        "make -n generate",
+        "test -d ../shared/build/XCFrameworks/release/EpilogueShared.xcframework; printf 'release_exists=%s\\n' \"$?\"; test -d ../shared/build/XCFrameworks/debug/EpilogueShared.xcframework; printf 'debug_exists=%s\\n' \"$?\"",
+        "JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" ../gradlew -p .. :shared:assembleEpilogueSharedXCFramework --dry-run",
+        "git diff -- Makefile App/Project.swift | sed -n '1,220p'",
+        "javap -classpath /Users/luca/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-gradle-plugin/1.9.22/f598600f8b407cda9d4dcd9a4d901e83af68b90f/kotlin-gradle-plugin-1.9.22-gradle82.jar -c -p 'org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFrameworkConfig' | sed -n '1,260p'",
+        "javap -classpath /Users/luca/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-gradle-plugin/1.9.22/f598600f8b407cda9d4dcd9a4d901e83af68b90f/kotlin-gradle-plugin-1.9.22-gradle82.jar -c -p 'org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFrameworkTask' | sed -n '1,320p'"
+      ],
+      "createdAt": "2026-05-18T11:39:32.841Z"
+    }
+  ],
   "signature": "sig_feat-release-f46ddda4e4_dc27f88268",
-  "linkedPatchAttemptIds": [],
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-release-f46ddda4e4-_52d5e03277"
+  ],
   "createdByRunId": "20260518T105835-38b83a",
   "createdAt": "2026-05-18T11:00:16.435Z",
-  "updatedAt": "2026-05-18T11:00:16.435Z"
+  "updatedAt": "2026-05-18T11:39:32.841Z"
 }

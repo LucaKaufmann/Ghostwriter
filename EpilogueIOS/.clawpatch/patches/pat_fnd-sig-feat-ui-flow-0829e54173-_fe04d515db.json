@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-ui-flow-0829e54173-_fe04d515db",
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-0829e54173-6584_f33152d1bc"
+  ],
+  "featureIds": [
+    "feat_ui-flow_0829e54173"
+  ],
+  "status": "applied",
+  "plan": "Made the Ghostwriter settings entry visible for first-time setup by replacing the disabled hard-coded gate with an available-settings visibility check, and added a focused regression test for the disabled Ghostwriter state.",
+  "filesChanged": [
+    "EpilogueIOS/App/Sources/Views/SettingsView.swift",
+    "EpilogueIOS/App/Tests/EpilogueTests.swift"
+  ],
+  "commandsRun": [],
+  "testResults": [],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-05-18T11:16:58.554Z",
+    "finishedAt": "2026-05-18T11:19:50.553Z"
+  },
+  "git": {
+    "baseSha": "0b95e3ced3abf6a460945b7b7a9c1592b661645d",
+    "commitSha": null,
+    "branchName": "codex/clawpatch-fixes",
+    "prUrl": null
+  },
+  "createdAt": "2026-05-18T11:16:58.551Z",
+  "updatedAt": "2026-05-18T11:19:50.553Z"
+}

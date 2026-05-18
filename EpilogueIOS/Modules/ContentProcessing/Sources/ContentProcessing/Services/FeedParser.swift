@@ -20,7 +20,7 @@ public final class EpilogueFeedParser: Sendable {
 
     /// Parse a feed from a URL and return raw articles
     public func parseFeed(url: String, feedName: String) async throws -> [RawArticle] {
-        guard let feedURL = URL(string: url) else {
+        guard let feedURL = URL.validHTTPURL(from: url) else {
             throw FeedParserError.invalidURL
         }
 
@@ -46,7 +46,7 @@ public final class EpilogueFeedParser: Sendable {
 
     /// Validate that a feed URL is accessible and parseable
     public func validateFeedURL(_ url: String) async throws -> Bool {
-        guard let feedURL = URL(string: url) else {
+        guard let feedURL = URL.validHTTPURL(from: url) else {
             throw FeedParserError.invalidURL
         }
 
@@ -168,9 +168,11 @@ public final class EpilogueFeedParser: Sendable {
     }
 }
 
+public typealias FeedParser = EpilogueFeedParser
+
 // MARK: - Errors
 
-public enum FeedParserError: LocalizedError {
+public enum FeedParserError: LocalizedError, Equatable {
     case invalidURL
     case networkError
     case parsingFailed(String)

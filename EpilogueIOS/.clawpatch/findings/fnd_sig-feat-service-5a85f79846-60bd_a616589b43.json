@@ -36,11 +36,33 @@
   "whyTestsDoNotAlreadyCoverThis": "The included GhostwriterClient tests only decode a normal filename, and the repository tests use fixed local paths; no test exercises hostile remote filenames or verifies containment under digestsDirectory.",
   "suggestedRegressionTest": "Add a DigestSyncService/save-file focused test with filenames like ../escape.epub and nested/name.epub, asserting the operation rejects them or stores a sanitized basename inside the digest directory.",
   "minimumFixScope": "DigestSyncService filename normalization/containment plus tests for every sync/download path that writes digest files.",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260518T113423-46a7ef",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original network model evidence still exists: SyncDigest.filename is still a server-decoded String at Modules/GhostwriterClient/Sources/GhostwriterClient/Models/SyncModels.swift:30, and sync download paths still pass digest.filename into saveEPUB. The vulnerable sink has changed: App/Sources/Services/DigestSyncService.swift:322 now calls digestFileURL(filename:) instead of directly appending the remote filename, and digestFileURL at lines 342-351 validates and standardizes the path before returning it. validateDigestFilename at lines 354-363 rejects empty names, dot segments, forward slashes, backslashes, NUL, absolute paths, and names whose lastPathComponent differs. expectedEPUBURL also now throws through the same validation, so no-download indexing paths are covered too. Regression tests were added in App/Tests/EpilogueTests.swift:9-28 for ../escape.epub, /tmp/escape.epub, nested/name.epub, backslash paths, dot names, empty names, and valid basenames. I attempted to run the relevant iOS test command, but this read-only sandbox prevented xcodebuildmcp from creating its temporary test directory, so runtime execution could not be completed here. Based on current code and test coverage in the repo, the reported local path traversal write/delete issue is fixed.",
+      "commands": [
+        "nl -ba Modules/GhostwriterClient/Sources/GhostwriterClient/Models/SyncModels.swift | sed -n '1,70p'",
+        "nl -ba App/Sources/Services/DigestSyncService.swift | sed -n '130,170p'",
+        "nl -ba App/Sources/Services/DigestSyncService.swift | sed -n '285,365p'",
+        "rg -n \"validateDigestFilename|invalidFilename|digestFileURL|\\.\\./|nested/name|escape\\.epub|DigestSyncFileError\" App Modules -S",
+        "nl -ba App/Tests/EpilogueTests.swift | sed -n '1,60p'",
+        "rg -n \"expectedEPUBURL\\(|saveEPUB\\(|saveFile\\(|digestFileURL\\(|validateDigestFilename\\(\" App/Sources/Services/DigestSyncService.swift -S",
+        "rg -n \"appendingPathComponent\\([^\\n]*(filename|epubFileName|Filename|fileName)|downloadDigest\\(filename|saveRemoteDigest\\(|epubFilePath\" App Modules -S",
+        "xcodebuildmcp --help",
+        "xcodebuildmcp simulator test --workspace-path Epilogue.xcworkspace --scheme Epilogue --simulator-name 'iPhone 16' --use-latest-os --output json"
+      ],
+      "createdAt": "2026-05-18T11:36:25.159Z"
+    }
+  ],
   "signature": "sig_feat-service-5a85f79846_60bd868c08",
-  "linkedPatchAttemptIds": [],
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-service-5a85f79846-_57896c4b5a"
+  ],
   "createdByRunId": "20260518T105835-38b83a",
   "createdAt": "2026-05-18T11:03:12.769Z",
-  "updatedAt": "2026-05-18T11:03:12.769Z"
+  "updatedAt": "2026-05-18T11:36:25.159Z"
 }

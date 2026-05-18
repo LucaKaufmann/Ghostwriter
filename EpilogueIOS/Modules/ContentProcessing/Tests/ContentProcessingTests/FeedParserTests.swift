@@ -14,8 +14,7 @@ import Foundation
 struct FeedParserTests {
     @Test("FeedParser initializes correctly")
     func testInitialization() {
-        let parser = FeedParser()
-        #expect(parser != nil)
+        _ = FeedParser()
     }
 
     @Test("Invalid URL throws error")
