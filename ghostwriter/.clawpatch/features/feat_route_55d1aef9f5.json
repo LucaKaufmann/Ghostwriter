@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_55d1aef9f5",
+  "title": "FastAPI route PUT /podcast/preferences",
+  "summary": "FastAPI route PUT /podcast/preferences handled by update_podcast_preferences in app/api/podcast.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/podcast.py",
+      "symbol": "update_podcast_preferences",
+      "route": "PUT /podcast/preferences",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/podcast.py",
+      "reason": "FastAPI route handler update_podcast_preferences"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-55d1aef9f5-b59fc3_32a5fb8528",
+    "fnd_sig-feat-route-55d1aef9f5-98fa2f_fe1393e830"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:18:21.920Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:18:21.920Z"
+}

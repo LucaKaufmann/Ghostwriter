@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b1b1685a97-1084_b2cb791a4b",
+  "featureId": "feat_library_b1b1685a97",
+  "title": "Owned API files fail the configured ruff lint gate",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/schedules.py",
+      "startLine": 11,
+      "endLine": 11,
+      "symbol": null,
+      "quote": "from app.models.schedule import ScheduleRead, ScheduleUpdate"
+    },
+    {
+      "path": "app/api/sync.py",
+      "startLine": 13,
+      "endLine": 13,
+      "symbol": null,
+      "quote": "from sqlalchemy import text"
+    },
+    {
+      "path": "app/api/sync.py",
+      "startLine": 82,
+      "endLine": 84,
+      "symbol": "combined_sync",
+      "quote": "feed_since: Optional[datetime] = Query(None, description=\"Get feed changes since this timestamp\"),"
+    }
+  ],
+  "reasoning": "The project lint command selects Pyflakes, isort, bugbear, and pyupgrade rules. Running ruff on the owned files reports unused imports in schedules.py and sync.py, unsorted imports in sync.py, UP045 for Optional annotations, and B008 for Query/Depends defaults. That means the feature cannot pass the declared release/check workflow as-is.",
+  "reproduction": "python -m ruff check app/api/schedules.py app/api/sync.py --no-cache reports F401 for ScheduleRead, ScheduleUpdate, and sqlalchemy.text, plus I001, UP045, and B008 in app/api/sync.py. hatch was not installed in this environment, so I used the local ruff module directly.",
+  "recommendation": "Remove unused imports, format/sort the import block, change Optional[...] to X | None, and either use the project-approved FastAPI Annotated style for Query/Depends defaults or explicitly align the ruff configuration if B008 is intentionally allowed for FastAPI routes.",
+  "whyTestsDoNotAlreadyCoverThis": "Runtime pytest coverage would not catch lint-only failures, and no linked tests exercise the configured lint command.",
+  "suggestedRegressionTest": "Add the existing lint command to CI for this feature path, or at least run python -m ruff check app/api/schedules.py app/api/sync.py --no-cache as a pre-merge check.",
+  "minimumFixScope": "app/api/schedules.py and app/api/sync.py lint cleanup only.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-b1b1685a97_1084c40f5e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:17.916Z",
+  "updatedAt": "2026-05-18T12:10:17.916Z"
+}

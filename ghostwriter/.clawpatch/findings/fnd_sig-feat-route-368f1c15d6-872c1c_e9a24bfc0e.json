@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-368f1c15d6-872c1c_e9a24bfc0e",
+  "featureId": "feat_route_368f1c15d6",
+  "title": "Artwork minimum dimensions are documented but never enforced",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 862,
+      "endLine": 862,
+      "symbol": "upload_podcast_feed_artwork",
+      "quote": "\"\"\"Upload custom podcast feed artwork (minimum 1400x1400).\"\"\""
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 880,
+      "endLine": 888,
+      "symbol": "upload_podcast_feed_artwork",
+      "quote": "image = Image.open(BytesIO(data))\n        width, height = image.size\n        image.verify()"
+    }
+  ],
+  "reasoning": "The route contract says uploaded artwork must be at least 1400x1400, but the handler only reads and returns the dimensions. It never rejects images where width or height is below 1400, so a small authenticated upload is accepted and stored as feed artwork, producing feed art that many podcast clients will reject or ignore.",
+  "reproduction": "POST /api/podcast/feed/artwork with an authenticated multipart image/jpeg containing a valid 100x100 JPEG. The code reaches the write/commit path and returns 200 with width=100 and height=100.",
+  "recommendation": "After decoding the image size, reject images with width < 1400 or height < 1400 using a 400 response before writing the file or updating preferences.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_podcast_api.py only covers a 1500x1500 successful upload and serving the stored artwork; it does not include a too-small valid image case.",
+  "suggestedRegressionTest": "Add a test that uploads a valid 100x100 or 1399x1400 image to /api/podcast/feed/artwork and asserts a 400 response and no persisted podcast_feed_artwork_path.",
+  "minimumFixScope": "Add dimension validation in upload_podcast_feed_artwork and a focused negative test in tests/test_podcast_api.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-368f1c15d6_872c1ccaf9",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:14:34.108Z",
+  "updatedAt": "2026-05-18T12:14:34.108Z"
+}

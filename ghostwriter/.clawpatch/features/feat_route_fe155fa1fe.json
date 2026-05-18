@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_fe155fa1fe",
+  "title": "FastAPI route GET /runs",
+  "summary": "FastAPI route GET /runs handled by list_media_runs in app/api/media.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/media.py",
+      "symbol": "list_media_runs",
+      "route": "GET /runs",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/media.py",
+      "reason": "FastAPI route handler list_media_runs"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-fe155fa1fe-9c6208_bad6896bcf"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:28:33.753Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:28:33.753Z"
+}

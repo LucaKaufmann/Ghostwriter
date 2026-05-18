@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-4159fca276-e5d536_cd6e3bf0f5",
+  "featureId": "feat_route_4159fca276",
+  "title": "Login never applies the configured auth rate limit",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/auth.py",
+      "startLine": 131,
+      "endLine": 156,
+      "symbol": "login",
+      "quote": "async def login(... request: Request ...): ... if not user: ... if not verify_password(...):"
+    },
+    {
+      "path": "app/api/auth.py",
+      "startLine": 337,
+      "endLine": 339,
+      "symbol": "revoke_api_token",
+      "quote": "return {\"status\": \"ok\", \"message\": \"Token revoked successfully.\"}\n    check_auth_rate_limit(request)\n    check_auth_rate_limit(request)"
+    }
+  ],
+  "reasoning": "The /auth/login handler accepts the Request but never calls the imported auth rate limiter before username lookup or password verification. The only check_auth_rate_limit calls in this file are duplicated after a return statement in a different route, so they are unreachable and cannot limit login attempts. This leaves password guessing against /auth/login unbounded by the app-level auth limiter.",
+  "reproduction": null,
+  "recommendation": "Move a single check_auth_rate_limit(request) call into the start of login before any credential validation, and remove the unreachable duplicated calls after revoke_api_token's return.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for this feature, and no inspected backend test exercises repeated failed /auth/login attempts or expects a 429 response from the auth limiter.",
+  "suggestedRegressionTest": "Add a FastAPI TestClient test that enables auth rate limiting, posts invalid credentials to /auth/login from the same client more than the configured limit, and asserts the next response is 429.",
+  "minimumFixScope": "app/api/auth.py: add the rate-limit check at the top of login and delete the unreachable trailing calls.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-4159fca276_e5d53692b2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:15:19.331Z",
+  "updatedAt": "2026-05-18T12:15:19.331Z"
+}

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-db316c1a7b-ac20_8486814a9f",
+  "featureId": "feat_library_db316c1a7b",
+  "title": "Podcast feed tokens authorize every episode, not just the token owner's episodes",
+  "category": "security",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 238,
+      "endLine": 250,
+      "symbol": "_authorize_standard_or_feed_token",
+      "quote": "if feed_token:\n        prefs = podcast_service.get_preferences_by_feed_token(session, feed_token)\n        if prefs is None:\n            raise HTTPException(\n                status_code=status.HTTP_401_UNAUTHORIZED,\n                detail=\"Invalid feed token\",\n            )\n        return"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 639,
+      "endLine": 651,
+      "symbol": "stream_podcast_episode",
+      "quote": "episode = session.get(PodcastEpisode, episode_id)\n    if episode is None:\n        raise HTTPException(status_code=404, detail=\"Podcast episode not found\")"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 721,
+      "endLine": 733,
+      "symbol": "get_podcast_feed_xml",
+      "quote": "prefs = podcast_service.get_preferences_by_feed_token(session, token)\n    if prefs is None:\n        raise HTTPException(status_code=401, detail=\"Invalid feed token\")\n    if not prefs.podcast_feed_enabled:\n        raise HTTPException(status_code=404, detail=\"Podcast feed is disabled\")\n\n    base_url = _podcast_base_url(request, prefs.podcast_feed_base_url)\n    episodes = session.exec(\n        select(PodcastEpisode)\n        .where(PodcastEpisode.status == \"ready\")"
+    }
+  ],
+  "reasoning": "A valid private podcast feed token is only checked for existence, then stream/download fetches the requested episode by ID with no owner or preference scope check. The RSS feed query similarly returns all ready episodes. In any multi-user deployment, one user's feed token can enumerate or download another user's ready podcast episodes.",
+  "reproduction": "Create two users with podcast preferences and ready episodes. Use user B's podcast feed token to request `/api/podcast/episodes/{user_A_episode_id}/download?token={user_B_token}` or `/api/podcast/feed.xml?token={user_B_token}`; the code authorizes the token and does not filter by user.",
+  "recommendation": "Have `_authorize_standard_or_feed_token` return the matched preferences/user identity, and require `PodcastEpisode.user_id == prefs.user_id` for feed XML, stream, download, and artwork-derived episode links. Return 404 for episodes outside the token scope.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked tests only cover feeds, health/config covers, and KOReader plugin packaging; none exercise podcast feed-token authorization or multi-user isolation.",
+  "suggestedRegressionTest": "Add a podcast API test with two users, two feed tokens, and an episode owned by user A; assert user B's feed token cannot see or download user A's episode.",
+  "minimumFixScope": "app/api/podcast.py authorization helper plus the feed XML, stream, and download handlers.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260518T132521-eb52c0",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original path app/api/podcast.py still exists, but the cited evidence has changed. _authorize_standard_or_feed_token now returns the resolved PodcastPreferences for feed tokens at lines 242-262 instead of returning None. stream_podcast_episode now rejects feed-token access when episode.user_id != token_prefs.user_id at lines 641-648, and download_podcast_episode has the same owner check at lines 697-704. get_podcast_feed_xml now filters ready episodes with PodcastEpisode.user_id == prefs.user_id at lines 737-741. A regression test exists at tests/test_podcast_api.py:437-517 and asserts a second user's feed token cannot see, download, or stream the first user's episode while still allowing its own episode. I did not find another feed-token episode access path in app/api/podcast.py. I attempted to run the focused pytest, but the read-only sandbox has no writable temporary directory, so pytest could not start; the code and test source indicate this finding is fixed.",
+      "commands": [
+        "pwd && git status --short",
+        "rg -n \"_authorize_standard_or_feed_token|stream_podcast_episode|get_podcast_feed_xml|feed_token|PodcastEpisode\" app/api/podcast.py tests app -g '!**/__pycache__/**'",
+        "nl -ba app/api/podcast.py | sed -n '235,265p;630,715p;720,755p;840,870p'",
+        "nl -ba tests/test_podcast_api.py | sed -n '380,525p'",
+        "rg -n \"token_prefs|user_id == prefs.user_id|token.*scoped|feed_token_is_scoped|PodcastEpisode.user_id\" app/api/podcast.py tests/test_podcast_api.py",
+        "nl -ba app/models/podcast_episode.py | sed -n '1,70p'",
+        "nl -ba app/services/podcast_service.py | sed -n '536,552p;617,720p'",
+        "rg -n \"token: str|feed_token|podcast_feed_token|_authorize_standard_or_feed_token|feed.xml|/podcast/episodes/.*/(stream|download)|PodcastEpisode\\)\" app/api/podcast.py",
+        "PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider tests/test_podcast_api.py::test_feed_token_is_scoped_to_token_owner"
+      ],
+      "createdAt": "2026-05-18T13:29:02.827Z"
+    }
+  ],
+  "signature": "sig_feat-library-db316c1a7b_ac205090ae",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-db316c1a7b-_d40abfadec"
+  ],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:11:18.252Z",
+  "updatedAt": "2026-05-18T13:29:02.827Z"
+}

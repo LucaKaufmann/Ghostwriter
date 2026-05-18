@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_98b663ddc9",
+  "title": "FastAPI route POST /podcast/episodes/{episode_id}/retry",
+  "summary": "FastAPI route POST /podcast/episodes/{episode_id}/retry handled by retry_podcast_episode in app/api/podcast.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/podcast.py",
+      "symbol": "retry_podcast_episode",
+      "route": "POST /podcast/episodes/{episode_id}/retry",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/podcast.py",
+      "reason": "FastAPI route handler retry_podcast_episode"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-98b663ddc9-42bb7b_3835c20d01",
+    "fnd_sig-feat-route-98b663ddc9-916fb6_003e17340d"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:21:32.611Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:21:32.611Z"
+}

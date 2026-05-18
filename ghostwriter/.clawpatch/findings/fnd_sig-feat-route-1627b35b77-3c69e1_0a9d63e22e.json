@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-1627b35b77-3c69e1_0a9d63e22e",
+  "featureId": "feat_route_1627b35b77",
+  "title": "Deleted feeds remain fetchable by ID",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 282,
+      "endLine": 292,
+      "symbol": "get_feed",
+      "quote": "feed = session.get(Feed, feed_id)\n    if not feed:"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 313,
+      "endLine": 318,
+      "symbol": "delete_feed",
+      "quote": "feed.is_active = False\n    feed.deleted_at = now\n    feed.updated_at = now"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 50,
+      "endLine": 55,
+      "symbol": "list_feeds",
+      "quote": "Returns all feeds regardless of active status (excludes tombstoned feeds)."
+    }
+  ],
+  "reasoning": "The delete endpoint implements deletion as a tombstone by setting deleted_at, and list_feeds explicitly excludes tombstoned feeds. get_feed only checks that the row exists, so GET /{feed_id} will still return a feed after it has been deleted. That makes the single-resource API inconsistent with the collection API and can expose stale deleted feeds to clients that still hold an ID.",
+  "reproduction": "Create a feed, DELETE /api/feeds/{id}, then GET /api/feeds/{id}; the current handler returns 200 with the tombstoned feed instead of treating it as not found.",
+  "recommendation": "Update get_feed to treat feeds with deleted_at set as not found, or explicitly document and test that tombstoned feeds are intentionally retrievable by ID.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_feeds.py covers listing, creating, and syncing feeds, but it does not exercise GET /{feed_id} or the behavior after DELETE.",
+  "suggestedRegressionTest": "Add a test that creates a feed, deletes it, then asserts GET /api/feeds/{id} returns 404 while the deleted feed remains absent from GET /api/feeds.",
+  "minimumFixScope": "Change get_feed in app/api/feeds.py to check deleted_at alongside row existence; add focused route tests in tests/test_feeds.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-1627b35b77_3c69e15111",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:11:30.153Z",
+  "updatedAt": "2026-05-18T12:11:30.153Z"
+}

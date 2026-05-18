@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-fa31b685cb-8b6c5f_56616f830b",
+  "featureId": "feat_route_fa31b685cb",
+  "title": "Concurrent manual triggers can start overlapping media pipelines",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/media.py",
+      "startLine": 409,
+      "endLine": 417,
+      "symbol": "trigger_media_processing",
+      "quote": "asyncio.create_task(run_media_pipeline())"
+    },
+    {
+      "path": "app/worker/media_pipeline.py",
+      "startLine": 41,
+      "endLine": 66,
+      "symbol": "run_media_pipeline",
+      "quote": "if processing_count:\n            logger.info(\"Media pipeline: items still processing, skipping this run\")\n            return"
+    },
+    {
+      "path": "app/worker/media_pipeline.py",
+      "startLine": 237,
+      "endLine": 252,
+      "symbol": "_process_pending_items",
+      "quote": "item = session.exec(\n                select(MediaItem)\n                .where(MediaItem.status == \"pending\")\n                .order_by(MediaItem.created_at)\n            ).first()"
+    }
+  ],
+  "reasoning": "POST /trigger unconditionally schedules a new pipeline task and returns before any run-level lock is acquired. The pipeline's only guard checks for existing items already marked processing, but that is not atomic with starting the run and does not cover the fetch/create phase. Two near-simultaneous trigger requests can both pass the guard before either marks an item processing, then both fetch/create items or select the same pending item for processing. That can duplicate external media/LLM work and can create duplicate media_items where feed GUIDs are only indexed, not unique.",
+  "reproduction": "Send two authenticated POST /media/trigger requests concurrently while no item is currently processing and at least one feed or pending item exists; both requests return started and both background tasks can enter run_media_pipeline before any processing status blocks the other.",
+  "recommendation": "Add a real media-pipeline lock before scheduling or at the start of run_media_pipeline, and return 409 when a run is already active. A process-local asyncio.Lock is a minimum for one worker process; a database-backed run lock/status row is safer across multiple Uvicorn workers or scheduler/manual overlap.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests were found for POST /media/trigger or trigger_media_processing; existing media tests cover retry behavior, while trigger tests in the suite target digest or podcast schedule endpoints.",
+  "suggestedRegressionTest": "Add an async route test that calls POST /media/trigger twice concurrently with run_media_pipeline blocked at a synchronization point, asserting only one task is started and the second response is 409 or an equivalent already-running response.",
+  "minimumFixScope": "app/api/media.py plus the media pipeline locking/status contract; add a focused test for the manual trigger concurrency behavior.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-fa31b685cb_8b6c5f149c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:29:17.972Z",
+  "updatedAt": "2026-05-18T12:29:17.972Z"
+}

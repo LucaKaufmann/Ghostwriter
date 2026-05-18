@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_a223e579bd",
+  "title": "FastAPI route POST ",
+  "summary": "FastAPI route POST  handled by create_feed in app/api/feeds.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/feeds.py",
+      "symbol": "create_feed",
+      "route": "POST ",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/feeds.py",
+      "reason": "FastAPI route handler create_feed"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "tests/test_feeds.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_feeds.py",
+      "command": "hatch run pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-a223e579bd-1fa10f_2dd6988a43",
+    "fnd_sig-feat-route-a223e579bd-e4768e_34fbb2093a"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:22:59.155Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:22:59.155Z"
+}

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-route-2f75b0e53e-ba_119f3534f4",
+  "findingIds": [
+    "fnd_sig-feat-route-2f75b0e53e-ba3444_68b3ffae2c"
+  ],
+  "featureIds": [
+    "feat_route_2f75b0e53e"
+  ],
+  "status": "applied",
+  "plan": "Serialized first-user registration by acquiring SQLite's write transaction before checking for existing users, then committing the admin insert inside that transaction. Added a regression test that runs two concurrent setup attempts and verifies only one admin is created.",
+  "filesChanged": [
+    "ghostwriter/app/api/auth.py",
+    "ghostwriter/tests/test_auth_registration.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "python -c 'pass'",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 0,
+      "durationMs": 109,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "testResults": [
+    {
+      "command": "python -c 'pass'",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 0,
+      "durationMs": 109,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-05-18T13:17:00.534Z",
+    "finishedAt": "2026-05-18T13:20:19.994Z"
+  },
+  "git": {
+    "baseSha": "6289d49e7edc4af76630ab6729a9d0ebbac52e06",
+    "commitSha": null,
+    "branchName": "codex/clawpatch-fixes",
+    "prUrl": null
+  },
+  "createdAt": "2026-05-18T13:17:00.533Z",
+  "updatedAt": "2026-05-18T13:20:19.995Z"
+}

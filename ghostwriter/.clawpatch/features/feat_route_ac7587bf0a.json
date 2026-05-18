@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_ac7587bf0a",
+  "title": "FastAPI route DELETE /{feed_id}",
+  "summary": "FastAPI route DELETE /{feed_id} handled by delete_feed in app/api/feeds.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/feeds.py",
+      "symbol": "delete_feed",
+      "route": "DELETE /{feed_id}",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/feeds.py",
+      "reason": "FastAPI route handler delete_feed"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "tests/test_feeds.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_feeds.py",
+      "command": "hatch run pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-ac7587bf0a-b7db76_dc5f6b040c"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:24:21.499Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:24:21.499Z"
+}

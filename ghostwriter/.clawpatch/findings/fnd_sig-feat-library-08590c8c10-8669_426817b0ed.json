@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-08590c8c10-8669_426817b0ed",
+  "featureId": "feat_library_08590c8c10",
+  "title": "EPUB generator interpolates unescaped feed titles and authors into XHTML",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/services/epub_generator.py",
+      "startLine": 344,
+      "endLine": 356,
+      "symbol": "EpubGenerator._create_section_divider",
+      "quote": "<title>{title}</title> ... <h1>{title}</h1>"
+    },
+    {
+      "path": "app/services/epub_generator.py",
+      "startLine": 393,
+      "endLine": 414,
+      "symbol": "EpubGenerator._create_chapter",
+      "quote": "{f'<span>By {article.author}</span> | ' if article.author else ''}"
+    }
+  ],
+  "reasoning": "Feed titles and article authors come from external RSS/email sources. Article titles and URLs are escaped in _create_chapter, but section titles and authors are inserted raw into XHTML. A title or author containing '<', '&', or markup can produce malformed EPUB chapters or inject reader-visible HTML/scripts in readers that execute active content.",
+  "reproduction": null,
+  "recommendation": "Escape section title and author with html_escape before interpolating into XHTML, and use the escaped values consistently for page titles/headings while keeping the raw value only for EbookLib metadata if that API handles escaping itself.",
+  "whyTestsDoNotAlreadyCoverThis": "The included service tests do not exercise EPUB generation with malicious or XML-significant feed titles/authors; tests around PDF escaping are separate and PDFGenerator already escapes these fields.",
+  "suggestedRegressionTest": "Create an EPUB with feed_title='Bad & <tag>' and author='<img src=x onerror=alert(1)>' then read the generated XHTML from the zip and assert escaped text appears and XML parsing succeeds.",
+  "minimumFixScope": "app/services/epub_generator.py _create_section_divider and _create_chapter, plus an EPUB regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-08590c8c10_866956f853",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:13.182Z",
+  "updatedAt": "2026-05-18T12:07:13.182Z"
+}

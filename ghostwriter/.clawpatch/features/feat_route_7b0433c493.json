@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_7b0433c493",
+  "title": "FastAPI route POST /{period}/disable",
+  "summary": "FastAPI route POST /{period}/disable handled by disable_schedule in app/api/schedules.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/schedules.py",
+      "symbol": "disable_schedule",
+      "route": "POST /{period}/disable",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/schedules.py",
+      "reason": "FastAPI route handler disable_schedule"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "reviewed",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "0 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:18:29.778Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:18:29.778Z"
+}

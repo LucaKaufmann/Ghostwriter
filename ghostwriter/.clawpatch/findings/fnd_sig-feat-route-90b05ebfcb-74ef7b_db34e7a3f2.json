@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-90b05ebfcb-74ef7b_db34e7a3f2",
+  "featureId": "feat_route_90b05ebfcb",
+  "title": "Token-authenticated podcast downloads are cacheable by default",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 682,
+      "endLine": 690,
+      "symbol": "download_podcast_episode",
+      "quote": "@router.get(\"/podcast/episodes/{episode_id}/download\")\nasync def download_podcast_episode(...):\n    \"\"\"Download podcast MP3 file.\"\"\"\n    await _authorize_standard_or_feed_token(request, session, token)"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 707,
+      "endLine": 711,
+      "symbol": "download_podcast_episode",
+      "quote": "return FileResponse(\n        audio_path,\n        media_type=\"audio/mpeg\",\n        filename=f\"podcast-{episode_id}.mp3\",\n    )"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 783,
+      "endLine": 784,
+      "symbol": "get_podcast_feed_xml",
+      "quote": "ET.SubElement(item, \"pubDate\").text = _to_rfc2822(created)\n        enclosure_url = base_url + f\"/api/podcast/episodes/{episode.id}/download?token={token}\""
+    }
+  ],
+  "reasoning": "The private feed publishes enclosure URLs with the bearer feed token in the query string, and the download handler serves the MP3 with a plain FileResponse and no Cache-Control. Unlike the stream handler, this leaves headerless token-authenticated GET responses eligible for browser or intermediary caching, so private audio can remain available from cache after feed access is disabled or a token is changed.",
+  "reproduction": "Request /api/podcast/episodes/{episode_id}/download?token=<valid_feed_token> and inspect the response headers; the handler does not set Cache-Control/Pragma on the FileResponse.",
+  "recommendation": "Pass explicit privacy cache headers on the download FileResponse, for example Cache-Control: private, no-cache, and consider matching the stream route's cache policy for all token-authenticated podcast media responses.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_podcast_api.py covers a successful token download and asserts status, content type, and bytes, but it does not assert cache-control behavior for private media URLs.",
+  "suggestedRegressionTest": "Add a token-authenticated download test that asserts the response includes a private cache policy while still returning audio/mpeg and the expected bytes.",
+  "minimumFixScope": "Update download_podcast_episode to include explicit cache-control headers on its FileResponse.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-90b05ebfcb_74ef7b5331",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:22:40.351Z",
+  "updatedAt": "2026-05-18T12:22:40.351Z"
+}

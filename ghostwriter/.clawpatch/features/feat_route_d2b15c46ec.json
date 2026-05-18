@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_d2b15c46ec",
+  "title": "FastAPI route POST /tokens",
+  "summary": "FastAPI route POST /tokens handled by create_api_token in app/api/auth.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/auth.py",
+      "symbol": "create_api_token",
+      "route": "POST /tokens",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/auth.py",
+      "reason": "FastAPI route handler create_api_token"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-d2b15c46ec-b21f46_853925385a",
+    "fnd_sig-feat-route-d2b15c46ec-28076c_5c00c6413a"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:27:53.299Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:27:53.299Z"
+}

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_fa31b685cb",
+  "title": "FastAPI route POST /trigger",
+  "summary": "FastAPI route POST /trigger handled by trigger_media_processing in app/api/media.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/media.py",
+      "symbol": "trigger_media_processing",
+      "route": "POST /trigger",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/media.py",
+      "reason": "FastAPI route handler trigger_media_processing"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-fa31b685cb-8b6c5f_56616f830b"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:29:17.973Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:29:17.973Z"
+}

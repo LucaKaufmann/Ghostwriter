@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_f202421dac",
+  "title": "FastAPI route GET /{digest_id}/cover",
+  "summary": "FastAPI route GET /{digest_id}/cover handled by get_digest_cover in app/api/digests.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/digests.py",
+      "symbol": "get_digest_cover",
+      "route": "GET /{digest_id}/cover",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/digests.py",
+      "reason": "FastAPI route handler get_digest_cover"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-f202421dac-093cc4_b9759105b4"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:28:59.126Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:28:59.126Z"
+}

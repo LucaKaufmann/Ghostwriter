@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-377f4c8e41-26ec_c14ae876f8",
+  "featureId": "feat_library_377f4c8e41",
+  "title": "Per-feed processing limits accept negative and unbounded values",
+  "category": "performance",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/models/feed.py",
+      "startLine": 22,
+      "endLine": 22,
+      "symbol": "FeedBase.max_articles",
+      "quote": "max_articles: int = Field(default=10, description=\"Max articles per run\")"
+    },
+    {
+      "path": "app/models/feed.py",
+      "startLine": 52,
+      "endLine": 52,
+      "symbol": "FeedCreate.max_articles",
+      "quote": "max_articles: int = Field(default=10, description=\"Max articles per run\")"
+    },
+    {
+      "path": "app/models/feed.py",
+      "startLine": 78,
+      "endLine": 78,
+      "symbol": "FeedSync.max_articles",
+      "quote": "max_articles: int = Field(default=10, description=\"Max articles per run\")"
+    },
+    {
+      "path": "app/models/feed.py",
+      "startLine": 89,
+      "endLine": 89,
+      "symbol": "FeedUpdate.max_articles",
+      "quote": "max_articles: int | None = Field(default=None, description=\"Max articles per run\")"
+    },
+    {
+      "path": "app/models/media_feed.py",
+      "startLine": 30,
+      "endLine": 30,
+      "symbol": "MediaFeedBase.max_items",
+      "quote": "max_items: int = Field(default=5, description=\"Max items to keep pending per run\")"
+    },
+    {
+      "path": "app/models/media_feed.py",
+      "startLine": 65,
+      "endLine": 65,
+      "symbol": "MediaFeedCreate.max_items",
+      "quote": "max_items: int = Field(default=5, description=\"Max items per run\")"
+    },
+    {
+      "path": "app/models/media_feed.py",
+      "startLine": 92,
+      "endLine": 92,
+      "symbol": "MediaFeedUpdate.max_items",
+      "quote": "max_items: int | None = Field(default=None, description=\"Max items per run\")"
+    }
+  ],
+  "reasoning": "These fields are intended to cap per-run work, but the create/sync/update schemas and persisted models do not set ge/le bounds. A client can persist negative values, which Python slicing treats as nearly all entries, or very large values that bypass the intended cap and can enqueue excessive feed or media processing work.",
+  "reproduction": "POST or sync a feed with max_articles=-1 or a media feed with max_items=1000000, then run the corresponding processor; the persisted value is accepted by the schema.",
+  "recommendation": "Add conservative lower and upper bounds to all create/update/sync and table fields, for example ge=1 with a product-defined maximum, and reject or clamp invalid existing values during migration/startup.",
+  "whyTestsDoNotAlreadyCoverThis": "Existing feed tests only use valid positive values, and no linked tests exercise negative or oversized per-feed limits.",
+  "suggestedRegressionTest": "Add API/model validation tests asserting max_articles and max_items reject zero, negative, and excessive values for create, update, and sync schemas.",
+  "minimumFixScope": "Feed and MediaFeed model/schema field definitions, API validation expectations, and any migration/data cleanup for already persisted invalid values.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-377f4c8e41_26ecd0fe39",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:49.971Z",
+  "updatedAt": "2026-05-18T12:07:49.971Z"
+}

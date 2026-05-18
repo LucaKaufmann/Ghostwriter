@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-d2b15c46ec-28076c_5c00c6413a",
+  "featureId": "feat_route_d2b15c46ec",
+  "title": "Auth module currently fails Ruff lint",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/auth.py",
+      "startLine": 13,
+      "endLine": 18,
+      "symbol": null,
+      "quote": "verify_api_token"
+    },
+    {
+      "path": "app/api/auth.py",
+      "startLine": 337,
+      "endLine": 339,
+      "symbol": "revoke_api_token",
+      "quote": "check_auth_rate_limit(request)"
+    }
+  ],
+  "reasoning": "The project lint configuration selects Pyflakes F rules. Running Ruff on this file reports F401 for the unused verify_api_token import and F821 for the undefined request name in the two unreachable lines after revoke_api_token returns. This blocks the configured lint command even though the runtime route path may not execute those lines.",
+  "reproduction": "python -m ruff check app/api/auth.py --select F401,F821 --output-format=json --no-cache",
+  "recommendation": "Remove the unused verify_api_token import and delete or correctly place the stray check_auth_rate_limit(request) calls with a real Request parameter in the intended endpoint.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked feature has no tests, and ordinary route tests would not catch static lint failures unless the lint command is part of verification.",
+  "suggestedRegressionTest": "Keep the configured Ruff lint command in CI for app/api/auth.py so undefined names and unused imports fail before release.",
+  "minimumFixScope": "Edit app/api/auth.py to satisfy Ruff F401/F821; no database or API contract change is required.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-d2b15c46ec_28076c2751",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:27:53.298Z",
+  "updatedAt": "2026-05-18T12:27:53.298Z"
+}

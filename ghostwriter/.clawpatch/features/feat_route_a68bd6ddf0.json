@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_a68bd6ddf0",
+  "title": "FastAPI route PUT /podcasts/{feed_id}",
+  "summary": "FastAPI route PUT /podcasts/{feed_id} handled by update_podcast_feed in app/api/media.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/media.py",
+      "symbol": "update_podcast_feed",
+      "route": "PUT /podcasts/{feed_id}",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/media.py",
+      "reason": "FastAPI route handler update_podcast_feed"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-a68bd6ddf0-a87cbc_1e1cb03086"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:23:32.492Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:23:32.492Z"
+}

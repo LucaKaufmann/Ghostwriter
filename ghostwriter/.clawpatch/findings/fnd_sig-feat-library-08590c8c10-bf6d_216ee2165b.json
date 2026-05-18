@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-08590c8c10-bf6d_216ee2165b",
+  "featureId": "feat_library_08590c8c10",
+  "title": "Newsletter sanitizer preserves unsafe link schemes",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/services/newsletter_service.py",
+      "startLine": 617,
+      "endLine": 618,
+      "symbol": "NewsletterService._KEEP_ATTRS",
+      "quote": "_KEEP_ATTRS = frozenset({\"href\"})"
+    },
+    {
+      "path": "app/services/newsletter_service.py",
+      "startLine": 697,
+      "endLine": 703,
+      "symbol": "NewsletterService._clean_newsletter_html",
+      "quote": "attrs_to_remove = [a for a in el.attrib if a not in self._KEEP_ATTRS]"
+    }
+  ],
+  "reasoning": "HTML newsletters are untrusted input. The cleaner removes scripts and non-href attributes, but any href value survives unchanged, including javascript:, data:, file:, or other non-web schemes. That sanitized HTML is then stored as article content for EPUB/PDF/web reader rendering, so a malicious newsletter can leave active links in generated output.",
+  "reproduction": null,
+  "recommendation": "When preserving href, parse and allow only http, https, mailto, and possibly relative anchors. Drop or neutralize every other scheme before serialization.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_newsletter_service.py covers comment removal, plain-text preference, HTML fallback, and parse-error resilience, but it does not assert href scheme filtering for malicious newsletter HTML.",
+  "suggestedRegressionTest": "Add a newsletter HTML cleaning test with '<a href=\"javascript:alert(1)\">bad</a><a href=\"https://example.com\">ok</a>' and assert the javascript href is removed while the https link remains.",
+  "minimumFixScope": "app/services/newsletter_service.py sanitizer attribute handling and tests/test_newsletter_service.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-08590c8c10_bf6d586d52",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:13.182Z",
+  "updatedAt": "2026-05-18T12:07:13.182Z"
+}

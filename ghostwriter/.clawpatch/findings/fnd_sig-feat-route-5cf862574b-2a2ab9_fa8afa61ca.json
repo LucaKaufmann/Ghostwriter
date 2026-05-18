@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-5cf862574b-2a2ab9_fa8afa61ca",
+  "featureId": "feat_route_5cf862574b",
+  "title": "PUT /settings has no focused API coverage",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/api/client.py",
+      "startLine": 105,
+      "endLine": 120,
+      "symbol": "update_client_settings",
+      "quote": "@router.put(\"/settings\", response_model=ClientStatusResponse, dependencies=[Depends(verify_api_key)])"
+    }
+  ],
+  "reasoning": "This endpoint accepts network input, relies on authentication, validates user-provided settings, persists them through activity_tracker.update_settings, and returns computed state. The feature declares no tests, and repository search found no tests exercising /api/client/settings or this handler, leaving validation bounds, omitted-field patch semantics, persistence, response shape, and auth behavior unguarded.",
+  "reproduction": null,
+  "recommendation": "Add focused FastAPI tests for PUT /api/client/settings covering valid partial updates, 422 validation for auto_disable_after_days outside 1-365, preservation of omitted fields, response fields including days_until_auto_disable, and unauthorized access when auth is configured.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature metadata lists an empty tests array, and existing tests cover other config/client-config endpoints but not app/api/client.py's settings route.",
+  "suggestedRegressionTest": "Create tests/test_client_settings.py with TestClient cases for PUT /api/client/settings using valid payloads, invalid day bounds, and configured API_KEY auth headers.",
+  "minimumFixScope": "Add a small test module that resets ClientSettings state between cases and exercises only the /api/client/settings route.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-5cf862574b_2a2ab924cb",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:18:29.644Z",
+  "updatedAt": "2026-05-18T12:18:29.644Z"
+}

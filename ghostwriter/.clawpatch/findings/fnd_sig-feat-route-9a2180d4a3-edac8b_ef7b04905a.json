@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-9a2180d4a3-edac8b_ef7b04905a",
+  "featureId": "feat_route_9a2180d4a3",
+  "title": "Wallabag preview can be driven to arbitrary server-side URLs",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 782,
+      "endLine": 785,
+      "symbol": "update_wallabag_config",
+      "quote": "setattr(config, field_name, value)"
+    },
+    {
+      "path": "app/api/config.py",
+      "startLine": 794,
+      "endLine": 799,
+      "symbol": "update_wallabag_config",
+      "quote": "Wallabag URL must start with http:// or https://"
+    },
+    {
+      "path": "app/api/config.py",
+      "startLine": 850,
+      "endLine": 855,
+      "symbol": "preview_wallabag",
+      "quote": "articles = await service.fetch_unread_articles()"
+    }
+  ],
+  "reasoning": "The same API surface lets an API-authenticated caller store any http(s) Wallabag URL and then make the backend connect to it during preview. There is no host allowlist, private-address guard, explicit opt-in for private hosts, or stronger admin-only authorization visible on this route. In deployments where API tokens are used by clients rather than only a fully trusted admin, this is an SSRF path to internal services.",
+  "reproduction": "Use the Wallabag config update route to set url to an internal http(s) endpoint, then POST /wallabag/preview; the backend will attempt the Wallabag token/fetch flow against that configured host.",
+  "recommendation": "Centralize Wallabag URL validation before persistence or before outbound requests. Reject loopback, link-local, RFC1918, and metadata IP ranges by default, or require an explicit trusted/private-host setting plus admin-only authorization for changing and previewing these URLs.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for this feature, and the test search did not find direct /wallabag/preview coverage or URL rejection cases.",
+  "suggestedRegressionTest": "Add an API test that stores a private or loopback Wallabag URL and asserts POST /wallabag/preview rejects it without invoking the outbound Wallabag client, plus a positive case for an allowed public/explicitly trusted host.",
+  "minimumFixScope": "app/api/config.py URL validation and, preferably, a shared outbound URL safety helper used by WallabagService callers.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-9a2180d4a3_edac8b7bee",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:22:14.224Z",
+  "updatedAt": "2026-05-18T12:22:14.224Z"
+}

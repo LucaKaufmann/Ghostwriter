@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_65c0aa97a8",
+  "title": "FastAPI route GET /{filename}",
+  "summary": "FastAPI route GET /{filename} handled by download_log_file in app/api/logs.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/logs.py",
+      "symbol": "download_log_file",
+      "route": "GET /{filename}",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/logs.py",
+      "reason": "FastAPI route handler download_log_file"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-65c0aa97a8-6d2fed_2a18b442b0"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:17:53.108Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:17:53.108Z"
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-af1ce5d4e9-cb0752_a49053ff43",
+  "featureId": "feat_route_af1ce5d4e9",
+  "title": "DELETE commits the episode removal before confirming audio deletion succeeded",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 615,
+      "endLine": 624,
+      "symbol": "delete_podcast_episode",
+      "quote": "session.delete(episode)\nsession.commit()\nif audio_path is not None:\n    try:\n        os.remove(audio_path)\n    except OSError as exc:\n        raise HTTPException(\n            status_code=500,\n            detail=f\"Failed to delete audio file: {exc}\",\n        ) from exc"
+    }
+  ],
+  "reasoning": "If os.remove raises, the API returns 500 even though the database row has already been permanently deleted. A retry then sees 404, and the audio file is left orphaned with no episode record to clean it up. This makes the operation non-atomic and gives clients a failure response for a partially completed delete.",
+  "reproduction": "Create a ready PodcastEpisode whose audio_path points to a file under the podcast output directory, make that file removal fail (for example by monkeypatching os.remove to raise OSError), then call DELETE /api/podcast/episodes/{episode_id}. The response is 500, session.get(PodcastEpisode, episode_id) returns None, and the file still exists.",
+  "recommendation": "Attempt artifact deletion before committing the episode delete, or make the operation explicitly best-effort by not returning 500 after the DB delete has committed and by scheduling/logging cleanup for failed artifact deletion. Keep DB and filesystem outcomes consistent from the client's perspective.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature metadata lists no linked tests. Existing podcast API tests cover stream/download and feed behavior, but there is no DELETE episode test for successful artifact cleanup or filesystem deletion failure.",
+  "suggestedRegressionTest": "Add a DELETE episode test that monkeypatches os.remove to raise OSError and asserts the episode remains in the database when the request fails, or, if cleanup is best-effort by design, asserts the endpoint returns success and records/logs the cleanup failure without leaving clients with an unretryable 500.",
+  "minimumFixScope": "Update delete_podcast_episode in app/api/podcast.py and add focused tests for ready episode deletion with audio cleanup failure.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-af1ce5d4e9_cb07529376",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:24:34.925Z",
+  "updatedAt": "2026-05-18T12:24:34.925Z"
+}

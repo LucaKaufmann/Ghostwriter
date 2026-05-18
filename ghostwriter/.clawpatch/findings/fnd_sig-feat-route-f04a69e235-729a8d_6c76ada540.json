@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-f04a69e235-729a8d_6c76ada540",
+  "featureId": "feat_route_f04a69e235",
+  "title": "GET /changes behavior is untested",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 3,
+      "endLine": 44,
+      "symbol": null,
+      "quote": "def test_list_feeds_empty(client):"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 74,
+      "endLine": 124,
+      "symbol": "get_feed_changes",
+      "quote": "@router.get(\"/changes\", response_model=FeedChangesResponse, dependencies=[Depends(verify_api_key)])"
+    }
+  ],
+  "reasoning": "The associated feed endpoint tests only cover listing feeds, creating a feed, and POST /sync. They do not exercise GET /changes at all, even though the route has distinct initial sync, incremental update, tombstone, ordering, and response cursor behavior.",
+  "reproduction": null,
+  "recommendation": "Add direct tests for GET /api/feeds/changes covering initial sync, incremental changes after a since timestamp, tombstones for deleted feeds, exclusion of deleted feeds from feeds, and response server_timestamp handling.",
+  "whyTestsDoNotAlreadyCoverThis": "The current tests never request /api/feeds/changes or assert FeedChangesResponse fields.",
+  "suggestedRegressionTest": "Create feeds with controlled updated_at/deleted_at values, call GET /api/feeds/changes with and without since, and assert feeds, tombstones, and server_timestamp semantics.",
+  "minimumFixScope": "tests/test_feeds.py coverage for get_feed_changes.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-f04a69e235_729a8da376",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:28:41.548Z",
+  "updatedAt": "2026-05-18T12:28:41.548Z"
+}

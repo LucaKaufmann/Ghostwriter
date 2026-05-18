@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_ac23a1b2ca",
+  "title": "FastAPI route GET /{digest_id}/status",
+  "summary": "FastAPI route GET /{digest_id}/status handled by get_digest_status in app/api/digests.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/digests.py",
+      "symbol": "get_digest_status",
+      "route": "GET /{digest_id}/status",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/digests.py",
+      "reason": "FastAPI route handler get_digest_status"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-ac23a1b2ca-83ece8_1fa43ae232"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:23:31.206Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:23:31.206Z"
+}

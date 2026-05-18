@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.core.config import Settings
 from app.services.media_processor import MediaProcessor, MediaResult
 from app.services.youtube_service import YouTubeResult
 
@@ -74,7 +75,9 @@ async def test_process_youtube_url(processor):
 @pytest.mark.asyncio
 async def test_process_audio_enclosure(processor):
     """Audio enclosure URL is routed to download+transcribe."""
-    mock_result = MediaResult(text="podcast text", source="podcast_audio", is_media=True)
+    mock_result = MediaResult(
+        text="podcast text", source="podcast_audio", is_media=True
+    )
 
     with patch.object(processor, "_process_audio", return_value=mock_result):
         result = await processor.process(
@@ -112,3 +115,132 @@ async def test_process_youtube_with_audio_enclosure(processor):
 
     assert result.is_media is True
     assert result.source == "youtube_captions"
+
+
+@pytest.mark.asyncio
+async def test_process_audio_blocks_private_enclosure_before_http(monkeypatch):
+    """Private enclosure URLs are rejected before opening an HTTP stream."""
+
+    def _unexpected_client(*_args, **_kwargs):
+        raise AssertionError("HTTP client should not be opened")
+
+    monkeypatch.setattr(
+        "app.services.media_processor.httpx.AsyncClient",
+        _unexpected_client,
+    )
+    processor = MediaProcessor(Settings(allow_private_hosts=False))
+
+    result = await processor._process_audio(
+        "http://127.0.0.1/audio.mp3",
+        whisper_provider="local",
+        whisper_model="base.en",
+    )
+
+    assert result.is_media is True
+    assert result.source == "podcast_audio"
+    assert result.error is not None
+    assert result.error.startswith("Audio download blocked:")
+
+
+@pytest.mark.asyncio
+async def test_process_audio_blocks_private_redirect_target(monkeypatch):
+    """Redirect targets are validated before following the redirect."""
+    requested_urls: list[str] = []
+
+    class _FakeResponse:
+        status_code = 302
+        headers = {"location": "http://127.0.0.1/secret.mp3"}
+        url = "http://93.184.216.34/audio.mp3"
+
+    class _FakeStream:
+        async def __aenter__(self):
+            return _FakeResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeAsyncClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            return
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, _method: str, url: str):
+            requested_urls.append(url)
+            return _FakeStream()
+
+    monkeypatch.setattr(
+        "app.services.media_processor.httpx.AsyncClient",
+        _FakeAsyncClient,
+    )
+    processor = MediaProcessor(Settings(allow_private_hosts=False))
+
+    result = await processor._process_audio(
+        "http://93.184.216.34/audio.mp3",
+        whisper_provider="local",
+        whisper_model="base.en",
+    )
+
+    assert result.error is not None
+    assert result.error.startswith("Audio download blocked:")
+    assert requested_urls == ["http://93.184.216.34/audio.mp3"]
+
+
+@pytest.mark.asyncio
+async def test_process_audio_aborts_when_stream_exceeds_size_cap(monkeypatch):
+    """Streaming downloads stop once the byte cap is exceeded."""
+
+    class _FakeResponse:
+        status_code = 200
+        headers: dict[str, str] = {}
+        url = "https://media.example.com/audio.mp3"
+
+        async def aiter_bytes(self, chunk_size: int = 65536):
+            yield b"1234"
+            yield b"5678"
+
+    class _FakeStream:
+        async def __aenter__(self):
+            return _FakeResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeAsyncClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            return
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, _method: str, _url: str):
+            return _FakeStream()
+
+    async def _unexpected_subprocess(*_args, **_kwargs):
+        raise AssertionError("ffmpeg should not run after oversized download")
+
+    monkeypatch.setattr("app.services.media_processor.MAX_AUDIO_DOWNLOAD_BYTES", 6)
+    monkeypatch.setattr(
+        "app.services.media_processor.httpx.AsyncClient",
+        _FakeAsyncClient,
+    )
+    monkeypatch.setattr(
+        "app.services.media_processor.asyncio.create_subprocess_exec",
+        _unexpected_subprocess,
+    )
+    processor = MediaProcessor(Settings(allow_private_hosts=True))
+
+    result = await processor._process_audio(
+        "https://media.example.com/audio.mp3",
+        whisper_provider="local",
+        whisper_model="base.en",
+    )
+
+    assert result.error == "Audio download failed: file too large"

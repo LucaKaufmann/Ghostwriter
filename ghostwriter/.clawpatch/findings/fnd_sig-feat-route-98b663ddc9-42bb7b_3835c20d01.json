@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-98b663ddc9-42bb7b_3835c20d01",
+  "featureId": "feat_route_98b663ddc9",
+  "title": "Retrying an episode can reset a different episode with the same digest",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 528,
+      "endLine": 545,
+      "symbol": "retry_podcast_episode",
+      "quote": "episode = session.get(PodcastEpisode, episode_id)\n...\nfirst_digest_id = UUID(digest_ids[0])\nretried = podcast_service.queue_episode_generation(\n    session,\n    digest_id=first_digest_id,\n    user_id=episode.user_id,\n    force=True,\n)"
+    }
+  ],
+  "reasoning": "The route is addressed by episode_id and validates that specific row is failed, but then retries by the first digest ID instead of by the loaded episode. The service lookup for queue_episode_generation is digest-based and chooses the newest episode containing that digest, so if more than one episode contains the same digest, POST /podcast/episodes/{old_failed_id}/retry can reset and return a different episode while leaving the requested failed episode unchanged. This breaks the route contract and can corrupt another episode's generation state.",
+  "reproduction": "Create a failed PodcastEpisode for digest D, then create a newer PodcastEpisode whose digest_ids also contains D. POST /api/podcast/episodes/{failed_episode_id}/retry. The handler passes D to queue_episode_generation(force=True), which can select the newer digest-matching episode and reset it instead of the requested failed episode.",
+  "recommendation": "Retry by episode identity. Add a service method that accepts episode_id or the loaded PodcastEpisode, resets that exact row, commits it, schedules its task, and returns it. Do not re-select by digest for this route.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_podcast_api.py only covers a single failed episode for the digest, so the digest-based re-selection returns the same row and hides the bug.",
+  "suggestedRegressionTest": "Add an API test with two episodes sharing the same digest_id where the requested failed episode is older than another episode; assert the retry response episode_id equals the requested failed id, that requested row becomes pending, and that the other row is unchanged.",
+  "minimumFixScope": "app/api/podcast.py and the minimal podcast_service helper needed to reset/schedule an exact episode by id.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-98b663ddc9_42bb7bc1fc",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:21:32.610Z",
+  "updatedAt": "2026-05-18T12:21:32.610Z"
+}

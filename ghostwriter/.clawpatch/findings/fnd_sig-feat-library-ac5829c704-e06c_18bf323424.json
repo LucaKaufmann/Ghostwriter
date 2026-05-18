@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-ac5829c704-e06c_18bf323424",
+  "featureId": "feat_library_ac5829c704",
+  "title": "Newsletter DigestArticle records discard summary metadata",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 493,
+      "endLine": 520,
+      "symbol": "BinderyPipeline.run",
+      "quote": "if newsletter_articles and newsletter_mode == \"summarize\":\n...\nresult = ExtractedArticle(\n...\nis_summary=True,\n                                ai_failed=False,"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 872,
+      "endLine": 886,
+      "symbol": "_save_newsletter_article_records",
+      "quote": "record = DigestArticle(\n                    digest_id=self.digest_id,\n                    feed_id=self._get_synthetic_feed_id(\"newsletter\"),\n                    title=article.title,\n                    url=article.url,\n                    mode=\"raw\",\n                    word_count=article.word_count,\n                    ai_failed=False,"
+    }
+  ],
+  "reasoning": "Newsletter articles can be summarized and represented as ExtractedArticle(is_summary=True), but _save_newsletter_article_records always persists mode=\"raw\" and ai_failed=False. The EPUB receives the summarized content, while the persisted DigestArticle audit/client-sync metadata says it is raw, creating inconsistent API data for the same article.",
+  "reproduction": null,
+  "recommendation": "Persist newsletter mode and ai_failed from the ExtractedArticle, matching the RSS and media save paths: mode should be summarized when article.is_summary is true, and ai_failed should use article.ai_failed.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests verify DigestArticle fields for summarized newsletter content.",
+  "suggestedRegressionTest": "Run newsletter enrichment with newsletter_mode=\"summarize\" and a successful LLM summary, then assert the saved DigestArticle has mode=\"summarized\" and ai_failed=false.",
+  "minimumFixScope": "_save_newsletter_article_records field mapping.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-ac5829c704_e06c46a1b2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:05.272Z",
+  "updatedAt": "2026-05-18T12:10:05.272Z"
+}

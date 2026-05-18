@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-bcc63a99f3-b9da2d_6c02f35f1c",
+  "featureId": "feat_route_bcc63a99f3",
+  "title": "ID-based download path is not constrained to the output directory",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/digests.py",
+      "startLine": 593,
+      "endLine": 608,
+      "symbol": "download_digest_by_id",
+      "quote": "file_path = os.path.join(settings.output_dir, target_filename)"
+    },
+    {
+      "path": "app/api/digests.py",
+      "startLine": 641,
+      "endLine": 645,
+      "symbol": "download_digest_by_id",
+      "quote": "return FileResponse("
+    },
+    {
+      "path": "app/api/digests.py",
+      "startLine": 660,
+      "endLine": 664,
+      "symbol": "download_digest",
+      "quote": "if \"..\" in filename or \"/\" in filename or \"\\\\\" in filename:"
+    }
+  ],
+  "reasoning": "The filename-based download route explicitly rejects traversal characters before joining with output_dir, but the ID-based route trusts Digest.filename and passes the joined path to FileResponse. If a digest row ever contains an absolute path or traversal segment, os.path.join can escape output_dir and the authenticated download endpoint will serve that file; the PDF branch also derives and writes a path from the same unchecked value. The filename is stored data rather than a direct query parameter, so exploitability depends on whether malformed rows can be introduced by migrations, imports, future generation changes, or database compromise, hence medium confidence.",
+  "reproduction": "Create a completed Digest row whose filename is an absolute readable file path or contains ../ traversal, then request GET /api/digests/{id}/download?format=epub. The route will build and serve that path instead of rejecting it as the filename route does.",
+  "recommendation": "Normalize and validate digest.filename before any path join in download_digest_by_id. Resolve the final path and require it to remain under settings.output_dir; reject absolute paths, traversal, and unexpected extensions for the requested format.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing download tests use UUID.epub filenames and only assert happy-path EPUB/PDF behavior. They do not seed a malformed stored filename or compare validation parity with the filename-based route.",
+  "suggestedRegressionTest": "Add tests that create completed digest rows with ../evil.epub and an absolute filename and assert GET /api/digests/{id}/download returns 400 without serving or generating any file outside OUTPUT_DIR.",
+  "minimumFixScope": "Add shared safe filename/path resolution for digest downloads and use it in both the EPUB and PDF branches of download_digest_by_id.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-bcc63a99f3_b9da2d610b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:26:28.365Z",
+  "updatedAt": "2026-05-18T12:26:28.365Z"
+}

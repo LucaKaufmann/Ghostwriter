@@ -7,18 +7,31 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass
+from urllib.parse import urljoin
 
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.core.net import validate_public_url
 from app.services.transcription_service import TranscriptionService
 from app.services.youtube_service import YouTubeService
 
 logger = logging.getLogger(__name__)
 
-_AUDIO_EXTENSIONS = frozenset({
-    ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".flac", ".aac", ".wma",
-})
+_AUDIO_EXTENSIONS = frozenset(
+    {
+        ".mp3",
+        ".m4a",
+        ".ogg",
+        ".opus",
+        ".wav",
+        ".flac",
+        ".aac",
+        ".wma",
+    }
+)
+MAX_AUDIO_DOWNLOAD_BYTES = 500_000_000
+MAX_AUDIO_REDIRECTS = 10
 
 
 @dataclass
@@ -126,31 +139,101 @@ class MediaProcessor:
             # Download the audio file
             download_path = os.path.join(tmpdir, "audio_download")
             try:
+                validate_public_url(audio_url, self.settings)
                 async with httpx.AsyncClient(
-                    follow_redirects=True, timeout=120
+                    follow_redirects=False, timeout=120
                 ) as client:
-                    async with client.stream("GET", audio_url) as response:
-                        if response.status_code != 200:
-                            return MediaResult(
-                                text="", source="podcast_audio", is_media=True,
-                                error=f"Audio download failed: HTTP {response.status_code}",
-                            )
-                        with open(download_path, "wb") as f:
-                            async for chunk in response.aiter_bytes(chunk_size=65536):
-                                f.write(chunk)
+                    current_url = audio_url
+                    for _ in range(MAX_AUDIO_REDIRECTS + 1):
+                        validate_public_url(current_url, self.settings)
+                        async with client.stream("GET", current_url) as response:
+                            if response.status_code in {301, 302, 303, 307, 308}:
+                                location = response.headers.get("location")
+                                if not location:
+                                    return MediaResult(
+                                        text="",
+                                        source="podcast_audio",
+                                        is_media=True,
+                                        error="Audio download failed: redirect without Location",
+                                    )
+                                current_url = urljoin(str(response.url), location)
+                                validate_public_url(current_url, self.settings)
+                                continue
+
+                            if response.status_code != 200:
+                                return MediaResult(
+                                    text="",
+                                    source="podcast_audio",
+                                    is_media=True,
+                                    error=f"Audio download failed: HTTP {response.status_code}",
+                                )
+
+                            content_length = response.headers.get("content-length")
+                            if content_length is not None:
+                                try:
+                                    if int(content_length) > MAX_AUDIO_DOWNLOAD_BYTES:
+                                        return MediaResult(
+                                            text="",
+                                            source="podcast_audio",
+                                            is_media=True,
+                                            error="Audio download failed: file too large",
+                                        )
+                                except ValueError:
+                                    pass
+
+                            bytes_written = 0
+                            with open(download_path, "wb") as f:
+                                async for chunk in response.aiter_bytes(
+                                    chunk_size=65536
+                                ):
+                                    bytes_written += len(chunk)
+                                    if bytes_written > MAX_AUDIO_DOWNLOAD_BYTES:
+                                        return MediaResult(
+                                            text="",
+                                            source="podcast_audio",
+                                            is_media=True,
+                                            error="Audio download failed: file too large",
+                                        )
+                                    f.write(chunk)
+                            break
+                    else:
+                        return MediaResult(
+                            text="",
+                            source="podcast_audio",
+                            is_media=True,
+                            error="Audio download failed: too many redirects",
+                        )
+            except ValueError as e:
+                return MediaResult(
+                    text="",
+                    source="podcast_audio",
+                    is_media=True,
+                    error=f"Audio download blocked: {e}",
+                )
             except Exception as e:
                 return MediaResult(
-                    text="", source="podcast_audio", is_media=True,
+                    text="",
+                    source="podcast_audio",
+                    is_media=True,
                     error=f"Audio download failed: {e!r}",
                 )
 
             # Convert to WAV with ffmpeg
             wav_path = os.path.join(tmpdir, "audio.wav")
             cmd = [
-                "ffmpeg", "-i", download_path,
-                "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+                "ffmpeg",
+                "-i",
+                download_path,
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-c:a",
+                "pcm_s16le",
                 wav_path,
-                "-y", "-loglevel", "error",
+                "-y",
+                "-loglevel",
+                "error",
             ]
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -160,20 +243,24 @@ class MediaProcessor:
             _, stderr = await process.communicate()
             if process.returncode != 0:
                 return MediaResult(
-                    text="", source="podcast_audio", is_media=True,
+                    text="",
+                    source="podcast_audio",
+                    is_media=True,
                     error=f"ffmpeg conversion failed: {stderr.decode()[:300]}",
                 )
 
             # Transcribe
             result = await self.transcription_service.transcribe(
-                wav_path, provider=whisper_provider, whisper_model=whisper_model,
+                wav_path,
+                provider=whisper_provider,
+                whisper_model=whisper_model,
                 timeout_seconds=timeout_seconds,
             )
             if result.error:
                 return MediaResult(
-                    text="", source="podcast_audio", is_media=True,
+                    text="",
+                    source="podcast_audio",
+                    is_media=True,
                     error=result.error,
                 )
-            return MediaResult(
-                text=result.text, source="podcast_audio", is_media=True
-            )
+            return MediaResult(text=result.text, source="podcast_audio", is_media=True)

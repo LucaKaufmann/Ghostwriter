@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-0b039fb49a-de397f_a95f14bb65",
+  "featureId": "feat_route_0b039fb49a",
+  "title": "Masked client_secret can be saved back as the real Wallabag secret",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 749,
+      "endLine": 756,
+      "symbol": "_wallabag_config_to_read",
+      "quote": "client_secret=PASSWORD_MASK if config.client_secret else \"\""
+    },
+    {
+      "path": "app/api/config.py",
+      "startLine": 782,
+      "endLine": 789,
+      "symbol": "update_wallabag_config",
+      "quote": "for field_name in [\"url\", \"client_id\", \"client_secret\", \"username\", \"mode\", \"tag_on_process\"]:"
+    }
+  ],
+  "reasoning": "GET /wallabag returns PASSWORD_MASK for an existing client_secret, but the update path only treats that sentinel specially for password. If a settings client loads the GET response and submits an unchanged form containing the masked client_secret, the PUT handler writes the mask into config.client_secret, destroying the real OAuth secret and breaking the integration.",
+  "reproduction": "Configure Wallabag with a non-empty client_secret, call GET /wallabag, then submit the returned client_secret value unchanged to PUT /wallabag. The persisted client_secret becomes the mask string instead of the original secret.",
+  "recommendation": "Handle client_secret the same way password is handled: skip updating it when the submitted value equals PASSWORD_MASK, and only clear/update it for explicit empty or real values.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests exercise GET /wallabag masking or a GET-then-PUT unchanged-secret round trip; the existing matches found are unrelated digest/EPUB tests and cover-secret tests.",
+  "suggestedRegressionTest": "Add an API test that creates a WallabagConfig with client_secret and password, verifies GET /wallabag masks both fields, then PUTs the returned payload unchanged and asserts the stored client_secret and password remain the original values.",
+  "minimumFixScope": "Change update_wallabag_config handling for client_secret in app/api/config.py and add a focused route-level regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-0b039fb49a_de397f179c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:11:10.958Z",
+  "updatedAt": "2026-05-18T12:11:10.958Z"
+}

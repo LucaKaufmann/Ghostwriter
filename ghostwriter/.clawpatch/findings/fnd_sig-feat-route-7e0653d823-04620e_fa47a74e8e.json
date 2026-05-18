@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-7e0653d823-04620e_fa47a74e8e",
+  "featureId": "feat_route_7e0653d823",
+  "title": "Wallabag credential changes do not invalidate the cached OAuth token",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 801,
+      "endLine": 807,
+      "symbol": "update_wallabag_config",
+      "quote": "session.commit()\n    session.refresh(config)\n\n    logger.info(\"Updated Wallabag configuration\")\n    return _wallabag_config_to_read(config)"
+    },
+    {
+      "path": "app/services/wallabag_service.py",
+      "startLine": 45,
+      "endLine": 46,
+      "symbol": "WallabagService",
+      "quote": "_cached_token: str | None = None\n    _cached_token_expires_at: float = 0"
+    },
+    {
+      "path": "app/services/wallabag_service.py",
+      "startLine": 88,
+      "endLine": 91,
+      "symbol": "WallabagService._ensure_token",
+      "quote": "if WallabagService._cached_token and time.time() < WallabagService._cached_token_expires_at - 60:\n            return WallabagService._cached_token"
+    }
+  ],
+  "reasoning": "The PUT route commits new Wallabag credentials but returns without clearing WallabagService's process-wide cached token. Because _ensure_token returns the cached bearer token before checking the current settings, subsequent test or preview operations can continue using a token minted for the previous URL/user until expiry. On the same Wallabag server, changing accounts can temporarily fetch the previous account's unread articles; at minimum, the test endpoint can report success without validating the new credentials.",
+  "reproduction": "Authenticate Wallabag once so WallabagService._cached_token is populated, update /wallabag to different credentials, then call /wallabag/test before token expiry. _ensure_token returns the old cached token instead of requesting a token with the new config.",
+  "recommendation": "After a successful Wallabag config update that changes url, client_id, client_secret, username, or password, clear the cached token and expiry or move token caching behind a key derived from the active credential set.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests cover token cache behavior across PUT /wallabag updates or the /wallabag/test interaction after a config change.",
+  "suggestedRegressionTest": "Add a unit/API test that pre-populates WallabagService._cached_token, updates Wallabag credentials through the route, and asserts the cache is cleared or that the next token request uses the new credentials.",
+  "minimumFixScope": "Add cache invalidation to update_wallabag_config and cover it with one focused regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-7e0653d823_04620ea1d8",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:20:05.492Z",
+  "updatedAt": "2026-05-18T12:20:05.492Z"
+}

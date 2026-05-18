@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-a3da278c64-e9fb_eb31f4f074",
+  "featureId": "feat_library_a3da278c64",
+  "title": "Existing databases without alembic_version are stamped as migrated without applying migrations",
+  "category": "data-loss",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "alembic/env.py",
+      "startLine": 83,
+      "endLine": 101,
+      "symbol": "run_migrations_online",
+      "quote": "if \"alembic_version\" not in insp.get_table_names():\n            target_metadata.create_all(connection)\n            ...\n            connection.execute(\n                sa.text(\"INSERT INTO alembic_version (version_num) VALUES (:v)\"),\n                {\"v\": head},\n            )\n            connection.commit()\n            return"
+    }
+  ],
+  "reasoning": "The fresh-database shortcut treats absence of alembic_version as proof that the database is empty. That is not equivalent: an existing pre-Alembic or partially initialized SQLite database can contain application tables but no alembic_version table. In that case create_all() will not add missing columns to existing tables, the code stamps the database at head, and then returns before running migrations. The deployment will believe the schema is current while required migration changes are absent, causing runtime failures and potentially preventing later automatic repair because the version table says head.",
+  "reproduction": "Create a SQLite database with one or more existing Ghostwriter tables but no alembic_version table, with a schema older than the current SQLModel metadata. Run `alembic upgrade head`. The branch at lines 83-101 stamps the database to head and skips all migration scripts; missing columns remain missing.",
+  "recommendation": "Only use the create_all-and-stamp shortcut when the database is genuinely empty, for example when no application tables exist. If application tables exist without alembic_version, create the version table at the appropriate base revision and run idempotent migrations, or fail with an explicit recovery message instead of stamping head.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests are included for Alembic bootstrap behavior, and there is no evidence of a test that exercises an existing database with application tables but no alembic_version table.",
+  "suggestedRegressionTest": "Add an Alembic integration test that creates an older SQLite schema with at least one existing app table and no alembic_version table, runs the online migration path, and asserts required migrated columns/indexes exist and alembic_version is not stamped without applying migrations.",
+  "minimumFixScope": "Update the fresh-database detection in `run_migrations_online()` and add a migration/bootstrap test for the existing-unversioned database path.",
+  "status": "uncertain",
+  "history": [],
+  "signature": "sig_feat-library-a3da278c64_e9fb8ee24a",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-a3da278c64-_c4c8b7a8ef"
+  ],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:08:19.009Z",
+  "updatedAt": "2026-05-18T12:59:20.582Z"
+}

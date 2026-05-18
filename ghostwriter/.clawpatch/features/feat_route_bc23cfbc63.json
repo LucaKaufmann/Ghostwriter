@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_bc23cfbc63",
+  "title": "FastAPI route GET ",
+  "summary": "FastAPI route GET  handled by list_feeds in app/api/feeds.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/feeds.py",
+      "symbol": "list_feeds",
+      "route": "GET ",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/feeds.py",
+      "reason": "FastAPI route handler list_feeds"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "tests/test_feeds.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_feeds.py",
+      "command": "hatch run pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-bc23cfbc63-0b3682_1ac836d6b7"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:25:24.188Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:25:24.188Z"
+}

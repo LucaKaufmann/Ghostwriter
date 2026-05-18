@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-02c5899d54-575444_becc5645be",
+  "featureId": "feat_route_02c5899d54",
+  "title": "Internal exception messages are returned to authenticated clients",
+  "category": "security",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 456,
+      "endLine": 459,
+      "symbol": "generate_podcast_now",
+      "quote": "raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc"
+    }
+  ],
+  "reasoning": "The route catches every exception from generation and exposes the raw exception text in the HTTP response. Generation touches database state and provider/task setup, so exception messages can disclose filesystem paths, SQL details, configuration values, or upstream error text. Even behind API-key auth, 500 responses should be generic and detailed diagnostics should go to logs.",
+  "reproduction": "Force podcast_service.generate_scheduled_episode to raise RuntimeError(\"sensitive path /secret/config\"), then POST /api/podcast/episodes/generate; the response body includes that message.",
+  "recommendation": "Log the exception with exc_info and return a generic error detail such as \"Podcast generation failed\". Map known expected failures to explicit 4xx/503 responses without reflecting raw exception strings.",
+  "whyTestsDoNotAlreadyCoverThis": "There is no direct test for /podcast/episodes/generate error handling, and existing tests do not assert that internal exception text is hidden from responses.",
+  "suggestedRegressionTest": "Monkeypatch generate_scheduled_episode to raise an exception containing a sentinel secret, POST /podcast/episodes/generate, assert status 500, and assert the sentinel is absent from response.json()[\"detail\"].",
+  "minimumFixScope": "Change the exception handler in generate_podcast_now and add a focused API regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-02c5899d54_5754448cff",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:29.663Z",
+  "updatedAt": "2026-05-18T12:10:29.663Z"
+}

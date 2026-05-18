@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_377f4c8e41",
+  "title": "Python source app/models#1",
+  "summary": "Python source group app/models#1 with 12 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/models#1",
+      "symbol": "app/models#1",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/models/__init__.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/api_token.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/article_feedback.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/client_config.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/client_settings.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/digest.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/feed.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/manual_cover.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/media_feed.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/media_item.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/media_processing_run.py",
+      "reason": "source group app/models#1"
+    },
+    {
+      "path": "app/models/podcast_episode.py",
+      "reason": "source group app/models#1"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-377f4c8e41-45f5_81cd59d70d",
+    "fnd_sig-feat-library-377f4c8e41-2822_7514f6c5d8",
+    "fnd_sig-feat-library-377f4c8e41-8df0_2ad0b802f5",
+    "fnd_sig-feat-library-377f4c8e41-26ec_c14ae876f8"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "4 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:07:49.972Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:07:49.972Z"
+}

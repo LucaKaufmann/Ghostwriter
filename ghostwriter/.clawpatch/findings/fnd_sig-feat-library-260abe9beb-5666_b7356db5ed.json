@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-260abe9beb-5666_b7356db5ed",
+  "featureId": "feat_library_260abe9beb",
+  "title": "Migration 007 skips required indexes when media tables already exist",
+  "category": "data-loss",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "alembic/versions/007_add_media_feeds_and_items.py",
+      "startLine": 63,
+      "endLine": 80,
+      "symbol": "upgrade",
+      "quote": "if not _table_exists(\"media_feeds\"):"
+    },
+    {
+      "path": "alembic/versions/007_add_media_feeds_and_items.py",
+      "startLine": 83,
+      "endLine": 113,
+      "symbol": "upgrade",
+      "quote": "if not _table_exists(\"media_items\"):"
+    }
+  ],
+  "reasoning": "The migration has idempotent index-existence checks, but those checks are nested inside the table-creation branches. If media_feeds or media_items already exists without one of these indexes, for example after a partial/manual migration, revision 007 does not create the missing indexes. The media_feeds URL uniqueness constraint is especially important because missing it allows duplicate feed rows that the intended schema would reject.",
+  "reproduction": "Create media_feeds without ix_media_feeds_url, set the database before revision 007, then run the migration. Because media_feeds already exists, the unique URL index is never created.",
+  "recommendation": "Move index creation outside the table-existence blocks so each index is created whenever it is missing, regardless of whether the table was created in this migration run.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked migration tests cover partially existing media tables or assert final indexes after revision 007.",
+  "suggestedRegressionTest": "Add a migration test with pre-existing media_feeds and media_items tables missing indexes, run revision 007, and assert ix_media_feeds_url, ix_media_items_feed_id, ix_media_items_guid, and ix_media_items_status exist.",
+  "minimumFixScope": "alembic/versions/007_add_media_feeds_and_items.py",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-260abe9beb_566612d7e5",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:23.097Z",
+  "updatedAt": "2026-05-18T12:07:23.097Z"
+}

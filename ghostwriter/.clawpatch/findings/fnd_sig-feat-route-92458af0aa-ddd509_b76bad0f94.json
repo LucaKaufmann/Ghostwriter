@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-92458af0aa-ddd509_b76bad0f94",
+  "featureId": "feat_route_92458af0aa",
+  "title": "DELETE reports success after losing the DB reference even if file removal fails",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 393,
+      "endLine": 402,
+      "symbol": "delete_manual_cover",
+      "quote": "session.delete(cover)\nsession.commit()\n\nif file_path.exists():\n    try:\n        file_path.unlink()\n    except Exception:\n        logger.exception(\"Failed to remove manual cover file: %s\", file_path)"
+    },
+    {
+      "path": "tests/test_health.py",
+      "startLine": 134,
+      "endLine": 139,
+      "symbol": "test_manual_cover_upload_activate_delete_flow",
+      "quote": "delete_active = client.delete(f\"/api/config/covers/{cover_two['id']}\")\nassert delete_active.status_code == 200\nremaining = delete_active.json()[\"covers\"]\nassert all(item[\"id\"] != cover_two[\"id\"] for item in remaining)\nmatching = [item for item in remaining if item[\"id\"] == cover_one[\"id\"]]\nassert matching and matching[0][\"is_active\"] is True"
+    }
+  ],
+  "reasoning": "The handler commits the database deletion before removing the uploaded cover file, then catches and only logs any unlink failure. If unlink fails, the API still returns 200 and the ManualCover row is gone, so the user cannot retry deletion through the API and the uploaded image remains orphaned on disk indefinitely.",
+  "reproduction": "Upload a cover, make the manual_covers directory non-writable for the app process, then call DELETE /api/config/covers/{id}. The route returns success, removes the database row, logs the unlink failure, and leaves the image file in data/manual_covers.",
+  "recommendation": "Treat file removal failure as a failed delete: attempt unlink before committing the row removal, and if unlink raises, roll back and return an error while preserving the DB row so the operation can be retried. Then perform active-cover reassignment only after the delete is fully successful.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked test verifies the response list and active reassignment only. It does not assert that the stored file was removed, and it does not simulate an unlink failure.",
+  "suggestedRegressionTest": "Add a test that uploads a cover, records the stored file path from the test database or manual_covers directory, deletes it through the route, and asserts the file no longer exists. Add a second test that monkeypatches Path.unlink to raise and asserts the route does not return success and the ManualCover row remains.",
+  "minimumFixScope": "Update delete_manual_cover in app/api/config.py and extend the manual cover delete tests in tests/test_health.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-92458af0aa_ddd509368f",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:20:55.022Z",
+  "updatedAt": "2026-05-18T12:20:55.022Z"
+}

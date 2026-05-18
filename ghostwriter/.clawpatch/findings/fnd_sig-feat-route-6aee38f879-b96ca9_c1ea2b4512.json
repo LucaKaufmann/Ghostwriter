@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-6aee38f879-b96ca9_c1ea2b4512",
+  "featureId": "feat_route_6aee38f879",
+  "title": "Article sync endpoint exposes non-completed digest contents",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/digests.py",
+      "startLine": 346,
+      "endLine": 360,
+      "symbol": "get_digest_articles",
+      "quote": "digest = session.get(Digest, digest_id)\nif not digest:\n    raise HTTPException(...)\n...\narticles = list(session.exec(statement).all())"
+    },
+    {
+      "path": "app/api/digests.py",
+      "startLine": 362,
+      "endLine": 379,
+      "symbol": "get_digest_articles",
+      "quote": "DigestArticleRead(... content=article.content, content_html=format_digest_content_to_html(article.content), ...)"
+    },
+    {
+      "path": "app/api/digests.py",
+      "startLine": 587,
+      "endLine": 591,
+      "symbol": "download_digest_by_id",
+      "quote": "if digest.status != \"completed\":\n    raise HTTPException(... detail=\"Digest is not completed yet\")"
+    }
+  ],
+  "reasoning": "The articles endpoint only verifies that the digest row exists, then returns full article content and rendered HTML. Unlike the download endpoint, it does not reject queued, processing, or failed digests. Because this route is documented as returning article content for client syncing, a client can sync partial or failed digest state if it has or guesses a digest ID before generation is complete. The confidence is medium because the route docstring does not explicitly say it is completed-only, but adjacent digest output paths enforce completed status before exposing final artifacts.",
+  "reproduction": "Create a Digest with status=\"processing\" and at least one DigestArticle for that digest, then call GET /api/digests/{digest_id}/articles with a valid API key. The route returns 200 with article content instead of a 409 conflict or similar non-ready response.",
+  "recommendation": "Add a completed-status guard in get_digest_articles after the digest existence check, matching download_digest_by_id semantics, or explicitly introduce a separate preview/debug route if partial article reads are intentional.",
+  "whyTestsDoNotAlreadyCoverThis": "The provided feature has no linked tests, and repository search found no direct tests for GET /api/digests/{digest_id}/articles or non-completed digest behavior.",
+  "suggestedRegressionTest": "Add a FastAPI test that creates a processing digest with one DigestArticle and asserts GET /api/digests/{digest_id}/articles returns 409 without article content; keep a completed-digest test asserting ordered article serialization still returns 200.",
+  "minimumFixScope": "app/api/digests.py:get_digest_articles plus a focused route test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-6aee38f879_b96ca92634",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:18:33.983Z",
+  "updatedAt": "2026-05-18T12:18:33.983Z"
+}

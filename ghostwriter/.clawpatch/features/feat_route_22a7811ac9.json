@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_22a7811ac9",
+  "title": "FastAPI route GET /youtube/items/all",
+  "summary": "FastAPI route GET /youtube/items/all handled by list_all_youtube_items in app/api/media.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/media.py",
+      "symbol": "list_all_youtube_items",
+      "route": "GET /youtube/items/all",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/media.py",
+      "reason": "FastAPI route handler list_all_youtube_items"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-22a7811ac9-8de6b6_39eb74d79a"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:12:30.078Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:12:30.078Z"
+}

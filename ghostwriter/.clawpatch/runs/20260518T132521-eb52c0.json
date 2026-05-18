@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260518T132521-eb52c0",
+  "command": "revalidate",
+  "args": [
+    "--root",
+    "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+    "revalidate",
+    "--all",
+    "--severity",
+    "high",
+    "--status",
+    "open",
+    "--no-input"
+  ],
+  "rootPath": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+  "headSha": "6289d49e7edc4af76630ab6729a9d0ebbac52e06",
+  "startedAt": "2026-05-18T13:25:22.035Z",
+  "finishedAt": "2026-05-18T13:30:02.562Z",
+  "status": "completed",
+  "claimedFeatureIds": [],
+  "findingIds": [
+    "fnd_sig-feat-library-2077975213-0afc_0226355c75",
+    "fnd_sig-feat-library-db316c1a7b-ac20_8486814a9f",
+    "fnd_sig-feat-test-suite-718a4099cb-6_451e64d5c6"
+  ],
+  "patchAttemptIds": [],
+  "errors": []
+}

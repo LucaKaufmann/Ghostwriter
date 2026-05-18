@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_35172d659a",
+  "title": "FastAPI route POST /youtube/resolve",
+  "summary": "FastAPI route POST /youtube/resolve handled by resolve_youtube_url in app/api/media.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/media.py",
+      "symbol": "resolve_youtube_url",
+      "route": "POST /youtube/resolve",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/media.py",
+      "reason": "FastAPI route handler resolve_youtube_url"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-35172d659a-76679d_d51d523817"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:13:13.133Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:13:13.133Z"
+}

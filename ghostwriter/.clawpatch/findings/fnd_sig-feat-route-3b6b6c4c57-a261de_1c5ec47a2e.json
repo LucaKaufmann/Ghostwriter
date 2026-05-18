@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-3b6b6c4c57-a261de_1c5ec47a2e",
+  "featureId": "feat_route_3b6b6c4c57",
+  "title": "Syncing a previously deleted feed leaves its tombstone in place",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 70,
+      "endLine": 71,
+      "symbol": "list_feeds",
+      "quote": "statement = select(Feed).where(Feed.deleted_at == None).order_by(Feed.title)"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 169,
+      "endLine": 181,
+      "symbol": "sync_feeds",
+      "quote": "feed.title = feed_data.title\n                feed.is_active = feed_data.is_active\n                feed.mode = feed_data.mode\n                feed.max_articles = feed_data.max_articles\n                feed.updated_at = datetime.utcnow()"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 293,
+      "endLine": 300,
+      "symbol": "create_feed",
+      "quote": "existing.deleted_at = None"
+    },
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 27,
+      "endLine": 44,
+      "symbol": "test_sync_feeds",
+      "quote": "assert data[\"synced\"] == 2"
+    }
+  ],
+  "reasoning": "POST /feeds/sync looks up every existing Feed by URL, including soft-deleted rows, then updates normal fields without clearing deleted_at. The endpoint can therefore report an updated feed while the feed remains tombstoned and excluded from normal feed listing and incremental active-feed sync. The create endpoint explicitly clears deleted_at when restoring the same URL, showing the intended invariant for resurrecting a soft-deleted feed is missing here.",
+  "reproduction": "Create a feed, delete it so deleted_at is set, then POST /api/feeds/sync with the same URL and is_active=true. The response reports the item as updated, but GET /api/feeds still excludes it because deleted_at remains non-null.",
+  "recommendation": "When sync receives a URL whose existing row is soft-deleted, either restore it by setting deleted_at = None and updated_at = now, or reject the request with a clear conflict if tombstones must win over client pushes.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing sync test only covers creating brand-new feeds and asserts the synced count; it never syncs a URL that already exists as a tombstoned row or checks visibility after sync.",
+  "suggestedRegressionTest": "Add a test that creates a feed, deletes it, POSTs the same URL to /api/feeds/sync, then asserts the feed is no longer tombstoned and appears in GET /api/feeds, or asserts the chosen conflict response if restoration is intentionally disallowed.",
+  "minimumFixScope": "Update sync_feeds handling for existing feeds with deleted_at set and add a tombstone-resync regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-3b6b6c4c57_a261de356b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:14:58.072Z",
+  "updatedAt": "2026-05-18T12:14:58.072Z"
+}

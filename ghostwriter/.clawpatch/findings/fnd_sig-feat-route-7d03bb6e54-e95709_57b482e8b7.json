@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-7d03bb6e54-e95709_57b482e8b7",
+  "featureId": "feat_route_7d03bb6e54",
+  "title": "416 range responses omit Content-Range length",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 180,
+      "endLine": 205,
+      "symbol": "_parse_range",
+      "quote": "raise HTTPException(status_code=416, detail=\"Requested range not satisfiable\")"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 653,
+      "endLine": 654,
+      "symbol": "stream_podcast_episode",
+      "quote": "requested_range = _parse_range(range_header, file_size)"
+    },
+    {
+      "path": "tests/test_podcast_api.py",
+      "startLine": 403,
+      "endLine": 409,
+      "symbol": "test_stream_download_and_feed_with_token_auth",
+      "quote": "assert stream.status_code == 206"
+    }
+  ],
+  "reasoning": "The stream route implements byte-range support, but unsatisfiable or invalid Range requests raise a bare 416 before response headers are assembled. A 416 response for a ranged media resource should include the current representation length via Content-Range, for example `bytes */36`, so podcast clients can recover from stale resume offsets. The existing test covers a valid 206 range only and would not catch the missing error header path.",
+  "reproduction": "Create a ready episode with a 36-byte MP3 and request `GET /api/podcast/episodes/{id}/stream` with `Range: bytes=999-` using valid auth or a valid feed token. The route returns 416 without `Content-Range: bytes */36`.",
+  "recommendation": "When `_parse_range` rejects an unsatisfiable range, raise `HTTPException` with `headers={\"Content-Range\": f\"bytes */{file_size}\", \"Accept-Ranges\": \"bytes\"}` or move range validation into the route so 416 responses carry the required media-range headers.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked podcast API test only asserts a successful `Range: bytes=0-9` response and does not exercise malformed or unsatisfiable Range requests.",
+  "suggestedRegressionTest": "Add a stream test for a ready episode that requests `Range: bytes=999-` and asserts status 416 plus `Content-Range: bytes */<file_size>`.",
+  "minimumFixScope": "Adjust `_parse_range`/`stream_podcast_episode` 416 handling and add one negative range test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-7d03bb6e54_e95709e086",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:19:52.835Z",
+  "updatedAt": "2026-05-18T12:19:52.835Z"
+}

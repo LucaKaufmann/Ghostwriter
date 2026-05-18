@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-a576033075-babcb2_da08444001",
+  "featureId": "feat_route_a576033075",
+  "title": "GET /latest has no direct route coverage",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/api/digests.py",
+      "startLine": 269,
+      "endLine": 292,
+      "symbol": "get_latest_digest",
+      "quote": "@router.get(\"/latest\", response_model=DigestRead, dependencies=[Depends(verify_api_key)])\nasync def get_latest_digest(\n    session: Session = Depends(get_session),\n) -> DigestRead:"
+    }
+  ],
+  "reasoning": "This route has user-visible behavior beyond simple serialization: API-key protection, completed-only filtering, latest ordering, PDF-format decoration through _pdf_enabled, and a 404 path. None of that is directly locked by a linked or discovered pytest test, so regressions in the endpoint contract can ship unnoticed.",
+  "reproduction": null,
+  "recommendation": "Add focused FastAPI client tests for /api/digests/latest covering auth, no completed digest, newest completed digest selection, exclusion of non-completed digests, and available_formats under PDF enabled/disabled config.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature metadata lists no tests, and an rg search of tests found no references to digests/latest, /latest, get_latest_digest, or No completed digests found.",
+  "suggestedRegressionTest": "Add tests/test_digests_latest.py with client calls for the 404 case and a mixed set of completed, processing, and failed digests, asserting the newest completed digest response matches DigestRead fields.",
+  "minimumFixScope": "Add a new focused pytest module or extend an existing digest API test module with /api/digests/latest cases.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-a576033075_babcb2653e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:23:36.965Z",
+  "updatedAt": "2026-05-18T12:23:36.965Z"
+}

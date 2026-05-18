@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-73774fad23-9499b4_e525269512",
+  "featureId": "feat_route_73774fad23",
+  "title": "POST callback requires redirect_uri but never uses it",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/newsletters.py",
+      "startLine": 32,
+      "endLine": 38,
+      "symbol": "OAuthCallbackRequest",
+      "quote": "class OAuthCallbackRequest(BaseModel):\n    \"\"\"OAuth callback request body.\"\"\"\n\n    code: str\n    redirect_uri: str\n    state: str"
+    },
+    {
+      "path": "app/api/newsletters.py",
+      "startLine": 191,
+      "endLine": 208,
+      "symbol": "oauth_callback_post",
+      "quote": "@router.post(\"/oauth/callback\")\nasync def oauth_callback_post(\n    body: OAuthCallbackRequest,\n    settings: Settings = Depends(get_settings),\n    _: None = Depends(verify_api_key),\n) -> dict:\n    \"\"\"Exchange OAuth authorization code for tokens (for manual flow).\"\"\"\n    service = NewsletterService(settings)\n    try:\n        await service.exchange_code_with_callback(body.code, body.state)"
+    }
+  ],
+  "reasoning": "The request schema makes redirect_uri mandatory, but the route ignores body.redirect_uri entirely. That creates a misleading OpenAPI/API contract: clients must send a value that cannot affect behavior, and a mismatched value is not rejected by this layer. For an OAuth callback contract this is especially confusing because redirect_uri is normally part of the token exchange inputs.",
+  "reproduction": "Call POST /oauth/callback with any redirect_uri value; the route only passes code and state to exchange_code_with_callback, so the supplied redirect_uri is indistinguishable from a correct one at the handler boundary.",
+  "recommendation": "Either remove redirect_uri from OAuthCallbackRequest if the callback intentionally uses only server-stored pending OAuth state, or validate/use it explicitly so the handler rejects values that do not match the pending OAuth flow.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature metadata lists no linked tests, and the repository search found only service-level newsletter tests, not route tests for POST /oauth/callback or its request contract.",
+  "suggestedRegressionTest": "Add a FastAPI route test for POST /api/newsletters/oauth/callback that sends a mismatched redirect_uri and asserts the intended behavior: either validation fails, or redirect_uri is no longer part of the accepted request schema.",
+  "minimumFixScope": "app/api/newsletters.py request model and oauth_callback_post handler; possibly the newsletter service if matching against stored redirect_uri is implemented there.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-73774fad23_9499b42ed6",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:19:13.046Z",
+  "updatedAt": "2026-05-18T12:19:13.046Z"
+}

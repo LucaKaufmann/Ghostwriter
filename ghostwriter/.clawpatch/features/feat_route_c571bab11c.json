@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_c571bab11c",
+  "title": "FastAPI route PUT ",
+  "summary": "FastAPI route PUT  handled by update_config in app/api/config.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/config.py",
+      "symbol": "update_config",
+      "route": "PUT ",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/config.py",
+      "reason": "FastAPI route handler update_config"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-c571bab11c-0c1971_8c5dc9ccd7",
+    "fnd_sig-feat-route-c571bab11c-35fbfa_37d01254d6"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:27:10.116Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:27:10.116Z"
+}

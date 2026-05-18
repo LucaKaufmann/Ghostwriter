@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-258c501002-331b22_b828472ccb",
+  "featureId": "feat_route_258c501002",
+  "title": "Unused os import breaks Ruff lint gate",
+  "category": "build-release",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/logs.py",
+      "startLine": 3,
+      "endLine": 3,
+      "symbol": null,
+      "quote": "import os"
+    }
+  ],
+  "reasoning": "The route module imports os but never uses it. The project Ruff configuration selects Pyflakes rules, so this triggers F401 and causes the lint command to fail before release/CI can pass.",
+  "reproduction": "From ghostwriter/: `ruff check --no-cache app/api/logs.py` reports `F401 [*] os imported but unused` at app/api/logs.py:3.",
+  "recommendation": "Remove the unused `os` import from app/api/logs.py.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for this feature, and runtime tests generally do not catch unused imports unless the lint gate is run.",
+  "suggestedRegressionTest": null,
+  "minimumFixScope": "Delete the single unused import line.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-258c501002_331b22b988",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:12:46.958Z",
+  "updatedAt": "2026-05-18T12:12:46.958Z"
+}

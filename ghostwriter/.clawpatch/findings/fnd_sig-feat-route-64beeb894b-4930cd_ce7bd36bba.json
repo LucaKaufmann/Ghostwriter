@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-64beeb894b-4930cd_ce7bd36bba",
+  "featureId": "feat_route_64beeb894b",
+  "title": "Concurrent manual triggers can queue duplicate podcast episodes for the same digest",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 427,
+      "endLine": 432,
+      "symbol": "trigger_digest_podcast",
+      "quote": "episode = podcast_service.queue_episode_generation(\n            session,\n            digest_id=digest_id,\n            user_id=user_id,\n            force=False,\n        )"
+    },
+    {
+      "path": "app/services/podcast_service.py",
+      "startLine": 628,
+      "endLine": 635,
+      "symbol": "PodcastService.queue_episode_generation",
+      "quote": "all_episodes = session.exec(\n            select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())\n        ).all()\n        episode = next(\n            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),\n            None,\n        )"
+    },
+    {
+      "path": "app/services/podcast_service.py",
+      "startLine": 682,
+      "endLine": 697,
+      "symbol": "PodcastService.queue_episode_generation",
+      "quote": "episode = PodcastEpisode(\n            digest_ids=[digest_id_str],\n            trigger=\"manual\",\n            user_id=user_id,\n            status=\"pending\",\n            created_at=now,\n            updated_at=now,\n        )\n        session.add(episode)\n        session.commit()\n        session.refresh(episode)\n        logger.info(\n            \"Podcast episode queued\",\n            extra={\"digest_id\": digest_id_str, \"episode_id\": str(episode.id), \"force\": force},\n        )\n        self._schedule_episode_task(episode.id)"
+    }
+  ],
+  "reasoning": "The POST route delegates every request directly to queue_episode_generation. That helper performs an application-level scan for an existing episode and, if none is found, inserts and schedules a new episode without a transaction-level lock or database uniqueness guard for the digest. Two simultaneous POST /digests/{digest_id}/podcast requests can both observe no existing episode, then both commit and schedule separate generation tasks, duplicating work and potentially TTS/LLM costs for the same digest.",
+  "reproduction": "For a completed digest with no podcast episode, issue two concurrent authenticated POST requests to /api/digests/{digest_id}/podcast. If both requests reach the existence scan before either commit is visible, both can return 200 with different episode_id values and both tasks are scheduled.",
+  "recommendation": "Make queueing atomic per digest. For SQLite, use a transaction/lock strategy such as BEGIN IMMEDIATE around the existence check and insert, or introduce a normalized digest-to-episode table with a unique digest_id constraint for manual single-digest episodes and handle the integrity conflict by returning the existing episode. Keep the route behavior idempotent under concurrent calls.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing route tests exercise a single sequential POST and a sequential failed-episode requeue path, but they do not send concurrent requests or assert that only one episode/task is created under contention.",
+  "suggestedRegressionTest": "Add a test that starts two concurrent POST /api/digests/{digest_id}/podcast calls for the same completed digest while delaying the service between the existence check and insert; assert that both responses reference the same episode or that the database contains exactly one episode for that digest and only one task is scheduled.",
+  "minimumFixScope": "Update app/services/podcast_service.py to enforce atomic per-digest queueing, and add a focused concurrency regression test for the POST route or service.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-64beeb894b_4930cd1a14",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:18:19.436Z",
+  "updatedAt": "2026-05-18T12:18:19.436Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2852349fd3-b875_f8f3f45066",
+  "featureId": "feat_library_2852349fd3",
+  "title": "Newsletter verifier reports ready when the token file is invalid or lacks a refresh token",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "scripts/verify_newsletter_setup.py",
+      "startLine": 35,
+      "endLine": 43,
+      "symbol": "main",
+      "quote": "has_refresh = \"refresh_token\" in token_data"
+    },
+    {
+      "path": "scripts/verify_newsletter_setup.py",
+      "startLine": 51,
+      "endLine": 55,
+      "symbol": "main",
+      "quote": "has_token = os.path.exists(token_path)\n\n    if has_creds and has_token:\n        print(\"Status: CONFIGURED - Newsletter integration is ready\")"
+    }
+  ],
+  "reasoning": "The script detects invalid JSON and whether refresh_token is absent, but the final status ignores both facts and checks only file existence. A corrupt token file or an access-token-only file will still produce CONFIGURED - Newsletter integration is ready, misleading setup/debugging even though OAuth refresh cannot work.",
+  "reproduction": "Create the configured data_dir/gmail_token.json with `{}` or malformed JSON, set Gmail credentials, and run `python scripts/verify_newsletter_setup.py`; the detail output says the token is invalid or has no refresh token, but the final summary can still say CONFIGURED.",
+  "recommendation": "Track token validity separately from file existence, require a parsed token with refresh_token for the CONFIGURED status, and consider returning a non-zero exit code when credentials or a usable token are missing.",
+  "whyTestsDoNotAlreadyCoverThis": "scripts/test_flow.py exercises feed and digest flow only; it does not run the newsletter setup verifier or assert its status decisions for invalid token files.",
+  "suggestedRegressionTest": "Add tests for verify_newsletter_setup status calculation with missing token, malformed token, token without refresh_token, and valid refresh token.",
+  "minimumFixScope": "Change scripts/verify_newsletter_setup.py to compute has_token from successful JSON parsing plus refresh_token presence, not os.path.exists().",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-2852349fd3_b87586b5f4",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:33.693Z",
+  "updatedAt": "2026-05-18T12:07:33.693Z"
+}

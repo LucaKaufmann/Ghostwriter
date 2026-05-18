@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-a344d0183d-8f9d_54333d62a9",
+  "featureId": "feat_library_a344d0183d",
+  "title": "Unmatched backend routes return HTTP 200 in frontend mode",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/main.py",
+      "startLine": 219,
+      "endLine": 221,
+      "symbol": "serve_spa",
+      "quote": "if full_path.startswith((\"api/\", \"docs\", \"redoc\", \"openapi.json\")):\n            return {\"detail\": \"Not found\"}"
+    }
+  ],
+  "reasoning": "In the frontend-build branch, the catch-all route handles unmatched /api, /docs, /redoc, and /openapi.json paths after the real backend routes have failed to match. Returning a plain dict makes FastAPI send status 200, so missing backend endpoints look successful to clients, probes, and caches.",
+  "reproduction": "With frontend routes enabled, GET /api/does-not-exist reaches serve_spa and returns {\"detail\":\"Not found\"} with FastAPI's default 200 status instead of 404.",
+  "recommendation": "Raise HTTPException(status_code=404, detail='Not found') or return a JSONResponse with status_code=404 for backend-reserved paths.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing tests exercise known /api/health routes and the no-frontend root response; they do not enable the frontend-build catch-all or request an unknown backend path.",
+  "suggestedRegressionTest": "When a built frontend index is present, assert GET '/api/not-real' and GET '/docs/not-real' return 404, while a client-side frontend route still returns index.html with 200.",
+  "minimumFixScope": "The backend-path guard inside serve_spa in app/main.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-a344d0183d_8f9da5cd29",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:15.220Z",
+  "updatedAt": "2026-05-18T12:10:15.220Z"
+}

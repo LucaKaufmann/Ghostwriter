@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-db316c1a7b-6122_99c77aa8be",
+  "featureId": "feat_library_db316c1a7b",
+  "title": "KOReader API token is committed before plugin zip generation can fail",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/plugins.py",
+      "startLine": 105,
+      "endLine": 110,
+      "symbol": "_build_plugin_zip",
+      "quote": "if not PLUGIN_TEMPLATE_DIR.exists() or not PLUGIN_TEMPLATE_DIR.is_dir():\n        raise HTTPException(\n            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,\n            detail=\"KOReader plugin template is not available on the server.\","
+    },
+    {
+      "path": "app/api/plugins.py",
+      "startLine": 130,
+      "endLine": 134,
+      "symbol": "_build_plugin_zip",
+      "quote": "except ValueError as exc:\n                    raise HTTPException(\n                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,\n                        detail=\"KOReader plugin settings template is invalid.\","
+    },
+    {
+      "path": "app/api/plugins.py",
+      "startLine": 162,
+      "endLine": 171,
+      "symbol": "download_koreader_plugin",
+      "quote": "api_token = APIToken(\n        user_id=current_user.id,\n        name=payload.token_name,\n        token_hash=token_hash,\n        token_prefix=token_prefix,\n    )\n    session.add(api_token)\n    session.commit()\n\n    zip_bytes = _build_plugin_zip(server_url=server_url, api_token=raw_token)"
+    }
+  ],
+  "reasoning": "If the template directory is missing or the settings template is invalid, the endpoint returns 500 after creating and committing a live API token. The caller never receives the raw token, so the account accumulates active, unrecoverable credentials.",
+  "reproduction": "Temporarily remove the KOReader template directory or its required placeholders, then POST `/api/plugins/koreader/download` as an authenticated user. The response fails, but an unrevoked `APIToken` row has already been committed.",
+  "recommendation": "Build the zip before committing the token, or wrap token creation and zip generation in a transaction and roll back on any packaging failure. Commit only once the response payload is ready to send.",
+  "whyTestsDoNotAlreadyCoverThis": "`tests/test_plugins.py` covers the successful packaging path and missing-auth path, but not template failure after token creation.",
+  "suggestedRegressionTest": "Mock `_build_plugin_zip` to raise and assert no active APIToken is persisted for the requesting user.",
+  "minimumFixScope": "app/api/plugins.py `download_koreader_plugin` transaction/order of operations.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-db316c1a7b_6122ae22b7",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:11:18.252Z",
+  "updatedAt": "2026-05-18T12:11:18.252Z"
+}

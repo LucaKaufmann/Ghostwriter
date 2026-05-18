@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urljoin
 
 import httpx
 
 from app.core.config import Settings
 from app.core.net import validate_public_url
-
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -23,6 +23,8 @@ DEFAULT_USER_AGENT = (
 
 # Avoid proxying unbounded responses (both for latency and memory safety).
 MAX_HTML_BYTES = 5_000_000  # 5 MB
+MAX_HTML_REDIRECTS = 5
+_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 
 
 @dataclass(frozen=True)
@@ -65,40 +67,57 @@ async def fetch_html_document(
 
     timeout = httpx.Timeout(settings.fetch_timeout_seconds)
     async with httpx.AsyncClient(
-        follow_redirects=True,
+        follow_redirects=False,
         timeout=timeout,
         headers=headers,
     ) as client:
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
+        current_url = url
+        for _ in range(MAX_HTML_REDIRECTS + 1):
+            validate_public_url(current_url, settings)
+            async with client.stream("GET", current_url) as response:
+                if response.status_code in _REDIRECT_STATUS_CODES:
+                    location = response.headers.get("location")
+                    if not location:
+                        raise ValueError("Redirect response missing Location header")
+                    current_url = urljoin(str(response.url), location)
+                    validate_public_url(current_url, settings)
+                    continue
 
-            content_type = response.headers.get("content-type")
-            if content_type:
-                lowered = content_type.lower()
-                if "text/html" not in lowered and "application/xhtml+xml" not in lowered:
-                    raise NonHtmlContentError(f"Unsupported content-type: {content_type}")
+                response.raise_for_status()
 
-            data = bytearray()
-            async for chunk in response.aiter_bytes():
-                data.extend(chunk)
-                if len(data) > max_bytes:
-                    raise DocumentTooLargeError(
-                        f"Document exceeded max size of {max_bytes} bytes"
-                    )
+                content_type = response.headers.get("content-type")
+                if content_type:
+                    lowered = content_type.lower()
+                    if (
+                        "text/html" not in lowered
+                        and "application/xhtml+xml" not in lowered
+                    ):
+                        raise NonHtmlContentError(
+                            f"Unsupported content-type: {content_type}"
+                        )
 
-            # Prefer httpx's detected encoding if available, otherwise fall back.
-            encoding = response.encoding or "utf-8"
-            try:
-                html = bytes(data).decode(encoding, errors="replace")
-            except LookupError:
-                html = bytes(data).decode("utf-8", errors="replace")
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > max_bytes:
+                        raise DocumentTooLargeError(
+                            f"Document exceeded max size of {max_bytes} bytes"
+                        )
 
-            return FetchedHtmlDocument(
-                url=url,
-                final_url=str(response.url),
-                content_type=content_type,
-                html=html,
-                fetched_at=datetime.utcnow(),
-                size_bytes=len(data),
-            )
+                # Prefer httpx's detected encoding if available, otherwise fall back.
+                encoding = response.encoding or "utf-8"
+                try:
+                    html = bytes(data).decode(encoding, errors="replace")
+                except LookupError:
+                    html = bytes(data).decode("utf-8", errors="replace")
 
+                return FetchedHtmlDocument(
+                    url=url,
+                    final_url=str(response.url),
+                    content_type=content_type,
+                    html=html,
+                    fetched_at=datetime.utcnow(),
+                    size_bytes=len(data),
+                )
+
+        raise ValueError("Too many redirects")

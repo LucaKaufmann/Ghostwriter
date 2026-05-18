@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_3ac69ad297",
+  "title": "FastAPI route POST /covers/{cover_id}/activate",
+  "summary": "FastAPI route POST /covers/{cover_id}/activate handled by activate_manual_cover in app/api/config.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/config.py",
+      "symbol": "activate_manual_cover",
+      "route": "POST /covers/{cover_id}/activate",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/config.py",
+      "reason": "FastAPI route handler activate_manual_cover"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-3ac69ad297-31eef2_44e3c07593"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:14:33.805Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:14:33.805Z"
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-19ddde6198-4d4a95_ecfc526aad",
+  "featureId": "feat_route_19ddde6198",
+  "title": "PUT accepts explicit nulls for optional update fields and can persist invalid values or raise 500",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 358,
+      "endLine": 365,
+      "symbol": "update_feed",
+      "quote": "update_data = feed_data.model_dump(exclude_unset=True)\n    for field, value in update_data.items():\n        setattr(feed, field, value)"
+    },
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 10,
+      "endLine": 24,
+      "symbol": "test_create_feed",
+      "quote": "assert data[\"title\"] == feed_data[\"title\"]"
+    },
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 27,
+      "endLine": 44,
+      "symbol": "test_sync_feeds",
+      "quote": "assert data[\"synced\"] == 2"
+    }
+  ],
+  "reasoning": "Partial-update schemas often use optional fields to mean 'field may be omitted', but update_feed treats explicitly provided null values as real writes. For required feed properties such as title, mode, max_articles, and is_active, a request body like {\"title\": null} reaches setattr and then commit. Depending on database nullability this either stores an invalid feed shape or raises an integrity error that becomes a 500 instead of a validation error. Confidence is medium because the included tests do not define the null-input contract, but the route currently has no guard against null writes.",
+  "reproduction": "PUT /api/feeds/{id} with {\"title\": null} or {\"max_articles\": null} after creating a feed. The handler includes the key because exclude_unset=True does not exclude explicit nulls, then writes None before committing.",
+  "recommendation": "Reject explicit nulls for fields that are not nullable in the feed domain, either by using non-null field types with an unset sentinel/update model validator or by filtering/validating None values before setattr and returning 422.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked tests do not exercise PUT /{feed_id} at all, and they only assert happy-path create/sync behavior with non-null values.",
+  "suggestedRegressionTest": "Add a PUT test that sends {\"title\": null} and asserts a 422 response and that the existing feed title remains unchanged.",
+  "minimumFixScope": "FeedUpdate validation or app/api/feeds.py update_feed null handling, plus one regression test",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-19ddde6198_4d4a95640b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:12:21.815Z",
+  "updatedAt": "2026-05-18T12:12:21.815Z"
+}

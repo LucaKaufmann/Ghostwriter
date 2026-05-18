@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-a576033075-937a0f_58e7f5470f",
+  "featureId": "feat_route_a576033075",
+  "title": "Latest digest selection is nondeterministic when completion timestamps are missing or tied",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/digests.py",
+      "startLine": 278,
+      "endLine": 282,
+      "symbol": "get_latest_digest",
+      "quote": "statement = (\n        select(Digest)\n        .where(Digest.status == \"completed\")\n        .order_by(Digest.completed_at.desc())\n        .limit(1)"
+    },
+    {
+      "path": "app/models/digest.py",
+      "startLine": 44,
+      "endLine": 46,
+      "symbol": "Digest",
+      "quote": "id: UUID = Field(default_factory=uuid4, primary_key=True)\n    created_at: datetime = Field(default_factory=datetime.utcnow)\n    completed_at: datetime | None = Field(default=None, description=\"Completion time\")"
+    }
+  ],
+  "reasoning": "The route promises the latest completed digest, but it orders only by a nullable completion timestamp. Completed rows with missing completed_at, or rows with the same completed_at, have no deterministic secondary ordering, so the endpoint can return an older/arbitrary digest instead of the newest available completed digest. The model permits this state, and several tests construct completed digests without completed_at, which indicates the codebase does not enforce completed_at as a hard invariant everywhere.",
+  "reproduction": null,
+  "recommendation": "Add a deterministic fallback order, for example by completed_at descending then created_at descending, and preferably id descending as a final stable tie breaker. If completed_at is intended to be mandatory for completed rows, enforce that invariant at write time and add a test for it.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature declares no linked tests, and repository tests do not reference /digests/latest, get_latest_digest, or the 404 detail for this route.",
+  "suggestedRegressionTest": "Create two completed digests with null or identical completed_at values and different created_at values, call GET /api/digests/latest, and assert the newer created_at digest is returned. Also cover that processing/failed digests are ignored and no completed digests returns 404.",
+  "minimumFixScope": "Change the get_latest_digest query ordering and add focused API tests for /api/digests/latest.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-a576033075_937a0f8c6f",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:23:36.965Z",
+  "updatedAt": "2026-05-18T12:23:36.965Z"
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-481f2ba6f4-b4e802_5051217a77",
+  "featureId": "feat_route_481f2ba6f4",
+  "title": "Concurrent schedule triggers can enqueue duplicate episodes for the same digest window",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 1112,
+      "endLine": 1115,
+      "symbol": "trigger_podcast_schedule",
+      "quote": "episode_id = podcast_service.generate_episode_for_schedule(schedule_id)"
+    },
+    {
+      "path": "app/services/podcast_service.py",
+      "startLine": 858,
+      "endLine": 899,
+      "symbol": "PodcastService.generate_episode_for_schedule",
+      "quote": "stmt = select(Digest).where(Digest.status == \"completed\")"
+    },
+    {
+      "path": "app/services/podcast_service.py",
+      "startLine": 700,
+      "endLine": 729,
+      "symbol": "PodcastService.queue_multi_digest_episode",
+      "quote": "episode = PodcastEpisode("
+    },
+    {
+      "path": "tests/test_podcast_api.py",
+      "startLine": 872,
+      "endLine": 899,
+      "symbol": "test_podcast_schedule_trigger",
+      "quote": "trigger = client.post("
+    }
+  ],
+  "reasoning": "The route delegates directly to generate_episode_for_schedule without any idempotency key, schedule-row lock, or duplicate episode check. generate_episode_for_schedule selects all completed digests after last_run_at, then queue_multi_digest_episode unconditionally inserts a new pending PodcastEpisode before updating the schedule. Two near-simultaneous POSTs for the same schedule, or a manual POST racing the scheduler, can both observe the same last_run_at and enqueue duplicate multi-digest episodes for the same digest set. This can double podcast generation work/cost and leave last_episode_id pointing to whichever commit wins last.",
+  "reproduction": "Send two concurrent authenticated POST requests to /api/podcast/schedules/{schedule_id}/trigger for a schedule with eligible completed digests and no last_run_at. Both requests can return 200 with different episode_id values containing the same digest_ids.",
+  "recommendation": "Make schedule-trigger generation idempotent per schedule/window. For example, perform the eligible-digest selection and schedule last_run_at/last_episode_id update under a transaction with a write lock appropriate for SQLite, or add a stable schedule/window identifier and reuse an existing pending/running/ready episode for the same schedule and digest set before inserting a new one.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked trigger test performs exactly one POST and only asserts that one pending episode is created and schedule tracking is updated. It never issues concurrent trigger requests or verifies duplicate suppression.",
+  "suggestedRegressionTest": "Add a test that invokes the trigger path twice concurrently for the same schedule with the same eligible digest set, then asserts only one PodcastEpisode exists for those digest_ids and both callers either receive the same episode or one receives a conflict.",
+  "minimumFixScope": "Update the schedule trigger generation path in the service to atomically claim a schedule window or detect/reuse an existing episode before creating a new PodcastEpisode; keep the API response shape unchanged.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-481f2ba6f4_b4e8022fe7",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:16:06.924Z",
+  "updatedAt": "2026-05-18T12:16:06.924Z"
+}

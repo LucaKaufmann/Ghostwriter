@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_3cfdad0b9e",
+  "title": "FastAPI route POST /{feed_id}/clear-seen",
+  "summary": "FastAPI route POST /{feed_id}/clear-seen handled by clear_seen_articles in app/api/feeds.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/feeds.py",
+      "symbol": "clear_seen_articles",
+      "route": "POST /{feed_id}/clear-seen",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/feeds.py",
+      "reason": "FastAPI route handler clear_seen_articles"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "tests/test_feeds.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_feeds.py",
+      "command": "hatch run pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-3cfdad0b9e-3cc54a_fe3d83c2bf"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:14:48.278Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:14:48.278Z"
+}

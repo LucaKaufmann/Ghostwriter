@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-f202421dac-093cc4_b9759105b4",
+  "featureId": "feat_route_f202421dac",
+  "title": "Cover endpoint can serve a digest before it is completed",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/digests.py",
+      "startLine": 469,
+      "endLine": 487,
+      "symbol": "get_digest_cover",
+      "quote": "digest = session.get(Digest, digest_id)"
+    },
+    {
+      "path": "app/api/digests.py",
+      "startLine": 522,
+      "endLine": 527,
+      "symbol": "get_digest_cover",
+      "quote": "return Response("
+    },
+    {
+      "path": "app/api/digests.py",
+      "startLine": 587,
+      "endLine": 591,
+      "symbol": "download_digest_by_id",
+      "quote": "if digest.status != \"completed\":"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 1075,
+      "endLine": 1081,
+      "symbol": "generate_digest",
+      "quote": "status=\"processing\","
+    }
+  ],
+  "reasoning": "get_digest_cover only checks that the digest row and target file exist, then returns the embedded image. It does not reject queued, processing, or failed digests, unlike the sibling download-by-id route. Digest rows are created with a deterministic EPUB filename while still processing, so if a previous file with that name already exists, this route can return a stale cover for a digest that has not completed yet; if the file is partially written or invalid, clients get inconsistent errors instead of the same 409 contract used for downloads.",
+  "reproduction": null,
+  "recommendation": "Add a completed-status guard to get_digest_cover before resolving the file path, returning 409 with a clear message when digest.status is not completed.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing cover route test only creates a completed digest and asserts the happy path. The searched tests contain no /cover case for processing or failed digests.",
+  "suggestedRegressionTest": "Create a digest with status='processing' and a valid EPUB file at its filename, then assert GET /api/digests/{id}/cover returns 409 and does not return image bytes.",
+  "minimumFixScope": "app/api/digests.py status check plus one route-level regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-f202421dac_093cc432e7",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:28:59.125Z",
+  "updatedAt": "2026-05-18T12:28:59.125Z"
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-358e77867e-22b350_9465983f2c",
+  "featureId": "feat_route_358e77867e",
+  "title": "List endpoint returns a 500 on database pool timeout instead of a retryable 503",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 564,
+      "endLine": 567,
+      "symbol": "list_podcast_episodes",
+      "quote": "episodes = session.exec(\n        select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())\n    ).all()\n    return [_build_episode_status(request, episode) for episode in episodes]"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 500,
+      "endLine": 508,
+      "symbol": "get_digest_podcast_status",
+      "quote": "except SQLAlchemyTimeoutError as exc:\n        logger.warning(\n            \"Podcast status check timed out waiting for DB connection\",\n            extra={\"digest_id\": str(digest_id)},\n            exc_info=exc,\n        )\n        raise HTTPException(\n            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,"
+    },
+    {
+      "path": "tests/test_podcast_api.py",
+      "startLine": 274,
+      "endLine": 277,
+      "symbol": "test_trigger_digest_podcast_and_list_episodes",
+      "quote": "list_resp = client.get(\"/api/podcast/episodes\", headers=auth_headers)\n    assert list_resp.status_code == 200\n    ids = {item[\"id\"] for item in list_resp.json()}\n    assert episode_id in ids"
+    }
+  ],
+  "reasoning": "The list route performs the same ordered PodcastEpisode query pattern as the digest podcast status route, but it does not catch SQLAlchemyTimeoutError. If the database pool is exhausted or a connection checkout times out, the exception escapes as an internal server error. The adjacent status route already maps this exact failure mode to HTTP 503 with a retryable message, so the list endpoint has inconsistent and less useful error behavior for the same dependency failure.",
+  "reproduction": "In a route unit test, provide a Session test double whose exec() raises sqlalchemy.exc.TimeoutError, then call GET /api/podcast/episodes with valid auth. The current handler will not translate the exception to HTTP 503.",
+  "recommendation": "Wrap the episode query in try/except SQLAlchemyTimeoutError, log with endpoint context, and raise HTTPException(status_code=503, detail=\"Podcast episodes temporarily unavailable. Please retry shortly.\") or the project-standard equivalent.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked test only covers the successful list path and asserts that a queued episode id is present. It does not simulate session.exec() raising SQLAlchemyTimeoutError or assert the expected transient-failure response.",
+  "suggestedRegressionTest": "Add a test for GET /api/podcast/episodes where the injected session raises SQLAlchemyTimeoutError from exec(), then assert status_code == 503 and a retryable detail message.",
+  "minimumFixScope": "Only app/api/podcast.py needs to change: add timeout handling around the query in list_podcast_episodes, mirroring the nearby get_digest_podcast_status behavior.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-358e77867e_22b35050d4",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:14:16.508Z",
+  "updatedAt": "2026-05-18T12:14:16.508Z"
+}

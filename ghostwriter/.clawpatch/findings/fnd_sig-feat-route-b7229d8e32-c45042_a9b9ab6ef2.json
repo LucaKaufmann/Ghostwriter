@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-b7229d8e32-c45042_a9b9ab6ef2",
+  "featureId": "feat_route_b7229d8e32",
+  "title": "YouTube feed item listing has no route-level regression coverage",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/api/media.py",
+      "startLine": 243,
+      "endLine": 259,
+      "symbol": "list_youtube_feed_items",
+      "quote": "@router.get(\n    \"/youtube/{feed_id}/items\",\n    response_model=list[MediaItemSummary],"
+    }
+  ],
+  "reasoning": "The reviewed feature is an authenticated API route that validates the feed exists and is a YouTube feed before returning ordered media item summaries. The feature metadata lists no linked tests, and repository search found media API tests only for retry behavior, not this route. That leaves the route's 200 response shape/order, 404 behavior for missing or non-YouTube feeds, and auth requirement unpinned against regressions.",
+  "reproduction": null,
+  "recommendation": "Add focused API tests for GET /api/media/youtube/{feed_id}/items covering success with newest-first ordering, 404 for missing feed, 404 for a podcast feed id, and authentication failure when the API key dependency is enforced in tests.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests are linked to this feature, and the existing media tests located by search target retry endpoints rather than the YouTube feed item listing route.",
+  "suggestedRegressionTest": "Create test_youtube_feed_items.py with seeded MediaFeed and MediaItem rows, then assert GET /api/media/youtube/{feed_id}/items returns only that feed's items in created_at descending order and rejects missing/wrong-type feed ids.",
+  "minimumFixScope": "Tests only; no production code change is required unless the new tests expose a behavioral defect.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-b7229d8e32_c4504298e8",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:24:47.596Z",
+  "updatedAt": "2026-05-18T12:24:47.596Z"
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-7d8d71e219-fd6d49_f7985f7dc6",
+  "featureId": "feat_route_7d8d71e219",
+  "title": "Download start is not reserved before returning",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 658,
+      "endLine": 668,
+      "symbol": "download_whisper_model",
+      "quote": "if service.is_downloading(request.model): ... background_tasks.add_task(service.download_model, request.model) ... models=service.list_models()"
+    }
+  ],
+  "reasoning": "The route checks whether a model is already downloading, then schedules the actual download as a FastAPI background task, then immediately returns a fresh model list. Because the background task runs after the response path, the handler has not reserved the model as downloading before returning. A first request can return a model list that still says not_downloaded, and two near-simultaneous requests can both pass the preflight check and receive success instead of the second receiving the intended 409 conflict. Any duplicate rejection then happens inside the background task, outside the HTTP response contract.",
+  "reproduction": "Against a clean model directory, send two concurrent POST requests to /config/whisper/models/download with the same valid model. Both can pass the is_downloading check before either background task marks the model as downloading, so both requests can return success; the immediate response can also report the requested model as not_downloaded rather than downloading.",
+  "recommendation": "Add an atomic service method that reserves the download synchronously under the same lock used for download status before scheduling the background task. Have the route call that method, return 409 if reservation fails, and build the response from the reserved status so the requested model is immediately reported as downloading.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for this route, and the repository search did not show backend tests for /whisper/models/download or duplicate download starts.",
+  "suggestedRegressionTest": "Add an async route test that monkeypatches the download worker to block, posts the same model twice before the first task completes, asserts the first response reports status='downloading', and asserts the second response is HTTP 409.",
+  "minimumFixScope": "app/api/config.py plus the WhisperModelService start/reservation API used by this route.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-7d8d71e219_fd6d49eac3",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:19:32.491Z",
+  "updatedAt": "2026-05-18T12:19:32.491Z"
+}

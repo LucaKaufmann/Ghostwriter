@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_db316c1a7b",
+  "title": "Python source app/api#1",
+  "summary": "Python source group app/api#1 with 12 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/api#1",
+      "symbol": "app/api#1",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/__init__.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/auth.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/client.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/config.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/digests.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/health.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/logs.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/media.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/newsletters.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/plugins.py",
+      "reason": "source group app/api#1"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "reason": "source group app/api#1"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "tests/test_feeds.py",
+      "reason": "associated test"
+    },
+    {
+      "path": "tests/test_health.py",
+      "reason": "associated test"
+    },
+    {
+      "path": "tests/test_plugins.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_feeds.py",
+      "command": "hatch run pytest"
+    },
+    {
+      "path": "tests/test_health.py",
+      "command": "hatch run pytest"
+    },
+    {
+      "path": "tests/test_plugins.py",
+      "command": "hatch run pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-db316c1a7b-ac20_8486814a9f",
+    "fnd_sig-feat-library-db316c1a7b-c30a_9dc50c92e4",
+    "fnd_sig-feat-library-db316c1a7b-8bb7_ff20bfdaac",
+    "fnd_sig-feat-library-db316c1a7b-6122_99c77aa8be",
+    "fnd_sig-feat-library-db316c1a7b-353d_6b3cae72f9"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "5 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:11:18.254Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:11:18.254Z"
+}

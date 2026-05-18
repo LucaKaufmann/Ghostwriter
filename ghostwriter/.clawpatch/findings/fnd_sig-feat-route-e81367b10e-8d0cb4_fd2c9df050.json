@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-e81367b10e-8d0cb4_fd2c9df050",
+  "featureId": "feat_route_e81367b10e",
+  "title": "YouTube detection matches embedded substrings instead of the URL host",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 24,
+      "endLine": 27,
+      "symbol": "_YOUTUBE_CHANNEL_RE",
+      "quote": "r\"(?:https?://)?(?:www\\.)?youtube\\.com/\""
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 239,
+      "endLine": 242,
+      "symbol": "_is_youtube_url",
+      "quote": "return YouTubeService.is_youtube_url(url) or bool(_YOUTUBE_CHANNEL_RE.search(url))"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 257,
+      "endLine": 259,
+      "symbol": "check_feed_url",
+      "quote": "if _is_youtube_url(url):\n        return FeedCheckResponse(feed_type=\"youtube\")"
+    }
+  ],
+  "reasoning": "The channel regex is searched across the entire input string rather than being matched against the parsed URL host. A non-YouTube URL such as https://example.com/redirect?to=https://youtube.com/@creator will be classified as youtube before any feed parsing, even though the URL being checked is hosted on example.com. That violates the route's classification contract and can make clients select the wrong feed type.",
+  "reproduction": "POST /api/feeds/check-url with {\"url\":\"https://example.com/redirect?to=https://youtube.com/@creator\"}; _YOUTUBE_CHANNEL_RE.search matches the query string and the route returns {\"feed_type\":\"youtube\"}.",
+  "recommendation": "Parse the URL and require the hostname to be exactly youtube.com, www.youtube.com, or another explicitly supported YouTube host before returning youtube. Alternatively, anchor the regex to the start of the URL and use fullmatch-style validation for channel URLs.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_feeds.py only covers listing, creating, and syncing feeds; it does not exercise POST /check-url or hostile/redirect-style URL inputs.",
+  "suggestedRegressionTest": "Add a check-url test that posts a non-YouTube URL containing a YouTube URL in its query/path and asserts it does not return feed_type=\"youtube\".",
+  "minimumFixScope": "Update YouTube URL classification in app/api/feeds.py and add targeted tests for POST /check-url.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-e81367b10e_8d0cb4ad51",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:29:30.328Z",
+  "updatedAt": "2026-05-18T12:29:30.328Z"
+}

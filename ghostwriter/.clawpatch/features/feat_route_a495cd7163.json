@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_a495cd7163",
+  "title": "FastAPI route POST /{period}/enable",
+  "summary": "FastAPI route POST /{period}/enable handled by enable_schedule in app/api/schedules.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/schedules.py",
+      "symbol": "enable_schedule",
+      "route": "POST /{period}/enable",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/schedules.py",
+      "reason": "FastAPI route handler enable_schedule"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "reviewed",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "0 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:21:49.101Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:21:49.101Z"
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-98b663ddc9-916fb6_003e17340d",
+  "featureId": "feat_route_98b663ddc9",
+  "title": "Retry route leaks stale digest errors as 500 responses",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 539,
+      "endLine": 545,
+      "symbol": "retry_podcast_episode",
+      "quote": "first_digest_id = UUID(digest_ids[0])\nretried = podcast_service.queue_episode_generation(\n    session,\n    digest_id=first_digest_id,\n    user_id=episode.user_id,\n    force=True,\n)"
+    }
+  ],
+  "reasoning": "The route only checks that digest_ids is non-empty. If the stored digest ID is malformed, UUID(digest_ids[0]) raises ValueError. If the referenced digest was deleted or is no longer completed, queue_episode_generation raises ValueError. Unlike the adjacent manual trigger endpoint, this route does not translate those expected domain failures into 4xx HTTP errors, so clients receive an internal server error for retry-ineligible persisted episodes.",
+  "reproduction": "Persist a failed PodcastEpisode whose digest_ids contains a non-UUID string, or contains a UUID for a missing/non-completed Digest, then POST /api/podcast/episodes/{episode_id}/retry.",
+  "recommendation": "Catch UUID parsing and queue_episode_generation ValueError in retry_podcast_episode and return stable 409/404 responses, or avoid digest re-resolution entirely by retrying the exact episode row after validating its stored digest IDs.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked retry test only covers the happy path with a valid completed digest; there are no tests for malformed, missing, or ineligible digest references.",
+  "suggestedRegressionTest": "Add retry endpoint tests for a failed episode with invalid digest_ids[0] and for a failed episode whose digest row is missing; assert a documented 4xx response rather than 500.",
+  "minimumFixScope": "app/api/podcast.py error handling around digest UUID parsing and service retry invocation.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-98b663ddc9_916fb6c155",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:21:32.610Z",
+  "updatedAt": "2026-05-18T12:21:32.610Z"
+}

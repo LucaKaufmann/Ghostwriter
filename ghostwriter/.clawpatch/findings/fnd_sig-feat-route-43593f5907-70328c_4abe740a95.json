@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-43593f5907-70328c_4abe740a95",
+  "featureId": "feat_route_43593f5907",
+  "title": "Feed token is not scoped to the owning user's episodes",
+  "category": "security",
+  "severity": "high",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 721,
+      "endLine": 733,
+      "symbol": "get_podcast_feed_xml",
+      "quote": "prefs = podcast_service.get_preferences_by_feed_token(session, token)\n...\nselect(PodcastEpisode)\n.where(PodcastEpisode.status == \"ready\")"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 784,
+      "endLine": 793,
+      "symbol": "get_podcast_feed_xml",
+      "quote": "enclosure_url = base_url + f\"/api/podcast/episodes/{episode.id}/download?token={token}\""
+    }
+  ],
+  "reasoning": "The feed token resolves a PodcastPreferences row, but the episode query only filters by status. Any valid feed token therefore receives enclosure URLs for every ready PodcastEpisode in the database, not just episodes associated with that token's preferences/user. Because those enclosure URLs reuse the same token, the token holder can then download unrelated ready episodes through the feed-authenticated download endpoint. This is a cross-user/private-content exposure if more than one user or preference owner exists.",
+  "reproduction": "Create a preferences row with podcast_feed_token='token_for_a' for user A, create a ready PodcastEpisode for user B, then request GET /api/podcast/feed.xml?token=token_for_a. The XML will include user B's episode enclosure URL with token_for_a.",
+  "recommendation": "Filter the feed query by the preferences owner, for example add PodcastEpisode.user_id == prefs.user_id, using IS NULL only for legacy prefs whose user_id is null. Apply the same ownership rule consistently before generating enclosure URLs.",
+  "whyTestsDoNotAlreadyCoverThis": "Existing feed tests exercise token auth and public base URL generation with episodes and preferences using user_id=None; they do not create two users or assert feed isolation by owner.",
+  "suggestedRegressionTest": "Add a test with two users/preference owners and ready episodes for both, then assert each feed token only returns items for its owner and cannot download the other owner's episode via the feed token.",
+  "minimumFixScope": "app/api/podcast.py get_podcast_feed_xml episode query, plus a focused multi-user/feed-token isolation test.",
+  "status": "uncertain",
+  "history": [],
+  "signature": "sig_feat-route-43593f5907_70328cd85a",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-route-43593f5907-70_f57a4f6719"
+  ],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:16:59.190Z",
+  "updatedAt": "2026-05-18T13:24:20.715Z"
+}

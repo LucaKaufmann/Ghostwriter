@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_2852349fd3",
+  "title": "Python source scripts",
+  "summary": "Python source group scripts with 2 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "scripts",
+      "symbol": "scripts",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "scripts/benchmark_sync.py",
+      "reason": "source group scripts"
+    },
+    {
+      "path": "scripts/verify_newsletter_setup.py",
+      "reason": "source group scripts"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "scripts/test_flow.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "scripts/test_flow.py",
+      "command": "hatch run pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-2852349fd3-fea0_0ed473f71c",
+    "fnd_sig-feat-library-2852349fd3-b875_f8f3f45066",
+    "fnd_sig-feat-library-2852349fd3-d28e_10d285e584",
+    "fnd_sig-feat-library-2852349fd3-17c2_0dc754f906"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "4 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:07:33.695Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:07:33.695Z"
+}

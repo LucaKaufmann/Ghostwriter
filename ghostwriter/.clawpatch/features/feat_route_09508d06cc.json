@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_09508d06cc",
+  "title": "FastAPI route GET /health",
+  "summary": "FastAPI route GET /health handled by health_check in app/api/health.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/health.py",
+      "symbol": "health_check",
+      "route": "GET /health",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/health.py",
+      "reason": "FastAPI route handler health_check"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "tests/test_health.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_health.py",
+      "command": "hatch run pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-09508d06cc-0acf8d_260a813808",
+    "fnd_sig-feat-route-09508d06cc-65706a_04036718d6"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:11:32.017Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:11:32.017Z"
+}

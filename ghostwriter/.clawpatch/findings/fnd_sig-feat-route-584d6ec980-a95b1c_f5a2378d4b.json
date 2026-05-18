@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-584d6ec980-a95b1c_f5a2378d4b",
+  "featureId": "feat_route_584d6ec980",
+  "title": "Unused client settings imports make Ruff fail",
+  "category": "build-release",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/client.py",
+      "startLine": 10,
+      "endLine": 10,
+      "symbol": null,
+      "quote": "from app.models.client_settings import ClientSettingsRead, ClientSettingsUpdate"
+    }
+  ],
+  "reasoning": "Both imported symbols are unused in this file. `python -m ruff check --no-cache app/api/client.py` reports F401 for `ClientSettingsRead` and `ClientSettingsUpdate`, so the configured lint command will fail before release or CI completion.",
+  "reproduction": "Run `python -m ruff check --no-cache app/api/client.py`; Ruff reports two F401 unused-import errors on line 10.",
+  "recommendation": "Remove the unused `ClientSettingsRead` and `ClientSettingsUpdate` import line.",
+  "whyTestsDoNotAlreadyCoverThis": "Runtime tests do not exercise static lint failures, and the feature lists no linked tests.",
+  "suggestedRegressionTest": null,
+  "minimumFixScope": "Delete the unused import from `app/api/client.py`.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-584d6ec980_a95b1c9278",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:17:16.823Z",
+  "updatedAt": "2026-05-18T12:17:16.823Z"
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-55d1aef9f5-98fa2f_fe1393e830",
+  "featureId": "feat_route_55d1aef9f5",
+  "title": "Scheduler synchronization can fail after preferences are already committed",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 327,
+      "endLine": 334,
+      "symbol": "update_podcast_preferences",
+      "quote": "prefs = podcast_service.update_preferences(session, update, user_id=user_id) ... update_podcast_schedule()"
+    },
+    {
+      "path": "app/services/podcast_service.py",
+      "startLine": 511,
+      "endLine": 514,
+      "symbol": "PodcastDigestService.update_preferences",
+      "quote": "prefs.updated_at = now\nsession.add(prefs)\nsession.commit()\nsession.refresh(prefs)"
+    },
+    {
+      "path": "app/worker/scheduler.py",
+      "startLine": 690,
+      "endLine": 695,
+      "symbol": "update_podcast_schedule",
+      "quote": "for job in scheduler.get_jobs(): ... scheduler.remove_job(job.id)\n\n_setup_podcast_job()"
+    },
+    {
+      "path": "tests/conftest.py",
+      "startLine": 20,
+      "endLine": 21,
+      "symbol": null,
+      "quote": "Avoid starting background schedulers during tests.\nos.environ[\"SCHEDULE_ENABLED\"] = \"false\""
+    }
+  ],
+  "reasoning": "The route commits preference changes inside `update_preferences` and only then calls `update_podcast_schedule`. If scheduler synchronization raises, the API returns a 500 even though the preference update is already durable. Worse, `update_podcast_schedule` removes existing podcast jobs before rebuilding them, so a failure during rebuild can leave the scheduler with no podcast jobs while the database shows scheduling enabled.",
+  "reproduction": "Run with the scheduler active and force `update_podcast_schedule` or `_setup_podcast_job` to raise after `update_preferences` returns. PUT /api/podcast/preferences returns an error, but the database row contains the new preference values; if the failure occurs after job removal, existing podcast jobs have been removed.",
+  "recommendation": "Make scheduler resync failure handling explicit. Either make `update_podcast_schedule` rebuild atomically enough that old jobs remain until the new configuration is validated, or catch/log resync failures and surface a clear degraded state while scheduling a retry from the database source of truth.",
+  "whyTestsDoNotAlreadyCoverThis": "The test environment disables background schedulers, and the preference route test does not monkeypatch `update_podcast_schedule` to assert success, failure behavior, or job preservation.",
+  "suggestedRegressionTest": "Add a route test that monkeypatches `app.worker.scheduler.update_podcast_schedule` to raise and asserts the chosen contract: either the API still returns the saved preferences with a logged resync failure, or the update is not committed and no jobs are removed.",
+  "minimumFixScope": "Adjust `update_podcast_preferences` and/or `app.worker.scheduler.update_podcast_schedule` error handling, then add focused route coverage.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-55d1aef9f5_98fa2f7a35",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:18:21.919Z",
+  "updatedAt": "2026-05-18T12:18:21.919Z"
+}

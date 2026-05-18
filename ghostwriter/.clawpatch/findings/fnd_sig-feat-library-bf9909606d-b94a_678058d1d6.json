@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-bf9909606d-b94a_678058d1d6",
+  "featureId": "feat_library_bf9909606d",
+  "title": "Wheel metadata omits runtime dependencies required by the app",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "pyproject.toml",
+      "startLine": 22,
+      "endLine": 38,
+      "symbol": "project.dependencies",
+      "quote": "dependencies = [...]"
+    },
+    {
+      "path": "requirements.txt",
+      "startLine": 8,
+      "endLine": 17,
+      "symbol": null,
+      "quote": "alembic, bcrypt, python-jose"
+    },
+    {
+      "path": "requirements.txt",
+      "startLine": 22,
+      "endLine": 37,
+      "symbol": null,
+      "quote": "youtube-transcript-api, pytz"
+    }
+  ],
+  "reasoning": "The installable project metadata only includes a subset of the runtime dependencies listed in requirements.txt. A user or deployment installing from the wheel or with `pip install .` will not get Alembic, bcrypt, python-jose, youtube-transcript-api, or pytz, even though the README describes migrations, authentication, newsletter/content processing, and scheduling behavior that depend on those dependency groups. This creates release artifacts that can import or start successfully in one path but fail at runtime in another.",
+  "reproduction": "Build/install from pyproject metadata only, for example `pip install .`, then exercise startup migrations/auth code paths that import omitted packages such as `alembic`, `bcrypt`, or `jose`.",
+  "recommendation": "Make `pyproject.toml` the authoritative runtime dependency list by adding the missing runtime packages, or explicitly stop publishing/installing from pyproject metadata and document requirements.txt as the only supported install path. Prefer keeping requirements.txt generated or synchronized from pyproject to avoid drift.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided, and there is no package-install smoke test proving that a wheel or `pip install .` environment can start the service.",
+  "suggestedRegressionTest": "Add a packaging smoke test that creates a clean environment, installs the project from `pyproject.toml`, and imports/starts the FastAPI app plus migration/auth modules.",
+  "minimumFixScope": "Update `pyproject.toml` `project.dependencies` to include all runtime dependencies currently required by the application and keep `requirements.txt` aligned.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-bf9909606d_b94aa8ae1a",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:09:01.220Z",
+  "updatedAt": "2026-05-18T12:09:01.220Z"
+}

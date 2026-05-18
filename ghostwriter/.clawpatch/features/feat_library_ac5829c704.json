@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_ac5829c704",
+  "title": "Python source app/worker",
+  "summary": "Python source group app/worker with 5 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/worker",
+      "symbol": "app/worker",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/worker/__init__.py",
+      "reason": "source group app/worker"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "reason": "source group app/worker"
+    },
+    {
+      "path": "app/worker/cleanup.py",
+      "reason": "source group app/worker"
+    },
+    {
+      "path": "app/worker/media_pipeline.py",
+      "reason": "source group app/worker"
+    },
+    {
+      "path": "app/worker/scheduler.py",
+      "reason": "source group app/worker"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-ac5829c704-a74c_c3b82593a3",
+    "fnd_sig-feat-library-ac5829c704-fa80_3ed3e3737c",
+    "fnd_sig-feat-library-ac5829c704-b574_8a8f377826",
+    "fnd_sig-feat-library-ac5829c704-c75f_946aa79b5b",
+    "fnd_sig-feat-library-ac5829c704-2f30_2ecd95bb9b",
+    "fnd_sig-feat-library-ac5829c704-e06c_18bf323424"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "6 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:10:05.275Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:10:05.275Z"
+}

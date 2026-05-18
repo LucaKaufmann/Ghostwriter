@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-9f4fcbdda7-80f0e8_0dec0d85f9",
+  "featureId": "feat_route_9f4fcbdda7",
+  "title": "Failed zip generation leaves an active token the user never receives",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/plugins.py",
+      "startLine": 168,
+      "endLine": 171,
+      "symbol": "download_koreader_plugin",
+      "quote": "session.add(api_token)\nsession.commit()\n\nzip_bytes = _build_plugin_zip(server_url=server_url, api_token=raw_token)"
+    },
+    {
+      "path": "app/api/plugins.py",
+      "startLine": 107,
+      "endLine": 110,
+      "symbol": "_build_plugin_zip",
+      "quote": "detail=\"KOReader plugin template is not available on the server.\""
+    },
+    {
+      "path": "app/api/plugins.py",
+      "startLine": 130,
+      "endLine": 134,
+      "symbol": "_build_plugin_zip",
+      "quote": "detail=\"KOReader plugin settings template is invalid.\""
+    }
+  ],
+  "reasoning": "The route commits the new API token before building the downloadable zip. If the template directory is missing, invalid, unreadable, or zip generation fails, the request returns an error after the token is already active in the database. The raw token is only embedded in the failed response path and cannot be recovered, leaving a useless active credential record for the user.",
+  "reproduction": "Make the plugin settings template invalid or unavailable, then call POST /api/plugins/koreader/download with valid auth. The response fails with 500 while a non-revoked APIToken row has already been committed.",
+  "recommendation": "Build the zip before committing the token, or wrap token creation and zip generation in a transaction with rollback on any packaging failure. Only commit after the response payload has been successfully constructed.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing tests cover successful packaging and auth rejection only; they do not simulate missing or invalid plugin templates after token creation starts.",
+  "suggestedRegressionTest": "Monkeypatch _build_plugin_zip to raise HTTPException or make the template invalid, call the endpoint, and assert no non-revoked APIToken row is persisted for that user.",
+  "minimumFixScope": "Reorder or transaction-wrap token persistence in app/api/plugins.py:download_koreader_plugin and add a failure-path test in tests/test_plugins.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-9f4fcbdda7_80f0e8ef95",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:23:31.942Z",
+  "updatedAt": "2026-05-18T12:23:31.942Z"
+}

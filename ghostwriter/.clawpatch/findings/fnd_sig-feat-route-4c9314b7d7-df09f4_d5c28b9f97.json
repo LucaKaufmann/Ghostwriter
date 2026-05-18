@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-4c9314b7d7-df09f4_d5c28b9f97",
+  "featureId": "feat_route_4c9314b7d7",
+  "title": "Missing favicon fallback can turn GET /favicon.svg into a 500",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/main.py",
+      "startLine": 185,
+      "endLine": 185,
+      "symbol": null,
+      "quote": "if FRONTEND_DIR.exists() and (FRONTEND_DIR / \"index.html\").exists():"
+    },
+    {
+      "path": "app/main.py",
+      "startLine": 199,
+      "endLine": 202,
+      "symbol": "favicon",
+      "quote": "favicon_path = FRONTEND_DIR / \"favicon.svg\"\n        if favicon_path.exists():\n            return FileResponse(favicon_path)\n        return FileResponse(FRONTEND_DIR / \"favicon.ico\")"
+    }
+  ],
+  "reasoning": "The frontend-serving block only verifies that index.html exists before registering the route. The favicon handler checks for favicon.svg, but if it is absent it unconditionally returns favicon.ico without checking that the fallback file exists. In a build or deployment artifact with index.html but no favicon.svg and no favicon.ico, Starlette's FileResponse will fail while serving the response, producing a server error for an optional static asset instead of a controlled 404 or another valid response.",
+  "reproduction": "Start the app with a frontend directory containing index.html but neither favicon.svg nor favicon.ico, then request GET /favicon.svg.",
+  "recommendation": "Check the fallback path before returning it. If neither icon exists, raise HTTPException(status_code=404) or avoid registering the route when no favicon file is present.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for the favicon route or for frontend static asset fallback behavior.",
+  "suggestedRegressionTest": "Add a FastAPI TestClient test that loads the app with a frontend build containing index.html but no favicon files and asserts GET /favicon.svg returns 404 rather than 500. Add a second case for favicon.svg present to assert a 200 response with the SVG file.",
+  "minimumFixScope": "Update only the favicon handler in app/main.py to validate both candidate files and return an explicit 404 when neither exists.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-4c9314b7d7_df09f47eb9",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:16:02.089Z",
+  "updatedAt": "2026-05-18T12:16:02.089Z"
+}

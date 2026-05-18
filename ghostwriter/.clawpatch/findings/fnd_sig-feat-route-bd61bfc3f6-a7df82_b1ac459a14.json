@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-bd61bfc3f6-a7df82_b1ac459a14",
+  "featureId": "feat_route_bd61bfc3f6",
+  "title": "Bulk retry can overwrite concurrent processing state",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/media.py",
+      "startLine": 378,
+      "endLine": 394,
+      "symbol": "retry_failed_media_items",
+      "quote": "failed_items = session.exec(query).all() ... _requeue_item(item) ... session.commit()"
+    },
+    {
+      "path": "app/worker/media_pipeline.py",
+      "startLine": 238,
+      "endLine": 252,
+      "symbol": "_process_pending_items",
+      "quote": "select(MediaItem).where(MediaItem.status == \"pending\") ... item.status = \"processing\" ... session.commit()"
+    }
+  ],
+  "reasoning": "The route loads all failed rows into a session, mutates the loaded objects, and commits by primary key without a status-qualified update. If two bulk retry requests select the same failed rows before either commits, or if a pipeline starts after the first retry commits, a later stale retry session can still see item.status == \"failed\" in memory and write the row back to pending. That makes retried counts incorrect and can briefly or permanently regress a row from processing to pending, allowing another pipeline run to pick the same media item for duplicate work.",
+  "reproduction": "Create one failed MediaItem. Start two concurrent POST /api/media/items/retry-failed requests and pause both after failed_items is loaded. Let request A commit, then let the media pipeline mark the item processing. Resume request B; it still passes the in-memory status check and commits pending over the processing status.",
+  "recommendation": "Make the retry operation atomic at the database level. Use a single SQL UPDATE with WHERE status = 'failed' and the optional content_type filter, set the retry fields, and return rowcount as retried; or update each row with WHERE id = :id AND status = 'failed' and count only successful updates. Avoid relying on stale ORM object state for the skipped/retried decision.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_media_retry.py covers only sequential requests and sequential count behavior; it does not exercise concurrent bulk retries or overlap with the media pipeline after rows have been selected but before commit.",
+  "suggestedRegressionTest": "Add a test that simulates a stale retry session: load a failed item in one session, change the same row to processing in another session, then run the retry update path and assert it does not change the processing row back to pending and does not count it as retried.",
+  "minimumFixScope": "Update retry_failed_media_items in app/api/media.py to perform status-qualified database updates and adjust tests for rowcount-based behavior.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-bd61bfc3f6_a7df826a31",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:26:42.669Z",
+  "updatedAt": "2026-05-18T12:26:42.669Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-c114a1df0e-e513_28f0b2bf6d",
+  "featureId": "feat_library_c114a1df0e",
+  "title": "Dynamic legacy item redirects can corrupt IDs containing reserved URL characters",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "frontend/src/routes/podcasts/items/[id]/+page.ts",
+      "startLine": 5,
+      "endLine": 5,
+      "symbol": "load",
+      "quote": "redirect(301, `/sources/media/items/${params.id}`);"
+    },
+    {
+      "path": "frontend/src/routes/youtube/items/[id]/+page.ts",
+      "startLine": 5,
+      "endLine": 5,
+      "symbol": "load",
+      "quote": "redirect(301, `/sources/media/items/${params.id}`);"
+    }
+  ],
+  "reasoning": "SvelteKit route params are decoded before being passed to load. Interpolating params.id directly into a redirect URL can turn reserved characters such as '/', '?', or '#' into path/query/fragment syntax instead of preserving them as the item identifier. A legacy URL like /podcasts/items/a%2Fb can redirect to /sources/media/items/a/b rather than /sources/media/items/a%2Fb, changing the target resource or producing a 404.",
+  "reproduction": "Request /podcasts/items/a%2Fb or /youtube/items/a%3Fb and observe that the Location header is built from the decoded parameter instead of an encoded path segment.",
+  "recommendation": "Encode the dynamic path segment when constructing the redirect target, for example `/sources/media/items/${encodeURIComponent(params.id)}`.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests are included for these frontend route redirects, and there is no evidence of coverage for encoded or reserved-character item IDs.",
+  "suggestedRegressionTest": "Add a SvelteKit route/load test or Playwright test asserting that /podcasts/items/a%2Fb and /youtube/items/a%2Fb redirect to /sources/media/items/a%2Fb.",
+  "minimumFixScope": "Update both dynamic item redirect load functions to encode params.id and add focused redirect coverage for reserved-character IDs.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-c114a1df0e_e513c09da3",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:08:31.160Z",
+  "updatedAt": "2026-05-18T12:08:31.160Z"
+}

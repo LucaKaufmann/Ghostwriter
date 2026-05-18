@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-test-suite-2755852c9c-a_088e6acf14",
+  "featureId": "feat_test-suite_2755852c9c",
+  "title": "Database-backed tests share state while asserting an empty database",
+  "category": "test-gap",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "tests/test_digest_download_formats.py",
+      "startLine": 71,
+      "endLine": 108,
+      "symbol": null,
+      "quote": "with Session(engine) as session:"
+    },
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 3,
+      "endLine": 7,
+      "symbol": "test_list_feeds_empty",
+      "quote": "response = client.get(\"/api/feeds\")"
+    },
+    {
+      "path": "tests/test_digest_download_formats.py",
+      "startLine": 54,
+      "endLine": 57,
+      "symbol": "test_download_digest_by_id_epub",
+      "quote": "first_digest = digests_response.json()[0]"
+    },
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 27,
+      "endLine": 43,
+      "symbol": "test_sync_feeds",
+      "quote": "response = client.post(\"/api/feeds/sync\", json=feeds)"
+    }
+  ],
+  "reasoning": "Several tests write committed rows through the global SQLModel engine and do not clean them up, while other tests assert globally empty or first-row state. For example, the PDF download test persists a Feed, then `test_list_feeds_empty` expects `/api/feeds` to be empty in the same test database. Similarly, `test_download_digest_by_id_epub` validates `digests_response.json()[0]` instead of locating the digest it created, so stale rows can make the assertion check the wrong digest. This makes the suite order-dependent and prone to full-run failures.",
+  "reproduction": "Run a database-writing test such as `tests/test_digest_download_formats.py::test_download_digest_by_id_pdf_generates_on_demand` in the same pytest session before `tests/test_feeds.py::test_list_feeds_empty`; the feed row committed by the first test remains visible to `/api/feeds`, contradicting the empty-list assertion.",
+  "recommendation": "Add test database isolation, preferably an autouse fixture that clears all tables or wraps each test in a rollback transaction against a test engine. Also change list assertions to locate records by their created IDs instead of assuming index 0 belongs to the current test.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing tests are the affected surface; they assume isolation rather than enforcing it. Some assertions such as `>= 1` in retry tests tolerate leaked state, which masks the same root cause instead of proving clean setup.",
+  "suggestedRegressionTest": "Add an isolation check that creates a feed in one test and verifies a subsequent test starts from an empty database, or enable randomized test ordering in CI after adding the cleanup fixture.",
+  "minimumFixScope": "Introduce shared database cleanup in the test fixture layer and adjust order-sensitive assertions in the owned tests.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-test-suite-2755852c9c_a09bf303b0",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:30:59.360Z",
+  "updatedAt": "2026-05-18T12:30:59.360Z"
+}

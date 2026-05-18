@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-a344d0183d-c65f_c96e279378",
+  "featureId": "feat_library_a344d0183d",
+  "title": "SPA fallback can read files outside the frontend directory",
+  "category": "security",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/main.py",
+      "startLine": 223,
+      "endLine": 226,
+      "symbol": "serve_spa",
+      "quote": "file_path = FRONTEND_DIR / full_path\n        if file_path.exists() and file_path.is_file():\n            return FileResponse(file_path)"
+    }
+  ],
+  "reasoning": "The catch-all route joins the URL path directly onto FRONTEND_DIR and serves the result if it exists. Encoded dot segments such as /%2e%2e/pyproject.toml are decoded by Starlette into ../pyproject.toml, so the Path join can escape the frontend directory and FileResponse can return arbitrary readable files adjacent to or above the frontend build when the frontend routes are enabled.",
+  "reproduction": "With the same route pattern, TestClient preserves encoded traversal: GET /%2e%2e/pyproject.toml produced full_path '../pyproject.toml' and resolved to frontend/../pyproject.toml, which exists and is_file=True.",
+  "recommendation": "Resolve the candidate path and verify it remains under FRONTEND_DIR.resolve() before serving, or delegate static file serving to Starlette StaticFiles for all static assets. Reject traversal attempts with 404 before constructing FileResponse.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests cover the frontend-build branch. The existing health/root tests import the app without a built frontend index, so serve_spa is not registered.",
+  "suggestedRegressionTest": "Create a temporary frontend build with index.html, register the app or extracted route against it, and assert GET '/%2e%2e/pyproject.toml' returns 404 while a real frontend asset under the directory still returns 200.",
+  "minimumFixScope": "The direct-file branch inside serve_spa in app/main.py.",
+  "status": "uncertain",
+  "history": [],
+  "signature": "sig_feat-library-a344d0183d_c65f06e013",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-a344d0183d-_3a2d01b970"
+  ],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:15.220Z",
+  "updatedAt": "2026-05-18T12:53:23.284Z"
+}

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_98122b0d70",
+  "title": "Python source app/models#2",
+  "summary": "Python source group app/models#2 with 6 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/models#2",
+      "symbol": "app/models#2",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/models/podcast_preferences.py",
+      "reason": "source group app/models#2"
+    },
+    {
+      "path": "app/models/podcast_schedule.py",
+      "reason": "source group app/models#2"
+    },
+    {
+      "path": "app/models/schedule.py",
+      "reason": "source group app/models#2"
+    },
+    {
+      "path": "app/models/seen_article.py",
+      "reason": "source group app/models#2"
+    },
+    {
+      "path": "app/models/user.py",
+      "reason": "source group app/models#2"
+    },
+    {
+      "path": "app/models/wallabag_config.py",
+      "reason": "source group app/models#2"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-98122b0d70-cd80_086db68e3f",
+    "fnd_sig-feat-library-98122b0d70-47fb_1ac9ebb18c"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:07:42.863Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:07:42.863Z"
+}

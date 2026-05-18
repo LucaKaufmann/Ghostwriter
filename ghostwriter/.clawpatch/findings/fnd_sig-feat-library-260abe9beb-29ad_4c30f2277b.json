@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-260abe9beb-29ad_4c30f2277b",
+  "featureId": "feat_library_260abe9beb",
+  "title": "Migration 005 can overwrite an already-migrated whisper_model value",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "alembic/versions/005_replace_summarize_sh_with_transcription.py",
+      "startLine": 23,
+      "endLine": 26,
+      "symbol": "upgrade",
+      "quote": "# Check which columns already exist (some may have been added by manual scripts)"
+    },
+    {
+      "path": "alembic/versions/005_replace_summarize_sh_with_transcription.py",
+      "startLine": 35,
+      "endLine": 40,
+      "symbol": "upgrade",
+      "quote": "if \"whisper_model\" not in existing:"
+    },
+    {
+      "path": "alembic/versions/005_replace_summarize_sh_with_transcription.py",
+      "startLine": 48,
+      "endLine": 54,
+      "symbol": "upgrade",
+      "quote": "if \"summarize_sh_whisper_model\" in existing:"
+    }
+  ],
+  "reasoning": "The migration explicitly supports partially migrated databases where new columns may already exist, but it still copies summarize_sh_whisper_model into whisper_model whenever the legacy column exists. If a manual/partial migration already created whisper_model and the application or user changed it, running Alembic 005 later will replace that value with the legacy column value. The copy should be conditional on whisper_model being newly created, blank, or still at the default, not merely on the old column existing.",
+  "reproduction": "Create client_config with summarize_sh_whisper_model='base.en' and an already-existing whisper_model='large-v3', then run revision 005. The UPDATE resets whisper_model to 'base.en'.",
+  "recommendation": "Track whether whisper_model was added by this upgrade, or guard the UPDATE with a predicate that only fills empty/default values. Do not overwrite an existing non-empty whisper_model on partially migrated databases.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked migration tests were supplied, and this requires a partially migrated schema with both legacy and replacement columns present.",
+  "suggestedRegressionTest": "Add a migration test that seeds client_config with both summarize_sh_whisper_model and whisper_model, runs revision 005, and asserts the existing whisper_model value is preserved.",
+  "minimumFixScope": "alembic/versions/005_replace_summarize_sh_with_transcription.py",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-260abe9beb_29ade12298",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:23.097Z",
+  "updatedAt": "2026-05-18T12:07:23.097Z"
+}

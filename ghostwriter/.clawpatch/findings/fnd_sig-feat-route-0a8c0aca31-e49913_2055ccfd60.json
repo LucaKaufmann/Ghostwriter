@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-0a8c0aca31-e49913_2055ccfd60",
+  "featureId": "feat_route_0a8c0aca31",
+  "title": "Dead rate-limit calls break configured lint for token revocation route",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/auth.py",
+      "startLine": 337,
+      "endLine": 339,
+      "symbol": "revoke_api_token",
+      "quote": "return {\"status\": \"ok\", \"message\": \"Token revoked successfully.\"}\n    check_auth_rate_limit(request)\n    check_auth_rate_limit(request)"
+    },
+    {
+      "path": "pyproject.toml",
+      "startLine": 69,
+      "endLine": 78,
+      "symbol": null,
+      "quote": "select = [\n    \"E\",    # pycodestyle errors\n    \"W\",    # pycodestyle warnings\n    \"F\",    # Pyflakes"
+    }
+  ],
+  "reasoning": "The DELETE /tokens/{token_id} handler returns before two check_auth_rate_limit calls, so those statements are unreachable. They also reference request, which is not in the function signature. Because Ruff is configured to run Pyflakes rules, this route causes F821 undefined-name failures and can block the configured lint/release check even though normal runtime execution never reaches the lines.",
+  "reproduction": "Run `ruff check --no-cache app/api/auth.py`; it reports F821 undefined name `request` on lines 338 and 339.",
+  "recommendation": "Remove the two unreachable calls. If rate limiting is intended for this route, add `request: Request` to the handler signature and call `check_auth_rate_limit(request)` once before the token lookup and before any return path.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided, and repository search found no direct tests for `revoke_api_token` or DELETE /auth/tokens/{token_id}. Runtime tests that only exercise successful deletion would not execute code after the return statement, so they would miss the static undefined-name failure.",
+  "suggestedRegressionTest": "Add a lint/static-check regression in CI for `app/api/auth.py`, or a focused test that imports all API modules plus keeps `ruff check app/api/auth.py` in the required verification path.",
+  "minimumFixScope": "`app/api/auth.py` only, inside the `revoke_api_token` route body and optionally its signature if the rate-limit call is kept.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-0a8c0aca31_e49913490f",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:11:15.914Z",
+  "updatedAt": "2026-05-18T12:11:15.914Z"
+}

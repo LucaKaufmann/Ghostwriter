@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-f68e3abc3b-f0e3ad_0388479c91",
+  "featureId": "feat_route_f68e3abc3b",
+  "title": "Failed database commit leaves orphaned cover files",
+  "category": "data-loss",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 331,
+      "endLine": 350,
+      "symbol": "upload_manual_cover",
+      "quote": "target_path.write_bytes(normalized.data)"
+    }
+  ],
+  "reasoning": "The normalized image is written to disk before the ManualCover row is committed. If session.add/commit/refresh fails after the write, the file remains under manual_covers without a database record, so it cannot be listed, activated, or deleted through the API and will accumulate until manually cleaned up.",
+  "reproduction": "Force session.commit() to raise after target_path.write_bytes succeeds; the generated file remains on disk with no corresponding ManualCover row.",
+  "recommendation": "Wrap the file write and database commit in error handling that unlinks the newly written file on any failure after the write. For stronger consistency, write to a temporary path, commit the row only after a successful final rename, and clean up temp/final files in except blocks.",
+  "whyTestsDoNotAlreadyCoverThis": "The manual-cover test covers a successful upload/activate/delete flow only; it does not simulate filesystem or database failures during upload.",
+  "suggestedRegressionTest": "Add a unit test that monkeypatches session.commit to raise after a successful write and asserts the generated manual cover file is removed.",
+  "minimumFixScope": "app/api/config.py upload_manual_cover error handling around write_bytes and session.commit.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-f68e3abc3b_f0e3adc68a",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:29:10.115Z",
+  "updatedAt": "2026-05-18T12:29:10.115Z"
+}

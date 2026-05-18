@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-test-suite-718a4099_22538c2a3d",
+  "findingIds": [
+    "fnd_sig-feat-test-suite-718a4099cb-6_451e64d5c6"
+  ],
+  "featureIds": [
+    "feat_test-suite_718a4099cb"
+  ],
+  "status": "failed",
+  "plan": "Renamed the live-server script helper so pytest no longer collects it as a test with an unresolved base_url fixture, and updated the CLI call site.",
+  "filesChanged": [
+    "ghostwriter/scripts/test_flow.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "python -c 'pass'",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 0,
+      "durationMs": 120,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "hatch run pytest",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 127,
+      "durationMs": 4,
+      "stdout": "",
+      "stderr": "/bin/sh: hatch: command not found\n"
+    }
+  ],
+  "testResults": [
+    {
+      "command": "python -c 'pass'",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 0,
+      "durationMs": 120,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "hatch run pytest",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 127,
+      "durationMs": 4,
+      "stdout": "",
+      "stderr": "/bin/sh: hatch: command not found\n"
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-05-18T13:24:20.938Z",
+    "finishedAt": "2026-05-18T13:24:50.694Z"
+  },
+  "git": {
+    "baseSha": "6289d49e7edc4af76630ab6729a9d0ebbac52e06",
+    "commitSha": null,
+    "branchName": "codex/clawpatch-fixes",
+    "prUrl": null
+  },
+  "createdAt": "2026-05-18T13:24:20.937Z",
+  "updatedAt": "2026-05-18T13:24:50.694Z"
+}

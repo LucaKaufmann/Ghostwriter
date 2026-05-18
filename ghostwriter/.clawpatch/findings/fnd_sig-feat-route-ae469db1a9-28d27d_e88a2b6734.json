@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-ae469db1a9-28d27d_e88a2b6734",
+  "featureId": "feat_route_ae469db1a9",
+  "title": "POST /preview has no route-level regression coverage",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/api/newsletters.py",
+      "startLine": 211,
+      "endLine": 238,
+      "symbol": "preview_newsletters",
+      "quote": "@router.post(\"/preview\", response_model=PreviewResponse)"
+    }
+  ],
+  "reasoning": "The reviewed route crosses authentication, Gmail service integration, response serialization, configured-vs-unconfigured behavior, and broad exception handling, but no linked tests were provided and repository search found only NewsletterService unit coverage, not API coverage for POST /api/newsletters/preview. A change to the dependency wiring, response shape, status/count/articles mapping, or error path could regress without failing tests.",
+  "reproduction": null,
+  "recommendation": "Add focused FastAPI route tests that override authentication/settings and monkeypatch NewsletterService to cover configured success, unconfigured error, service exception, and auth rejection if existing auth tests do not already cover route dependencies.",
+  "whyTestsDoNotAlreadyCoverThis": "The included feature metadata lists no tests, and the existing newsletter tests exercise NewsletterService parsing/fetch behavior rather than the preview_newsletters route contract.",
+  "suggestedRegressionTest": "Use TestClient against /api/newsletters/preview with dependency overrides or monkeypatched NewsletterService: assert a successful fetch returns status ok with count and serialized articles, an unconfigured service returns status error, and a raised service exception returns the expected PreviewResponse error body.",
+  "minimumFixScope": "Add route-level tests only; no production code change is required unless tests expose an actual route contract defect.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-ae469db1a9_28d27d4f25",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:23:57.626Z",
+  "updatedAt": "2026-05-18T12:23:57.626Z"
+}

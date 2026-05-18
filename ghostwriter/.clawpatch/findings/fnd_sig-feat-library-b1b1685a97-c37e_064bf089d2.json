@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b1b1685a97-c37e_064bf089d2",
+  "featureId": "feat_library_b1b1685a97",
+  "title": "Malformed digest_ids can turn sync requests into 500s",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/sync.py",
+      "startLine": 149,
+      "endLine": 156,
+      "symbol": "combined_sync",
+      "quote": "known_ids = {id_str.strip() for id_str in digest_ids.split(\",\") if id_str.strip()}"
+    }
+  ],
+  "reasoning": "The endpoint accepts digest_ids as an arbitrary comma-separated string, then converts each token with UUID(id_str) inside the request handler. Any malformed token raises ValueError instead of FastAPI request validation or an HTTPException, so an authenticated client with one corrupted/legacy cached digest id gets a server error rather than a 4xx response it can recover from.",
+  "reproduction": "Call GET /api/sync?digest_ids=not-a-uuid with a valid API key; UUID('not-a-uuid') raises ValueError before the query executes.",
+  "recommendation": "Parse digest_ids in a small validation helper and raise HTTPException(status_code=422, detail=...) for invalid tokens, or expose it as a typed list of UUID query values if the client contract can change.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for app/api/sync.py, and the existing search results did not include tests for /api/sync digest_ids parsing.",
+  "suggestedRegressionTest": "Add a FastAPI client test for /api/sync?digest_ids=not-a-uuid asserting a 422/400 response with no unhandled exception, plus a valid comma-separated UUID case that excludes known digests.",
+  "minimumFixScope": "app/api/sync.py digest_ids parsing and one sync endpoint regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-b1b1685a97_c37ef61dce",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:17.916Z",
+  "updatedAt": "2026-05-18T12:10:17.916Z"
+}

@@ -102,6 +102,7 @@ class EpubGenerator:
         newsletter_articles: list[ExtractedArticle] | None = None,
         media_articles: list[ExtractedArticle] | None = None,
         cover_image: CoverImage | None = None,
+        output_filename: str | None = None,
     ) -> str:
         """
         Generate an EPUB file from extracted articles.
@@ -114,6 +115,7 @@ class EpubGenerator:
             newsletter_articles: Newsletter articles.
             media_articles: Completed media items (podcast/YouTube transcripts).
             cover_image: Optional generated cover image to embed.
+            output_filename: Stored EPUB filename to write.
 
         Returns:
             Path to the generated EPUB file.
@@ -202,7 +204,9 @@ class EpubGenerator:
                 feed_chapters.append(chapter)
                 spine_entries.append(chapter)
 
-            toc_entries.append((epub.Section(feed_title), [feed_section] + feed_chapters))
+            toc_entries.append(
+                (epub.Section(feed_title), [feed_section] + feed_chapters)
+            )
 
         # Append media articles (podcasts, YouTube) in separate sections at the end
         media_by_type: dict[str, list[ExtractedArticle]] = {}
@@ -212,7 +216,9 @@ class EpubGenerator:
         section_labels = {"podcast": "Podcasts", "youtube": "YouTube"}
         for content_type, type_articles in media_by_type.items():
             section_title = section_labels.get(content_type, content_type.capitalize())
-            for feed_title, feed_articles in self._group_articles_by_feed(type_articles):
+            for feed_title, feed_articles in self._group_articles_by_feed(
+                type_articles
+            ):
                 feed_index += 1
                 group_title = f"{section_title}: {feed_title}"
                 feed_slug = self._slugify(group_title)
@@ -253,7 +259,7 @@ class EpubGenerator:
         book.spine = spine_entries
 
         # Generate filename and save
-        filename = f"{date.strftime('%Y-%m-%d')}_{period}.epub"
+        filename = output_filename or f"{date.strftime('%Y-%m-%d')}_{period}.epub"
         output_path = os.path.join(self.settings.output_dir, filename)
 
         # Ensure output directory exists
@@ -315,9 +321,7 @@ class EpubGenerator:
         """
         cover_image_html = ""
         if cover_image_href:
-            cover_image_html = (
-                f'<img class="cover-art" src="{cover_image_href}" alt="Digest cover image"/>'
-            )
+            cover_image_html = f'<img class="cover-art" src="{cover_image_href}" alt="Digest cover image"/>'
 
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -330,7 +334,7 @@ class EpubGenerator:
     <div class="cover">
         {cover_image_html}
         <h1>Epilogue</h1>
-        <p class="date">{date.strftime('%A, %B %d, %Y')}</p>
+        <p class="date">{date.strftime("%A, %B %d, %Y")}</p>
         <p>{period.capitalize()} Edition</p>
         <p>{article_count} articles</p>
     </div>
@@ -401,9 +405,9 @@ class EpubGenerator:
     <div class="article">
         <h1>{title}{badge}</h1>
         <div class="article-meta">
-            {f'<span>By {article.author}</span> | ' if article.author else ''}
+            {f"<span>By {article.author}</span> | " if article.author else ""}
             <span>{article.word_count} words</span>
-            {' | <span>AI fallback</span>' if article.ai_failed else ''}
+            {" | <span>AI fallback</span>" if article.ai_failed else ""}
         </div>
         <div class="article-content">
             {content_html}

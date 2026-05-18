@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_9f4fcbdda7",
+  "title": "FastAPI route POST /koreader/download",
+  "summary": "FastAPI route POST /koreader/download handled by download_koreader_plugin in app/api/plugins.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/plugins.py",
+      "symbol": "download_koreader_plugin",
+      "route": "POST /koreader/download",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/plugins.py",
+      "reason": "FastAPI route handler download_koreader_plugin"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "tests/test_plugins.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_plugins.py",
+      "command": "hatch run pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization",
+    "auth"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-9f4fcbdda7-166622_ba078376ee",
+    "fnd_sig-feat-route-9f4fcbdda7-80f0e8_0dec0d85f9"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:23:31.943Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:23:31.943Z"
+}

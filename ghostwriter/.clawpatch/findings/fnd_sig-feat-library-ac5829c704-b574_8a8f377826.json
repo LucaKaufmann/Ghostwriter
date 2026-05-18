@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-ac5829c704-b574_8a8f377826",
+  "featureId": "feat_library_ac5829c704",
+  "title": "Digest filenames collide for repeated runs on the same day and period",
+  "category": "data-loss",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 1075,
+      "endLine": 1084,
+      "symbol": "generate_digest",
+      "quote": "digest = Digest(\n            filename=f\"{now.strftime('%Y-%m-%d')}_{period}.epub\",\n            period=period,\n            status=\"processing\",\n            stage=\"queued\",\n            locked_at=now,\n            locked_by=\"ghostwriter\",\n        )"
+    }
+  ],
+  "reasoning": "Every digest for a given date and period receives the same filename, including repeated manual runs where period is \"manual\". The code does not check for an existing completed digest or add a unique suffix, so multiple digest records can point at the same output name and later runs can overwrite or alias earlier digest artifacts.",
+  "reproduction": null,
+  "recommendation": "Generate a unique filename per digest, for example by including the digest UUID or a timestamp with sufficient precision, and keep the generator output aligned to that stored filename.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests create two digests for the same date and period and assert distinct downloadable artifacts.",
+  "suggestedRegressionTest": "Freeze time, call generate_digest twice for the same period after allowing the first lock to clear or by directly creating records, and assert filenames differ.",
+  "minimumFixScope": "generate_digest filename creation and the EPUB generation call path that writes the file.",
+  "status": "uncertain",
+  "history": [],
+  "signature": "sig_feat-library-ac5829c704_b574de3ece",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-ac5829c704-_60a9061789"
+  ],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:05.272Z",
+  "updatedAt": "2026-05-18T13:02:36.605Z"
+}

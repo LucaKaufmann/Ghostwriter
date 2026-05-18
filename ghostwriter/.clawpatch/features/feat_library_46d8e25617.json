@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_46d8e25617",
+  "title": "Python source app/core",
+  "summary": "Python source group app/core with 8 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/core",
+      "symbol": "app/core",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/core/__init__.py",
+      "reason": "source group app/core"
+    },
+    {
+      "path": "app/core/auth.py",
+      "reason": "source group app/core"
+    },
+    {
+      "path": "app/core/config.py",
+      "reason": "source group app/core"
+    },
+    {
+      "path": "app/core/database.py",
+      "reason": "source group app/core"
+    },
+    {
+      "path": "app/core/logging.py",
+      "reason": "source group app/core"
+    },
+    {
+      "path": "app/core/net.py",
+      "reason": "source group app/core"
+    },
+    {
+      "path": "app/core/rate_limit.py",
+      "reason": "source group app/core"
+    },
+    {
+      "path": "app/core/security.py",
+      "reason": "source group app/core"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-46d8e25617-eade_443ce3d4ca",
+    "fnd_sig-feat-library-46d8e25617-8017_f97aaff132",
+    "fnd_sig-feat-library-46d8e25617-5903_308e6089bb"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:07:59.318Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:07:59.318Z"
+}

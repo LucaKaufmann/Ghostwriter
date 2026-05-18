@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_0b039fb49a",
+  "title": "FastAPI route GET /wallabag",
+  "summary": "FastAPI route GET /wallabag handled by get_wallabag_config in app/api/config.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/config.py",
+      "symbol": "get_wallabag_config",
+      "route": "GET /wallabag",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/config.py",
+      "reason": "FastAPI route handler get_wallabag_config"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-0b039fb49a-de397f_a95f14bb65"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:11:10.958Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:11:10.958Z"
+}

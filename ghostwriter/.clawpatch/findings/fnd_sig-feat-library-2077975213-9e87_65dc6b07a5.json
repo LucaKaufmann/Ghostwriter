@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2077975213-9e87_65dc6b07a5",
+  "featureId": "feat_library_2077975213",
+  "title": "YouTube caption extraction uses the wrong transcript API methods",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/services/youtube_service.py",
+      "startLine": 58,
+      "endLine": 81,
+      "symbol": "YouTubeService._get_captions",
+      "quote": "ytt_api = YouTubeTranscriptApi() ... ytt_api.fetch(video_id, languages=[\"en\"]) ... ytt_api.list(video_id)"
+    },
+    {
+      "path": "app/services/youtube_service.py",
+      "startLine": 105,
+      "endLine": 107,
+      "symbol": "YouTubeService._get_captions",
+      "quote": "except Exception as e: ... return None"
+    },
+    {
+      "path": "tests/test_youtube_service.py",
+      "startLine": 71,
+      "endLine": 75,
+      "symbol": "test_get_transcript_captions_success",
+      "quote": "patch.object(service, \"_get_captions\", return_value=\"Hello from captions\")"
+    }
+  ],
+  "reasoning": "The implementation calls instance methods named fetch and list. With the declared youtube-transcript-api dependency range used by this project, the available API is get_transcript/list_transcripts, so these calls raise and are swallowed by the broad exception handler. In practice, the caption path is dead and every video without a mocked _get_captions falls through to yt-dlp audio transcription, which is slower, less reliable, and may require local binaries or OpenAI credentials.",
+  "reproduction": "Call await YouTubeService(settings)._get_captions(\"dQw4w9WgXcQ\") with youtube-transcript-api 0.6.x installed; AttributeError is caught and the method returns None, causing get_transcript to use audio fallback.",
+  "recommendation": "Use the library API supported by the pinned dependency, such as YouTubeTranscriptApi.get_transcript(video_id, languages=[...]) and YouTubeTranscriptApi.list_transcripts(video_id), or update the dependency and implementation together. Avoid swallowing AttributeError from programmer/API mismatches as if captions were unavailable.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing caption success test patches _get_captions itself, so it never executes the youtube-transcript-api integration code that is broken.",
+  "suggestedRegressionTest": "Mock youtube_transcript_api.YouTubeTranscriptApi.get_transcript/list_transcripts or run against a fixture-compatible fake object and assert _get_captions returns joined caption text without falling back to audio.",
+  "minimumFixScope": "app/services/youtube_service.py plus a direct _get_captions unit test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-2077975213_9e87c5f8d2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:37.633Z",
+  "updatedAt": "2026-05-18T12:07:37.633Z"
+}

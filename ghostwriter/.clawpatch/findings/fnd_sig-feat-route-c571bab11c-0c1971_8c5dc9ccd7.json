@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-c571bab11c-0c1971_8c5dc9ccd7",
+  "featureId": "feat_route_c571bab11c",
+  "title": "One-second conflict tolerance permits stale rapid writes",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 450,
+      "endLine": 456,
+      "symbol": "update_config",
+      "quote": "diff = abs((server_ts - client_ts).total_seconds())\n        if diff > 1:"
+    },
+    {
+      "path": "app/api/config.py",
+      "startLine": 580,
+      "endLine": 584,
+      "symbol": "update_config",
+      "quote": "config.updated_at = datetime.now(timezone.utc)\n\n    session.add(config)\n    session.commit()"
+    }
+  ],
+  "reasoning": "The route advertises optimistic conflict detection, but it accepts any stale client_updated_at within one second of the current server timestamp. If two clients read the same config and both PUT changes within that one-second window, the second stale write passes the conflict check and overwrites the first client's fields, even though the server was already modified by another client.",
+  "reproduction": "Client A and Client B both GET /api/config at timestamp T. Client A PUTs a change at T+0.2s. Client B PUTs a different change with client_updated_at=T at T+0.4s. Because diff is <= 1, B receives 200 instead of 409 and its stale update is committed.",
+  "recommendation": "Remove the tolerance for conflict detection and compare a normalized UTC timestamp exactly, or better use a monotonic version column / conditional database update that only commits when the stored updated_at still matches the client's version.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked tests cover some config fields, PDF validation, and secret masking, but there is no test for client_updated_at conflict behavior or rapid successive updates.",
+  "suggestedRegressionTest": "Add a test that creates a config, records updated_at, applies one update, then immediately sends a second PUT with the original client_updated_at and asserts the response is 409 and the first update is preserved.",
+  "minimumFixScope": "Change the conflict check in app/api/config.py and add route-level tests for accepted matching timestamps and rejected stale timestamps.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-c571bab11c_0c1971a656",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:27:10.115Z",
+  "updatedAt": "2026-05-18T12:27:10.115Z"
+}

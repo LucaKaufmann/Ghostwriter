@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-46d8e25617-8017_f97aaff132",
+  "featureId": "feat_library_46d8e25617",
+  "title": "SSRF guard is vulnerable to DNS rebinding between validation and fetch",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/core/net.py",
+      "startLine": 72,
+      "endLine": 78,
+      "symbol": "validate_public_url",
+      "quote": "ips = _resolve_host(hostname)\n    if not ips:\n        raise ValueError(\"Hostname could not be resolved\")\n\n    for ip in ips:\n        if _is_private_ip(ip):\n            raise ValueError(\"Private or local IPs are not allowed\")"
+    }
+  ],
+  "reasoning": "validate_public_url checks the hostname's current DNS answers and then returns only success/failure. It does not return a pinned public address or perform the outbound request itself, so any later HTTP client fetches the original hostname and can resolve it again. An attacker-controlled domain can answer with a public IP during validation and a private or loopback IP during the actual fetch, bypassing the documented private-host restriction.",
+  "reproduction": "Use a test resolver or rebinding DNS name that returns a public address for validate_public_url and a private address for the subsequent HTTP client's lookup.",
+  "recommendation": "Move outbound fetching behind a safe helper that resolves and connects to an approved address in one operation, or return/require a pinned resolved endpoint and ensure redirects are revalidated. At minimum, document that validate_public_url is only a prefilter and not a complete SSRF control.",
+  "whyTestsDoNotAlreadyCoverThis": "There are no tests for DNS rebinding or for ensuring callers use the same resolved address that passed validation.",
+  "suggestedRegressionTest": "Add a test with a fake resolver/fetcher showing that a URL whose second resolution points to 127.0.0.1 is rejected before any network request is made.",
+  "minimumFixScope": "app/core/net.py and the outbound fetch call sites that currently validate then fetch by hostname.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-46d8e25617_8017339284",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:59.316Z",
+  "updatedAt": "2026-05-18T12:07:59.316Z"
+}

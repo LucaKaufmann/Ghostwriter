@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-bf9909606d-a84b_32ca44855b",
+  "featureId": "feat_library_bf9909606d",
+  "title": "Hatch commands do not install dev tools declared only as optional extras",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "pyproject.toml",
+      "startLine": 40,
+      "endLine": 46,
+      "symbol": "project.optional-dependencies.dev",
+      "quote": "dev = [\"pytest...\", \"ruff...\", \"mypy...\"]"
+    },
+    {
+      "path": "pyproject.toml",
+      "startLine": 53,
+      "endLine": 58,
+      "symbol": "tool.hatch",
+      "quote": "[build-system] ... [tool.hatch.build.targets.wheel]"
+    }
+  ],
+  "reasoning": "The project advertises `hatch run pytest`, `hatch run ruff`, and `hatch run mypy` commands, but the corresponding tools are only listed under the optional `dev` extra. The file does not define a Hatch environment that enables that extra or separately installs those tools. In a fresh Hatch environment, those commands can fail because pytest, ruff, and mypy are not guaranteed to be installed.",
+  "reproduction": "In a clean checkout with Hatch available but no project-local virtualenv, run `hatch run pytest` or `hatch run ruff check .`; the default Hatch environment has no explicit dependency list that installs the dev optional extra.",
+  "recommendation": "Add a `[tool.hatch.envs.default]` configuration that installs the `dev` extra or declares the dev dependencies directly, and optionally add Hatch scripts for the documented commands.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests or CI configuration were included that exercise the documented Hatch commands from a clean environment.",
+  "suggestedRegressionTest": "Add a CI job that starts from a clean environment and runs the documented `hatch run mypy .`, `hatch run ruff check .`, `hatch run ruff format --check .`, and `hatch run pytest` commands.",
+  "minimumFixScope": "Add Hatch environment configuration in `pyproject.toml` for the default dev/test environment.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-bf9909606d_a84b66d413",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:09:01.221Z",
+  "updatedAt": "2026-05-18T12:09:01.221Z"
+}

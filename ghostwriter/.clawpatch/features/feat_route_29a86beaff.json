@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_29a86beaff",
+  "title": "FastAPI route GET /digests/{digest_id}/podcast",
+  "summary": "FastAPI route GET /digests/{digest_id}/podcast handled by get_digest_podcast_status in app/api/podcast.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/podcast.py",
+      "symbol": "get_digest_podcast_status",
+      "route": "GET /digests/{digest_id}/podcast",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/podcast.py",
+      "reason": "FastAPI route handler get_digest_podcast_status"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-29a86beaff-35b6b2_6e6d686bdc"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:14:20.761Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:14:20.761Z"
+}

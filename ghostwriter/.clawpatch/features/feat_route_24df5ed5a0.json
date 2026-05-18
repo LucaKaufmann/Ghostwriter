@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_24df5ed5a0",
+  "title": "FastAPI route GET ",
+  "summary": "FastAPI route GET  handled by get_config in app/api/config.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/config.py",
+      "symbol": "get_config",
+      "route": "GET ",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/config.py",
+      "reason": "FastAPI route handler get_config"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-24df5ed5a0-07d512_5836b76037",
+    "fnd_sig-feat-route-24df5ed5a0-7c4c7a_49161a60cc"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:13:00.805Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:13:00.805Z"
+}

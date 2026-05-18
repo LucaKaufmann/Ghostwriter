@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_c114a1df0e",
+  "title": "Node source frontend/src/routes",
+  "summary": "Node/TypeScript source group frontend/src/routes with 6 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "frontend/package.json",
+      "symbol": "frontend/src/routes",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "frontend/src/routes/feeds/+page.ts",
+      "reason": "source group frontend/src/routes"
+    },
+    {
+      "path": "frontend/src/routes/newsletters/+page.ts",
+      "reason": "source group frontend/src/routes"
+    },
+    {
+      "path": "frontend/src/routes/podcasts/+page.ts",
+      "reason": "source group frontend/src/routes"
+    },
+    {
+      "path": "frontend/src/routes/podcasts/items/[id]/+page.ts",
+      "reason": "source group frontend/src/routes"
+    },
+    {
+      "path": "frontend/src/routes/youtube/+page.ts",
+      "reason": "source group frontend/src/routes"
+    },
+    {
+      "path": "frontend/src/routes/youtube/items/[id]/+page.ts",
+      "reason": "source group frontend/src/routes"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "frontend/package.json",
+      "reason": "package manifest"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:frontend",
+    "project-root:frontend"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-c114a1df0e-e513_28f0b2bf6d"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:08:31.160Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:08:31.160Z"
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-231e4790c6-6ffabd_423d753619",
+  "featureId": "feat_route_231e4790c6",
+  "title": "Running-job conflict check is not atomic",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/digests.py",
+      "startLine": 178,
+      "endLine": 185,
+      "symbol": "trigger_digest",
+      "quote": "if digest_id is None:"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 1031,
+      "endLine": 1040,
+      "symbol": "generate_digest",
+      "quote": "running = session.exec(statement).first()"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 1075,
+      "endLine": 1086,
+      "symbol": "generate_digest",
+      "quote": "session.add(digest)\n        session.commit()"
+    },
+    {
+      "path": "app/models/digest.py",
+      "startLine": 40,
+      "endLine": 42,
+      "symbol": "Digest",
+      "quote": "Index(\"ix_digests_status\", \"status\")"
+    }
+  ],
+  "reasoning": "The route promises a 409 when a digest job is already running, but generate_digest first queries for an active processing row and only later inserts a new processing row. There is no unique active-job constraint or transactional lock shown on the digests table. Two concurrent POST /trigger requests can both observe no running job before either commits, causing both to start pipelines instead of one receiving 409.",
+  "reproduction": null,
+  "recommendation": "Move the active-job guard into an atomic database operation, for example a singleton lock table or transaction that serializes job creation, and keep a process-level async lock only as an optimization. Preserve stale-lock handling inside the same critical section.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked or discovered tests exercise concurrent POST /digests/trigger requests; existing tests found in this area cover downloads and unrelated podcast triggers.",
+  "suggestedRegressionTest": "Use an async test client to issue two authenticated POST /api/digests/trigger requests concurrently with the pipeline held open, then assert exactly one response is 200 and the other is 409 and only one processing digest row exists.",
+  "minimumFixScope": "Atomic job-start logic in app/worker/bindery.py plus a concurrent trigger regression test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-231e4790c6_6ffabd11be",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:13:32.478Z",
+  "updatedAt": "2026-05-18T12:13:32.478Z"
+}

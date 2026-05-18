@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-7e0653d823-293747_c642002445",
+  "featureId": "feat_route_7e0653d823",
+  "title": "Masked client_secret is persisted as the real Wallabag secret",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 749,
+      "endLine": 756,
+      "symbol": "_wallabag_config_to_read",
+      "quote": "client_secret=PASSWORD_MASK if config.client_secret else \"\""
+    },
+    {
+      "path": "app/api/config.py",
+      "startLine": 782,
+      "endLine": 785,
+      "symbol": "update_wallabag_config",
+      "quote": "for field_name in [\"url\", \"client_id\", \"client_secret\", \"username\", \"mode\", \"tag_on_process\"]:"
+    },
+    {
+      "path": "app/api/config.py",
+      "startLine": 787,
+      "endLine": 789,
+      "symbol": "update_wallabag_config",
+      "quote": "if request.password is not None and request.password != PASSWORD_MASK:"
+    }
+  ],
+  "reasoning": "The read model masks both client_secret and password, but the update route only treats the password mask as an unchanged sentinel. A client that reads the config and submits the returned form back with an unchanged client_secret will overwrite the stored OAuth client secret with the mask string, breaking Wallabag authentication and losing the previous secret. The password handling directly shows the intended sentinel behavior, but client_secret is included in the generic assignment loop instead.",
+  "reproduction": "Save a valid Wallabag config with client_secret set. GET /wallabag returns client_secret as the mask. PUT /wallabag with that returned client_secret while changing another field. The database client_secret becomes the mask instead of remaining the original secret.",
+  "recommendation": "Handle client_secret the same way as password: exclude it from the generic field loop and update it only when the provided value is not the mask sentinel. Preserve empty string behavior if clearing the secret is supported.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests exercise PUT /wallabag secret-preservation semantics; the available Wallabag-related tests only cover digest ordering/prompt behavior.",
+  "suggestedRegressionTest": "Add an API test that seeds a WallabagConfig with client_secret='real-secret', calls PUT /wallabag with client_secret equal to the masked response value and another changed field, then asserts the stored client_secret remains 'real-secret'.",
+  "minimumFixScope": "Update only update_wallabag_config secret-field handling and add focused route/model persistence coverage.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-7e0653d823_2937476ee2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:20:05.492Z",
+  "updatedAt": "2026-05-18T12:20:05.492Z"
+}

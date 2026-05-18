@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-ac5829c704-fa80_3ed3e3737c",
+  "featureId": "feat_library_ac5829c704",
+  "title": "Articles are marked seen before digest generation is durable",
+  "category": "data-loss",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 262,
+      "endLine": 275,
+      "symbol": "BinderyPipeline.run",
+      "quote": "wallabag_articles.append(ExtractedArticle(\n...\nawait self._mark_seen_raw(wb_feed_id, guid, wb[\"url\"], wb[\"title\"])"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 308,
+      "endLine": 312,
+      "symbol": "BinderyPipeline.run",
+      "quote": "if not await self._is_seen(nl_feed_id, nl.guid):\n                            newsletter_articles.append(nl)\n                            await self._mark_seen_raw(nl_feed_id, nl.guid, nl.url, nl.title)"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 434,
+      "endLine": 444,
+      "symbol": "BinderyPipeline.run",
+      "quote": "digest_logger.article_extracted(\n...\nawait self._mark_seen(feed.id, parsed_article)"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 581,
+      "endLine": 687,
+      "symbol": "BinderyPipeline.run",
+      "quote": "# Stage 4: Compile EPUB\n...\nawait self._fail(str(e))\n            raise"
+    }
+  ],
+  "reasoning": "RSS articles are marked seen after extraction, and Wallabag/newsletter items are marked seen during fetch, but EPUB generation, article-record saves, media consumption, and external processed markers all happen afterward and can still fail. On any later exception, the digest is failed while the seen rows remain committed, causing those articles to be skipped on the next run even though no successful digest delivered them.",
+  "reproduction": null,
+  "recommendation": "Defer SeenArticle writes until after EPUB generation and DigestArticle persistence succeed, or record them transactionally with the successful digest state. If early reservation is required, use a separate transient reservation state that is cleared on failure.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests exercise failure after extraction/fetch and then verify the same articles are retried on the next digest run.",
+  "suggestedRegressionTest": "Simulate a successful extraction followed by EpubGenerator.generate raising, then run the pipeline again and assert the same RSS/newsletter/Wallabag items are still eligible.",
+  "minimumFixScope": "BinderyPipeline.run plus _mark_seen/_mark_seen_raw call placement.",
+  "status": "uncertain",
+  "history": [],
+  "signature": "sig_feat-library-ac5829c704_fa80d0cb0d",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-ac5829c704-_180313405e"
+  ],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:05.272Z",
+  "updatedAt": "2026-05-18T13:08:12.866Z"
+}

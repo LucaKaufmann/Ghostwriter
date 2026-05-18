@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-8b03f39851-210124_b8dac246d8",
+  "featureId": "feat_route_8b03f39851",
+  "title": "GET /podcasts has no route-level regression coverage",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/api/media.py",
+      "startLine": 80,
+      "endLine": 93,
+      "symbol": "list_podcast_feeds",
+      "quote": "@router.get("
+    },
+    {
+      "path": "tests/test_media_retry.py",
+      "startLine": 53,
+      "endLine": 129,
+      "symbol": null,
+      "quote": "test_retry_single_failed_item_sets_pending_and_clears_error"
+    }
+  ],
+  "reasoning": "The owned route is responsible for filtering to `feed_type == \"podcast\"`, excluding soft-deleted feeds, sorting by title, serializing `MediaFeedRead`, and enforcing the API-key dependency. The inspected media tests cover retry behavior only and do not exercise listing feeds, so regressions such as returning deleted feeds, leaking YouTube feeds, or changing the response shape would not be caught.",
+  "reproduction": null,
+  "recommendation": "Add focused FastAPI tests for GET /api/media/podcasts that create active podcast, deleted podcast, and YouTube feeds, then assert only active podcasts are returned in title order and with the expected response fields. Include an auth-required case if the test harness supports authenticated mode.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for this feature, and the existing `tests/test_media_retry.py` file only posts to `/api/media/items/.../retry` endpoints.",
+  "suggestedRegressionTest": "Create `tests/test_media_feeds.py::test_list_podcast_feeds_returns_only_non_deleted_podcasts_in_title_order`.",
+  "minimumFixScope": "Add route-level tests for GET /api/media/podcasts without changing production behavior.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-8b03f39851_210124c311",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:20:14.824Z",
+  "updatedAt": "2026-05-18T12:20:14.824Z"
+}

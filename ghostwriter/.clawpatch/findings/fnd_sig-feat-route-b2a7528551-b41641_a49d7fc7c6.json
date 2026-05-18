@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-b2a7528551-b41641_a49d7fc7c6",
+  "featureId": "feat_route_b2a7528551",
+  "title": "Deleting the last custom schedule can reactivate the legacy podcast schedule",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 1090,
+      "endLine": 1095,
+      "symbol": "delete_podcast_schedule",
+      "quote": "session.delete(sched)\nsession.commit()\n\nupdate_podcast_schedule()"
+    },
+    {
+      "path": "app/worker/scheduler.py",
+      "startLine": 541,
+      "endLine": 563,
+      "symbol": "_setup_podcast_job",
+      "quote": "if all_schedules:\n    ...\n    return\n\n# Fallback: legacy single schedule from PodcastPreferences\n# (only when no podcast_schedules rows exist at all)"
+    },
+    {
+      "path": "app/worker/scheduler.py",
+      "startLine": 681,
+      "endLine": 695,
+      "symbol": "update_podcast_schedule",
+      "quote": "Falls back to legacy PodcastPreferences if no podcast_schedules exist."
+    }
+  ],
+  "reasoning": "The DELETE handler removes the row, commits, then asks the scheduler to rebuild. When that deletion removes the final podcast_schedules row, update_podcast_schedule calls _setup_podcast_job, which intentionally falls back to PodcastPreferences. For a user who previously had legacy podcast preferences enabled, deleting the last custom schedule can therefore leave a podcast job scheduled instead of leaving no schedule active. That can trigger unexpected generation and external TTS/API cost after a successful DELETE.",
+  "reproduction": "With the scheduler running, set PodcastPreferences.enabled=true and schedule='daily', create a single row in podcast_schedules, then DELETE /podcast/schedules/{schedule_id}. The row is gone, but update_podcast_schedule rebuilds jobs from the legacy preferences because no podcast_schedules rows remain.",
+  "recommendation": "Make the delete path preserve the user's intent to have no custom schedules active. For example, add an explicit scheduler update mode that does not fall back to legacy after schedule CRUD deletion, or record a migration/disable flag so fallback is only used for pre-multi-schedule installations, not after the user deletes all custom schedules.",
+  "whyTestsDoNotAlreadyCoverThis": "The CRUD test only asserts the 204 response and that GET returns 404 after deletion. The test suite also disables background schedulers with SCHEDULE_ENABLED=false, so it does not observe the rebuilt APScheduler jobs or the legacy fallback behavior.",
+  "suggestedRegressionTest": "Add a scheduler-level or API integration test that seeds enabled legacy podcast preferences plus one custom schedule, starts or fakes the scheduler, deletes the custom schedule, and asserts no legacy podcast_generation job is created unless the user explicitly opted into fallback.",
+  "minimumFixScope": "Update the scheduler refresh contract used by schedule CRUD deletion and add focused coverage for deleting the final schedule while legacy preferences are enabled.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-b2a7528551_b41641a88e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:25:13.907Z",
+  "updatedAt": "2026-05-18T12:25:13.907Z"
+}

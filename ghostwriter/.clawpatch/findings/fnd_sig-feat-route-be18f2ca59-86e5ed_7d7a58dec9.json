@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-be18f2ca59-86e5ed_7d7a58dec9",
+  "featureId": "feat_route_be18f2ca59",
+  "title": "Active whisper model route has no regression coverage",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 706,
+      "endLine": 727,
+      "symbol": "set_active_whisper_model",
+      "quote": "async def set_active_whisper_model("
+    }
+  ],
+  "reasoning": "The route performs validation for unknown models, rejects models that are not downloaded, persists ClientConfig.whisper_model, and returns the updated model list, but there are no linked tests for this feature and repository search found no tests exercising /whisper/models/active. A regression here could silently allow an unavailable model to become active or fail to persist the selected model, breaking local transcription later.",
+  "reproduction": null,
+  "recommendation": "Add focused FastAPI tests for successful activation, unknown model rejection, and not-downloaded rejection, mocking or isolating WhisperModelService filesystem state.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature declares no tests, and existing config tests only cover PDF settings on /api/config rather than whisper model management.",
+  "suggestedRegressionTest": "Create tests that call PUT /api/config/whisper/models/active with a known downloaded model and assert the response active_model and persisted ClientConfig.whisper_model, plus 400 cases for an unknown model and a known but missing model file.",
+  "minimumFixScope": "Add route-level pytest coverage for set_active_whisper_model; no production code change is required for this finding.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-be18f2ca59_86e5edbe6a",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:26:29.149Z",
+  "updatedAt": "2026-05-18T12:26:29.149Z"
+}

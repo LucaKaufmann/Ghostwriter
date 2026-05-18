@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "projectId": "prj_git-github-com-lucakaufmann-ghos_2aa52944cb",
+  "name": "Ghostwriter",
+  "rootPath": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+  "git": {
+    "remoteUrl": "git@github.com:LucaKaufmann/Ghostwriter.git",
+    "defaultBranch": "main",
+    "currentBranch": "codex/clawpatch-fixes",
+    "headSha": "6289d49e7edc4af76630ab6729a9d0ebbac52e06"
+  },
+  "detected": {
+    "languages": [
+      "python"
+    ],
+    "frameworks": [
+      "fastapi",
+      "pytest"
+    ],
+    "packageManagers": [
+      "hatch"
+    ],
+    "commands": {
+      "typecheck": "hatch run mypy .",
+      "lint": "hatch run ruff check .",
+      "format": "hatch run ruff format --check .",
+      "test": "hatch run pytest"
+    }
+  },
+  "createdAt": "2026-05-18T12:04:18.254Z",
+  "updatedAt": "2026-05-18T12:04:18.254Z"
+}

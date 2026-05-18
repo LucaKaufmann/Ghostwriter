@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_8ca90904de",
+  "title": "FastAPI route GET /whisper/models",
+  "summary": "FastAPI route GET /whisper/models handled by list_whisper_models in app/api/config.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/config.py",
+      "symbol": "list_whisper_models",
+      "route": "GET /whisper/models",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/config.py",
+      "reason": "FastAPI route handler list_whisper_models"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-8ca90904de-ba114a_fe27a359a7"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:21:06.382Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:21:06.382Z"
+}

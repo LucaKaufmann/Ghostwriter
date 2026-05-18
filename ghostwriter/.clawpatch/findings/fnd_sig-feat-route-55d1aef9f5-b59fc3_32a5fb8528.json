@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-55d1aef9f5-b59fc3_32a5fb8528",
+  "featureId": "feat_route_55d1aef9f5",
+  "title": "Nullable preference fields cannot be cleared with JSON null",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/models/podcast_preferences.py",
+      "startLine": 139,
+      "endLine": 154,
+      "symbol": "PodcastPreferencesUpdate",
+      "quote": "script_model: str | None = None ... podcast_feed_base_url: str | None = None"
+    },
+    {
+      "path": "app/services/podcast_service.py",
+      "startLine": 454,
+      "endLine": 456,
+      "symbol": "PodcastDigestService.update_preferences",
+      "quote": "if update.script_model is not None:\n    cleaned_model = update.script_model.strip()\n    prefs.script_model = cleaned_model or None"
+    },
+    {
+      "path": "app/services/podcast_service.py",
+      "startLine": 503,
+      "endLine": 506,
+      "symbol": "PodcastDigestService.update_preferences",
+      "quote": "if update.podcast_feed_base_url is not None:\n    prefs.podcast_feed_base_url = self._sanitize_public_base_url(update.podcast_feed_base_url)"
+    },
+    {
+      "path": "tests/test_podcast_api.py",
+      "startLine": 167,
+      "endLine": 206,
+      "symbol": "test_podcast_preferences_get_and_update",
+      "quote": "sets non-null script_model and podcast_feed_base_url, then asserts those values"
+    }
+  ],
+  "reasoning": "The update schema advertises nullable fields, so FastAPI accepts JSON null for fields such as script_model and podcast_feed_base_url. The service treats None as omitted by checking `is not None`, so an explicit null is silently ignored and the old value remains. Clients following the OpenAPI contract cannot clear these settings with null, leaving stale feed base URLs or model overrides in place.",
+  "reproduction": "PUT /api/podcast/preferences with {\"podcast_feed_base_url\":\"https://podcasts.example.com\",\"script_model\":\"gpt-4.1-mini\"}, then PUT the same endpoint with {\"podcast_feed_base_url\":null,\"script_model\":null}. The response and stored preferences retain the old values.",
+  "recommendation": "Distinguish omitted fields from explicit null using `update.model_fields_set` and apply clearing for nullable fields that are present with value None, or make those request fields non-nullable and document the empty-string clearing behavior.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing preference route test only sets non-null values and checks invalid URL input; it never sends explicit JSON null after a value has been stored.",
+  "suggestedRegressionTest": "Add a test that sets `script_model` and `podcast_feed_base_url`, then PUTs both as null and asserts the response and persisted row have None.",
+  "minimumFixScope": "Update `PodcastDigestService.update_preferences` nullable-field handling and add route coverage in `tests/test_podcast_api.py`.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-55d1aef9f5_b59fc3f999",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:18:21.919Z",
+  "updatedAt": "2026-05-18T12:18:21.919Z"
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-a720381b44-5ca3f3_73f757bc72",
+  "featureId": "feat_route_a720381b44",
+  "title": "Invalid schedule timezones are silently accepted and run as UTC",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 981,
+      "endLine": 994,
+      "symbol": "create_podcast_schedule",
+      "quote": "tz = payload.timezone\n    if not tz:\n        from app.models.client_config import ClientConfig\n        config = session.exec(select(ClientConfig)).first()\n        tz = config.timezone if config and config.timezone else \"UTC\"\n\n    sched = PodcastSchedule(\n        user_id=user_id,\n        name=payload.name,\n        days=[d for d in payload.days],\n        time=payload.time,\n        timezone=tz,"
+    },
+    {
+      "path": "app/worker/scheduler.py",
+      "startLine": 572,
+      "endLine": 577,
+      "symbol": "_apply_podcast_schedule_entry",
+      "quote": "tz_name = sched.timezone or \"UTC\"\n    try:\n        tz = pytz.timezone(tz_name)\n    except pytz.exceptions.UnknownTimeZoneError:\n        logger.warning(\"Podcast scheduler: unknown timezone '%s', using UTC\", tz_name)\n        tz = pytz.UTC"
+    },
+    {
+      "path": "tests/test_podcast_api.py",
+      "startLine": 825,
+      "endLine": 841,
+      "symbol": "test_podcast_schedule_validation",
+      "quote": "def test_podcast_schedule_validation(client, auth_headers):\n    \"\"\"Validate schedule creation constraints.\"\"\"\n    # No days\n    resp = client.post(\n        \"/api/podcast/schedules\",\n        json={\"name\": \"Bad\", \"days\": [], \"time\": \"08:00\"},\n        headers=auth_headers,\n    )\n    assert resp.status_code == 400\n\n    # Invalid time format\n    resp = client.post(\n        \"/api/podcast/schedules\",\n        json={\"name\": \"Bad\", \"days\": [\"monday\"], \"time\": \"99:99\"},\n        headers=auth_headers,\n    )\n    assert resp.status_code == 400"
+    }
+  ],
+  "reasoning": "The create route persists any non-empty timezone string from the request without validating it. The scheduler later catches unknown timezone names and silently schedules the job in UTC while the API continues to report the invalid timezone. A user typo such as \"Europe/Helsinkii\" therefore creates a successful schedule that runs at the wrong local time instead of returning a 400 validation error.",
+  "reproduction": "POST /api/podcast/schedules with {\"name\":\"Bad TZ\",\"days\":[\"monday\"],\"time\":\"08:00\",\"timezone\":\"Europe/Helsinkii\"}. The route returns 201 and stores timezone=\"Europe/Helsinkii\"; scheduler logs a warning and uses UTC for the actual CronTrigger.",
+  "recommendation": "Validate payload.timezone before committing the schedule, using the same timezone database as the scheduler, and return 400 for unknown timezone names. Prefer normalizing to the canonical timezone string that will actually be used for scheduling.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing validation test only covers empty days and out-of-range time values; it does not create a schedule with an invalid timezone or assert that timezone validation fails.",
+  "suggestedRegressionTest": "Add a POST /api/podcast/schedules test with timezone=\"Not/AZone\" expecting 400, and a valid timezone test that verifies the stored response timezone matches the requested zone.",
+  "minimumFixScope": "Update create_podcast_schedule timezone resolution/validation and add focused API tests for invalid and valid timezone inputs.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-a720381b44_5ca3f35096",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:24:06.110Z",
+  "updatedAt": "2026-05-18T12:24:06.110Z"
+}

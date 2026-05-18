@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_be890603e2",
+  "title": "Node source frontend/src/lib/components/ui/dialog",
+  "summary": "Node/TypeScript source file frontend/src/lib/components/ui/dialog/index.ts.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "frontend/package.json",
+      "symbol": "frontend/src/lib/components/ui/dialog",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "frontend/src/lib/components/ui/dialog/index.ts",
+      "reason": "source group frontend/src/lib/components/ui/dialog"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "frontend/package.json",
+      "reason": "package manifest"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:frontend",
+    "project-root:frontend"
+  ],
+  "trustBoundaries": [],
+  "status": "reviewed",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "0 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:08:03.309Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:08:03.309Z"
+}

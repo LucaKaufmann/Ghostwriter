@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-4997238479-59f4e3_4790e7b0b3",
+  "featureId": "feat_route_4997238479",
+  "title": "Root /health route is not covered by a regression test",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/main.py",
+      "startLine": 177,
+      "endLine": 181,
+      "symbol": "root_health",
+      "quote": "@app.get(\"/health\")\nasync def root_health():\n    \"\"\"Root health check for Docker healthcheck and backwards compatibility.\"\"\"\n    return {\"status\": \"healthy\"}"
+    }
+  ],
+  "reasoning": "The route is explicitly used for Docker healthcheck and backwards compatibility, but the feature lists no linked tests. Existing health tests found in the repository exercise /api/health, not the root /health endpoint, so removing this route or changing its response contract could pass the current health test coverage.",
+  "reproduction": null,
+  "recommendation": "Add a focused TestClient regression test for GET /health that asserts HTTP 200 and the expected JSON body.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature metadata has an empty tests list, and the existing health test file only requests /api/health and /api/health/config.",
+  "suggestedRegressionTest": "Add test_root_health in tests/test_health.py: client.get(\"/health\") should return 200 with {\"status\": \"healthy\"}.",
+  "minimumFixScope": "Test-only change covering the root_health route.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-4997238479_59f4e33305",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:15:45.812Z",
+  "updatedAt": "2026-05-18T12:15:45.812Z"
+}

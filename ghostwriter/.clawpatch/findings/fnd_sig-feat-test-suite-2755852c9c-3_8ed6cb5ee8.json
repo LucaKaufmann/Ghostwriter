@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-test-suite-2755852c9c-3_8ed6cb5ee8",
+  "featureId": "feat_test-suite_2755852c9c",
+  "title": "Owned tests fail configured Ruff lint and format gates",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "tests/test_media_processor.py",
+      "startLine": 5,
+      "endLine": 5,
+      "symbol": null,
+      "quote": "from unittest.mock import AsyncMock, MagicMock, patch"
+    },
+    {
+      "path": "tests/test_media_retry.py",
+      "startLine": 39,
+      "endLine": 39,
+      "symbol": null,
+      "quote": "completed_at=datetime.now(timezone.utc) if status == \"failed\" else None,"
+    },
+    {
+      "path": "tests/test_media_retry.py",
+      "startLine": 57,
+      "endLine": 57,
+      "symbol": null,
+      "quote": "stale_created_at = datetime.now(timezone.utc) - timedelta(hours=5)"
+    },
+    {
+      "path": "tests/test_digest_ordering_and_epub.py",
+      "startLine": 3,
+      "endLine": 15,
+      "symbol": null,
+      "quote": "import base64"
+    }
+  ],
+  "reasoning": "The project declares lint and format checks for the whole tree. Running Ruff directly with no cache against the owned files reports F401 for the unused AsyncMock import, UP017 for timezone.utc, and I001 import-order failures; ruff format --check also reports six owned files would be reformatted. That means the submitted test-suite feature breaks the configured quality gates before pytest behavior is considered.",
+  "reproduction": "Run `python -m ruff check --no-cache tests/test_config_pdf_settings.py tests/test_content_processor.py tests/test_digest_content_formatter.py tests/test_digest_download_formats.py tests/test_digest_ordering_and_epub.py tests/test_feeds.py tests/test_health.py tests/test_llm_service.py tests/test_markdown_utils.py tests/test_media_processor.py tests/test_media_retry.py tests/test_newsletter_service.py`; Ruff reports the listed fixable errors. Run `python -m ruff format --check --no-cache ...` over the same files; it reports six files would be reformatted.",
+  "recommendation": "Remove the unused import, apply the datetime.UTC modernization, organize imports, and run Ruff format on the owned tests so the declared lint and format commands pass.",
+  "whyTestsDoNotAlreadyCoverThis": "Pytest assertions do not exercise static lint or formatting requirements; these failures are only caught by the configured release checks.",
+  "suggestedRegressionTest": null,
+  "minimumFixScope": "Only the owned test files with Ruff violations need mechanical formatting/import cleanup.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-test-suite-2755852c9c_314ce6b14e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:30:59.360Z",
+  "updatedAt": "2026-05-18T12:30:59.360Z"
+}

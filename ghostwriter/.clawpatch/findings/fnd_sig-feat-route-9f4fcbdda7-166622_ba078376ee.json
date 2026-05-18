@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-9f4fcbdda7-166622_ba078376ee",
+  "featureId": "feat_route_9f4fcbdda7",
+  "title": "Lua escaping can be bypassed through regex replacement backslash handling",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/plugins.py",
+      "startLine": 48,
+      "endLine": 50,
+      "symbol": "_escape_lua_string",
+      "quote": "return value.replace(\"\\\\\", \"\\\\\\\\\").replace('\"', '\\\\\"')"
+    },
+    {
+      "path": "app/api/plugins.py",
+      "startLine": 86,
+      "endLine": 94,
+      "symbol": "_inject_plugin_settings",
+      "quote": "re.subn(..., rf'\\1\"{escaped_url}\"', ...)"
+    }
+  ],
+  "reasoning": "The code first builds Lua escapes for user-controlled server_url, then passes the escaped value through re.sub as a replacement string. Python's regex replacement processing interprets backslashes again, so an input path containing a backslash followed by a quote can be emitted as a Lua string terminator instead of a literal quote. Because the generated file is executable Lua loaded by KOReader, a crafted server_url can inject Lua code into the plugin package.",
+  "reproduction": "Post an authenticated request with a server_url path containing a backslash, quote, Lua expression, and comment marker, such as an actual value like https://reader.example.com/a\\\" .. os.execute('touch /tmp/pwn') --, then inspect ghostwriter_settings.lua in the returned zip. The assignment can be rendered as executable Lua instead of a single string literal.",
+  "recommendation": "Use a function replacement for re.sub so Python does not reinterpret backslashes, or avoid regex replacement entirely and parse/replace fixed placeholders safely. Add tests with backslash-plus-quote, quotes, and backslashes in server_url to verify the emitted Lua remains one string literal.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_plugins.py only asserts a normal URL is embedded; it does not exercise escape-sensitive server_url values containing backslashes or quotes.",
+  "suggestedRegressionTest": "Add a test that posts server_url with a backslash followed by a quote and Lua-looking suffix, then asserts ghostwriter_settings.lua contains the whole value inside the server_url string without closing the assignment or adding executable tokens outside the literal.",
+  "minimumFixScope": "app/api/plugins.py:_inject_plugin_settings replacement construction and focused tests in tests/test_plugins.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-9f4fcbdda7_166622d4f3",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:23:31.942Z",
+  "updatedAt": "2026-05-18T12:23:31.942Z"
+}

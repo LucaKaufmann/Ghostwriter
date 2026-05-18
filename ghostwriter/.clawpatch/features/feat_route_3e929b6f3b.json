@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_3e929b6f3b",
+  "title": "FastAPI route GET /oauth/callback",
+  "summary": "FastAPI route GET /oauth/callback handled by oauth_web_callback in app/api/newsletters.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/api/newsletters.py",
+      "symbol": "oauth_web_callback",
+      "route": "GET /oauth/callback",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/newsletters.py",
+      "reason": "FastAPI route handler oauth_web_callback"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-3e929b6f3b-e1b2b7_63ea92823c"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:15:00.230Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:15:00.230Z"
+}

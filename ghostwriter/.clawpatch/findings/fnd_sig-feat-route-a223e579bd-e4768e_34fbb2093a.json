@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-a223e579bd-e4768e_34fbb2093a",
+  "featureId": "feat_route_a223e579bd",
+  "title": "Concurrent duplicate creates can leak a database IntegrityError instead of 409",
+  "category": "concurrency",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/models/feed.py",
+      "startLine": 14,
+      "endLine": 14,
+      "symbol": "FeedBase.url",
+      "quote": "url: str = Field(index=True, unique=True, description=\"Feed URL\")"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 288,
+      "endLine": 319,
+      "symbol": "create_feed",
+      "quote": "existing = session.exec(statement).first()"
+    },
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 10,
+      "endLine": 24,
+      "symbol": "test_create_feed",
+      "quote": "assert response.status_code == 200"
+    }
+  ],
+  "reasoning": "create_feed implements duplicate detection as a pre-insert SELECT followed by an INSERT/COMMIT, while the schema enforces URL uniqueness at the database layer. Two concurrent POST /api/feeds requests with the same new URL can both observe no existing row; one commit succeeds and the other hits the unique constraint. Because the handler does not catch the commit-time IntegrityError, the loser can return a 500 instead of the route's documented 409 duplicate-feed response.",
+  "reproduction": "Send two POST /api/feeds requests concurrently with the same new URL against a database that enforces the feeds.url unique constraint. The second transaction can fail during session.commit() after passing the existing-row check.",
+  "recommendation": "Keep the pre-check for the common path, but also catch sqlalchemy.exc.IntegrityError around session.commit(), roll back the session, and translate feed URL unique-constraint failures to the same 409 response. Alternatively perform an atomic insert/upsert pattern appropriate for SQLite.",
+  "whyTestsDoNotAlreadyCoverThis": "The included test only creates a single feed once; it does not cover duplicate creates or concurrent create requests.",
+  "suggestedRegressionTest": "Add a duplicate-create test that verifies the second POST /api/feeds returns 409, and ideally a concurrency test or unit-level simulation that forces commit to raise IntegrityError and verifies rollback plus 409.",
+  "minimumFixScope": "app/api/feeds.py commit error handling in create_feed plus duplicate/IntegrityError coverage in tests/test_feeds.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-a223e579bd_e4768efb8d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:22:59.147Z",
+  "updatedAt": "2026-05-18T12:22:59.147Z"
+}

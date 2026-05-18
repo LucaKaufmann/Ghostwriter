@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-184acbe1c1-8e02_23f21d4da8",
+  "featureId": "feat_library_184acbe1c1",
+  "title": "Temporary test directories are never cleaned up",
+  "category": "maintainability",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "tests/conftest.py",
+      "startLine": 10,
+      "endLine": 14,
+      "symbol": "_BASE_DIR",
+      "quote": "_BASE_DIR = tempfile.mkdtemp(prefix=\"ghostwriter_test_\")\nos.environ[\"DATA_DIR\"] = os.path.join(_BASE_DIR, \"data\")\nos.environ[\"OUTPUT_DIR\"] = os.path.join(_BASE_DIR, \"output\")\nos.environ[\"LOGS_DIR\"] = os.path.join(_BASE_DIR, \"logs\")"
+    }
+  ],
+  "reasoning": "`tempfile.mkdtemp()` creates a real directory that pytest will not remove automatically. Because the path is module-global and there is no session-finalizer cleanup, every test run leaves a `ghostwriter_test_*` tree behind, including generated EPUB/PDF/database artifacts. Over time this pollutes developer and CI machines and can obscure failures when debugging filesystem state.",
+  "reproduction": "Run `hatch run pytest` repeatedly and inspect the system temp directory for accumulating `ghostwriter_test_*` directories.",
+  "recommendation": "Use pytest's `tmp_path_factory` in a session-scoped fixture and register cleanup, or create a `TemporaryDirectory` managed by a session fixture finalizer after the app lifecycle completes.",
+  "whyTestsDoNotAlreadyCoverThis": "The tests rely on the directories being writable but never assert cleanup after the session ends.",
+  "suggestedRegressionTest": null,
+  "minimumFixScope": "`tests/conftest.py` test environment setup.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-184acbe1c1_8e027b33fc",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:05:14.059Z",
+  "updatedAt": "2026-05-18T12:05:14.059Z"
+}

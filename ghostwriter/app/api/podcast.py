@@ -12,7 +12,16 @@ import mimetypes
 import os
 import xml.etree.ElementTree as ET
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
@@ -24,7 +33,11 @@ from app.core.security import security, verify_api_key
 from app.models.article_feedback import ArticleFeedbackRead, ArticleFeedbackUpsert
 from app.models.digest import DigestArticle
 from app.models.podcast_episode import PodcastEpisode, PodcastEpisodeArticleRead
-from app.models.podcast_preferences import PodcastPreferencesRead, PodcastPreferencesUpdate
+from app.models.podcast_preferences import (
+    PodcastPreferences,
+    PodcastPreferencesRead,
+    PodcastPreferencesUpdate,
+)
 from app.models.podcast_schedule import (
     PodcastSchedule,
     PodcastScheduleCreate,
@@ -208,7 +221,9 @@ def _parse_range(range_header: str | None, file_size: int) -> tuple[int, int] | 
     return start, end
 
 
-def _read_range(path: Path, start: int, end: int, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
+def _read_range(
+    path: Path, start: int, end: int, chunk_size: int = 64 * 1024
+) -> Iterator[bytes]:
     with path.open("rb") as fp:
         fp.seek(start)
         remaining = end - start + 1
@@ -220,7 +235,9 @@ def _read_range(path: Path, start: int, end: int, chunk_size: int = 64 * 1024) -
             yield data
 
 
-def _validated_child_path(path: Path, *, allowed_parent: Path, not_found_detail: str) -> Path:
+def _validated_child_path(
+    path: Path, *, allowed_parent: Path, not_found_detail: str
+) -> Path:
     """Resolve and validate file path remains inside an expected parent directory."""
     try:
         resolved = path.resolve(strict=True)
@@ -239,7 +256,7 @@ async def _authorize_standard_or_feed_token(
     request: Request,
     session: Session,
     feed_token: str | None,
-) -> None:
+) -> PodcastPreferences | None:
     if feed_token:
         prefs = podcast_service.get_preferences_by_feed_token(session, feed_token)
         if prefs is None:
@@ -247,7 +264,7 @@ async def _authorize_standard_or_feed_token(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid feed token",
             )
-        return
+        return prefs
 
     credentials = await security(request)
     await verify_api_key(
@@ -255,6 +272,7 @@ async def _authorize_standard_or_feed_token(
         credentials=credentials,
         settings=get_settings(),
     )
+    return None
 
 
 def _to_rfc2822(dt: datetime) -> str:
@@ -406,7 +424,9 @@ async def delete_article_feedback(
 ):
     """Delete explicit feedback for one digest article."""
     user_id = podcast_service.resolve_user_id(session)
-    deleted = podcast_service.delete_feedback(session, article_id=article_id, user_id=user_id)
+    deleted = podcast_service.delete_feedback(
+        session, article_id=article_id, user_id=user_id
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="Feedback not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -508,7 +528,9 @@ async def get_digest_podcast_status(
             detail="Podcast status temporarily unavailable. Please retry shortly.",
         ) from exc
     if episode is None:
-        raise HTTPException(status_code=404, detail="Podcast episode not found for digest")
+        raise HTTPException(
+            status_code=404, detail="Podcast episode not found for digest"
+        )
     return DigestPodcastStatusResponse(
         digest_id=digest_id,
         episode=_build_episode_status(request, episode),
@@ -529,7 +551,9 @@ async def retry_podcast_episode(
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
     if episode.status != "failed":
-        raise HTTPException(status_code=409, detail="Only failed episodes can be retried")
+        raise HTTPException(
+            status_code=409, detail="Only failed episodes can be retried"
+        )
 
     digest_ids = episode.digest_ids or []
     if not digest_ids:
@@ -633,11 +657,13 @@ async def stream_podcast_episode(
     session: Session = Depends(get_session),
 ):
     """Stream podcast MP3 with byte-range support."""
-    await _authorize_standard_or_feed_token(request, session, token)
+    token_prefs = await _authorize_standard_or_feed_token(request, session, token)
     settings = get_settings()
 
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
+    if token_prefs is not None and episode.user_id != token_prefs.user_id:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
     if episode.status != "ready":
         raise HTTPException(status_code=409, detail="Podcast episode is not ready")
@@ -687,11 +713,13 @@ async def download_podcast_episode(
     session: Session = Depends(get_session),
 ):
     """Download podcast MP3 file."""
-    await _authorize_standard_or_feed_token(request, session, token)
+    token_prefs = await _authorize_standard_or_feed_token(request, session, token)
     settings = get_settings()
 
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
+    if token_prefs is not None and episode.user_id != token_prefs.user_id:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
     if episode.status != "ready":
         raise HTTPException(status_code=409, detail="Podcast episode is not ready")
@@ -728,6 +756,7 @@ async def get_podcast_feed_xml(
     episodes = session.exec(
         select(PodcastEpisode)
         .where(PodcastEpisode.status == "ready")
+        .where(PodcastEpisode.user_id == prefs.user_id)
         .order_by(PodcastEpisode.created_at.desc())
         .limit(100)
     ).all()
@@ -756,7 +785,9 @@ async def get_podcast_feed_xml(
         newest = episodes[0].completed_at or episodes[0].created_at
         ET.SubElement(channel, "lastBuildDate").text = _to_rfc2822(newest)
 
-    if prefs.podcast_feed_artwork_path and os.path.exists(prefs.podcast_feed_artwork_path):
+    if prefs.podcast_feed_artwork_path and os.path.exists(
+        prefs.podcast_feed_artwork_path
+    ):
         image_url = base_url + "/api/podcast/feed/artwork" + f"?token={token}"
         ET.SubElement(channel, "itunes:image", {"href": image_url})
 
@@ -768,20 +799,28 @@ async def get_podcast_feed_xml(
         # Build title: include digest count for multi-digest episodes
         digest_count = len(episode.digest_ids or [])
         if digest_count > 1:
-            ET.SubElement(item, "title").text = (
-                f"Digest Podcast - {created_local} ({digest_count} digests)"
-            )
+            ET.SubElement(
+                item, "title"
+            ).text = f"Digest Podcast - {created_local} ({digest_count} digests)"
         else:
             ET.SubElement(item, "title").text = f"Digest Podcast - {created_local}"
 
-        article_titles = [article.title for article in _resolve_episode_articles(session, episode)]
+        article_titles = [
+            article.title for article in _resolve_episode_articles(session, episode)
+        ]
         if article_titles:
-            ET.SubElement(item, "description").text = "Includes: " + "; ".join(article_titles[:8])
+            ET.SubElement(item, "description").text = "Includes: " + "; ".join(
+                article_titles[:8]
+            )
         else:
-            ET.SubElement(item, "description").text = "AI-generated digest podcast episode"
+            ET.SubElement(
+                item, "description"
+            ).text = "AI-generated digest podcast episode"
 
         ET.SubElement(item, "pubDate").text = _to_rfc2822(created)
-        enclosure_url = base_url + f"/api/podcast/episodes/{episode.id}/download?token={token}"
+        enclosure_url = (
+            base_url + f"/api/podcast/episodes/{episode.id}/download?token={token}"
+        )
         ET.SubElement(
             item,
             "enclosure",
@@ -791,11 +830,13 @@ async def get_podcast_feed_xml(
                 "type": "audio/mpeg",
             },
         )
-        ET.SubElement(item, "itunes:duration").text = _format_duration(episode.duration_seconds)
-        ET.SubElement(item, "itunes:episode").text = str(index)
-        ET.SubElement(item, "guid", {"isPermaLink": "false"}).text = (
-            f"podcast-episode-{episode.id}"
+        ET.SubElement(item, "itunes:duration").text = _format_duration(
+            episode.duration_seconds
         )
+        ET.SubElement(item, "itunes:episode").text = str(index)
+        ET.SubElement(
+            item, "guid", {"isPermaLink": "false"}
+        ).text = f"podcast-episode-{episode.id}"
 
     xml_bytes = ET.tostring(rss, encoding="utf-8", xml_declaration=True)
     return Response(content=xml_bytes, media_type="application/rss+xml; charset=utf-8")
@@ -863,7 +904,9 @@ async def upload_podcast_feed_artwork(
     try:
         from PIL import Image
     except Exception as exc:  # pragma: no cover - Pillow is an install dependency.
-        raise HTTPException(status_code=500, detail=f"Pillow unavailable: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Pillow unavailable: {exc}"
+        ) from exc
 
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Artwork file must be an image")
@@ -881,7 +924,9 @@ async def upload_podcast_feed_artwork(
         width, height = image.size
         image.verify()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid artwork image: {exc}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Invalid artwork image: {exc}"
+        ) from exc
 
     ext = (image.format or "JPEG").lower()
     if ext == "jpeg":
@@ -914,7 +959,9 @@ async def upload_podcast_feed_artwork(
 # ---------------------------------------------------------------------------
 
 
-def _schedule_to_read(sched: PodcastSchedule, next_run_at: datetime | None = None) -> PodcastScheduleRead:
+def _schedule_to_read(
+    sched: PodcastSchedule, next_run_at: datetime | None = None
+) -> PodcastScheduleRead:
     return PodcastScheduleRead(
         id=sched.id,
         name=sched.name,
@@ -943,8 +990,7 @@ async def list_podcast_schedules(session: Session = Depends(get_session)):
         select(PodcastSchedule).order_by(PodcastSchedule.created_at.asc())
     ).all()
     return [
-        _schedule_to_read(s, get_podcast_schedule_next_run(s.id))
-        for s in schedules
+        _schedule_to_read(s, get_podcast_schedule_next_run(s.id)) for s in schedules
     ]
 
 
@@ -959,10 +1005,15 @@ async def create_podcast_schedule(
     session: Session = Depends(get_session),
 ):
     """Create a new podcast schedule."""
-    from app.worker.scheduler import get_podcast_schedule_next_run, update_podcast_schedule
+    from app.worker.scheduler import (
+        get_podcast_schedule_next_run,
+        update_podcast_schedule,
+    )
 
     if not payload.days:
-        raise HTTPException(status_code=400, detail="At least one day must be specified")
+        raise HTTPException(
+            status_code=400, detail="At least one day must be specified"
+        )
 
     # Validate time format
     parts = payload.time.strip().split(":")
@@ -982,6 +1033,7 @@ async def create_podcast_schedule(
     tz = payload.timezone
     if not tz:
         from app.models.client_config import ClientConfig
+
         config = session.exec(select(ClientConfig)).first()
         tz = config.timezone if config and config.timezone else "UTC"
 
@@ -1033,7 +1085,10 @@ async def update_podcast_schedule_endpoint(
     session: Session = Depends(get_session),
 ):
     """Update a podcast schedule."""
-    from app.worker.scheduler import get_podcast_schedule_next_run, update_podcast_schedule
+    from app.worker.scheduler import (
+        get_podcast_schedule_next_run,
+        update_podcast_schedule,
+    )
 
     sched = session.get(PodcastSchedule, schedule_id)
     if sched is None:
@@ -1043,7 +1098,9 @@ async def update_podcast_schedule_endpoint(
         sched.name = payload.name
     if payload.days is not None:
         if not payload.days:
-            raise HTTPException(status_code=400, detail="At least one day must be specified")
+            raise HTTPException(
+                status_code=400, detail="At least one day must be specified"
+            )
         sched.days = [d for d in payload.days]
     if payload.time is not None:
         parts = payload.time.strip().split(":")

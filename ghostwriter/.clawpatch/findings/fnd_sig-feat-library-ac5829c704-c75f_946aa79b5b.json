@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-ac5829c704-c75f_946aa79b5b",
+  "featureId": "feat_library_ac5829c704",
+  "title": "Media pipeline can double-claim pending items under concurrent runs",
+  "category": "concurrency",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/worker/media_pipeline.py",
+      "startLine": 44,
+      "endLine": 51,
+      "symbol": "run_media_pipeline",
+      "quote": "processing_count = session.exec(\n            select(MediaItem).where(MediaItem.status == \"processing\")\n        ).first()\n        if processing_count:\n            logger.info(\"Media pipeline: items still processing, skipping this run\")\n            return"
+    },
+    {
+      "path": "app/worker/media_pipeline.py",
+      "startLine": 237,
+      "endLine": 252,
+      "symbol": "_process_pending_items",
+      "quote": "item = session.exec(\n                select(MediaItem)\n                .where(MediaItem.status == \"pending\")\n                .order_by(MediaItem.created_at)\n            ).first()\n...\nitem.status = \"processing\"\n...\nsession.commit()"
+    }
+  ],
+  "reasoning": "The guard that skips when a processing item exists and the later pending-item claim are separate read-then-write operations. If two run_media_pipeline tasks start together, both can observe no processing item, then both can select the same pending row before either commits the status change, causing duplicate transcription/summarization work and racing final status/content writes.",
+  "reproduction": null,
+  "recommendation": "Claim work atomically. Use a conditional update from pending to processing keyed by item id/status in one transaction, then proceed only if one row was updated; also consider a process-wide or database-backed media-pipeline lock.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests start two media pipeline runs concurrently or assert that only one worker can claim a pending MediaItem.",
+  "suggestedRegressionTest": "Create one pending MediaItem, run two _process_pending_items tasks concurrently with a delayed MediaProcessor, and assert process() is called once and only one run records the item as processed.",
+  "minimumFixScope": "run_media_pipeline/_process_pending_items item claiming logic.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-ac5829c704_c75f426c71",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:05.272Z",
+  "updatedAt": "2026-05-18T12:10:05.272Z"
+}

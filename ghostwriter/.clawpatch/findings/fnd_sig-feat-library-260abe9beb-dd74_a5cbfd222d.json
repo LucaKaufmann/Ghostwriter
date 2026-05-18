@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-260abe9beb-dd74_a5cbfd222d",
+  "featureId": "feat_library_260abe9beb",
+  "title": "Migration 005 downgrade leaves whisper_timeout_minutes behind on non-SQLite databases",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "alembic/versions/005_replace_summarize_sh_with_transcription.py",
+      "startLine": 74,
+      "endLine": 80,
+      "symbol": "upgrade",
+      "quote": "batch_op.add_column("
+    },
+    {
+      "path": "alembic/versions/005_replace_summarize_sh_with_transcription.py",
+      "startLine": 97,
+      "endLine": 100,
+      "symbol": "downgrade",
+      "quote": "batch_op.drop_column(\"whisper_model\")"
+    }
+  ],
+  "reasoning": "The non-SQLite upgrade adds three columns: whisper_provider, whisper_model, and whisper_timeout_minutes. The non-SQLite downgrade drops only whisper_model and whisper_provider, so downgrading does not restore the prior schema. This is a direct upgrade/downgrade contract mismatch.",
+  "reproduction": "On a non-SQLite Alembic context, upgrade through revision 005 and then downgrade to 004. The whisper_timeout_minutes column remains in client_config.",
+  "recommendation": "Drop whisper_timeout_minutes in the non-SQLite downgrade together with the other columns, or intentionally document why the downgrade is partial.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked migration downgrade tests were supplied.",
+  "suggestedRegressionTest": "Add a migration round-trip test for revision 005 on the supported non-SQLite dialect path that verifies all columns added by upgrade are removed by downgrade.",
+  "minimumFixScope": "alembic/versions/005_replace_summarize_sh_with_transcription.py",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-260abe9beb_dd74fdb3bb",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:23.097Z",
+  "updatedAt": "2026-05-18T12:07:23.097Z"
+}

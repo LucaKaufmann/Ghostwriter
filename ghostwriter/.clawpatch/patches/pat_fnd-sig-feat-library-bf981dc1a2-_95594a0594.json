@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-library-bf981dc1a2-_95594a0594",
+  "findingIds": [
+    "fnd_sig-feat-library-bf981dc1a2-bc13_e0932db0ed"
+  ],
+  "featureIds": [
+    "feat_library_bf981dc1a2"
+  ],
+  "status": "applied",
+  "plan": "Fixed migration 018 so SQLite batch rebuild drops the digest_id index, named unique constraint, and reflected digest_id foreign key before dropping the column. Added a focused regression test that upgrades a revision-017 database with the old constrained schema to revision 018 and verifies digest_id data is preserved in digest_ids with no remaining digest_id constraints or indexes.",
+  "filesChanged": [
+    "ghostwriter/alembic/versions/018_podcast_multi_digest.py",
+    "ghostwriter/tests/test_podcast_multi_digest_migration.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "python -c 'pass'",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 0,
+      "durationMs": 121,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "testResults": [
+    {
+      "command": "python -c 'pass'",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 0,
+      "durationMs": 121,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-05-18T13:08:13.094Z",
+    "finishedAt": "2026-05-18T13:11:07.102Z"
+  },
+  "git": {
+    "baseSha": "6289d49e7edc4af76630ab6729a9d0ebbac52e06",
+    "commitSha": null,
+    "branchName": "codex/clawpatch-fixes",
+    "prUrl": null
+  },
+  "createdAt": "2026-05-18T13:08:13.091Z",
+  "updatedAt": "2026-05-18T13:11:07.102Z"
+}

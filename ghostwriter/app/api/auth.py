@@ -6,6 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.core.auth import (
@@ -80,35 +81,41 @@ async def register(
 
     Returns a JWT token on successful registration.
     """
-    # Check if any users exist
-    existing_user = session.exec(select(User)).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Registration is closed. An admin user already exists.",
-        )
+    session.exec(text("BEGIN IMMEDIATE"))
+    try:
+        # Check if any users exist while holding SQLite's write lock so concurrent
+        # first-registration attempts cannot both observe an empty users table.
+        existing_user = session.exec(select(User)).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Registration is closed. An admin user already exists.",
+            )
 
-    # Check if username is taken (shouldn't be possible, but be safe)
-    username_taken = session.exec(
-        select(User).where(User.username == data.username)
-    ).first()
-    if username_taken:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Username already exists.",
-        )
+        # Check if username is taken (shouldn't be possible, but be safe)
+        username_taken = session.exec(
+            select(User).where(User.username == data.username)
+        ).first()
+        if username_taken:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already exists.",
+            )
 
-    # Create the admin user
-    user = User(
-        username=data.username,
-        email=data.email,
-        password_hash=hash_password(data.password),
-        is_admin=True,  # First user is always admin
-        last_login_at=datetime.utcnow(),
-    )
-    session.add(user)
-    session.commit()
-    session.refresh(user)
+        # Create the admin user
+        user = User(
+            username=data.username,
+            email=data.email,
+            password_hash=hash_password(data.password),
+            is_admin=True,  # First user is always admin
+            last_login_at=datetime.utcnow(),
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    except Exception:
+        session.rollback()
+        raise
 
     logger.info(f"First admin user created: {user.username}")
 
@@ -332,7 +339,9 @@ async def revoke_api_token(
     session.add(token)
     session.commit()
 
-    logger.info(f"API token revoked for user {current_user.username}: {token.token_prefix}")
+    logger.info(
+        f"API token revoked for user {current_user.username}: {token.token_prefix}"
+    )
 
     return {"status": "ok", "message": "Token revoked successfully."}
     check_auth_rate_limit(request)

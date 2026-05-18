@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-46d8e25617-eade_443ce3d4ca",
+  "featureId": "feat_library_46d8e25617",
+  "title": "DNS lookup failures escape URL validation as socket errors",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/core/net.py",
+      "startLine": 23,
+      "endLine": 30,
+      "symbol": "_resolve_host",
+      "quote": "for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, None):"
+    },
+    {
+      "path": "app/core/net.py",
+      "startLine": 72,
+      "endLine": 74,
+      "symbol": "validate_public_url",
+      "quote": "ips = _resolve_host(hostname)\n    if not ips:\n        raise ValueError(\"Hostname could not be resolved\")"
+    }
+  ],
+  "reasoning": "validate_public_url normalizes invalid URL cases to ValueError, and callers can reasonably handle that as validation failure. However socket.getaddrinfo raises socket.gaierror for unresolvable hostnames before validate_public_url reaches the intended empty-result ValueError branch. That turns common bad input like an unknown domain into an unexpected exception path, which can surface as a 500 instead of a validation error.",
+  "reproduction": "Calling validate_public_url('https://nonexistent.invalid') raises socket.gaierror rather than ValueError.",
+  "recommendation": "Catch socket.gaierror and OSError inside _resolve_host or validate_public_url and raise ValueError('Hostname could not be resolved') from the original exception.",
+  "whyTestsDoNotAlreadyCoverThis": "The discovered tests only exercise URL-fetching paths with Settings(allow_private_hosts=True), which returns before DNS resolution, and there are no direct tests for app/core/net.py failure modes.",
+  "suggestedRegressionTest": "Add a unit test that monkeypatches socket.getaddrinfo to raise socket.gaierror and asserts validate_public_url raises ValueError with the hostname resolution message.",
+  "minimumFixScope": "app/core/net.py plus a focused net utility test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-46d8e25617_eadef793f5",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:59.316Z",
+  "updatedAt": "2026-05-18T12:07:59.316Z"
+}

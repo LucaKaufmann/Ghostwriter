@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_310949517a",
+  "title": "FastAPI route GET /{full_path:path}",
+  "summary": "FastAPI route GET /{full_path:path} handled by serve_spa in app/main.py.",
+  "kind": "route",
+  "source": "python-fastapi-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "app/main.py",
+      "symbol": "serve_spa",
+      "route": "GET /{full_path:path}",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/main.py",
+      "reason": "FastAPI route handler serve_spa"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "fastapi",
+    "route"
+  ],
+  "trustBoundaries": [
+    "network",
+    "user-input",
+    "serialization"
+  ],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-route-310949517a-e99c7c_b42bcd9b9a",
+    "fnd_sig-feat-route-310949517a-b6f7bc_749ca0f2ca"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:14:22.797Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:14:22.797Z"
+}

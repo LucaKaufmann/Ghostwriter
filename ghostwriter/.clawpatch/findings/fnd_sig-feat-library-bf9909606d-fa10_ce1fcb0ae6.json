@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-bf9909606d-fa10_ce1fcb0ae6",
+  "featureId": "feat_library_bf9909606d",
+  "title": "Published license metadata contradicts the project license",
+  "category": "build-release",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "pyproject.toml",
+      "startLine": 7,
+      "endLine": 7,
+      "symbol": "project.license",
+      "quote": "license = {text = \"GPL-3.0-or-later\"}"
+    },
+    {
+      "path": "pyproject.toml",
+      "startLine": 16,
+      "endLine": 16,
+      "symbol": "project.classifiers",
+      "quote": "License :: OSI Approved :: MIT License"
+    },
+    {
+      "path": "README.md",
+      "startLine": 311,
+      "endLine": 312,
+      "symbol": null,
+      "quote": "## License"
+    }
+  ],
+  "reasoning": "The package declares GPL-3.0-or-later in the structured license field and README, but the Trove classifier says MIT. Package indexes and compliance tooling often read classifiers, so this can publish misleading license metadata and create downstream legal/compliance confusion.",
+  "reproduction": null,
+  "recommendation": "Replace the MIT classifier with the matching GPL classifier, for example `License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)`, or update the structured license if MIT is actually intended.",
+  "whyTestsDoNotAlreadyCoverThis": "No metadata validation test was provided, and normal unit tests typically do not compare license fields against classifiers.",
+  "suggestedRegressionTest": "Add a metadata lint check that validates the license classifier matches the declared `project.license` value.",
+  "minimumFixScope": "Edit the license classifier in `pyproject.toml` to match the declared project license.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-bf9909606d_fa10cfb810",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:09:01.221Z",
+  "updatedAt": "2026-05-18T12:09:01.221Z"
+}

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_b1b1685a97",
+  "title": "Python source app/api#2",
+  "summary": "Python source group app/api#2 with 3 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "app/api#2",
+      "symbol": "app/api#2",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "app/api/router.py",
+      "reason": "source group app/api#2"
+    },
+    {
+      "path": "app/api/schedules.py",
+      "reason": "source group app/api#2"
+    },
+    {
+      "path": "app/api/sync.py",
+      "reason": "source group app/api#2"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-b1b1685a97-c37e_064bf089d2",
+    "fnd_sig-feat-library-b1b1685a97-1084_b2cb791a4b"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:10:17.918Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:10:17.918Z"
+}

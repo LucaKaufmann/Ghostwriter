@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-07816a7880-f21dca_995b48bc7b",
+  "featureId": "feat_route_07816a7880",
+  "title": "Episode detail lookup is not scoped to the authenticated user",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 570,
+      "endLine": 578,
+      "symbol": "get_podcast_episode",
+      "quote": "dependencies=[Depends(verify_api_key)]"
+    },
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 581,
+      "endLine": 589,
+      "symbol": "get_podcast_episode",
+      "quote": "episode = session.get(PodcastEpisode, episode_id)"
+    }
+  ],
+  "reasoning": "The route only verifies that the request has some valid API credential, then loads the episode directly by UUID and returns the script, article IDs, and source article metadata. It does not derive the authenticated user or filter the episode by owner. If more than one user or API token owner exists, any authenticated caller who obtains or guesses an episode UUID can read another user's podcast detail payload.",
+  "reproduction": "Create two users with separate API tokens, create a PodcastEpisode with user_id set to user A, then call GET /api/podcast/episodes/{episode_id} using user B's token. The handler performs session.get(PodcastEpisode, episode_id) and returns the episode instead of 404/403.",
+  "recommendation": "Use the authenticated user dependency for this route and query by both episode_id and the current user's id, with an explicit compatibility rule only if legacy null-owned episodes are intentionally shared.",
+  "whyTestsDoNotAlreadyCoverThis": "The inspected podcast API tests cover listing, triggering, retrying, streaming, downloading, and feed behavior, but do not exercise GET /api/podcast/episodes/{episode_id} or cross-user access isolation.",
+  "suggestedRegressionTest": "Add a test that creates two users/API tokens and an episode owned by one user, then asserts the other user's token cannot retrieve GET /api/podcast/episodes/{episode_id}.",
+  "minimumFixScope": "Update get_podcast_episode authorization/query logic in app/api/podcast.py and add focused route tests for owner access, non-owner denial, and legacy/null-owner behavior if supported.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-07816a7880_f21dcab89b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:49.128Z",
+  "updatedAt": "2026-05-18T12:10:49.128Z"
+}

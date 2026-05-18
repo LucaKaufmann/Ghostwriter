@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-ac5829c704-2f30_2ecd95bb9b",
+  "featureId": "feat_library_ac5829c704",
+  "title": "Media processing corrupts creation timestamps and changes digest ordering",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/worker/media_pipeline.py",
+      "startLine": 247,
+      "endLine": 252,
+      "symbol": "_process_pending_items",
+      "quote": "# Mark as processing\n            item.status = \"processing\"\n            # created_at doubles as processing start for stale-lock detection.\n            item.created_at = datetime.now(timezone.utc)\n            session.add(item)\n            session.commit()"
+    },
+    {
+      "path": "app/worker/bindery.py",
+      "startLine": 548,
+      "endLine": 554,
+      "symbol": "BinderyPipeline.run",
+      "quote": "completed_items = session.exec(\n                        select(MediaItem)\n                        .where(MediaItem.status == \"completed\")\n                        .where(MediaItem.consumed_at == None)\n                        .where(MediaItem.content_type.in_(types_to_include))\n                        .order_by(MediaItem.created_at)\n                    ).all()"
+    }
+  ],
+  "reasoning": "_process_pending_items overwrites created_at to track processing start. That destroys the original item creation/discovery timestamp and directly affects later digest inclusion order, because completed media items are ordered by created_at when added to a digest. A retry or delayed processing can therefore reorder older media items and make client-visible created_at values inaccurate.",
+  "reproduction": null,
+  "recommendation": "Add or use a separate processing_started_at/updated_at field for stale-lock detection, leaving created_at immutable. Order digest media items by the intended stable timestamp.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests verify MediaItem.created_at remains stable after processing or that completed media items keep original ordering in digests.",
+  "suggestedRegressionTest": "Create two pending MediaItems with distinct created_at values, process one later, and assert created_at is unchanged and digest selection order remains based on original creation time.",
+  "minimumFixScope": "MediaItem processing timestamp handling and stale-lock query in media_pipeline.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-ac5829c704_2f30ef6e16",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:05.272Z",
+  "updatedAt": "2026-05-18T12:10:05.272Z"
+}

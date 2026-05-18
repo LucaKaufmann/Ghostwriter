@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-09508d06cc-65706a_04036718d6",
+  "featureId": "feat_route_09508d06cc",
+  "title": "Unused imports in the owned route file will fail the configured Ruff lint step",
+  "category": "build-release",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/health.py",
+      "startLine": 7,
+      "endLine": 7,
+      "symbol": null,
+      "quote": "from sqlmodel import Session, func, select"
+    },
+    {
+      "path": "app/api/health.py",
+      "startLine": 13,
+      "endLine": 13,
+      "symbol": null,
+      "quote": "from app.services.llm_service import LLMService"
+    }
+  ],
+  "reasoning": "func and LLMService are imported but unused in app/api/health.py. The project lint command is Ruff with Pyflakes rules enabled, so these are F401 failures and can block CI or release checks even though the route tests pass.",
+  "reproduction": "Run the project lint command, hatch run ruff check ., in an environment with hatch available; Ruff reports unused-import diagnostics for these imports.",
+  "recommendation": "Remove unused imports, or use LLMService as part of the health response if the endpoint should report AI provider health.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests exercise HTTP behavior only; they do not run the lint command and cannot catch unused-import build failures.",
+  "suggestedRegressionTest": null,
+  "minimumFixScope": "app/api/health.py",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-09508d06cc_65706a3fca",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:11:32.016Z",
+  "updatedAt": "2026-05-18T12:11:32.016Z"
+}

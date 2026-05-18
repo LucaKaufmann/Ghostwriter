@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_260abe9beb",
+  "title": "Python source alembic/versions#1",
+  "summary": "Python source group alembic/versions#1 with 12 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "alembic/versions#1",
+      "symbol": "alembic/versions#1",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "alembic/versions/001_add_users_and_tokens.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/002_add_summarize_sh_enabled.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/003_add_summarize_sh_on_fail.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/004_add_summarize_sh_whisper_model.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/005_replace_summarize_sh_with_transcription.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/006_consolidate_legacy_migrations.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/007_add_media_feeds_and_items.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/008_add_cover_generation_settings.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/009_add_cover_api_keys.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/010_add_manual_covers_table.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/011_add_cover_overlay_enabled.py",
+      "reason": "source group alembic/versions#1"
+    },
+    {
+      "path": "alembic/versions/012_add_media_processing_runs.py",
+      "reason": "source group alembic/versions#1"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-library-260abe9beb-29ad_4c30f2277b",
+    "fnd_sig-feat-library-260abe9beb-dd74_a5cbfd222d",
+    "fnd_sig-feat-library-260abe9beb-5666_b7356db5ed"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260518T120435-a94ff3",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-05-18T12:07:23.099Z"
+    }
+  ],
+  "createdAt": "2026-05-18T12:04:24.798Z",
+  "updatedAt": "2026-05-18T12:07:23.099Z"
+}

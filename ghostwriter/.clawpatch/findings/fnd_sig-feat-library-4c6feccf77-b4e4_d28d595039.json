@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-4c6feccf77-b4e4_d28d595039",
+  "featureId": "feat_library_4c6feccf77",
+  "title": "Logout leaves the bearer token persisted",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "frontend/src/lib/api/client.ts",
+      "startLine": 70,
+      "endLine": 82,
+      "symbol": "ApiClient.setToken/getToken",
+      "quote": "setToken persists ghostwriter_token in localStorage, and getToken reloads it from localStorage."
+    },
+    {
+      "path": "frontend/src/lib/api/client.ts",
+      "startLine": 201,
+      "endLine": 202,
+      "symbol": "ApiClient.logout",
+      "quote": "async logout(): Promise<void> { await this.request('/auth/logout', { method: 'POST' }); }"
+    }
+  ],
+  "reasoning": "The client stores the bearer token with setToken(), but logout() only POSTs to the logout endpoint and never clears the in-memory or localStorage token. After a successful logout call, getToken() and isAuthenticated() can still report the old token, and future API calls will continue sending it.",
+  "reproduction": "Mock fetch to return 200 for /auth/logout, call api.setToken('token'), then await api.logout(); api.getToken() still returns 'token'.",
+  "recommendation": "Clear the client token as part of logout, preferably in a finally block so an explicit user logout discards local credentials even if the network request fails.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for the frontend API client token lifecycle.",
+  "suggestedRegressionTest": "Add a frontend API client test that sets a token, mocks a successful logout response, calls logout(), and asserts localStorage no longer contains ghostwriter_token and getToken() returns null.",
+  "minimumFixScope": "Update ApiClient.logout() in frontend/src/lib/api/client.ts to call setToken(null) after attempting the logout request.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-4c6feccf77_b4e4412c19",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:08:05.352Z",
+  "updatedAt": "2026-05-18T12:08:05.352Z"
+}

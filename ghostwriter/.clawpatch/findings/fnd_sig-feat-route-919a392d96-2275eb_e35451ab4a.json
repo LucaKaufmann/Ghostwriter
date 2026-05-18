@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-919a392d96-2275eb_e35451ab4a",
+  "featureId": "feat_route_919a392d96",
+  "title": "DELETE-by-URL cannot reliably identify feeds whose URLs contain query strings",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 351,
+      "endLine": 355,
+      "symbol": "delete_feed_by_url",
+      "quote": "@router.delete(\"/by-url/{feed_url:path}\", dependencies=[Depends(verify_api_key)])\nasync def delete_feed_by_url(\n    feed_url: str,\n    session: Session = Depends(get_session),\n) -> dict:"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 362,
+      "endLine": 363,
+      "symbol": "delete_feed_by_url",
+      "quote": "statement = select(Feed).where(Feed.url == feed_url)\nfeed = session.exec(statement).first()"
+    },
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 1,
+      "endLine": 37,
+      "symbol": null,
+      "quote": "\"\"\"Tests for feed management endpoints.\"\"\""
+    }
+  ],
+  "reasoning": "The route puts the feed URL in the request path and then compares the captured path parameter for exact equality with Feed.url. Feed URLs commonly include query strings. In HTTP, an unencoded '?' starts the request query rather than remaining part of the path, so a natural call such as DELETE /api/feeds/by-url/https://example.com/rss?token=abc passes only 'https://example.com/rss' as feed_url and returns 404 for a stored URL of 'https://example.com/rss?token=abc'. This makes the route's by-URL contract fragile unless every caller percent-encodes the whole URL correctly.",
+  "reproduction": "Create a feed with url 'https://example.com/rss?token=abc', then call DELETE /api/feeds/by-url/https://example.com/rss?token=abc. The handler receives feed_url without '?token=abc' as part of the path and the exact lookup misses the row.",
+  "recommendation": "Avoid putting arbitrary URLs directly in a path segment. Accept the URL as a query parameter or request body for deletion, or document and enforce whole-URL percent-encoding at the client boundary with tests covering encoded query strings.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_feeds.py only covers list, create, and sync; it has no delete-by-url coverage and no feed URL containing a query string.",
+  "suggestedRegressionTest": "Add a test that creates a feed whose URL contains a query string and verifies DELETE by URL removes it using the supported request shape.",
+  "minimumFixScope": "Change delete_feed_by_url's request contract and matching tests, or add robust encoded-URL handling plus client-facing documentation/tests for query-string URLs.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-919a392d96_2275eb332e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:20:06.525Z",
+  "updatedAt": "2026-05-18T12:20:06.525Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-9b7a3eef2a-f0d96b_d879b1dde2",
+  "featureId": "feat_route_9b7a3eef2a",
+  "title": "Deleting the active Whisper model leaves config pointing at a missing model",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/config.py",
+      "startLine": 687,
+      "endLine": 697,
+      "symbol": "delete_whisper_model",
+      "quote": "service.delete_model(model_name)\n    config = get_or_create_config(session)\n    return WhisperModelsResponse(\n        active_model=config.whisper_model or \"base.en\","
+    },
+    {
+      "path": "app/api/config.py",
+      "startLine": 716,
+      "endLine": 724,
+      "symbol": "set_active_whisper_model",
+      "quote": "if not service.is_downloaded(request.model):\n        raise HTTPException(\n            status_code=status.HTTP_400_BAD_REQUEST,\n            detail=\"Model must be downloaded before activation\",\n        )\n    config = get_or_create_config(session)\n    config.whisper_model = request.model"
+    }
+  ],
+  "reasoning": "The route allows deleting any known model without checking whether it is the configured active model. Immediately after deletion it still reports the unchanged config value as active_model, so the API can return an active model that is no longer downloaded. The active-model setter already enforces that active models must be downloaded, so this route breaks the same invariant and can cause later local transcription attempts using the persisted config.whisper_model to fail until a user manually selects another downloaded model.",
+  "reproduction": "Set active model to a downloaded model such as tiny.en, call DELETE /config/whisper/models/tiny.en, then call GET /config/whisper/models. The response still reports active_model as tiny.en while that model's downloaded/status fields indicate it is absent.",
+  "recommendation": "Either reject deletion of the active model with 409 Conflict, or atomically switch config.whisper_model to another downloaded model and commit that change before returning the response.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided, and repository search did not find backend tests covering the Whisper model management endpoints or active-model deletion behavior.",
+  "suggestedRegressionTest": "Add an API test that creates a config with whisper_model set to a downloaded model, invokes DELETE /config/whisper/models/{model}, and asserts the route either returns 409 or updates active_model to a model that remains downloaded.",
+  "minimumFixScope": "Update delete_whisper_model in app/api/config.py to preserve the invariant that config.whisper_model always refers to a downloaded model, and add focused endpoint coverage.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-9b7a3eef2a_f0d96bcc55",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:21:20.622Z",
+  "updatedAt": "2026-05-18T12:21:20.622Z"
+}

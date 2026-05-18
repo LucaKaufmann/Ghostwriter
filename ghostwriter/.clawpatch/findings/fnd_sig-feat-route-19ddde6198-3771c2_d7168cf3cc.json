@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-19ddde6198-3771c2_d7168cf3cc",
+  "featureId": "feat_route_19ddde6198",
+  "title": "PUT can mutate soft-deleted feeds into inconsistent active tombstones",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 68,
+      "endLine": 70,
+      "symbol": "list_feeds",
+      "quote": "Returns all feeds regardless of active status (excludes tombstoned feeds)."
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 292,
+      "endLine": 300,
+      "symbol": "create_feed",
+      "quote": "existing.deleted_at = None"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 351,
+      "endLine": 363,
+      "symbol": "update_feed",
+      "quote": "feed = session.get(Feed, feed_id)"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 389,
+      "endLine": 392,
+      "symbol": "delete_feed",
+      "quote": "feed.is_active = False\n    feed.deleted_at = now\n    feed.updated_at = now"
+    }
+  ],
+  "reasoning": "The route updates any row returned by primary key, including rows that have been soft-deleted. Deletion marks a feed inactive and sets deleted_at, while list/changes treat deleted_at as the tombstone state and create_feed explicitly clears deleted_at when restoring. PUT does not reject tombstoned rows or clear deleted_at, so a client can send {\"is_active\": true} after deletion and leave the row simultaneously active and tombstoned. That makes subsequent sync/list behavior inconsistent and can hide an apparently active feed from normal feed listings.",
+  "reproduction": "Create a feed, DELETE /api/feeds/{id}, then PUT /api/feeds/{id} with {\"is_active\": true}. The response will be 200 with is_active true while deleted_at remains set; GET /api/feeds still excludes it because deleted_at is not null.",
+  "recommendation": "In update_feed, either return 404/410 for feeds with deleted_at set, or implement an explicit restore path that clears deleted_at atomically when reactivating. Keep the behavior aligned with create_feed's restore semantics.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_feeds.py only covers listing, creation, and sync. It has no PUT or delete-then-update coverage.",
+  "suggestedRegressionTest": "Add a test that creates a feed, deletes it, then verifies PUT /api/feeds/{id} cannot leave is_active=true with deleted_at still set; assert either 404/410 or restored deleted_at=null behavior, depending on the intended contract.",
+  "minimumFixScope": "app/api/feeds.py update_feed plus focused tests in tests/test_feeds.py",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-19ddde6198_3771c257b4",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:12:21.815Z",
+  "updatedAt": "2026-05-18T12:12:21.815Z"
+}

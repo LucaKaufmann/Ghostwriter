@@ -7,20 +7,20 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlmodel import Session, select
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app import __version__
 from app.api.health import set_startup_time
 from app.api.router import api_router
 from app.core.config import get_settings
-from app.core.database import init_db, engine
-from app.core.logging import configure_logging, digest_logger
+from app.core.database import engine, init_db
+from app.core.logging import configure_logging
 from app.models.digest import Digest
-from sqlmodel import Session, select
 from app.services.podcast_service import podcast_service
 from app.worker.scheduler import setup_scheduler, shutdown_scheduler
 
@@ -31,6 +31,16 @@ logger = logging.getLogger(__name__)
 
 # Frontend directory (built SvelteKit app)
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+
+def _frontend_file_path(full_path: str) -> Path | None:
+    frontend_dir = FRONTEND_DIR.resolve()
+    file_path = (FRONTEND_DIR / full_path).resolve()
+    try:
+        file_path.relative_to(frontend_dir)
+    except ValueError:
+        return None
+    return file_path
 
 
 class ProxyHeadersMiddleware(BaseHTTPMiddleware):
@@ -157,7 +167,9 @@ app = FastAPI(
 )
 
 # Proxy headers middleware (for correct URL generation behind reverse proxy)
-trusted_proxies = [h.strip() for h in settings.trusted_proxy_hosts.split(",") if h.strip()]
+trusted_proxies = [
+    h.strip() for h in settings.trusted_proxy_hosts.split(",") if h.strip()
+]
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_proxies)
 
 # CORS middleware (optional; configure allowed origins via settings)
@@ -174,6 +186,7 @@ if cors_origins:
 # Include API routes
 app.include_router(api_router, prefix="/api")
 
+
 # Root health endpoint for Docker healthcheck (also available at /api/health)
 @app.get("/health")
 async def root_health():
@@ -188,7 +201,9 @@ if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
     # Mount static assets (JS, CSS, images, etc.)
     # These are typically in _app/ for SvelteKit builds
     if (FRONTEND_DIR / "_app").exists():
-        app.mount("/_app", StaticFiles(directory=FRONTEND_DIR / "_app"), name="app-assets")
+        app.mount(
+            "/_app", StaticFiles(directory=FRONTEND_DIR / "_app"), name="app-assets"
+        )
 
     # Mount any other static files (favicon, robots.txt, etc.)
     # We'll handle index.html separately for SPA routing
@@ -221,7 +236,9 @@ if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
             return {"detail": "Not found"}
 
         # Check if it's a direct file request (has extension)
-        file_path = FRONTEND_DIR / full_path
+        file_path = _frontend_file_path(full_path)
+        if file_path is None:
+            raise HTTPException(status_code=404, detail="Not found")
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)
 

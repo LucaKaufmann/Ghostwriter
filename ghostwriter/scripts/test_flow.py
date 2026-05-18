@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-def test_with_live_server(base_url: str) -> None:
+def run_with_live_server(base_url: str) -> None:
     """Test against a running server."""
     import httpx
 
@@ -210,7 +210,7 @@ def main():
     args = parser.parse_args()
 
     if args.live:
-        test_with_live_server(args.live)
+        run_with_live_server(args.live)
     else:
         test_with_testclient()
 

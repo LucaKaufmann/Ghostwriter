@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-02c5899d54-0a4100_9a9b66850a",
+  "featureId": "feat_route_02c5899d54",
+  "title": "Manual generate endpoint is disabled when the podcast schedule is set to manual",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "app/api/podcast.py",
+      "startLine": 455,
+      "endLine": 464,
+      "symbol": "generate_podcast_now",
+      "quote": "Manually trigger podcast generation using the time-window approach (same as scheduled)."
+    }
+  ],
+  "reasoning": "The route is presented as a manual generate-now endpoint, but it delegates entirely to the scheduled-generation path. That service path skips generation when preferences are disabled or schedule is \"manual\", causing this manual endpoint to return the generic 409 even when completed digests exist. Users who choose manual scheduling cannot use the manual generate-now endpoint, which is an API contract mismatch for this route.",
+  "reproduction": "Set podcast preferences to enabled=true and schedule=\"manual\", create a completed digest in the current window, then POST /api/podcast/episodes/generate with a valid API key. The endpoint returns 409 instead of queuing an episode.",
+  "recommendation": "Split the service behavior: keep scheduler-only gating for the APScheduler job, and let this route call a generate-now service method that uses the same time window/deduplication logic without rejecting manual schedule preferences. Return a distinct 409/400 message only for true no-digest or duplicate-window cases.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing podcast API tests exercise the single-digest trigger endpoint and call generate_scheduled_episode directly with schedule=\"daily\"; they do not POST /podcast/episodes/generate or cover schedule=\"manual\".",
+  "suggestedRegressionTest": "Add an API test that configures preferences with enabled=true and schedule=\"manual\", creates a completed digest, POSTs /api/podcast/episodes/generate, and asserts a pending episode is returned with that digest id.",
+  "minimumFixScope": "Add or adjust a podcast service method for route-initiated time-window generation and update generate_podcast_now to call it.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-02c5899d54_0a410040f2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:29.663Z",
+  "updatedAt": "2026-05-18T12:10:29.663Z"
+}

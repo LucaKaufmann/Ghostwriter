@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-library-ac5829c704-_60a9061789",
+  "findingIds": [
+    "fnd_sig-feat-library-ac5829c704-b574_8a8f377826"
+  ],
+  "featureIds": [
+    "feat_library_ac5829c704"
+  ],
+  "status": "applied",
+  "plan": "Fixed digest filename collisions by assigning each new digest a UUID-backed EPUB filename and passing that stored filename into EPUB generation so the file written matches the database record. Added focused regression coverage for repeated same-period digest runs and stored output filename writes.",
+  "filesChanged": [
+    "ghostwriter/app/services/epub_generator.py",
+    "ghostwriter/app/worker/bindery.py",
+    "ghostwriter/tests/test_bindery_digest_filenames.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "python -c 'pass'",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 0,
+      "durationMs": 119,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "testResults": [
+    {
+      "command": "python -c 'pass'",
+      "cwd": "/Users/luca/.codex/worktrees/29b4/Epilogue/ghostwriter",
+      "exitCode": 0,
+      "durationMs": 119,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-05-18T12:59:20.810Z",
+    "finishedAt": "2026-05-18T13:02:36.605Z"
+  },
+  "git": {
+    "baseSha": "6289d49e7edc4af76630ab6729a9d0ebbac52e06",
+    "commitSha": null,
+    "branchName": "codex/clawpatch-fixes",
+    "prUrl": null
+  },
+  "createdAt": "2026-05-18T12:59:20.808Z",
+  "updatedAt": "2026-05-18T13:02:36.605Z"
+}

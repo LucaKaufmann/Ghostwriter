@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-c216c98bf1-482221_bb8f5ffdd0",
+  "featureId": "feat_route_c216c98bf1",
+  "title": "GET /status has no linked regression coverage",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/api/client.py",
+      "startLine": 59,
+      "endLine": 78,
+      "symbol": "get_client_status",
+      "quote": "@router.get(\"/status\", response_model=ClientStatusResponse, dependencies=[Depends(verify_api_key)])"
+    }
+  ],
+  "reasoning": "The reviewed feature exposes authenticated client activity and auto-disable state, but the feature metadata lists no tests for this route. That leaves the response contract, API-key enforcement, nullable datetime serialization, and days_until_auto_disable behavior unpinned against regressions.",
+  "reproduction": null,
+  "recommendation": "Add route-level tests for authorized and unauthorized GET /status requests, asserting the response shape and key field values for representative client settings states.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for this semantic feature.",
+  "suggestedRegressionTest": "Use FastAPI TestClient to call GET /status with a valid API key after stubbing or seeding activity_tracker settings, assert HTTP 200 and all ClientStatusResponse fields; also assert missing/invalid API key is rejected.",
+  "minimumFixScope": "Add focused tests for app/api/client.py GET /status without changing route behavior.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-c216c98bf1_482221a40a",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:25:33.053Z",
+  "updatedAt": "2026-05-18T12:25:33.053Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-bcc63a99f3-769e94_489fb1c6ee",
+  "featureId": "feat_route_bcc63a99f3",
+  "title": "On-demand PDF rendering blocks the FastAPI event loop",
+  "category": "performance",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/digests.py",
+      "startLine": 573,
+      "endLine": 578,
+      "symbol": "download_digest_by_id",
+      "quote": "async def download_digest_by_id("
+    },
+    {
+      "path": "app/api/digests.py",
+      "startLine": 610,
+      "endLine": 625,
+      "symbol": "download_digest_by_id",
+      "quote": "pdf_generator.generate("
+    }
+  ],
+  "reasoning": "The route is declared async, but the first PDF download performs synchronous PDF generation directly in the request handler with no await, threadpool offload, background job, or cached in-progress state. PDF rendering is CPU and filesystem heavy, so one first-time PDF download can block the event loop and stall unrelated API requests served by the same worker until rendering completes.",
+  "reproduction": "Enable PDF downloads, create a completed digest without an existing PDF, then issue GET /api/digests/{digest_id}/download?format=pdf while concurrently polling a lightweight endpoint on the same worker. The lightweight request will not be serviced until synchronous PDF rendering returns.",
+  "recommendation": "Run PDF generation outside the event loop, for example with FastAPI/Starlette run_in_threadpool, or pre-generate PDFs in the worker and have this route only serve completed files. Consider recording an in-progress generation state so duplicate requests do not trigger duplicate work.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing download-format tests assert a successful PDF response and file creation, but they do not exercise concurrent requests or verify that the async server remains responsive during first-time PDF generation.",
+  "suggestedRegressionTest": "Add an async test that monkeypatches PdfGenerator.generate to block on a synchronization primitive, starts a PDF download request, then verifies another lightweight API request can complete before the generator is released.",
+  "minimumFixScope": "Change only the PDF-missing branch in download_digest_by_id to offload or precompute the blocking PdfGenerator.generate call.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-bcc63a99f3_769e942898",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:26:28.365Z",
+  "updatedAt": "2026-05-18T12:26:28.365Z"
+}

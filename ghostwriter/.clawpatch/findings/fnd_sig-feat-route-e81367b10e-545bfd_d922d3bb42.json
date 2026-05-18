@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-e81367b10e-545bfd_d922d3bb42",
+  "featureId": "feat_route_e81367b10e",
+  "title": "check-url waits on outbound feed parsing without a bounded timeout at the route boundary",
+  "category": "performance",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 261,
+      "endLine": 265,
+      "symbol": "check_feed_url",
+      "quote": "processor = ContentProcessor()\n        entries = await processor.parse_feed(url, max_entries=5)"
+    },
+    {
+      "path": "app/api/feeds.py",
+      "startLine": 271,
+      "endLine": 274,
+      "symbol": "check_feed_url",
+      "quote": "except Exception:\n        logger.debug(\"Feed check failed for %s, defaulting to article\", url, exc_info=True)\n\n    return FeedCheckResponse(feed_type=\"article\")"
+    }
+  ],
+  "reasoning": "The route performs an outbound feed fetch as part of request handling and awaits it directly. There is no timeout or cancellation boundary in the route, so a slow or stalled public feed can keep the request open and consume server resources until the underlying parser returns. The broad exception fallback only handles eventual failures; it does not bound latency.",
+  "reproduction": "Point /api/feeds/check-url at a public HTTP endpoint that accepts the connection but delays the response indefinitely; the request remains pending instead of returning within the configured fetch timeout.",
+  "recommendation": "Wrap the feed parse call with a timeout, preferably the existing fetch timeout setting, and handle asyncio.TimeoutError explicitly. If parse_feed is intended to own timeouts, enforce it there and keep this route's behavior covered by tests.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests do not call POST /check-url and do not simulate slow feed parsing or timeout behavior.",
+  "suggestedRegressionTest": "Monkeypatch ContentProcessor.parse_feed to await longer than the configured timeout, call POST /check-url, and assert the response completes with the intended fallback or error status within the timeout budget.",
+  "minimumFixScope": "Add timeout handling around the parse_feed call used by check_feed_url and cover it in tests.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-e81367b10e_545bfdc45e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:29:30.328Z",
+  "updatedAt": "2026-05-18T12:29:30.328Z"
+}

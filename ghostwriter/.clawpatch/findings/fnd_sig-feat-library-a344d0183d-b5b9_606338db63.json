@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-a344d0183d-b5b9_606338db63",
+  "featureId": "feat_library_a344d0183d",
+  "title": "Owned entrypoint currently fails configured Ruff checks",
+  "category": "build-release",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/main.py",
+      "startLine": 16,
+      "endLine": 25,
+      "symbol": null,
+      "quote": "from app.core.logging import configure_logging, digest_logger\nfrom app.models.digest import Digest\nfrom sqlmodel import Session, select"
+    }
+  ],
+  "reasoning": "The repository's Ruff configuration selects import sorting and Pyflakes rules. Running ruff on the owned files reports I001 for the import block and F401 because digest_logger is imported but unused, so the configured lint command will fail on this feature.",
+  "reproduction": "python -m ruff check --no-cache app/main.py app/__init__.py reports I001 and F401 on app/main.py.",
+  "recommendation": "Remove the unused digest_logger import and sort the import block according to Ruff/isort.",
+  "whyTestsDoNotAlreadyCoverThis": "This is a lint/build gate issue rather than runtime behavior, and no linked tests run Ruff for just this feature.",
+  "suggestedRegressionTest": null,
+  "minimumFixScope": "The import block in app/main.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-a344d0183d_b5b922b421",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:10:15.220Z",
+  "updatedAt": "2026-05-18T12:10:15.220Z"
+}

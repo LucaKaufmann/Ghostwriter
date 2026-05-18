@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-9bc68b3c89-9a0e87_4384f62f00",
+  "featureId": "feat_route_9bc68b3c89",
+  "title": "Status counts load every matching media row",
+  "category": "performance",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/media.py",
+      "startLine": 367,
+      "endLine": 380,
+      "symbol": "get_media_status",
+      "quote": "pending = len(session.exec(\n        select(MediaItem).where(MediaItem.status == \"pending\")\n    ).all())"
+    },
+    {
+      "path": "app/api/media.py",
+      "startLine": 371,
+      "endLine": 372,
+      "symbol": "get_media_status",
+      "quote": "processing = len(processing_items)"
+    },
+    {
+      "path": "app/api/media.py",
+      "startLine": 373,
+      "endLine": 380,
+      "symbol": "get_media_status",
+      "quote": "completed = len(session.exec(\n        select(MediaItem).where(MediaItem.status == \"completed\")\n    ).all())\n    failed = len(session.exec(\n        select(MediaItem).where(MediaItem.status == \"failed\")\n    ).all())"
+    }
+  ],
+  "reasoning": "GET /status is a dashboard-style endpoint, but it materializes full MediaItem ORM rows for each status just to compute counts. On a large media library this does unnecessary row hydration and memory allocation, and the endpoint can become slow or memory-heavy even though the database can answer these as aggregate counts.",
+  "reproduction": null,
+  "recommendation": "Use aggregate count queries such as select(func.count()).select_from(MediaItem).where(MediaItem.status == ...) for the four counters, while keeping a separate limited query for the current processing item details.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for this route, and there is no evidence of a large-dataset performance assertion around /status.",
+  "suggestedRegressionTest": "Seed many MediaItem rows across statuses and assert /status returns correct counts without selecting full MediaItem rows, for example by checking generated SQL or using a repository/helper that issues count queries.",
+  "minimumFixScope": "Limit the change to get_media_status count query construction in app/api/media.py.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-9bc68b3c89_9a0e87bddd",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:21:12.212Z",
+  "updatedAt": "2026-05-18T12:21:12.212Z"
+}

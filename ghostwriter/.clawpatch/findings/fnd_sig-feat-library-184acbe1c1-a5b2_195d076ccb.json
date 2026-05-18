@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-184acbe1c1-a5b2_195d076ccb",
+  "featureId": "feat_library_184acbe1c1",
+  "title": "Shared test database is not reset between tests",
+  "category": "test-gap",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "tests/conftest.py",
+      "startLine": 26,
+      "endLine": 30,
+      "symbol": "client",
+      "quote": "@pytest.fixture\ndef client():\n    \"\"\"Create a FastAPI TestClient.\"\"\"\n    with TestClient(app) as client:\n        yield client"
+    },
+    {
+      "path": "tests/test_feeds.py",
+      "startLine": 3,
+      "endLine": 7,
+      "symbol": "test_list_feeds_empty",
+      "quote": "def test_list_feeds_empty(client):\n    \"\"\"Test listing feeds when none exist.\"\"\"\n    response = client.get(\"/api/feeds\")\n    assert response.status_code == 200\n    assert isinstance(response.json(), list)"
+    },
+    {
+      "path": "tests/test_digest_download_formats.py",
+      "startLine": 42,
+      "endLine": 47,
+      "symbol": "test_download_digest_by_id_epub",
+      "quote": "digests_response = client.get(\"/api/digests\")\n    assert digests_response.status_code == 200\n    first_digest = digests_response.json()[0]\n    assert first_digest[\"available_formats\"] == [\"epub\"]"
+    }
+  ],
+  "reasoning": "The global fixture creates one app/database environment for the test session and only yields a TestClient; it does not clear tables or create a per-test database. Several tests insert feeds, digests, and client config rows, while other tests assume empty or first-row state. That makes the suite order-dependent and can produce false failures when tests are reordered, run selectively after prior tests in the same process, or expanded with additional database-writing tests.",
+  "reproduction": "Run the suite with an order that executes a feed-creating test before `test_list_feeds_empty`, or add a digest row before `test_download_digest_by_id_epub`; the tests can observe leftover rows because the `client` fixture does not reset persisted state.",
+  "recommendation": "Add an autouse fixture in `tests/conftest.py` that truncates mutable tables before each test, or create an isolated temporary database per test and rebind the app/session dependencies accordingly. Keep explicit reset helpers only for test-specific setup, not general isolation.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests exercise endpoint behavior but do not verify test isolation or run under randomized order. Existing cleanup is ad hoc and limited to `ClientConfig` in a couple of tests.",
+  "suggestedRegressionTest": "Add a small isolation test pair where one test creates a feed and another asserts `/api/feeds` starts empty, then run with randomized ordering or enforce the isolation through an autouse reset fixture.",
+  "minimumFixScope": "`tests/conftest.py` plus any shared database reset helper needed for the app's SQLModel tables.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-184acbe1c1_a5b2bc5b77",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:05:14.059Z",
+  "updatedAt": "2026-05-18T12:05:14.059Z"
+}

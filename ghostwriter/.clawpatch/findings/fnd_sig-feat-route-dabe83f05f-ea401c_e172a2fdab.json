@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-dabe83f05f-ea401c_e172a2fdab",
+  "featureId": "feat_route_dabe83f05f",
+  "title": "GET /tokens lacks direct coverage for its security-sensitive response contract",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "app/api/auth.py",
+      "startLine": 241,
+      "endLine": 264,
+      "symbol": "list_api_tokens",
+      "quote": "@router.get(\"/tokens\", response_model=list[APITokenResponse])\nasync def list_api_tokens(\n    current_user: Annotated[User, Depends(get_current_user)],\n    session: Session = Depends(get_session),\n) -> list[APITokenResponse]:\n    \"\"\"List all API tokens for the current user.\"\"\""
+    }
+  ],
+  "reasoning": "This route exposes API-token metadata and relies on filtering by `current_user.id`, excluding revoked tokens, ordering by creation time, and returning only the response fields. The feature lists no tests, and repository search did not find a direct test for `/auth/tokens` or `list_api_tokens`, so regressions that leak another user's token metadata, include revoked tokens, or accidentally expose token hashes/raw tokens would not be caught at the route boundary.",
+  "reproduction": null,
+  "recommendation": "Add route-level pytest coverage that creates tokens for two users, includes a revoked token, calls GET `/auth/tokens` as one user, and asserts only that user's non-revoked tokens are returned in newest-first order without `token_hash` or full token fields.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature metadata has an empty `tests` list; existing token references found in tests are setup helpers or plugin/podcast coverage, not assertions for this route's response contract.",
+  "suggestedRegressionTest": "A FastAPI client test for GET `/auth/tokens` covering unauthenticated rejection, per-user scoping, revoked-token exclusion, newest-first ordering, and absence of `token_hash`/`token` in the JSON payload.",
+  "minimumFixScope": "Add focused tests under `ghostwriter/tests/` for the `list_api_tokens` route.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-dabe83f05f_ea401c8ebf",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:28:21.162Z",
+  "updatedAt": "2026-05-18T12:28:21.162Z"
+}

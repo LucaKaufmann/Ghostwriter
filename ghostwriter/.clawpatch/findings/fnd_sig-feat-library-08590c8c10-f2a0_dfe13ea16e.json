@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-08590c8c10-f2a0_dfe13ea16e",
+  "featureId": "feat_library_08590c8c10",
+  "title": "LLM service logs full prompts and provider response bodies at info/error level",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "app/services/llm_service.py",
+      "startLine": 260,
+      "endLine": 279,
+      "symbol": "LLMService.summarize",
+      "quote": "context_lines.append(f\"URL: {url}\") ... prompt = summarize_prompt.format(context=context, content=content, ...)"
+    },
+    {
+      "path": "app/services/llm_service.py",
+      "startLine": 358,
+      "endLine": 363,
+      "symbol": "LLMService._run_completion",
+      "quote": "logger.info(\"LLM call prompt | call_id=%s system_prompt=%r user_prompt=%r\", ... prompt)"
+    },
+    {
+      "path": "app/services/llm_service.py",
+      "startLine": 422,
+      "endLine": 429,
+      "symbol": "LLMService._extract_error_details",
+      "quote": "details.append(f\"response_text={response_text}\") ... details.append(f\"response_content={body}\")"
+    }
+  ],
+  "reasoning": "Summarization prompts contain full article/newsletter/transcript content plus metadata, and _run_completion writes the complete prompt to normal info logs. Error handling can also log full provider response bodies. In Ghostwriter this content can include private newsletters, saved articles, tokens embedded in URLs, or other personal data, so routine logs become a secondary sensitive-data store.",
+  "reproduction": null,
+  "recommendation": "Log call IDs, provider/model, prompt lengths, and redacted/truncated diagnostics by default. Gate full prompt logging behind an explicit debug setting and redact URLs/secrets before writing provider response details.",
+  "whyTestsDoNotAlreadyCoverThis": "tests/test_llm_service.py covers fallback behavior, model string selection, transcript length guidance, and timeout forwarding, but has no caplog assertions for prompt or provider-error redaction.",
+  "suggestedRegressionTest": "Add caplog tests around _run_completion with a fake completion/error containing sentinel private text and assert normal logs contain only metadata and do not contain the sentinel.",
+  "minimumFixScope": "app/services/llm_service.py logging statements and error detail extraction; optional settings flag for explicit debug prompt capture.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-08590c8c10_f2a018ae02",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:07:13.182Z",
+  "updatedAt": "2026-05-18T12:07:13.182Z"
+}

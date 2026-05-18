@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-dabe83f05f-6f4ef5_9df4a74135",
+  "featureId": "feat_route_dabe83f05f",
+  "title": "Configured lint rejects the /tokens dependency signature",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "app/api/auth.py",
+      "startLine": 241,
+      "endLine": 245,
+      "symbol": "list_api_tokens",
+      "quote": "@router.get(\"/tokens\", response_model=list[APITokenResponse])\nasync def list_api_tokens(\n    current_user: Annotated[User, Depends(get_current_user)],\n    session: Session = Depends(get_session),\n) -> list[APITokenResponse]:"
+    }
+  ],
+  "reasoning": "The project lint command selects flake8-bugbear, and `python -m ruff check --no-cache app/api/auth.py` reports B008 on this route because `Depends(get_session)` is called in a default argument. That makes the owned file fail the configured release check unless this FastAPI dependency style is converted to an `Annotated` dependency or B008 is explicitly ignored for the project.",
+  "reproduction": "Run `python -m ruff check --no-cache app/api/auth.py`; Ruff reports B008 at app/api/auth.py:244.",
+  "recommendation": "Change the session parameter to `session: Annotated[Session, Depends(get_session)]` with no default, applying the same pattern consistently where this file needs to pass lint, or explicitly configure Ruff to ignore B008 for FastAPI dependency declarations.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked feature lists no tests, and ordinary pytest route tests would not catch lint-gate failures unless the lint command is part of CI.",
+  "suggestedRegressionTest": "Add the configured lint command to CI for this package, or at minimum run `ruff check app/api/auth.py` in the release gate.",
+  "minimumFixScope": "Update the `list_api_tokens` dependency declaration and any sibling declarations required for `app/api/auth.py` to pass the configured Ruff rules.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-route-dabe83f05f_6f4ef50a25",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260518T120435-a94ff3",
+  "createdAt": "2026-05-18T12:28:21.162Z",
+  "updatedAt": "2026-05-18T12:28:21.162Z"
+}
