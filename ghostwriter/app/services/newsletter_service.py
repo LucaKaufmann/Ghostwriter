@@ -20,6 +20,7 @@ from lxml import html as lxml_html
 from lxml.html import tostring as html_tostring
 
 from app.core.config import Settings, get_settings
+from app.services.article_eligibility_filter import ArticleEligibilityFilter
 from app.services.content_processor import ContentProcessor, ExtractedArticle
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class NewsletterService:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+        self.article_filter = ArticleEligibilityFilter()
         self._token_path = os.path.join(self.settings.data_dir, "gmail_token.json")
         self._pending_oauth_path = os.path.join(self.settings.data_dir, "gmail_oauth_pending.json")
 
@@ -393,6 +395,22 @@ class NewsletterService:
         if not cleaned.strip():
             return None
 
+        eligibility = self.article_filter.check_extracted(
+            url=f"https://mail.google.com/mail/u/0/#inbox/{msg.get('id', '')}",
+            title=subject,
+            content=cleaned,
+            author=sender,
+            source="Newsletter",
+        )
+        if not eligibility.eligible:
+            logger.info(
+                "Skipping promotional newsletter subject=%s reason=%s confidence=%.2f",
+                subject,
+                eligibility.reason,
+                eligibility.confidence,
+            )
+            return None
+
         word_count = ContentProcessor.count_words(plain_for_count)
         if word_count == 0:
             return None
@@ -577,7 +595,8 @@ class NewsletterService:
             compact_lines.append(stripped)
             previous_blank = False
 
-        return "\n".join(compact_lines).strip()
+        stripped = "\n".join(compact_lines).strip()
+        return self._remove_promotional_text_blocks(stripped)
 
     @staticmethod
     def _plain_text_to_html(plain_text: str) -> str:
@@ -722,7 +741,58 @@ class NewsletterService:
             if serialized.strip():
                 parts.append(serialized.strip())
 
-        return "\n".join(parts)
+        return self._remove_promotional_html_blocks("\n".join(parts))
+
+    @classmethod
+    def _remove_promotional_text_blocks(cls, text: str) -> str:
+        """Remove obvious standalone sponsored/ad blocks from plain text newsletters."""
+
+        if not text.strip():
+            return ""
+
+        kept: list[str] = []
+        for block in re.split(r"\n\s*\n", text):
+            normalized = block.strip()
+            if not normalized:
+                continue
+            if (
+                len(normalized) < 1200
+                and ArticleEligibilityFilter.is_promotional_block_text(normalized)
+            ):
+                continue
+            kept.append(normalized)
+        return "\n\n".join(kept).strip()
+
+    @classmethod
+    def _remove_promotional_html_blocks(cls, html: str) -> str:
+        """Remove obvious standalone sponsored/ad blocks from cleaned HTML newsletters."""
+
+        if not html.strip():
+            return ""
+        try:
+            wrapper = lxml_html.fromstring(f"<div>{html}</div>")
+        except Exception:
+            return html
+
+        for el in list(wrapper.iter()):
+            if not cls._is_element(el) or el is wrapper:
+                continue
+            text = el.text_content().strip()
+            if (
+                text
+                and len(text) < 1200
+                and ArticleEligibilityFilter.is_promotional_block_text(text)
+            ):
+                parent = el.getparent()
+                if parent is not None:
+                    parent.remove(el)
+
+        parts = [
+            html_tostring(child, encoding="unicode", method="xml").strip()
+            for child in wrapper
+            if cls._is_element(child)
+        ]
+        return "\n".join(part for part in parts if part)
 
     @staticmethod
     def _flatten_table(table):

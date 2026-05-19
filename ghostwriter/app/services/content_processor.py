@@ -28,6 +28,9 @@ class ParsedArticle:
     url: str
     title: str
     content_url: str | None = None
+    summary: str | None = None
+    content: str | None = None
+    tags: list[str] | None = None
     published: str | None = None
     author: str | None = None
 
@@ -162,6 +165,38 @@ class ContentProcessor:
 
                 return None
 
+            def _extract_entry_content(entry: dict) -> str | None:
+                content = entry.get("content") or []
+                if isinstance(content, list):
+                    values = [
+                        item.get("value")
+                        for item in content
+                        if isinstance(item, dict) and item.get("value")
+                    ]
+                    if values:
+                        return "\n\n".join(values)
+                if isinstance(content, str) and content:
+                    return content
+                return None
+
+            def _extract_entry_tags(entry: dict) -> list[str]:
+                tags: list[str] = []
+                for item in entry.get("tags") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    value = item.get("term") or item.get("label")
+                    if value:
+                        tags.append(str(value))
+                for key in ("category", "category_detail"):
+                    value = entry.get(key)
+                    if isinstance(value, str) and value:
+                        tags.append(value)
+                    elif isinstance(value, dict):
+                        term = value.get("term") or value.get("label")
+                        if term:
+                            tags.append(str(term))
+                return list(dict.fromkeys(tags))
+
             limit = self.settings.max_articles_per_feed
             if max_entries is not None:
                 limit = max_entries
@@ -172,6 +207,9 @@ class ContentProcessor:
                 guid = entry.get("id") or entry.get("guid")
                 url = entry.get("link", "")
                 content_url = _extract_media_url(entry)
+                content = _extract_entry_content(entry)
+                summary = entry.get("summary") or entry.get("description")
+                tags = _extract_entry_tags(entry)
 
                 if not guid:
                     guid = hashlib.sha256(url.encode()).hexdigest()[:16]
@@ -181,6 +219,9 @@ class ContentProcessor:
                         guid=guid,
                         url=url,
                         content_url=content_url,
+                        summary=summary,
+                        content=content,
+                        tags=tags,
                         title=entry.get("title", "Untitled"),
                         published=entry.get("published"),
                         author=entry.get("author"),
@@ -241,7 +282,7 @@ class ContentProcessor:
         except ValueError as e:
             logger.warning(f"Blocked URL fetch (unsafe): {url} - {e}")
             return None
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"Timeout extracting content from {url}")
             return None
         except Exception as e:

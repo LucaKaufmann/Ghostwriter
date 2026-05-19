@@ -58,6 +58,15 @@ def test_model_string_gemini():
     assert model == "gemini/gemini-1.5-flash"
 
 
+def test_promotional_sentinel_detection(llm_service):
+    """PROMOTIONAL_CONTENT should be recognized exactly, ignoring case/space."""
+
+    assert llm_service.is_promotional_sentinel(" PROMOTIONAL_CONTENT ")
+    assert llm_service.is_promotional_sentinel("promotional_content")
+    assert not llm_service.is_promotional_sentinel("PROMOTIONAL_CONTENT: details")
+    assert not llm_service.is_promotional_sentinel("regular summary")
+
+
 def test_transcript_length_guidance_short(llm_service):
     """Short transcripts should get a shorter summary target."""
     content = "word " * 1500

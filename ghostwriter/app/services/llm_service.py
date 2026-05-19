@@ -40,6 +40,7 @@ Content guidance:
 - Include 2-3 key supporting facts, data points, or events.
 - Preserve 1-2 short exact excerpts (max 25 words each) when there's a strong, memorable line. Italicize excerpts with *single asterisks*.
 - Omit sponsor messages, ads, calls-to-action, and boilerplate. Do not mention or acknowledge them.
+- If the article is primarily sponsored, advertising, affiliate, or deal content, output exactly PROMOTIONAL_CONTENT.
 
 Length: Target around 800-1,200 characters. Use 2-3 short paragraphs.
 
@@ -176,6 +177,7 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
 
     DIRECT_SUMMARY_CHAR_LIMIT = 15000
     CHUNK_CHAR_LIMIT = 12000
+    PROMOTIONAL_SENTINEL = "PROMOTIONAL_CONTENT"
     _TRANSCRIPT_LENGTH_TIERS = (
         (2500, "Target around 350-500 words (~2,100-3,000 characters). Use 4-6 short paragraphs."),
         (7000, "Target around 500-750 words (~3,000-4,500 characters). Use 5-8 short paragraphs."),
@@ -195,6 +197,12 @@ Final check: Ensure the summary flows naturally and captures the full scope of t
         """
         self.settings = settings or get_settings()
         self._configure_litellm()
+
+    @classmethod
+    def is_promotional_sentinel(cls, text: str | None) -> bool:
+        """Return true when the LLM indicates the article should be skipped."""
+
+        return bool(text and text.strip().upper() == cls.PROMOTIONAL_SENTINEL)
 
     def _configure_litellm(self) -> None:
         """Configure LiteLLM based on the selected provider."""
