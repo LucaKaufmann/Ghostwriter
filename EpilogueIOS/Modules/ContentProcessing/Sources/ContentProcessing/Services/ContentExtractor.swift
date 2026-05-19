@@ -22,7 +22,7 @@ public final class ContentExtractor: ContentExtractorProtocol, Sendable {
 
     /// Extract full article content from a URL
     public func extractContent(from url: String) async throws -> String {
-        guard let articleURL = URL(string: url) else {
+        guard let articleURL = URL.validHTTPURL(from: url) else {
             throw ContentExtractorError.invalidURL
         }
 
@@ -145,7 +145,7 @@ public final class ContentExtractor: ContentExtractorProtocol, Sendable {
 
 // MARK: - Errors
 
-public enum ContentExtractorError: LocalizedError {
+public enum ContentExtractorError: LocalizedError, Equatable {
     case invalidURL
     case networkError
     case invalidEncoding

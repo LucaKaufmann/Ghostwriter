@@ -15,7 +15,12 @@ struct SettingsView: View {
     @Environment(\.settingsRepository) private var settingsRepository
     @EnvironmentObject private var ghostwriterCoordinator: GhostwriterSyncCoordinator
     @EnvironmentObject private var localDigestService: LocalDigestService
-    private let ghostwriterSettingsEnabled = false
+
+    private static let ghostwriterSettingsAvailable = true
+
+    static func shouldShowGhostwriterSettings(ghostwriterEnabled: Bool) -> Bool {
+        Self.ghostwriterSettingsAvailable || ghostwriterEnabled
+    }
 
     @State private var apiKey = ""
     @State private var showApiKey = false
@@ -37,7 +42,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if ghostwriterSettingsEnabled || ghostwriterEnabled {
+                if Self.shouldShowGhostwriterSettings(ghostwriterEnabled: ghostwriterEnabled) {
                     // MARK: - Ghostwriter Sync
                     Section {
                         NavigationLink {

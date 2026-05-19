@@ -70,6 +70,7 @@ public final class LocalDigestService: ObservableObject {
             let articleRepository = ArticleRepository(
                 feedParser: feedParser,
                 contentExtractor: contentExtractor,
+                feedRepository: feedRepository,
                 aiService: aiService,
                 minWordCount: minWordCount
             )

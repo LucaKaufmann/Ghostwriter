@@ -5,15 +5,16 @@ Revises: 017
 Create Date: 2026-02-20
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import context, op
 import sqlalchemy as sa
 
+from alembic import context, op
+
 revision: str = "018"
-down_revision: Union[str, None] = "017"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "017"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _table_exists(name: str) -> bool:
@@ -63,12 +64,26 @@ def upgrade() -> None:
             "WHERE digest_id IS NOT NULL AND digest_ids = '[]'"
         )
 
-    # Drop old digest_id column via table rebuild
-    # Must drop the index first — SQLite batch alter tries to recreate all
-    # existing indexes on the rebuilt table, which fails if the column is gone.
+    # Drop old digest_id column via table rebuild. SQLite batch alter tries to
+    # recreate existing constraints and indexes on the rebuilt table, which
+    # fails if they still reference the removed column.
     if "digest_id" in existing:
-        with op.batch_alter_table("podcast_episodes") as batch_op:
+        naming_convention = {
+            "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+        }
+        with op.batch_alter_table(
+            "podcast_episodes",
+            naming_convention=naming_convention,
+        ) as batch_op:
             batch_op.drop_index("ix_podcast_episodes_digest_id")
+            batch_op.drop_constraint(
+                "uq_podcast_episodes_digest_id",
+                type_="unique",
+            )
+            batch_op.drop_constraint(
+                "fk_podcast_episodes_digest_id_digests",
+                type_="foreignkey",
+            )
             batch_op.drop_column("digest_id")
 
 

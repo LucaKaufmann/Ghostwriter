@@ -19,6 +19,7 @@ from app.models.api_token import APIToken
 from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
+from app.models.podcast_preferences import PodcastPreferences
 from app.models.podcast_schedule import PodcastSchedule
 from app.models.user import User
 from app.services.podcast_service import (
@@ -101,16 +102,19 @@ def _create_episode(
     status: str,
     audio_path: Path | None = None,
     trigger: str = "manual",
+    user_id: UUID | None = None,
 ) -> PodcastEpisode:
     now = datetime.utcnow()
     episode = PodcastEpisode(
         digest_ids=[str(digest_id)],
         trigger=trigger,
-        user_id=None,
+        user_id=user_id,
         script="[HOST_A]: Intro\n[HOST_B]: Reply\n[HOST_A]: Outro\n[HOST_B]: End\n"
         "[HOST_A]: Next\n[HOST_B]: Done",
         audio_path=str(audio_path) if audio_path else None,
-        audio_size_bytes=audio_path.stat().st_size if audio_path and audio_path.exists() else None,
+        audio_size_bytes=audio_path.stat().st_size
+        if audio_path and audio_path.exists()
+        else None,
         duration_seconds=95 if audio_path else None,
         article_ids=[str(article_id) for article_id in article_ids],
         article_count=len(article_ids),
@@ -302,12 +306,16 @@ def test_article_feedback_roundtrip(client, auth_headers):
     delete = client.delete(f"/api/articles/{article_id}/feedback", headers=auth_headers)
     assert delete.status_code == 204
 
-    missing = client.delete(f"/api/articles/{article_id}/feedback", headers=auth_headers)
+    missing = client.delete(
+        f"/api/articles/{article_id}/feedback", headers=auth_headers
+    )
     assert missing.status_code == 404
 
 
 def test_trigger_digest_podcast_and_list_episodes(client, monkeypatch, auth_headers):
-    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
     digest_id, _ = _create_digest_with_articles(article_count=2)
 
     trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=auth_headers)
@@ -327,7 +335,9 @@ def test_trigger_digest_podcast_and_list_episodes(client, monkeypatch, auth_head
 
 
 def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
-    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
     digest_id, article_ids = _create_digest_with_articles(article_count=2)
     failed = _create_episode(
         digest_id=digest_id,
@@ -335,7 +345,9 @@ def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
         status="failed",
     )
 
-    retry = client.post(f"/api/podcast/episodes/{failed.id}/retry", headers=auth_headers)
+    retry = client.post(
+        f"/api/podcast/episodes/{failed.id}/retry", headers=auth_headers
+    )
     assert retry.status_code == 200
     payload = retry.json()
     assert payload["episode_id"] == str(failed.id)
@@ -347,7 +359,9 @@ def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
         assert refreshed.status == "pending"
 
 
-def test_trigger_digest_podcast_requeues_failed_episode(client, monkeypatch, auth_headers):
+def test_trigger_digest_podcast_requeues_failed_episode(
+    client, monkeypatch, auth_headers
+):
     scheduled: list[UUID] = []
     monkeypatch.setattr(
         podcast_service,
@@ -380,7 +394,9 @@ def test_trigger_digest_podcast_requeues_failed_episode(client, monkeypatch, aut
 
 @pytest.mark.asyncio
 async def test_run_episode_generation_uses_runtime_preference_snapshot(monkeypatch):
-    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
     digest_id, _ = _create_digest_with_articles(article_count=2)
 
     with Session(engine) as session:
@@ -457,7 +473,9 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     assert stream.content == b"0123456789"
     assert stream.headers["content-range"].startswith("bytes 0-9/")
 
-    download = client.get(f"/api/podcast/episodes/{episode.id}/download?token=feed_token_123456")
+    download = client.get(
+        f"/api/podcast/episodes/{episode.id}/download?token=feed_token_123456"
+    )
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("audio/mpeg")
     assert download.content == audio_path.read_bytes()
@@ -479,6 +497,89 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     guid = items[0].find("guid")
     assert guid is not None
     assert guid.attrib.get("isPermaLink") == "false"
+
+
+def test_feed_token_is_scoped_to_token_owner(client):
+    digest_id, article_ids = _create_digest_with_articles(article_count=1)
+    settings = get_settings()
+    podcasts_dir = Path(settings.output_dir) / "podcasts"
+    podcasts_dir.mkdir(parents=True, exist_ok=True)
+    audio_a = podcasts_dir / f"episode-{uuid4()}.mp3"
+    audio_b = podcasts_dir / f"episode-{uuid4()}.mp3"
+    audio_a.write_bytes(b"user-a-audio")
+    audio_b.write_bytes(b"user-b-audio")
+
+    with Session(engine) as session:
+        user_a = User(
+            username=f"pod-a-{uuid4().hex[:8]}",
+            password_hash="test-password-hash",
+        )
+        user_b = User(
+            username=f"pod-b-{uuid4().hex[:8]}",
+            password_hash="test-password-hash",
+        )
+        session.add(user_a)
+        session.add(user_b)
+        session.commit()
+        session.refresh(user_a)
+        session.refresh(user_b)
+        user_a_id = user_a.id
+        user_b_id = user_b.id
+
+        session.add(
+            PodcastPreferences(
+                user_id=user_a_id,
+                podcast_feed_enabled=True,
+                podcast_feed_token="feed_token_user_a_scope",
+            )
+        )
+        session.add(
+            PodcastPreferences(
+                user_id=user_b_id,
+                podcast_feed_enabled=True,
+                podcast_feed_token="feed_token_user_b_scope",
+            )
+        )
+        session.commit()
+
+    episode_a = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_a,
+        user_id=user_a_id,
+    )
+    episode_b = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_b,
+        user_id=user_b_id,
+    )
+
+    feed = client.get("/api/podcast/feed.xml?token=feed_token_user_b_scope")
+    assert feed.status_code == 200
+    root = ET.fromstring(feed.content)
+    enclosures = root.findall("./channel/item/enclosure")
+    enclosure_urls = [item.attrib["url"] for item in enclosures]
+    assert any(str(episode_b.id) in url for url in enclosure_urls)
+    assert all(str(episode_a.id) not in url for url in enclosure_urls)
+
+    cross_download = client.get(
+        f"/api/podcast/episodes/{episode_a.id}/download?token=feed_token_user_b_scope"
+    )
+    assert cross_download.status_code == 404
+
+    cross_stream = client.get(
+        f"/api/podcast/episodes/{episode_a.id}/stream?token=feed_token_user_b_scope"
+    )
+    assert cross_stream.status_code == 404
+
+    own_download = client.get(
+        f"/api/podcast/episodes/{episode_b.id}/download?token=feed_token_user_b_scope"
+    )
+    assert own_download.status_code == 200
+    assert own_download.content == b"user-b-audio"
 
 
 def test_stream_and_download_reject_paths_outside_podcast_output_dir(client, tmp_path):
@@ -522,7 +623,9 @@ def test_feed_artwork_rejects_paths_outside_podcast_artwork_dir(client):
             session.add(prefs)
             session.commit()
 
-        artwork = client.get("/api/podcast/feed/artwork?token=feed_token_bad_artwork_path")
+        artwork = client.get(
+            "/api/podcast/feed/artwork?token=feed_token_bad_artwork_path"
+        )
         assert artwork.status_code == 403
     finally:
         outside_artwork.unlink(missing_ok=True)
@@ -591,7 +694,9 @@ def test_feed_artwork_upload_and_serve(client, auth_headers):
 
 
 def test_scheduled_podcast_generation(monkeypatch):
-    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
     digest_id, _ = _create_digest_with_articles(article_count=2)
 
     with Session(engine) as session:
@@ -754,11 +859,15 @@ def test_brief_parser_and_renderer_preserve_richer_podcast_context():
 
 
 def test_queue_episode_generation_finds_existing_episode(monkeypatch):
-    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
 
     # Pre-create an episode for this digest
-    existing = _create_episode(digest_id=digest_id, article_ids=article_ids, status="ready")
+    existing = _create_episode(
+        digest_id=digest_id, article_ids=article_ids, status="ready"
+    )
 
     with Session(engine) as session:
         # Should find and return the existing episode instead of creating a new one
@@ -768,7 +877,9 @@ def test_queue_episode_generation_finds_existing_episode(monkeypatch):
     assert str(digest_id) in episode.digest_ids
 
 
-def test_schedule_episode_task_uses_main_loop_when_called_without_running_loop(monkeypatch):
+def test_schedule_episode_task_uses_main_loop_when_called_without_running_loop(
+    monkeypatch,
+):
     scheduled: dict[str, object] = {}
 
     class _ClosedLoop:
@@ -802,7 +913,9 @@ def test_schedule_episode_task_uses_main_loop_when_called_without_running_loop(m
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(monkeypatch):
+async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(
+    monkeypatch,
+):
     captured: dict[str, object] = {}
 
     class _Response:
@@ -942,7 +1055,11 @@ def test_podcast_schedules_crud(client, auth_headers):
     # Update
     update_resp = client.put(
         f"/api/podcast/schedules/{schedule_id}",
-        json={"name": "Morning Briefing", "days": ["monday", "tuesday"], "time": "08:00"},
+        json={
+            "name": "Morning Briefing",
+            "days": ["monday", "tuesday"],
+            "time": "08:00",
+        },
         headers=auth_headers,
     )
     assert update_resp.status_code == 200
@@ -952,7 +1069,9 @@ def test_podcast_schedules_crud(client, auth_headers):
     assert updated["time"] == "08:00"
 
     # Delete
-    delete_resp = client.delete(f"/api/podcast/schedules/{schedule_id}", headers=auth_headers)
+    delete_resp = client.delete(
+        f"/api/podcast/schedules/{schedule_id}", headers=auth_headers
+    )
     assert delete_resp.status_code == 204
 
     # Verify deleted
@@ -1009,7 +1128,9 @@ def test_podcast_schedule_toggle_enabled(client, auth_headers):
 
 def test_podcast_schedule_trigger(client, monkeypatch, auth_headers):
     """Trigger podcast generation for a specific schedule."""
-    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
     digest_id, _ = _create_digest_with_articles(article_count=2)
 
     create = client.post(
@@ -1040,7 +1161,9 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
     """Verify that only digests created after last_run_at are included."""
     from datetime import timedelta
 
-    monkeypatch.setattr(podcast_service, "_schedule_episode_task", lambda _episode_id: None)
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
 
     # Create an older digest
     old_time = datetime.utcnow() - timedelta(hours=2)

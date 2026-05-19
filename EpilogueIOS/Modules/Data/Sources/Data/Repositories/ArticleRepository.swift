@@ -14,26 +14,38 @@ import Domain
 public final class ArticleRepository: ArticleRepositoryProtocol {
     private let feedParser: FeedParserProtocol
     private let contentExtractor: ContentExtractorProtocol
+    private let feedRepository: FeedRepositoryProtocol?
     private let aiService: AIServiceProtocol?
     private let minWordCount: Int
 
     public init(
         feedParser: FeedParserProtocol,
         contentExtractor: ContentExtractorProtocol,
+        feedRepository: FeedRepositoryProtocol? = nil,
         aiService: AIServiceProtocol? = nil,
         minWordCount: Int = 300
     ) {
         self.feedParser = feedParser
         self.contentExtractor = contentExtractor
+        self.feedRepository = feedRepository
         self.aiService = aiService
         self.minWordCount = minWordCount
     }
 
     public func fetchAndProcessArticles() async throws -> [ProcessedArticle] {
-        // This would need access to FeedRepository to get enabled feeds
-        // For now, return empty array - this will be properly implemented
-        // when we wire up dependencies
-        return []
+        guard let feedRepository else {
+            throw ArticleProcessingError.feedRepositoryUnavailable
+        }
+
+        let feeds = try await feedRepository.getEnabledFeeds()
+        var processed: [ProcessedArticle] = []
+
+        for feed in feeds {
+            let feedArticles = try await fetchAndProcessArticles(from: feed)
+            processed.append(contentsOf: feedArticles)
+        }
+
+        return processed
     }
 
     public func fetchAndProcessArticles(from feed: Feed) async throws -> [ProcessedArticle] {
@@ -145,6 +157,7 @@ public final class ArticleRepository: ArticleRepositoryProtocol {
 public enum ArticleProcessingError: LocalizedError {
     case contentTooShort
     case aiServiceUnavailable
+    case feedRepositoryUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -152,6 +165,8 @@ public enum ArticleProcessingError: LocalizedError {
             return "Article content does not meet minimum word count"
         case .aiServiceUnavailable:
             return "AI service is not configured for briefing mode"
+        case .feedRepositoryUnavailable:
+            return "Feed repository is not configured"
         }
     }
 }

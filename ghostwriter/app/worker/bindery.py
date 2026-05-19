@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime, timedelta
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlmodel import Session, select
 
@@ -166,9 +166,11 @@ class BinderyPipeline:
         whisper_provider = "local"
         whisper_model = "base.en"
         whisper_timeout_seconds: int | None = None
+        digest_filename: str | None = None
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
             period = digest.period if digest else "manual"
+            digest_filename = digest.filename if digest else None
             client_config = session.exec(select(ClientConfig)).first()
             if client_config:
                 whisper_provider = client_config.whisper_provider or "local"
@@ -178,10 +180,23 @@ class BinderyPipeline:
         try:
             await self._update_stage("fetching")
             feeds = await self._get_active_feeds()
+            seen_articles: list[tuple[UUID, str, str, str]] = []
+            seen_articles_lock = asyncio.Lock()
+
+            async def _queue_seen(
+                feed_id: UUID,
+                guid: str,
+                url: str,
+                title: str,
+            ) -> None:
+                async with seen_articles_lock:
+                    seen_articles.append((feed_id, guid, url, title))
 
             if not feeds:
                 logger.warning("No active feeds found")
-                digest_logger.pipeline_no_articles(str(self.digest_id), "No active feeds configured")
+                digest_logger.pipeline_no_articles(
+                    str(self.digest_id), "No active feeds configured"
+                )
                 await self._complete(0)
                 return
 
@@ -224,19 +239,26 @@ class BinderyPipeline:
                     # Per-fetch delay (inside semaphore to rate-limit)
                     await asyncio.sleep(self.settings.fetch_delay_ms / 1000)
 
-            logger.info(f"Fetching {len(feeds)} feeds with concurrency={self.settings.max_concurrent_fetches}")
+            logger.info(
+                f"Fetching {len(feeds)} feeds with concurrency={self.settings.max_concurrent_fetches}"
+            )
             await asyncio.gather(*[_fetch_one(f) for f in feeds])
             await self._flush_progress_if_needed(force=True)
             feed_order = {feed.id: idx for idx, feed in enumerate(feeds)}
-            all_articles = self._order_fetched_articles_by_feed(all_articles, feed_order)
+            all_articles = self._order_fetched_articles_by_feed(
+                all_articles, feed_order
+            )
 
             # Fetch Wallabag articles (separate from RSS pipeline)
             wallabag_articles: list[ExtractedArticle] = []
             wallabag_entry_ids: list[int] = []
             wallabag_enabled = False
             with Session(engine) as wb_session:
-                wallabag_service = WallabagService.from_db_or_settings(wb_session, self.settings)
+                wallabag_service = WallabagService.from_db_or_settings(
+                    wb_session, self.settings
+                )
                 from app.models.wallabag_config import WallabagConfig
+
                 wb_cfg = wb_session.exec(select(WallabagConfig)).first()
                 wallabag_enabled = wb_cfg.enabled if wb_cfg else True
 
@@ -256,25 +278,31 @@ class BinderyPipeline:
                             content = wb["content"] or ""
                             # Strip HTML for plain text
                             import re
+
                             plain = re.sub(r"<[^>]+>", "", content)
                             word_count = ContentProcessor.count_words(plain)
 
-                            wallabag_articles.append(ExtractedArticle(
-                                guid=guid,
-                                url=wb["url"],
-                                title=wb["title"],
-                                content=plain,
-                                author=wb.get("domain_name"),
-                                word_count=word_count,
-                                is_summary=False,
-                                ai_failed=False,
-                                processing_ms=0,
-                                feed_title="Wallabag",
-                            ))
+                            wallabag_articles.append(
+                                ExtractedArticle(
+                                    guid=guid,
+                                    url=wb["url"],
+                                    title=wb["title"],
+                                    content=plain,
+                                    author=wb.get("domain_name"),
+                                    word_count=word_count,
+                                    is_summary=False,
+                                    ai_failed=False,
+                                    processing_ms=0,
+                                    feed_title="Wallabag",
+                                )
+                            )
                             wallabag_entry_ids.append(wb["id"])
-                            await self._mark_seen_raw(wb_feed_id, guid, wb["url"], wb["title"])
+                            await _queue_seen(wb_feed_id, guid, wb["url"], wb["title"])
                 except Exception as e:
-                    logger.warning(f"Wallabag fetch failed, continuing with RSS only: {e!r}", exc_info=True)
+                    logger.warning(
+                        f"Wallabag fetch failed, continuing with RSS only: {e!r}",
+                        exc_info=True,
+                    )
                     digest_logger.error(
                         f"Wallabag fetch failed: {e!r}",
                         component="feeds",
@@ -298,7 +326,10 @@ class BinderyPipeline:
             if newsletter_service.is_configured and newsletters_enabled:
                 try:
                     # Single fetch returns both articles and their message IDs in sync
-                    nl_raw, newsletter_message_ids = await newsletter_service.fetch_newsletters()
+                    (
+                        nl_raw,
+                        newsletter_message_ids,
+                    ) = await newsletter_service.fetch_newsletters()
                     digest_logger.info(
                         f"Newsletters: fetched {len(nl_raw)} emails",
                         component="feeds",
@@ -309,7 +340,7 @@ class BinderyPipeline:
                     for nl in nl_raw:
                         if not await self._is_seen(nl_feed_id, nl.guid):
                             newsletter_articles.append(nl)
-                            await self._mark_seen_raw(nl_feed_id, nl.guid, nl.url, nl.title)
+                            await _queue_seen(nl_feed_id, nl.guid, nl.url, nl.title)
                 except Exception as e:
                     logger.warning(f"Newsletter fetch failed, continuing without: {e}")
                     digest_logger.error(
@@ -321,7 +352,9 @@ class BinderyPipeline:
 
             if not all_articles and not wallabag_articles and not newsletter_articles:
                 logger.warning("No new articles found")
-                digest_logger.pipeline_no_articles(str(self.digest_id), "No new articles found across all feeds")
+                digest_logger.pipeline_no_articles(
+                    str(self.digest_id), "No new articles found across all feeds"
+                )
                 await self._complete(0)
                 return
 
@@ -363,11 +396,18 @@ class BinderyPipeline:
                     ai_failed = False
 
                     # Step 1: Skip media items — they're handled by the decoupled media pipeline
-                    if MediaProcessor.quick_check(parsed_article.url, parsed_article.content_url):
+                    if MediaProcessor.quick_check(
+                        parsed_article.url, parsed_article.content_url
+                    ):
                         logger.debug(
                             f"Skipping media item (handled by media pipeline): {parsed_article.url}"
                         )
-                        await self._mark_seen(feed.id, parsed_article)
+                        await _queue_seen(
+                            feed.id,
+                            parsed_article.guid,
+                            parsed_article.url,
+                            parsed_article.title,
+                        )
                         return
 
                     content_type = "article"
@@ -437,14 +477,21 @@ class BinderyPipeline:
                         url=parsed_article.url,
                     )
 
-                    await self._mark_seen(feed.id, parsed_article)
+                    await _queue_seen(
+                        feed.id,
+                        parsed_article.guid,
+                        parsed_article.url,
+                        parsed_article.title,
+                    )
 
                     self._articles_enriched += 1
                     self._progress_dirty = True
                     await self._flush_progress_if_needed()
 
             logger.info(f"Extracting {len(all_articles)} articles with concurrency=5")
-            await asyncio.gather(*[_extract_one(feed, art) for feed, art in all_articles])
+            await asyncio.gather(
+                *[_extract_one(feed, art) for feed, art in all_articles]
+            )
             await self._flush_progress_if_needed(force=True)
             extracted_articles = self._order_extracted_articles(
                 extracted_articles,
@@ -474,7 +521,9 @@ class BinderyPipeline:
                                 title=article.title,
                                 content=summary_content,
                                 author=article.author,
-                                word_count=ContentProcessor.count_words(summary_content),
+                                word_count=ContentProcessor.count_words(
+                                    summary_content
+                                ),
                                 is_summary=True,
                                 ai_failed=False,
                                 processing_ms=article.processing_ms,
@@ -485,7 +534,9 @@ class BinderyPipeline:
                     async with wb_lock:
                         enriched_wallabag.append(result)
 
-                logger.info(f"Summarizing {len(wallabag_articles)} Wallabag articles with concurrency=3")
+                logger.info(
+                    f"Summarizing {len(wallabag_articles)} Wallabag articles with concurrency=3"
+                )
                 await asyncio.gather(*[_summarize_wb(a) for a in wallabag_articles])
                 wallabag_articles = enriched_wallabag
 
@@ -512,7 +563,9 @@ class BinderyPipeline:
                                 title=article.title,
                                 content=summary_content,
                                 author=article.author,
-                                word_count=ContentProcessor.count_words(summary_content),
+                                word_count=ContentProcessor.count_words(
+                                    summary_content
+                                ),
                                 is_summary=True,
                                 ai_failed=False,
                                 processing_ms=article.processing_ms,
@@ -523,7 +576,9 @@ class BinderyPipeline:
                     async with nl_lock:
                         enriched_newsletters.append(result)
 
-                logger.info(f"Summarizing {len(newsletter_articles)} newsletter articles with concurrency=3")
+                logger.info(
+                    f"Summarizing {len(newsletter_articles)} newsletter articles with concurrency=3"
+                )
                 await asyncio.gather(*[_summarize_nl(a) for a in newsletter_articles])
                 newsletter_articles = enriched_newsletters
 
@@ -554,35 +609,48 @@ class BinderyPipeline:
                     ).all()
 
                     for item in completed_items:
-                        media_articles.append(ExtractedArticle(
-                            guid=item.guid,
-                            url=item.url,
-                            title=item.title,
-                            content=item.content,
-                            author=item.author,
-                            word_count=item.word_count,
-                            is_summary=item.is_summary,
-                            ai_failed=item.ai_failed,
-                            processing_ms=item.processing_ms,
-                            feed_title=item.content_type.capitalize(),
-                            content_type=item.content_type,
-                        ))
+                        media_articles.append(
+                            ExtractedArticle(
+                                guid=item.guid,
+                                url=item.url,
+                                title=item.title,
+                                content=item.content,
+                                author=item.author,
+                                word_count=item.word_count,
+                                is_summary=item.is_summary,
+                                ai_failed=item.ai_failed,
+                                processing_ms=item.processing_ms,
+                                feed_title=item.content_type.capitalize(),
+                                content_type=item.content_type,
+                            )
+                        )
                         media_item_ids.append(item.id)
 
                     if media_articles:
-                        logger.info(f"Including {len(media_articles)} completed media items in digest")
+                        logger.info(
+                            f"Including {len(media_articles)} completed media items in digest"
+                        )
 
-            if not extracted_articles and not wallabag_articles and not newsletter_articles and not media_articles:
+            if (
+                not extracted_articles
+                and not wallabag_articles
+                and not newsletter_articles
+                and not media_articles
+            ):
                 logger.warning("No articles extracted successfully")
-                digest_logger.pipeline_no_articles(str(self.digest_id), "All article extractions failed")
-                await self._complete(0)
+                digest_logger.pipeline_no_articles(
+                    str(self.digest_id), "All article extractions failed"
+                )
+                await self._complete(0, seen_articles=seen_articles)
                 return
 
             # Stage 4: Compile EPUB
             await self._update_stage("compiling")
             total_count = (
-                len(extracted_articles) + len(wallabag_articles)
-                + len(newsletter_articles) + len(media_articles)
+                len(extracted_articles)
+                + len(wallabag_articles)
+                + len(newsletter_articles)
+                + len(media_articles)
             )
             digest_logger.epub_generation_started(str(self.digest_id), total_count)
 
@@ -602,8 +670,11 @@ class BinderyPipeline:
             epub_path = self.epub_generator.generate(
                 articles_for_epub,
                 period=period,
+                output_filename=digest_filename,
                 saved_articles=wallabag_articles if wallabag_articles else None,
-                newsletter_articles=newsletter_articles if newsletter_articles else None,
+                newsletter_articles=newsletter_articles
+                if newsletter_articles
+                else None,
                 media_articles=media_articles if media_articles else None,
                 cover_image=cover_image,
             )
@@ -611,7 +682,9 @@ class BinderyPipeline:
             # Log EPUB file size
             try:
                 file_size_kb = os.path.getsize(epub_path) // 1024
-                digest_logger.epub_generation_completed(str(self.digest_id), epub_path, file_size_kb)
+                digest_logger.epub_generation_completed(
+                    str(self.digest_id), epub_path, file_size_kb
+                )
             except OSError:
                 file_size_kb = 0
 
@@ -620,19 +693,24 @@ class BinderyPipeline:
 
             # Save Wallabag article records
             if wallabag_articles:
-                await self._save_wallabag_article_records(wallabag_articles, len(extracted_articles))
+                await self._save_wallabag_article_records(
+                    wallabag_articles, len(extracted_articles)
+                )
 
             # Save newsletter article records
             if newsletter_articles:
                 await self._save_newsletter_article_records(
-                    newsletter_articles, len(extracted_articles) + len(wallabag_articles)
+                    newsletter_articles,
+                    len(extracted_articles) + len(wallabag_articles),
                 )
 
             # Save media article records
             if media_articles:
                 await self._save_media_article_records(
                     media_articles,
-                    len(extracted_articles) + len(wallabag_articles) + len(newsletter_articles),
+                    len(extracted_articles)
+                    + len(wallabag_articles)
+                    + len(newsletter_articles),
                 )
 
             # Mark consumed media items
@@ -664,14 +742,19 @@ class BinderyPipeline:
                         try:
                             await wallabag_service.mark_processed(eid)
                         except Exception:
-                            logger.warning(f"Failed to mark wallabag entry {eid} as processed")
+                            logger.warning(
+                                f"Failed to mark wallabag entry {eid} as processed"
+                            )
 
                 await asyncio.gather(*[_mark_wb(eid) for eid in wallabag_entry_ids])
 
             await self._complete(
-                len(extracted_articles) + len(wallabag_articles)
-                + len(newsletter_articles) + len(media_articles),
+                len(extracted_articles)
+                + len(wallabag_articles)
+                + len(newsletter_articles)
+                + len(media_articles),
                 epub_path,
+                seen_articles=seen_articles,
             )
 
         except Exception as e:
@@ -682,7 +765,9 @@ class BinderyPipeline:
                 digest = session.get(Digest, self.digest_id)
                 if digest:
                     current_stage = digest.stage
-            digest_logger.pipeline_failed(str(self.digest_id), str(e), stage=current_stage)
+            digest_logger.pipeline_failed(
+                str(self.digest_id), str(e), stage=current_stage
+            )
             await self._fail(str(e))
             raise
 
@@ -714,7 +799,11 @@ class BinderyPipeline:
 
         if not ai_enabled:
             if active_manual_cover:
-                manual_path = os.path.join(self.settings.data_dir, "manual_covers", active_manual_cover.file_name)
+                manual_path = os.path.join(
+                    self.settings.data_dir,
+                    "manual_covers",
+                    active_manual_cover.file_name,
+                )
                 try:
                     with open(manual_path, "rb") as fp:
                         data = fp.read()
@@ -724,7 +813,9 @@ class BinderyPipeline:
                         provider="manual",
                     )
                 except Exception:
-                    logger.exception("Failed to load active manual cover; falling back to text cover")
+                    logger.exception(
+                        "Failed to load active manual cover; falling back to text cover"
+                    )
                     return None
             return None
 
@@ -741,7 +832,9 @@ class BinderyPipeline:
                 cover_gemini_api_key=cover_gemini_api_key,
             )
         except Exception:
-            logger.exception("Cover generation failed unexpectedly; falling back to text cover")
+            logger.exception(
+                "Cover generation failed unexpectedly; falling back to text cover"
+            )
             return None
 
         if cover:
@@ -773,11 +866,7 @@ class BinderyPipeline:
     async def _get_active_feeds(self) -> list[Feed]:
         """Get all active feeds."""
         with Session(engine) as session:
-            statement = (
-                select(Feed)
-                .where(Feed.is_active == True)
-                .order_by(Feed.title)
-            )
+            statement = select(Feed).where(Feed.is_active == True).order_by(Feed.title)
             return list(session.exec(statement).all())
 
     async def _fetch_feed(self, feed: Feed) -> tuple[list[tuple[Feed, any]], int]:
@@ -801,9 +890,7 @@ class BinderyPipeline:
             if not await self._is_seen(feed.id, article.guid):
                 new_articles.append((feed, article))
 
-        logger.info(
-            f"Feed {feed.title}: {total_count} total, {len(new_articles)} new"
-        )
+        logger.info(f"Feed {feed.title}: {total_count} total, {len(new_articles)} new")
         return new_articles, total_count
 
     async def _is_seen(self, feed_id: UUID, guid: str) -> bool:
@@ -833,7 +920,9 @@ class BinderyPipeline:
             session.add(seen)
             session.commit()
 
-    async def _mark_seen_raw(self, feed_id: UUID, guid: str, url: str, title: str) -> None:
+    async def _mark_seen_raw(
+        self, feed_id: UUID, guid: str, url: str, title: str
+    ) -> None:
         """Mark an article as seen using raw fields (for non-RSS sources)."""
         with Session(engine) as session:
             seen = SeenArticle(
@@ -976,7 +1065,12 @@ class BinderyPipeline:
             )
             self._progress_dirty = False
 
-    async def _complete(self, article_count: int, epub_path: str | None = None) -> None:
+    async def _complete(
+        self,
+        article_count: int,
+        epub_path: str | None = None,
+        seen_articles: list[tuple[UUID, str, str, str]] | None = None,
+    ) -> None:
         """Mark digest as completed."""
         duration = time.time() - self.start_time if self.start_time else 0
 
@@ -990,6 +1084,15 @@ class BinderyPipeline:
                 digest.locked_at = None
                 digest.locked_by = None
                 session.add(digest)
+                for feed_id, guid, url, title in seen_articles or []:
+                    session.add(
+                        SeenArticle(
+                            feed_id=feed_id,
+                            guid=guid,
+                            url=url,
+                            title=title,
+                        )
+                    )
                 session.commit()
         logger.info(f"Digest completed with {article_count} articles")
 
@@ -1074,8 +1177,10 @@ async def generate_digest(
 
         # Create new digest
         now = datetime.utcnow()
+        digest_id = uuid4()
         digest = Digest(
-            filename=f"{now.strftime('%Y-%m-%d')}_{period}.epub",
+            id=digest_id,
+            filename=f"{now.strftime('%Y-%m-%d')}_{period}_{digest_id.hex}.epub",
             period=period,
             status="processing",
             stage="queued",
@@ -1084,8 +1189,6 @@ async def generate_digest(
         )
         session.add(digest)
         session.commit()
-        session.refresh(digest)
-        digest_id = digest.id
 
     logger.info(
         "Digest created",

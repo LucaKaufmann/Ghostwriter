@@ -540,7 +540,7 @@ class GhostwriterRepository @Inject constructor(
                     documentsDir.mkdirs()
                 }
 
-                val outputFile = File(documentsDir, filename)
+                val outputFile = resolveDigestOutputFile(documentsDir, filename)
                 outputFile.outputStream().use { output ->
                     output.write(bytes)
                 }
@@ -567,7 +567,7 @@ class GhostwriterRepository @Inject constructor(
                     documentsDir.mkdirs()
                 }
 
-                val outputFile = File(documentsDir, filename)
+                val outputFile = resolveDigestOutputFile(documentsDir, filename)
                 response.body()!!.byteStream().use { input ->
                     outputFile.outputStream().use { output ->
                         input.copyTo(output)
@@ -605,7 +605,7 @@ class GhostwriterRepository @Inject constructor(
                 if (!documentsDir.exists()) {
                     documentsDir.mkdirs()
                 }
-                val outputFile = File(documentsDir, outputFilename)
+                val outputFile = resolveDigestOutputFile(documentsDir, outputFilename)
                 outputFile.outputStream().use { output -> output.write(bytes) }
                 GhostwriterResult.Success(outputFile)
             } catch (e: GhostwriterApiException) {
@@ -625,7 +625,7 @@ class GhostwriterRepository @Inject constructor(
                 if (!documentsDir.exists()) {
                     documentsDir.mkdirs()
                 }
-                val outputFile = File(documentsDir, outputFilename)
+                val outputFile = resolveDigestOutputFile(documentsDir, outputFilename)
                 response.body()!!.byteStream().use { input ->
                     outputFile.outputStream().use { output ->
                         input.copyTo(output)
@@ -1909,4 +1909,25 @@ class GhostwriterRepository @Inject constructor(
             GhostwriterResult.Error("Failed to revoke auth token: ${e.message}")
         }
     }
+}
+
+internal fun resolveDigestOutputFile(documentsDir: File, filename: String): File {
+    require(filename.isNotBlank()) { "Digest filename must not be blank" }
+    require('/' !in filename && '\\' !in filename) {
+        "Digest filename must not contain path separators"
+    }
+    require(filename != "." && filename != "..") {
+        "Digest filename must not be a traversal segment"
+    }
+    require(File(filename).name == filename) {
+        "Digest filename must be a basename"
+    }
+
+    val canonicalDir = documentsDir.canonicalFile
+    val outputFile = File(canonicalDir, filename).canonicalFile
+    val basePath = canonicalDir.path + File.separator
+    require(outputFile.path.startsWith(basePath)) {
+        "Digest output path must stay inside the Epilogue directory"
+    }
+    return outputFile
 }

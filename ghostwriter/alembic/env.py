@@ -4,30 +4,31 @@ import os
 import sys
 from logging.config import fileConfig
 
-from alembic import context
 import sqlalchemy as sa
 from sqlalchemy import engine_from_config, inspect, pool
 from sqlmodel import SQLModel
+
+from alembic import context
 
 # Add the app directory to the path so we can import models
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import all models to ensure they're registered with SQLModel
-from app.models.user import User  # noqa: F401, E402
 from app.models.api_token import APIToken  # noqa: F401, E402
-from app.models.feed import Feed  # noqa: F401, E402
-from app.models.digest import Digest, DigestArticle  # noqa: F401, E402
-from app.models.seen_article import SeenArticle  # noqa: F401, E402
-from app.models.schedule import Schedule  # noqa: F401, E402
+from app.models.article_feedback import ArticleFeedback  # noqa: F401, E402
 from app.models.client_config import ClientConfig  # noqa: F401, E402
 from app.models.client_settings import ClientSettings  # noqa: F401, E402
-from app.models.wallabag_config import WallabagConfig  # noqa: F401, E402
+from app.models.digest import Digest, DigestArticle  # noqa: F401, E402
+from app.models.feed import Feed  # noqa: F401, E402
+from app.models.manual_cover import ManualCover  # noqa: F401, E402
 from app.models.media_feed import MediaFeed  # noqa: F401, E402
 from app.models.media_item import MediaItem  # noqa: F401, E402
-from app.models.manual_cover import ManualCover  # noqa: F401, E402
-from app.models.podcast_preferences import PodcastPreferences  # noqa: F401, E402
-from app.models.article_feedback import ArticleFeedback  # noqa: F401, E402
 from app.models.podcast_episode import PodcastEpisode  # noqa: F401, E402
+from app.models.podcast_preferences import PodcastPreferences  # noqa: F401, E402
+from app.models.schedule import Schedule  # noqa: F401, E402
+from app.models.seen_article import SeenArticle  # noqa: F401, E402
+from app.models.user import User  # noqa: F401, E402
+from app.models.wallabag_config import WallabagConfig  # noqa: F401, E402
 
 # this is the Alembic Config object
 config = context.config
@@ -39,12 +40,52 @@ if config.config_file_name is not None:
 # Use SQLModel's metadata for autogenerate support
 target_metadata = SQLModel.metadata
 
+LEGACY_BOOTSTRAP_REVISION = "004"
+LEGACY_BOOTSTRAP_TABLE_NAMES = {
+    "api_tokens",
+    "client_config",
+    "client_settings",
+    "digest_articles",
+    "digests",
+    "feeds",
+    "schedules",
+    "seen_articles",
+    "users",
+    "wallabag_config",
+}
+
 
 def get_database_url() -> str:
     """Get the database URL from environment or default."""
     data_dir = os.environ.get("DATA_DIR", "/app/data")
     os.makedirs(data_dir, exist_ok=True)
     return f"sqlite:///{data_dir}/ghostwriter.db"
+
+
+def has_application_tables(table_names: set[str]) -> bool:
+    """Return whether any SQLModel application table already exists."""
+    return bool(set(target_metadata.tables) & table_names)
+
+
+def stamp_revision(connection: sa.Connection, revision: str) -> None:
+    """Create alembic_version and stamp it with a specific revision."""
+    connection.execute(
+        sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+    )
+    connection.execute(
+        sa.text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+        {"v": revision},
+    )
+
+
+def create_legacy_bootstrap_tables(connection: sa.Connection) -> None:
+    """Create only tables expected before the idempotent migration chain."""
+    tables = [
+        target_metadata.tables[name]
+        for name in LEGACY_BOOTSTRAP_TABLE_NAMES
+        if name in target_metadata.tables
+    ]
+    target_metadata.create_all(connection, tables=tables)
 
 
 def run_migrations_offline() -> None:
@@ -93,20 +134,22 @@ def run_migrations_online() -> None:
         # 002-005 assume client_config exists), so for a new database we skip
         # the migration chain entirely — create_all() produces the current schema.
         insp = inspect(connection)
-        if "alembic_version" not in insp.get_table_names():
-            target_metadata.create_all(connection)
-            # Stamp the current head revision directly (can't use command.stamp
-            # from within env.py — it re-enters run_env and fails).
-            head = context.script.get_current_head()
-            connection.execute(
-                sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-            )
-            connection.execute(
-                sa.text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
-                {"v": head},
-            )
+        table_names = set(insp.get_table_names())
+        if "alembic_version" not in table_names:
+            if not has_application_tables(table_names):
+                target_metadata.create_all(connection)
+                # Stamp the current head revision directly (can't use command.stamp
+                # from within env.py — it re-enters run_env and fails).
+                stamp_revision(connection, context.script.get_current_head())
+                connection.commit()
+                return
+
+            # Existing pre-Alembic databases have app tables but no version row.
+            # Create missing legacy tables, then start after the non-idempotent
+            # early revisions so consolidation migrations repair columns.
+            create_legacy_bootstrap_tables(connection)
+            stamp_revision(connection, LEGACY_BOOTSTRAP_REVISION)
             connection.commit()
-            return
 
         context.configure(
             connection=connection,
