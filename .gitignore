@@ -116,3 +116,7 @@ play-service-account-*.json
 
 # Codex local settings
 .codex/
+
+# Clawpatch local scan artifacts and config
+.clawpatch/
+**/.clawpatch/
