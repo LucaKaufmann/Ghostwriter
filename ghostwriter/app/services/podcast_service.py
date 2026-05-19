@@ -92,6 +92,7 @@ SCRIPT_BRIEF_CHUNK_SIZE = 3
 SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
 MIN_EPISODE_DURATION_SECONDS = 30
 SOURCE_DIVERSITY_TARGET_FRACTION = 0.35
+ONE_OFF_MAX_EPISODE_ARTICLES = 20
 CONCRETE_DETAIL_RE = re.compile(
     r"(\b\d+(?:[.,]\d+)?\b|[$]\s?\d+|\b\d+%|\b20\d{2}\b|\"[^\"]{12,}\"|\*[^\*]{12,}\*)"
 )
@@ -1069,6 +1070,7 @@ class PodcastDigestService:
                     digest_ids=episode_digest_ids,
                     prefs=runtime_prefs,
                     user_id=user_id,
+                    trigger=episode.trigger,
                 )
                 logger.info(
                     "Podcast article selection complete",
@@ -1211,6 +1213,7 @@ class PodcastDigestService:
         digest_ids: list[UUID],
         prefs: PodcastGenerationPreferences,
         user_id: UUID | None,
+        trigger: str | None = None,
     ) -> list[DigestArticle]:
         """Rank articles from one or more digests and pick top items for script generation."""
         articles = session.exec(
@@ -1224,6 +1227,22 @@ class PodcastDigestService:
                 extra={"digest_ids": [str(d) for d in digest_ids]},
             )
             return []
+
+        if trigger == "one_off":
+            selected = [
+                article
+                for article in articles
+                if re.sub(r"\s+", " ", article.content or "").strip()
+            ][:ONE_OFF_MAX_EPISODE_ARTICLES]
+            logger.info(
+                "One-off podcast article selection preserved source order",
+                extra={
+                    "digest_ids": [str(d) for d in digest_ids],
+                    "total_article_count": len(articles),
+                    "selected_count": len(selected),
+                },
+            )
+            return selected
 
         # Deduplicate articles by URL across digests
         seen_urls: set[str] = set()

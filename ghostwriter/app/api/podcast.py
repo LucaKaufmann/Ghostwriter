@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from email.utils import format_datetime
-from pathlib import Path
-from typing import Iterator
-from uuid import UUID
 import logging
 import mimetypes
 import os
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
+from datetime import datetime, timezone
+from email.utils import format_datetime
+from pathlib import Path
+from typing import Literal
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
@@ -23,7 +24,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlmodel import Session, select
 
@@ -43,6 +44,12 @@ from app.models.podcast_schedule import (
     PodcastScheduleCreate,
     PodcastScheduleRead,
     PodcastScheduleUpdate,
+)
+from app.services.one_off_podcast_service import (
+    ONE_OFF_MAX_SOURCES,
+    OneOffPodcastError,
+    one_off_podcast_service,
+    one_off_source_from_payload,
 )
 from app.services.podcast_service import podcast_service
 
@@ -96,6 +103,26 @@ class PodcastTriggerResponse(BaseModel):
     digest_ids: list[str]
     status: str
     message: str
+
+
+class OneOffPodcastSourceRequest(BaseModel):
+    """One source for one-off podcast generation."""
+
+    type: Literal["url", "text"]
+    title: str | None = None
+    url: str | None = None
+    content: str | None = None
+
+
+class OneOffPodcastCreateRequest(BaseModel):
+    """Request to create a podcast episode from ad hoc source material."""
+
+    title: str | None = None
+    brief: str | None = None
+    sources: list[OneOffPodcastSourceRequest] = Field(
+        min_length=1,
+        max_length=ONE_OFF_MAX_SOURCES,
+    )
 
 
 class DigestPodcastStatusResponse(BaseModel):
@@ -493,6 +520,36 @@ async def generate_podcast_now(
         digest_ids=episode.digest_ids or [],
         status=episode.status,
         message="Podcast generation queued from recent digests",
+    )
+
+
+@router.post(
+    "/podcast/episodes/one-off",
+    response_model=PodcastTriggerResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def create_one_off_podcast_episode(
+    payload: OneOffPodcastCreateRequest,
+    session: Session = Depends(get_session),
+):
+    """Create a podcast episode from caller-supplied URL and text sources."""
+    user_id = podcast_service.resolve_user_id(session)
+    try:
+        episode = await one_off_podcast_service.create_episode(
+            session,
+            title=payload.title,
+            brief=payload.brief,
+            sources=[one_off_source_from_payload(source) for source in payload.sources],
+            user_id=user_id,
+        )
+    except OneOffPodcastError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return PodcastTriggerResponse(
+        episode_id=episode.id,
+        digest_ids=episode.digest_ids or [],
+        status=episode.status,
+        message="One-off podcast generation queued",
     )
 
 
