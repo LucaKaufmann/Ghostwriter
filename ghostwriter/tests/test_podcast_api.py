@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
-import xml.etree.ElementTree as ET
 
 import pytest
 from PIL import Image
@@ -22,6 +22,10 @@ from app.models.podcast_episode import PodcastEpisode
 from app.models.podcast_preferences import PodcastPreferences
 from app.models.podcast_schedule import PodcastSchedule
 from app.models.user import User
+from app.services.one_off_podcast_service import (
+    ONE_OFF_SOURCE_LABEL,
+    one_off_podcast_service,
+)
 from app.services.podcast_service import (
     AudioGenerationResult,
     PodcastGenerationPreferences,
@@ -334,6 +338,152 @@ def test_trigger_digest_podcast_and_list_episodes(client, monkeypatch, auth_head
     assert episode_id in ids
 
 
+def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "OpenClaw planning brief",
+            "brief": "Focus on implementation tradeoffs.",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "OpenClaw notes",
+                    "content": (
+                        "OpenClaw should generate one-off podcast episodes from "
+                        "selected documents. The implementation should reuse the "
+                        "existing digest-backed podcast pipeline and preserve the "
+                        "submitted source order."
+                    ),
+                },
+                {
+                    "type": "text",
+                    "title": "Hermes notes",
+                    "content": (
+                        "Hermes needs an assistant-friendly endpoint that accepts "
+                        "documents, creates a manual digest, and queues audio "
+                        "generation without requiring a scheduled digest run."
+                    ),
+                },
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "pending"
+    assert payload["message"] == "One-off podcast generation queued"
+    assert len(payload["digest_ids"]) == 1
+
+    episode_id = UUID(payload["episode_id"])
+    digest_id = UUID(payload["digest_ids"][0])
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        digest = session.get(Digest, digest_id)
+        articles = session.exec(
+            select(DigestArticle)
+            .where(DigestArticle.digest_id == digest_id)
+            .order_by(DigestArticle.sort_order.asc())
+        ).all()
+        feed = session.exec(select(Feed).where(Feed.url == "synthetic://one-off")).first()
+
+    assert episode is not None
+    assert episode.trigger == "one_off"
+    assert str(digest_id) in (episode.digest_ids or [])
+    assert digest is not None
+    assert digest.status == "completed"
+    assert digest.period == "manual"
+    assert digest.article_count == 2
+    assert (Path(get_settings().output_dir) / digest.filename).exists()
+    assert feed is not None
+    assert feed.title == ONE_OFF_SOURCE_LABEL
+    assert [article.title for article in articles] == ["OpenClaw notes", "Hermes notes"]
+    assert [article.sort_order for article in articles] == [0, 1]
+    assert all(article.feed_title == ONE_OFF_SOURCE_LABEL for article in articles)
+    assert "Episode title: OpenClaw planning brief" in articles[0].content
+    assert "Caller brief: Focus on implementation tradeoffs." in articles[0].content
+
+    download = client.get(
+        f"/api/digests/{digest_id}/download?format=epub",
+        headers=auth_headers,
+    )
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/epub+zip")
+
+
+def test_create_one_off_podcast_from_url_source(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    async def _extract_content(url: str) -> str:
+        assert url == "https://example.com/openclaw-roadmap"
+        return (
+            "The roadmap explains how OpenClaw can package selected research "
+            "documents into a podcast episode. It highlights source mapping, "
+            "script generation, TTS reuse, and feed publication."
+        )
+
+    monkeypatch.setattr(
+        one_off_podcast_service.content_processor,
+        "extract_content",
+        _extract_content,
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "sources": [
+                {
+                    "type": "url",
+                    "url": "https://example.com/openclaw-roadmap",
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    digest_id = UUID(response.json()["digest_ids"][0])
+    with Session(engine) as session:
+        article = session.exec(
+            select(DigestArticle).where(DigestArticle.digest_id == digest_id)
+        ).one()
+
+    assert article.url == "https://example.com/openclaw-roadmap"
+    assert article.title == "openclaw roadmap"
+    assert "source mapping" in article.content
+
+
+def test_create_one_off_podcast_rejects_unusable_sources(
+    client, monkeypatch, auth_headers
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Too short",
+                    "content": "too short",
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "No usable sources" in response.json()["detail"]
+
+
 def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
@@ -446,12 +596,6 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     podcasts_dir.mkdir(parents=True, exist_ok=True)
     audio_path = podcasts_dir / f"episode-{uuid4()}.mp3"
     audio_path.write_bytes(b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    episode = _create_episode(
-        digest_id=digest_id,
-        article_ids=article_ids,
-        status="ready",
-        audio_path=audio_path,
-    )
 
     with Session(engine) as session:
         prefs = podcast_service.get_or_create_preferences(session, user_id=None)
@@ -462,8 +606,17 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
         prefs.podcast_feed_base_url = None
         prefs.podcast_feed_token = "feed_token_123456"
         prefs.updated_at = datetime.utcnow()
+        user_id = prefs.user_id
         session.add(prefs)
         session.commit()
+
+    episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_path,
+        user_id=user_id,
+    )
 
     stream = client.get(
         f"/api/podcast/episodes/{episode.id}/stream?token=feed_token_123456",
@@ -497,6 +650,40 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     guid = items[0].find("guid")
     assert guid is not None
     assert guid.attrib.get("isPermaLink") == "false"
+
+
+def test_feed_includes_ready_one_off_episode(client, tmp_path):
+    digest_id, article_ids = _create_digest_with_articles(article_count=1)
+    settings = get_settings()
+    podcasts_dir = Path(settings.output_dir) / "podcasts"
+    podcasts_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = podcasts_dir / f"one-off-{uuid4()}.mp3"
+    audio_path.write_bytes(b"one-off-audio")
+    with Session(engine) as session:
+        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs.podcast_feed_enabled = True
+        prefs.podcast_feed_token = "feed_token_one_off_ready"
+        user_id = prefs.user_id
+        session.add(prefs)
+        session.commit()
+
+    episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_path,
+        trigger="one_off",
+        user_id=user_id,
+    )
+
+    feed = client.get("/api/podcast/feed.xml?token=feed_token_one_off_ready")
+    assert feed.status_code == 200
+    root = ET.fromstring(feed.content)
+    enclosure_urls = [
+        enclosure.attrib["url"]
+        for enclosure in root.findall("./channel/item/enclosure")
+    ]
+    assert any(str(episode.id) in url for url in enclosure_urls)
 
 
 def test_feed_token_is_scoped_to_token_owner(client):
@@ -586,19 +773,22 @@ def test_stream_and_download_reject_paths_outside_podcast_output_dir(client, tmp
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
     outside_audio = tmp_path / "outside.mp3"
     outside_audio.write_bytes(b"outside-audio")
-    episode = _create_episode(
-        digest_id=digest_id,
-        article_ids=article_ids,
-        status="ready",
-        audio_path=outside_audio,
-    )
 
     with Session(engine) as session:
         prefs = podcast_service.get_or_create_preferences(session, user_id=None)
         prefs.podcast_feed_enabled = True
         prefs.podcast_feed_token = "feed_token_path_guard"
+        user_id = prefs.user_id
         session.add(prefs)
         session.commit()
+
+    episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=outside_audio,
+        user_id=user_id,
+    )
 
     stream = client.get(
         f"/api/podcast/episodes/{episode.id}/stream?token=feed_token_path_guard",
@@ -823,6 +1013,64 @@ def test_balanced_article_selection_keeps_one_source_from_dominating():
     assert selected_sources.count("Dominant") == 2
     assert "Alternative One" in selected_sources
     assert "Alternative Two" in selected_sources
+
+
+def test_one_off_article_selection_preserves_submitted_order():
+    digest_id = uuid4()
+    feed_id = uuid4()
+    articles = [
+        DigestArticle(
+            digest_id=digest_id,
+            feed_id=feed_id,
+            title=f"Submitted source {index}",
+            url=f"one-off://source/{index}",
+            mode="raw",
+            word_count=8,
+            ai_failed=False,
+            processing_ms=0,
+            content=f"Short but intentional submitted source {index}.",
+            feed_title=ONE_OFF_SOURCE_LABEL,
+            sort_order=index,
+            content_type="article",
+        )
+        for index in range(3)
+    ]
+    with Session(engine) as session:
+        feed = Feed(
+            id=feed_id,
+            url=f"synthetic://one-off-selection-{uuid4()}",
+            title=ONE_OFF_SOURCE_LABEL,
+            is_active=False,
+            mode="raw",
+            max_articles=0,
+        )
+        digest = Digest(
+            id=digest_id,
+            filename=f"one-off-selection-{uuid4()}.epub",
+            period="manual",
+            status="completed",
+            stage="completed",
+            article_count=len(articles),
+        )
+        session.add(feed)
+        session.add(digest)
+        for article in articles:
+            session.add(article)
+        session.commit()
+
+        selected = podcast_service.select_articles_for_episode(
+            session,
+            digest_ids=[digest_id],
+            prefs=_test_podcast_preferences(filter_keywords=["intentional"]),
+            user_id=None,
+            trigger="one_off",
+        )
+
+    assert [article.title for article in selected] == [
+        "Submitted source 0",
+        "Submitted source 1",
+        "Submitted source 2",
+    ]
 
 
 def test_brief_parser_and_renderer_preserve_richer_podcast_context():
