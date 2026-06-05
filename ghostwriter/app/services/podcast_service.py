@@ -12,7 +12,7 @@ import shutil
 import tempfile
 from concurrent.futures import Future
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -20,6 +20,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
+from sqlalchemy import exists
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
@@ -27,6 +28,7 @@ from app.core.database import engine
 from app.models.article_feedback import ArticleFeedback, ArticleFeedbackUpsert
 from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle
+from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
 from app.models.podcast_preferences import PodcastPreferences, PodcastPreferencesUpdate
 from app.models.user import User
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 SCRIPT_STATUSES = {"pending", "generating_script", "generating_audio", "ready", "failed"}
 RUNNING_STATUSES = {"generating_script", "generating_audio"}
+ONE_OFF_SYNTHETIC_FEED_URL = "synthetic://one-off"
 SUPPORTED_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
 SUPPORTED_TTS_PROVIDERS = {"openai", "elevenlabs"}
 SCRIPT_LINE_RE = re.compile(r"^\[(HOST_A|HOST_B)\]:\s+(.+)$")
@@ -673,6 +676,7 @@ class PodcastDigestService:
         *,
         user_id: UUID | None = None,
         force: bool = False,
+        trigger: str = "manual",
     ) -> PodcastEpisode:
         """Queue podcast generation for a single digest (manual trigger)."""
         digest = session.get(Digest, digest_id)
@@ -694,6 +698,12 @@ class PodcastDigestService:
         )
 
         if episode is not None:
+            if episode.trigger != trigger:
+                episode.trigger = trigger
+                episode.updated_at = now
+                session.add(episode)
+                session.commit()
+                session.refresh(episode)
             if episode.status in RUNNING_STATUSES:
                 logger.info(
                     "Podcast generation already running for digest",
@@ -740,7 +750,7 @@ class PodcastDigestService:
 
         episode = PodcastEpisode(
             digest_ids=[digest_id_str],
-            trigger="manual",
+            trigger=trigger,
             user_id=user_id,
             status="pending",
             created_at=now,
@@ -755,6 +765,17 @@ class PodcastDigestService:
         )
         self._schedule_episode_task(episode.id)
         return episode
+
+    @staticmethod
+    def _exclude_one_off_digests(statement):
+        """Exclude digests backed by one-off synthetic-feed articles."""
+        one_off_digest_exists = (
+            exists()
+            .where(DigestArticle.digest_id == Digest.id)
+            .where(DigestArticle.feed_id == Feed.id)
+            .where(Feed.url == ONE_OFF_SYNTHETIC_FEED_URL)
+        )
+        return statement.where(~one_off_digest_exists)
 
     def queue_multi_digest_episode(
         self,
@@ -839,8 +860,8 @@ class PodcastDigestService:
             else:
                 return None
 
-            start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
-            end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+            start_utc = start_local.astimezone(UTC).replace(tzinfo=None)
+            end_utc = end_local.astimezone(UTC).replace(tzinfo=None)
 
             # Deduplicate: skip if a non-failed episode already exists for this window
             existing_statement = select(PodcastEpisode).where(
@@ -857,13 +878,14 @@ class PodcastDigestService:
                 return None
 
             # Find completed digests in the time window
-            digests = session.exec(
+            statement = self._exclude_one_off_digests(
                 select(Digest).where(
                     Digest.status == "completed",
                     Digest.created_at >= start_utc,
                     Digest.created_at < end_utc,
                 )
-            ).all()
+            )
+            digests = session.exec(statement).all()
 
             if not digests:
                 logger.info(
@@ -915,7 +937,9 @@ class PodcastDigestService:
                 return None
 
             # Find digests completed after the schedule's last run
-            stmt = select(Digest).where(Digest.status == "completed")
+            stmt = self._exclude_one_off_digests(
+                select(Digest).where(Digest.status == "completed")
+            )
             if schedule.last_run_at is not None:
                 stmt = stmt.where(Digest.created_at > schedule.last_run_at)
             stmt = stmt.order_by(Digest.created_at.asc())

@@ -39,16 +39,11 @@ def _create_digest_with_articles(
     *,
     article_count: int = 3,
     completed_at: datetime | None = None,
+    feed_url: str | None = None,
+    feed_title: str | None = None,
 ) -> tuple[UUID, list[UUID]]:
     suffix = str(uuid4())[:8]
     created = completed_at or datetime.utcnow()
-    feed = Feed(
-        url=f"https://example.com/feed/{suffix}.xml",
-        title=f"Feed {suffix}",
-        is_active=True,
-        mode="raw",
-        max_articles=5,
-    )
     digest = Digest(
         filename=f"digest-{suffix}.epub",
         period="manual",
@@ -60,9 +55,20 @@ def _create_digest_with_articles(
     )
 
     with Session(engine) as session:
-        session.add(feed)
-        session.commit()
-        session.refresh(feed)
+        feed = None
+        if feed_url is not None:
+            feed = session.exec(select(Feed).where(Feed.url == feed_url)).first()
+        if feed is None:
+            feed = Feed(
+                url=feed_url or f"https://example.com/feed/{suffix}.xml",
+                title=feed_title or f"Feed {suffix}",
+                is_active=True,
+                mode="raw",
+                max_articles=5,
+            )
+            session.add(feed)
+            session.commit()
+            session.refresh(feed)
 
         session.add(digest)
         session.commit()
@@ -421,6 +427,43 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
     )
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("application/epub+zip")
+
+
+def test_one_off_episode_trigger_is_persisted_before_scheduling(
+    client, monkeypatch, auth_headers
+):
+    scheduled_triggers: list[str | None] = []
+
+    def capture_scheduled_trigger(episode_id: UUID) -> None:
+        with Session(engine) as session:
+            episode = session.get(PodcastEpisode, episode_id)
+            scheduled_triggers.append(episode.trigger if episode else None)
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", capture_scheduled_trigger
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Pre-schedule trigger check",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Trigger notes",
+                    "content": (
+                        "This source is long enough to become a one-off podcast "
+                        "digest article, and the worker must see the one-off trigger "
+                        "before any asynchronous generation task can begin."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert scheduled_triggers == ["one_off"]
 
 
 def test_one_off_podcast_uses_unique_digest_filenames(
@@ -1073,6 +1116,41 @@ def test_scheduled_podcast_generation(monkeypatch):
         assert episode.status == "pending"
 
 
+def test_scheduled_podcast_generation_excludes_one_off_digests(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    one_off_digest_id, _ = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    normal_digest_id, _ = _create_digest_with_articles(article_count=2)
+
+    with Session(engine) as session:
+        existing_scheduled = session.exec(
+            select(PodcastEpisode).where(PodcastEpisode.trigger == "scheduled")
+        ).all()
+        for episode in existing_scheduled:
+            session.delete(episode)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs.enabled = True
+        prefs.schedule = "daily"
+        prefs.schedule_time = "00:00"
+        prefs.updated_at = datetime.utcnow()
+        session.add(prefs)
+        session.commit()
+
+    episode_id = podcast_service.generate_scheduled_episode()
+    assert episode_id is not None
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, UUID(str(episode_id)))
+        assert episode is not None
+        assert str(normal_digest_id) in episode.digest_ids
+        assert str(one_off_digest_id) not in episode.digest_ids
+
+
 def test_elevenlabs_tts_normalization_for_spoken_delivery():
     normalized = podcast_service._normalize_tts_segment_text(
         "Dr. Lee said revenue hit $42.50 at 14:30 on 2026-02-20 via https://example.com/path",
@@ -1616,3 +1694,38 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
         episode = session.get(PodcastEpisode, result)
         assert episode is not None
         assert str(new_digest_id) in episode.digest_ids
+
+
+def test_generate_episode_for_schedule_excludes_one_off_digests(client, monkeypatch):
+    """Verify that manual schedule triggers ignore one-off source digests."""
+    from datetime import timedelta
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    last_run = datetime.utcnow() + timedelta(days=1)
+    with Session(engine) as session:
+        sched = PodcastSchedule(
+            name="One-off Filter Test",
+            days=["monday"],
+            time="08:00",
+            enabled=True,
+            last_run_at=last_run,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(sched)
+        session.commit()
+        session.refresh(sched)
+        schedule_id = sched.id
+
+    _create_digest_with_articles(
+        article_count=2,
+        completed_at=last_run + timedelta(seconds=1),
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+
+    result = podcast_service.generate_episode_for_schedule(schedule_id)
+    assert result is None

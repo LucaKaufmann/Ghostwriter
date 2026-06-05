@@ -167,12 +167,8 @@ class OneOffPodcastService:
             digest_id=digest.id,
             user_id=user_id,
             force=False,
+            trigger="one_off",
         )
-        episode.trigger = "one_off"
-        episode.updated_at = datetime.utcnow()
-        session.add(episode)
-        session.commit()
-        session.refresh(episode)
         return episode
 
     async def normalize_sources(
