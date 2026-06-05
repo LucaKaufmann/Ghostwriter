@@ -348,6 +348,22 @@ async def _ensure_one_off_digest_episode_access(
     await _ensure_one_off_episode_access(request, session, episode)
 
 
+async def _resolve_podcast_preferences_user_id(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+    session: Session,
+) -> UUID | None:
+    try:
+        user = await get_current_user(request, credentials, session)
+        return user.id
+    except HTTPException as exc:
+        settings = get_settings()
+        has_users = session.exec(select(User)).first() is not None
+        if exc.status_code == 401 and not has_users and not settings.api_key:
+            return None
+        raise
+
+
 def _to_rfc2822(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -370,13 +386,19 @@ def _format_duration(seconds: int | None) -> str:
     response_model=PodcastPreferencesRead,
 )
 async def get_podcast_preferences(
-    current_user: Annotated[User, Depends(get_current_user)],
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Get podcast preferences for the authenticated user."""
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
     prefs = podcast_service.get_or_create_preferences(
         session,
-        user_id=current_user.id,
+        user_id=user_id,
     )
     return PodcastPreferencesRead(
         enabled=prefs.enabled,
@@ -413,17 +435,23 @@ async def get_podcast_preferences(
 )
 async def update_podcast_preferences(
     update: PodcastPreferencesUpdate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Update podcast preferences."""
     from app.worker.scheduler import update_podcast_schedule
 
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
     try:
         prefs = podcast_service.update_preferences(
             session,
             update,
-            user_id=current_user.id,
+            user_id=user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -977,13 +1005,18 @@ async def get_podcast_feed_xml(
 )
 async def get_podcast_feed_info(
     request: Request,
-    current_user: Annotated[User, Depends(get_current_user)],
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Return feed URL and setup instructions for podcast apps."""
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
     prefs = podcast_service.get_or_create_preferences(
         session,
-        user_id=current_user.id,
+        user_id=user_id,
     )
     base_url = _podcast_base_url(request, prefs.podcast_feed_base_url)
     feed_url = f"{base_url}/api/podcast/feed.xml?token={prefs.podcast_feed_token}"
@@ -1025,10 +1058,11 @@ async def get_podcast_feed_artwork(
 @router.post(
     "/podcast/feed/artwork",
     response_model=PodcastArtworkUploadResponse,
-    dependencies=[Depends(verify_api_key)],
 )
 async def upload_podcast_feed_artwork(
+    request: Request,
     file: UploadFile = File(...),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Upload custom podcast feed artwork (minimum 1400x1400)."""
@@ -1063,7 +1097,11 @@ async def upload_podcast_feed_artwork(
     if ext == "jpeg":
         ext = "jpg"
 
-    user_id = podcast_service.resolve_user_id(session)
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
     prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
 
     settings = get_settings()

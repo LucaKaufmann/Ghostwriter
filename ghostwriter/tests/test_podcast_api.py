@@ -1665,7 +1665,8 @@ def test_feed_uses_configured_public_base_url(client):
     )
 
 
-def test_feed_artwork_upload_and_serve(client, auth_headers):
+def test_feed_artwork_upload_and_serve(client):
+    user_id, headers = _create_auth_headers_for_user("artwork_upload")
     image = Image.new("RGB", (1500, 1500), color=(10, 20, 30))
     buffer = BytesIO()
     image.save(buffer, format="JPEG")
@@ -1674,7 +1675,7 @@ def test_feed_artwork_upload_and_serve(client, auth_headers):
     upload = client.post(
         "/api/podcast/feed/artwork",
         files={"file": ("artwork.jpg", buffer.getvalue(), "image/jpeg")},
-        headers=auth_headers,
+        headers=headers,
     )
     assert upload.status_code == 200
     upload_payload = upload.json()
@@ -1683,7 +1684,7 @@ def test_feed_artwork_upload_and_serve(client, auth_headers):
     assert upload_payload["height"] == 1500
 
     with Session(engine) as session:
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.podcast_feed_enabled = True
         prefs.updated_at = datetime.utcnow()
         token = prefs.podcast_feed_token
@@ -1694,10 +1695,52 @@ def test_feed_artwork_upload_and_serve(client, auth_headers):
     assert artwork.status_code == 200
     assert artwork.headers["content-type"].startswith("image/")
 
-    info = client.get("/api/podcast/feed/info", headers=auth_headers)
+    info = client.get("/api/podcast/feed/info", headers=headers)
     assert info.status_code == 200
     info_payload = info.json()
     assert "feed.xml?token=" in info_payload["feed_url"]
+
+
+def test_feed_artwork_upload_is_scoped_to_token_owner(client, tmp_path):
+    owner_id, _owner_headers = _create_auth_headers_for_user("artwork_owner")
+    user_id, headers = _create_auth_headers_for_user("artwork_secondary")
+    owner_artwork = tmp_path / "owner.jpg"
+    owner_artwork.write_bytes(b"owner-artwork")
+
+    with Session(engine) as session:
+        owner_prefs = podcast_service.get_or_create_preferences(
+            session,
+            user_id=owner_id,
+        )
+        owner_prefs.podcast_feed_enabled = True
+        owner_prefs.podcast_feed_token = "feed_token_artwork_owner"
+        owner_prefs.podcast_feed_artwork_path = str(owner_artwork)
+        session.add(owner_prefs)
+        session.commit()
+
+    image = Image.new("RGB", (1500, 1500), color=(30, 20, 10))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+
+    upload = client.post(
+        "/api/podcast/feed/artwork",
+        files={"file": ("secondary.jpg", buffer.getvalue(), "image/jpeg")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+
+    with Session(engine) as session:
+        owner_prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == owner_id)
+        ).first()
+        prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == user_id)
+        ).one()
+
+    assert owner_prefs is not None
+    assert owner_prefs.podcast_feed_artwork_path == str(owner_artwork)
+    assert prefs.podcast_feed_artwork_path
+    assert prefs.podcast_feed_artwork_path != str(owner_artwork)
 
 
 def test_scheduled_podcast_generation(monkeypatch):
