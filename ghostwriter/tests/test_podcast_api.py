@@ -26,13 +26,13 @@ from app.services.one_off_podcast_service import (
     ONE_OFF_MAX_BRIEF_CHARS,
     ONE_OFF_MAX_TEXT_CHARS,
     ONE_OFF_SOURCE_LABEL,
-    one_off_podcast_service,
 )
 from app.services.podcast_service import (
     AudioGenerationResult,
     PodcastGenerationPreferences,
     podcast_service,
 )
+from app.services.reader_service import FetchedHtmlDocument
 
 
 def _create_digest_with_articles(
@@ -900,18 +900,33 @@ def test_create_one_off_podcast_from_url_source(client, monkeypatch, auth_header
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
 
-    async def _extract_content(url: str) -> str:
+    async def _fetch_html_document(url: str, **_kwargs) -> FetchedHtmlDocument:
         assert url == "https://example.com/openclaw-roadmap"
-        return (
-            "The roadmap explains how OpenClaw can package selected research "
-            "documents into a podcast episode. It highlights source mapping, "
-            "script generation, TTS reuse, and feed publication."
+        html = """
+        <html>
+          <head><title>OpenClaw roadmap</title></head>
+          <body>
+            <article>
+              <p>The roadmap explains how OpenClaw can package selected research
+              documents into a podcast episode.</p>
+              <p>It highlights source mapping, script generation, TTS reuse, and
+              feed publication.</p>
+            </article>
+          </body>
+        </html>
+        """
+        return FetchedHtmlDocument(
+            url=url,
+            final_url="https://example.com/openclaw-roadmap",
+            content_type="text/html",
+            html=html,
+            fetched_at=datetime.utcnow(),
+            size_bytes=len(html.encode("utf-8")),
         )
 
     monkeypatch.setattr(
-        one_off_podcast_service.content_processor,
-        "extract_content",
-        _extract_content,
+        "app.services.one_off_podcast_service.fetch_html_document",
+        _fetch_html_document,
     )
 
     response = client.post(
@@ -937,6 +952,40 @@ def test_create_one_off_podcast_from_url_source(client, monkeypatch, auth_header
     assert article.url == "https://example.com/openclaw-roadmap"
     assert article.title == "openclaw roadmap"
     assert "source mapping" in article.content
+
+
+def test_create_one_off_podcast_rejects_private_url_redirect(
+    client,
+    monkeypatch,
+    auth_headers,
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    async def _fetch_html_document(_url: str, **_kwargs) -> FetchedHtmlDocument:
+        raise ValueError("URL resolves to private address")
+
+    monkeypatch.setattr(
+        "app.services.one_off_podcast_service.fetch_html_document",
+        _fetch_html_document,
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "sources": [
+                {
+                    "type": "url",
+                    "url": "https://example.com/private-redirect",
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "private address" in response.json()["detail"]
 
 
 def test_create_one_off_podcast_rejects_unusable_sources(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from dataclasses import dataclass
@@ -10,14 +11,25 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
+import httpx
+import trafilatura
 from sqlmodel import Session
 
 from app.core.config import Settings, get_settings
 from app.models.digest import Digest, DigestArticle
 from app.models.podcast_episode import PodcastEpisode
-from app.services.content_processor import ContentProcessor, ExtractedArticle
+from app.services.content_processor import (
+    ContentProcessor,
+    ExtractedArticle,
+    trafilatura_config,
+)
 from app.services.epub_generator import EpubGenerator
 from app.services.podcast_service import podcast_service
+from app.services.reader_service import (
+    DocumentTooLargeError,
+    NonHtmlContentError,
+    fetch_html_document,
+)
 from app.worker.bindery import get_or_create_synthetic_feed
 
 ONE_OFF_SOURCE_LABEL = "One-off Podcast"
@@ -57,7 +69,6 @@ class OneOffPodcastService:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self.content_processor = ContentProcessor(self.settings)
 
     async def create_episode(
         self,
@@ -231,18 +242,47 @@ class OneOffPodcastService:
         if not url:
             raise OneOffPodcastError(f"URL source {index} is missing a URL")
 
-        content = await self.content_processor.extract_content(url)
+        content, final_url = await self._extract_url_content(url, index)
         content = self._normalize_content(content or "")
         if len(content) < ONE_OFF_MIN_CONTENT_CHARS:
             return None
 
-        title = self._normalize_title(source.title) or self._title_from_url(url, index)
+        title = self._normalize_title(source.title) or self._title_from_url(
+            final_url,
+            index,
+        )
         return NormalizedOneOffSource(
             title=title,
-            url=url,
+            url=final_url,
             content=content,
             word_count=ContentProcessor.count_words(content),
         )
+
+    async def _extract_url_content(self, url: str, index: int) -> tuple[str | None, str]:
+        try:
+            doc = await fetch_html_document(url, settings=self.settings)
+            content = await asyncio.wait_for(
+                asyncio.to_thread(
+                    trafilatura.extract,
+                    doc.html,
+                    url=doc.final_url,
+                    config=trafilatura_config,
+                    include_comments=False,
+                    include_tables=True,
+                    favor_precision=True,
+                    output_format="txt",
+                ),
+                timeout=self.settings.fetch_timeout_seconds,
+            )
+            return content, doc.final_url
+        except (ValueError, NonHtmlContentError, DocumentTooLargeError) as exc:
+            raise OneOffPodcastError(
+                f"URL source {index} could not be fetched: {exc}"
+            ) from exc
+        except (httpx.HTTPError, TimeoutError) as exc:
+            raise OneOffPodcastError(
+                f"URL source {index} could not be fetched"
+            ) from exc
 
     @staticmethod
     def _normalize_title(value: str | None) -> str:
