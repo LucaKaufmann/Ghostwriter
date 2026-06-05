@@ -325,6 +325,56 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert "podcast_feed_base_url" in invalid_feed_base_url.json()["detail"]
 
 
+def test_podcast_preferences_are_scoped_to_token_owner(client):
+    owner_id, _owner_headers = _create_auth_headers_for_user("prefs_owner")
+    user_id, headers = _create_auth_headers_for_user("prefs_secondary")
+
+    with Session(engine) as session:
+        owner_prefs = podcast_service.get_or_create_preferences(
+            session,
+            user_id=owner_id,
+        )
+        owner_prefs.podcast_feed_enabled = True
+        owner_prefs.podcast_feed_token = "feed_token_prefs_owner"
+        owner_prefs.podcast_feed_title = "Owner Feed"
+        session.add(owner_prefs)
+        session.commit()
+
+    update = client.put(
+        "/api/podcast/preferences",
+        json={
+            "podcast_feed_enabled": True,
+            "podcast_feed_title": "Secondary Feed",
+            "preferred_length_minutes": 25,
+        },
+        headers=headers,
+    )
+    assert update.status_code == 200
+    assert update.json()["podcast_feed_enabled"] is True
+    assert update.json()["podcast_feed_title"] == "Secondary Feed"
+    assert update.json()["preferred_length_minutes"] == 25
+
+    info = client.get("/api/podcast/feed/info", headers=headers)
+    assert info.status_code == 200
+    info_payload = info.json()
+    assert info_payload["feed_enabled"] is True
+    assert info_payload["feed_title"] == "Secondary Feed"
+    assert "feed_token_prefs_owner" not in info_payload["feed_url"]
+
+    with Session(engine) as session:
+        owner_prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == owner_id)
+        ).first()
+        prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == user_id)
+        ).one()
+
+    assert owner_prefs is not None
+    assert owner_prefs.podcast_feed_title == "Owner Feed"
+    assert prefs.podcast_feed_title == "Secondary Feed"
+    assert prefs.podcast_feed_token in info_payload["feed_url"]
+
+
 def test_article_feedback_roundtrip(client, auth_headers):
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
     article_id = article_ids[0]

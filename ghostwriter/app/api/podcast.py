@@ -368,12 +368,16 @@ def _format_duration(seconds: int | None) -> str:
 @router.get(
     "/podcast/preferences",
     response_model=PodcastPreferencesRead,
-    dependencies=[Depends(verify_api_key)],
 )
-async def get_podcast_preferences(session: Session = Depends(get_session)):
-    """Get podcast preferences for the singleton user."""
-    user_id = podcast_service.resolve_user_id(session)
-    prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+async def get_podcast_preferences(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Session = Depends(get_session),
+):
+    """Get podcast preferences for the authenticated user."""
+    prefs = podcast_service.get_or_create_preferences(
+        session,
+        user_id=current_user.id,
+    )
     return PodcastPreferencesRead(
         enabled=prefs.enabled,
         schedule=prefs.schedule,
@@ -406,18 +410,21 @@ async def get_podcast_preferences(session: Session = Depends(get_session)):
 @router.put(
     "/podcast/preferences",
     response_model=PodcastPreferencesRead,
-    dependencies=[Depends(verify_api_key)],
 )
 async def update_podcast_preferences(
     update: PodcastPreferencesUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Session = Depends(get_session),
 ):
     """Update podcast preferences."""
     from app.worker.scheduler import update_podcast_schedule
 
-    user_id = podcast_service.resolve_user_id(session)
     try:
-        prefs = podcast_service.update_preferences(session, update, user_id=user_id)
+        prefs = podcast_service.update_preferences(
+            session,
+            update,
+            user_id=current_user.id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
