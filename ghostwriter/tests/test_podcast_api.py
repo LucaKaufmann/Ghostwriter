@@ -1493,7 +1493,8 @@ def test_feed_info_uses_authenticated_token_owner(client):
 
 
 def test_feed_info_does_not_claim_legacy_preferences(client):
-    user_id, headers = _create_auth_headers_for_user("feed_info_legacy")
+    _owner_id, _owner_headers = _create_auth_headers_for_user("feed_info_legacy_owner")
+    user_id, headers = _create_auth_headers_for_user("feed_info_legacy_secondary")
 
     with Session(engine) as session:
         legacy_prefs = PodcastPreferences(
@@ -1513,12 +1514,17 @@ def test_feed_info_does_not_claim_legacy_preferences(client):
 
     with Session(engine) as session:
         legacy_prefs = session.get(PodcastPreferences, legacy_prefs_id)
+        singleton_owner = session.exec(
+            select(User).order_by(User.created_at.asc())
+        ).first()
         prefs = session.exec(
             select(PodcastPreferences).where(PodcastPreferences.user_id == user_id)
         ).one()
 
     assert legacy_prefs is not None
-    assert legacy_prefs.user_id is None
+    assert singleton_owner is not None
+    assert legacy_prefs.user_id == singleton_owner.id
+    assert legacy_prefs.user_id != user_id
     assert legacy_prefs.openai_api_key == "legacy-sensitive-key"
     assert prefs.podcast_feed_token
     assert prefs.podcast_feed_token in feed_url

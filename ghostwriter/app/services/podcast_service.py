@@ -441,6 +441,32 @@ class PodcastDigestService:
         """Public wrapper for singleton user resolution."""
         return self._resolve_user_id(session)
 
+    def _assign_legacy_preferences_owner(
+        self,
+        session: Session,
+        now: datetime,
+    ) -> None:
+        """Attach legacy NULL-owner preferences to the singleton owner."""
+        owner_id = self._resolve_user_id(session)
+        if owner_id is None:
+            return
+
+        legacy_rows = session.exec(
+            select(PodcastPreferences)
+            .where(PodcastPreferences.user_id.is_(None))
+            .order_by(PodcastPreferences.created_at.asc())
+        ).all()
+        if not legacy_rows:
+            return
+
+        for prefs in legacy_rows:
+            prefs.user_id = owner_id
+            prefs.updated_at = now
+            if not prefs.podcast_feed_token:
+                prefs.podcast_feed_token = self._generate_feed_token()
+            session.add(prefs)
+        session.commit()
+
     def get_or_create_preferences(
         self,
         session: Session,
@@ -450,6 +476,7 @@ class PodcastDigestService:
         now = datetime.utcnow()
 
         if user_id is not None:
+            self._assign_legacy_preferences_owner(session, now)
             prefs = session.exec(
                 select(PodcastPreferences)
                 .where(PodcastPreferences.user_id == user_id)
