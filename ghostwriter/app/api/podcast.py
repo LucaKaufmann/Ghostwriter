@@ -326,7 +326,7 @@ async def _ensure_one_off_episode_access(
     session: Session,
     episode: PodcastEpisode,
 ) -> None:
-    if episode.trigger != "one_off":
+    if episode.user_id is None:
         return
 
     current_user = await _current_user_for_request(request, session)
@@ -564,12 +564,16 @@ async def trigger_digest_podcast(
         credentials,
         session,
     )
+    trigger = (
+        "one_off" if podcast_service.is_one_off_digest(session, digest_id) else "manual"
+    )
     try:
         episode = podcast_service.queue_episode_generation(
             session,
             digest_id=digest_id,
             user_id=user_id,
             force=False,
+            trigger=trigger,
         )
     except ValueError as exc:
         message = str(exc)
@@ -742,12 +746,12 @@ async def list_podcast_episodes(
     episodes = session.exec(
         select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
     ).all()
-    if any(episode.trigger == "one_off" for episode in episodes):
+    if any(episode.user_id is not None for episode in episodes):
         current_user = await _current_user_for_request(request, session)
         episodes = [
             episode
             for episode in episodes
-            if episode.trigger != "one_off" or episode.user_id == current_user.id
+            if episode.user_id is None or episode.user_id == current_user.id
         ]
     return [_build_episode_status(request, episode) for episode in episodes]
 

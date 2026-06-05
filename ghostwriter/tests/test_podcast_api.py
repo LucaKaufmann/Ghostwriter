@@ -431,19 +431,42 @@ def test_trigger_digest_podcast_uses_authenticated_token_owner(client, monkeypat
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
-    _owner_id, _owner_headers = _create_auth_headers_for_user("manual_podcast_owner")
+    owner_id, owner_headers = _create_auth_headers_for_user("manual_podcast_owner")
     user_id, headers = _create_auth_headers_for_user("manual_podcast_secondary")
     digest_id, _ = _create_digest_with_articles(article_count=2)
+
+    owner_trigger = client.post(
+        f"/api/digests/{digest_id}/podcast",
+        headers=owner_headers,
+    )
+    assert owner_trigger.status_code == 200
+    owner_episode_id = UUID(owner_trigger.json()["episode_id"])
 
     trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=headers)
     assert trigger.status_code == 200
     episode_id = UUID(trigger.json()["episode_id"])
+    assert episode_id != owner_episode_id
 
     with Session(engine) as session:
+        owner_episode = session.get(PodcastEpisode, owner_episode_id)
         episode = session.get(PodcastEpisode, episode_id)
 
+    assert owner_episode is not None
+    assert owner_episode.user_id == owner_id
     assert episode is not None
     assert episode.user_id == user_id
+
+    owner_detail = client.get(
+        f"/api/podcast/episodes/{owner_episode_id}",
+        headers=headers,
+    )
+    assert owner_detail.status_code == 404
+
+    list_response = client.get("/api/podcast/episodes", headers=headers)
+    assert list_response.status_code == 200
+    listed_ids = {item["id"] for item in list_response.json()}
+    assert str(episode_id) in listed_ids
+    assert str(owner_episode_id) not in listed_ids
 
 
 def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_headers):
@@ -1243,23 +1266,23 @@ def test_retry_failed_one_off_episode_preserves_trigger(client, monkeypatch):
         assert refreshed.trigger == "one_off"
 
 
-def test_trigger_digest_podcast_requeues_failed_episode(
-    client, monkeypatch, auth_headers
-):
+def test_trigger_digest_podcast_requeues_failed_episode(client, monkeypatch):
     scheduled: list[UUID] = []
     monkeypatch.setattr(
         podcast_service,
         "_schedule_episode_task",
         lambda episode_id: scheduled.append(episode_id),
     )
+    user_id, headers = _create_auth_headers_for_user("manual_requeue_owner")
     digest_id, article_ids = _create_digest_with_articles(article_count=2)
     failed = _create_episode(
         digest_id=digest_id,
         article_ids=article_ids,
         status="failed",
+        user_id=user_id,
     )
 
-    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=auth_headers)
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=headers)
     assert trigger.status_code == 200
     payload = trigger.json()
     assert payload["episode_id"] == str(failed.id)

@@ -731,7 +731,13 @@ class PodcastDigestService:
             select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
         ).all()
         episode = next(
-            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),
+            (
+                ep
+                for ep in all_episodes
+                if digest_id_str in (ep.digest_ids or [])
+                and ep.user_id == user_id
+                and (trigger == "one_off") == (ep.trigger == "one_off")
+            ),
             None,
         )
 
