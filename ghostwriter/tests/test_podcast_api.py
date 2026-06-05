@@ -428,6 +428,7 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
             .where(DigestArticle.digest_id == digest_id)
             .order_by(DigestArticle.sort_order.asc())
         ).all()
+        first_article_id = articles[0].id
         feed = session.exec(select(Feed).where(Feed.url == "synthetic://one-off")).first()
 
     assert episode is not None
@@ -1489,6 +1490,38 @@ def test_feed_info_uses_authenticated_token_owner(client):
 
     assert prefs_b.podcast_feed_token
     assert prefs_b.podcast_feed_token in feed_url
+
+
+def test_feed_info_does_not_claim_legacy_preferences(client):
+    user_id, headers = _create_auth_headers_for_user("feed_info_legacy")
+
+    with Session(engine) as session:
+        legacy_prefs = PodcastPreferences(
+            user_id=None,
+            podcast_feed_enabled=True,
+            podcast_feed_token="feed_token_legacy_unowned",
+            openai_api_key="legacy-sensitive-key",
+        )
+        session.add(legacy_prefs)
+        session.commit()
+        legacy_prefs_id = legacy_prefs.id
+
+    info = client.get("/api/podcast/feed/info", headers=headers)
+    assert info.status_code == 200
+    feed_url = info.json()["feed_url"]
+    assert "feed_token_legacy_unowned" not in feed_url
+
+    with Session(engine) as session:
+        legacy_prefs = session.get(PodcastPreferences, legacy_prefs_id)
+        prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == user_id)
+        ).one()
+
+    assert legacy_prefs is not None
+    assert legacy_prefs.user_id is None
+    assert legacy_prefs.openai_api_key == "legacy-sensitive-key"
+    assert prefs.podcast_feed_token
+    assert prefs.podcast_feed_token in feed_url
 
 
 def test_stream_and_download_reject_paths_outside_podcast_output_dir(client, tmp_path):
