@@ -24,6 +24,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlmodel import Session, select
@@ -326,7 +327,7 @@ async def _ensure_one_off_episode_access(
     session: Session,
     episode: PodcastEpisode,
 ) -> None:
-    if episode.trigger != "one_off":
+    if episode.user_id is None:
         return
 
     current_user = await _current_user_for_request(request, session)
@@ -346,6 +347,28 @@ async def _ensure_one_off_digest_episode_access(
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
     await _ensure_one_off_episode_access(request, session, episode)
+
+
+async def _resolve_podcast_preferences_user_id(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+    session: Session,
+) -> UUID | None:
+    try:
+        user = await get_current_user(request, credentials, session)
+        return user.id
+    except HTTPException as exc:
+        settings = get_settings()
+        has_users = session.exec(select(User)).first() is not None
+        if exc.status_code == 401 and not has_users:
+            token = None
+            if credentials and credentials.credentials:
+                token = credentials.credentials
+            else:
+                token = request.headers.get("x-api-key")
+            if not settings.api_key or token == settings.api_key:
+                return None
+        raise
 
 
 def _to_rfc2822(dt: datetime) -> str:
@@ -368,12 +391,22 @@ def _format_duration(seconds: int | None) -> str:
 @router.get(
     "/podcast/preferences",
     response_model=PodcastPreferencesRead,
-    dependencies=[Depends(verify_api_key)],
 )
-async def get_podcast_preferences(session: Session = Depends(get_session)):
-    """Get podcast preferences for the singleton user."""
-    user_id = podcast_service.resolve_user_id(session)
-    prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+async def get_podcast_preferences(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    session: Session = Depends(get_session),
+):
+    """Get podcast preferences for the authenticated user."""
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+    prefs = podcast_service.get_or_create_preferences(
+        session,
+        user_id=user_id,
+    )
     return PodcastPreferencesRead(
         enabled=prefs.enabled,
         schedule=prefs.schedule,
@@ -406,18 +439,38 @@ async def get_podcast_preferences(session: Session = Depends(get_session)):
 @router.put(
     "/podcast/preferences",
     response_model=PodcastPreferencesRead,
-    dependencies=[Depends(verify_api_key)],
 )
 async def update_podcast_preferences(
     update: PodcastPreferencesUpdate,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Update podcast preferences."""
     from app.worker.scheduler import update_podcast_schedule
 
-    user_id = podcast_service.resolve_user_id(session)
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+    schedule_fields = ("enabled", "schedule", "schedule_time", "schedule_day")
+    singleton_user_id = podcast_service.resolve_user_id(session)
+    if (
+        user_id is not None
+        and user_id != singleton_user_id
+        and any(getattr(update, field) is not None for field in schedule_fields)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Podcast schedule settings can only be changed by the singleton owner",
+        )
     try:
-        prefs = podcast_service.update_preferences(session, update, user_id=user_id)
+        prefs = podcast_service.update_preferences(
+            session,
+            update,
+            user_id=user_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -513,17 +566,26 @@ async def delete_article_feedback(
 async def trigger_digest_podcast(
     digest_id: UUID,
     request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Manually queue podcast generation for one digest."""
     await _ensure_one_off_digest_episode_access(request, session, digest_id)
-    user_id = podcast_service.resolve_user_id(session)
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+    trigger = (
+        "one_off" if podcast_service.is_one_off_digest(session, digest_id) else "manual"
+    )
     try:
         episode = podcast_service.queue_episode_generation(
             session,
             digest_id=digest_id,
             user_id=user_id,
             force=False,
+            trigger=trigger,
         )
     except ValueError as exc:
         message = str(exc)
@@ -608,6 +670,7 @@ async def create_one_off_podcast_episode(
 async def get_digest_podcast_status(
     digest_id: UUID,
     request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Get podcast generation status for a digest."""
@@ -618,8 +681,24 @@ async def get_digest_podcast_status(
         all_episodes = session.exec(
             select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
         ).all()
+        user_id = await _resolve_podcast_preferences_user_id(
+            request,
+            credentials,
+            session,
+        )
+        matching_episodes = [
+            ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])
+        ]
+        user_episodes = (
+            [ep for ep in matching_episodes if ep.user_id == user_id]
+            if user_id is not None
+            else []
+        )
+        legacy_episodes = [
+            ep for ep in matching_episodes if ep.user_id is None
+        ]
         episode = next(
-            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),
+            iter(user_episodes or legacy_episodes),
             None,
         )
     except SQLAlchemyTimeoutError as exc:
@@ -696,12 +775,12 @@ async def list_podcast_episodes(
     episodes = session.exec(
         select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
     ).all()
-    if any(episode.trigger == "one_off" for episode in episodes):
+    if any(episode.user_id is not None for episode in episodes):
         current_user = await _current_user_for_request(request, session)
         episodes = [
             episode
             for episode in episodes
-            if episode.trigger != "one_off" or episode.user_id == current_user.id
+            if episode.user_id is None or episode.user_id == current_user.id
         ]
     return [_build_episode_status(request, episode) for episode in episodes]
 
@@ -967,15 +1046,22 @@ async def get_podcast_feed_xml(
 @router.get(
     "/podcast/feed/info",
     response_model=PodcastFeedInfoResponse,
-    dependencies=[Depends(verify_api_key)],
 )
 async def get_podcast_feed_info(
     request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Return feed URL and setup instructions for podcast apps."""
-    user_id = podcast_service.resolve_user_id(session)
-    prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+    prefs = podcast_service.get_or_create_preferences(
+        session,
+        user_id=user_id,
+    )
     base_url = _podcast_base_url(request, prefs.podcast_feed_base_url)
     feed_url = f"{base_url}/api/podcast/feed.xml?token={prefs.podcast_feed_token}"
 
@@ -1016,13 +1102,20 @@ async def get_podcast_feed_artwork(
 @router.post(
     "/podcast/feed/artwork",
     response_model=PodcastArtworkUploadResponse,
-    dependencies=[Depends(verify_api_key)],
 )
 async def upload_podcast_feed_artwork(
+    request: Request,
     file: UploadFile = File(...),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Upload custom podcast feed artwork (minimum 1400x1400)."""
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+
     try:
         from PIL import Image
     except Exception as exc:  # pragma: no cover - Pillow is an install dependency.
@@ -1054,7 +1147,6 @@ async def upload_podcast_feed_artwork(
     if ext == "jpeg":
         ext = "jpg"
 
-    user_id = podcast_service.resolve_user_id(session)
     prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
 
     settings = get_settings()

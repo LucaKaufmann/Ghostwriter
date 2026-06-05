@@ -441,16 +441,71 @@ class PodcastDigestService:
         """Public wrapper for singleton user resolution."""
         return self._resolve_user_id(session)
 
+    def _assign_legacy_preferences_owner(
+        self,
+        session: Session,
+        now: datetime,
+    ) -> None:
+        """Attach legacy NULL-owner preferences to the singleton owner."""
+        owner_id = self._resolve_user_id(session)
+        if owner_id is None:
+            return
+
+        legacy_rows = session.exec(
+            select(PodcastPreferences)
+            .where(PodcastPreferences.user_id.is_(None))
+            .order_by(PodcastPreferences.created_at.asc())
+        ).all()
+        if not legacy_rows:
+            return
+
+        for prefs in legacy_rows:
+            prefs.user_id = owner_id
+            prefs.updated_at = now
+            if not prefs.podcast_feed_token:
+                prefs.podcast_feed_token = self._generate_feed_token()
+            session.add(prefs)
+
+        legacy_episodes = session.exec(
+            select(PodcastEpisode).where(PodcastEpisode.user_id.is_(None))
+        ).all()
+        for episode in legacy_episodes:
+            episode.user_id = owner_id
+            episode.updated_at = now
+            session.add(episode)
+
+        session.commit()
+
     def get_or_create_preferences(
         self,
         session: Session,
         user_id: UUID | None = None,
     ) -> PodcastPreferences:
         """Get podcast preferences, creating a singleton row when missing."""
-        prefs = session.exec(
-            select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
-        ).first()
         now = datetime.utcnow()
+
+        if user_id is not None:
+            self._assign_legacy_preferences_owner(session, now)
+            prefs = session.exec(
+                select(PodcastPreferences)
+                .where(PodcastPreferences.user_id == user_id)
+                .order_by(PodcastPreferences.created_at.asc())
+            ).first()
+            if prefs is None:
+                prefs = PodcastPreferences(
+                    user_id=user_id,
+                    podcast_feed_token=self._generate_feed_token(),
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(prefs)
+                session.commit()
+                session.refresh(prefs)
+                return prefs
+        else:
+            prefs = session.exec(
+                select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
+            ).first()
 
         if prefs is None:
             prefs = PodcastPreferences(
@@ -459,14 +514,6 @@ class PodcastDigestService:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(prefs)
-            session.commit()
-            session.refresh(prefs)
-            return prefs
-
-        if prefs.user_id is None and user_id is not None:
-            prefs.user_id = user_id
-            prefs.updated_at = now
             session.add(prefs)
             session.commit()
             session.refresh(prefs)
@@ -692,16 +739,28 @@ class PodcastDigestService:
         all_episodes = session.exec(
             select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
         ).all()
+        legacy_owner_id = self._resolve_user_id(session) if user_id is not None else None
         episode = next(
-            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),
+            (
+                ep
+                for ep in all_episodes
+                if digest_id_str in (ep.digest_ids or [])
+                and (
+                    ep.user_id == user_id
+                    or (
+                        ep.user_id is None
+                        and user_id is not None
+                        and user_id == legacy_owner_id
+                    )
+                )
+                and ep.trigger == trigger
+            ),
             None,
         )
 
         if episode is not None:
-            if episode.trigger == "one_off" and trigger != "one_off":
-                trigger = episode.trigger
-            if episode.trigger != trigger:
-                episode.trigger = trigger
+            if episode.user_id is None and user_id is not None:
+                episode.user_id = user_id
                 episode.updated_at = now
                 session.add(episode)
                 session.commit()

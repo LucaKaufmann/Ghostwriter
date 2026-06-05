@@ -325,6 +325,64 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert "podcast_feed_base_url" in invalid_feed_base_url.json()["detail"]
 
 
+def test_podcast_preferences_are_scoped_to_token_owner(client):
+    owner_id, _owner_headers = _create_auth_headers_for_user("prefs_owner")
+    user_id, headers = _create_auth_headers_for_user("prefs_secondary")
+
+    with Session(engine) as session:
+        owner_prefs = podcast_service.get_or_create_preferences(
+            session,
+            user_id=owner_id,
+        )
+        owner_prefs.podcast_feed_enabled = True
+        owner_prefs.podcast_feed_token = "feed_token_prefs_owner"
+        owner_prefs.podcast_feed_title = "Owner Feed"
+        session.add(owner_prefs)
+        session.commit()
+
+    update = client.put(
+        "/api/podcast/preferences",
+        json={
+            "podcast_feed_enabled": True,
+            "podcast_feed_title": "Secondary Feed",
+            "preferred_length_minutes": 25,
+        },
+        headers=headers,
+    )
+    assert update.status_code == 200
+    assert update.json()["podcast_feed_enabled"] is True
+    assert update.json()["podcast_feed_title"] == "Secondary Feed"
+    assert update.json()["preferred_length_minutes"] == 25
+
+    info = client.get("/api/podcast/feed/info", headers=headers)
+    assert info.status_code == 200
+    info_payload = info.json()
+    assert info_payload["feed_enabled"] is True
+    assert info_payload["feed_title"] == "Secondary Feed"
+    assert "feed_token_prefs_owner" not in info_payload["feed_url"]
+
+    schedule_update = client.put(
+        "/api/podcast/preferences",
+        json={"enabled": True, "schedule": "daily"},
+        headers=headers,
+    )
+    assert schedule_update.status_code == 400
+    assert "schedule settings" in schedule_update.json()["detail"]
+
+    with Session(engine) as session:
+        owner_prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == owner_id)
+        ).first()
+        prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == user_id)
+        ).one()
+
+    assert owner_prefs is not None
+    assert owner_prefs.podcast_feed_title == "Owner Feed"
+    assert prefs.podcast_feed_title == "Secondary Feed"
+    assert prefs.podcast_feed_token in info_payload["feed_url"]
+
+
 def test_article_feedback_roundtrip(client, auth_headers):
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
     article_id = article_ids[0]
@@ -375,6 +433,52 @@ def test_trigger_digest_podcast_and_list_episodes(client, monkeypatch, auth_head
     assert list_resp.status_code == 200
     ids = {item["id"] for item in list_resp.json()}
     assert episode_id in ids
+
+
+def test_trigger_digest_podcast_uses_authenticated_token_owner(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    owner_id, owner_headers = _create_auth_headers_for_user("manual_podcast_owner")
+    user_id, headers = _create_auth_headers_for_user("manual_podcast_secondary")
+    digest_id, _ = _create_digest_with_articles(article_count=2)
+
+    owner_trigger = client.post(
+        f"/api/digests/{digest_id}/podcast",
+        headers=owner_headers,
+    )
+    assert owner_trigger.status_code == 200
+    owner_episode_id = UUID(owner_trigger.json()["episode_id"])
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=headers)
+    assert trigger.status_code == 200
+    episode_id = UUID(trigger.json()["episode_id"])
+    assert episode_id != owner_episode_id
+
+    with Session(engine) as session:
+        owner_episode = session.get(PodcastEpisode, owner_episode_id)
+        episode = session.get(PodcastEpisode, episode_id)
+
+    assert owner_episode is not None
+    assert owner_episode.user_id == owner_id
+    assert episode is not None
+    assert episode.user_id == user_id
+
+    owner_detail = client.get(
+        f"/api/podcast/episodes/{owner_episode_id}",
+        headers=headers,
+    )
+    assert owner_detail.status_code == 404
+
+    digest_status = client.get(f"/api/digests/{digest_id}/podcast", headers=headers)
+    assert digest_status.status_code == 200
+    assert digest_status.json()["episode"]["id"] == str(episode_id)
+
+    list_response = client.get("/api/podcast/episodes", headers=headers)
+    assert list_response.status_code == 200
+    listed_ids = {item["id"] for item in list_response.json()}
+    assert str(episode_id) in listed_ids
+    assert str(owner_episode_id) not in listed_ids
 
 
 def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_headers):
@@ -428,6 +532,7 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
             .where(DigestArticle.digest_id == digest_id)
             .order_by(DigestArticle.sort_order.asc())
         ).all()
+        first_article_id = articles[0].id
         feed = session.exec(select(Feed).where(Feed.url == "synthetic://one-off")).first()
 
     assert episode is not None
@@ -1173,23 +1278,23 @@ def test_retry_failed_one_off_episode_preserves_trigger(client, monkeypatch):
         assert refreshed.trigger == "one_off"
 
 
-def test_trigger_digest_podcast_requeues_failed_episode(
-    client, monkeypatch, auth_headers
-):
+def test_trigger_digest_podcast_requeues_failed_episode(client, monkeypatch):
     scheduled: list[UUID] = []
     monkeypatch.setattr(
         podcast_service,
         "_schedule_episode_task",
         lambda episode_id: scheduled.append(episode_id),
     )
+    user_id, headers = _create_auth_headers_for_user("manual_requeue_owner")
     digest_id, article_ids = _create_digest_with_articles(article_count=2)
     failed = _create_episode(
         digest_id=digest_id,
         article_ids=article_ids,
         status="failed",
+        user_id=user_id,
     )
 
-    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=auth_headers)
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=headers)
     assert trigger.status_code == 200
     payload = trigger.json()
     assert payload["episode_id"] == str(failed.id)
@@ -1204,6 +1309,43 @@ def test_trigger_digest_podcast_requeues_failed_episode(
         assert refreshed.completed_at is None
 
     assert scheduled == [failed.id]
+
+
+def test_trigger_digest_podcast_reuses_legacy_singleton_episode(
+    client, monkeypatch, auth_headers
+):
+    scheduled: list[UUID] = []
+    monkeypatch.setattr(
+        podcast_service,
+        "_schedule_episode_task",
+        lambda episode_id: scheduled.append(episode_id),
+    )
+    digest_id, article_ids = _create_digest_with_articles(article_count=2)
+    legacy = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        user_id=None,
+    )
+    with Session(engine) as session:
+        singleton_owner = session.exec(
+            select(User).order_by(User.created_at.asc())
+        ).first()
+        assert singleton_owner is not None
+        singleton_owner_id = singleton_owner.id
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=auth_headers)
+    assert trigger.status_code == 200
+    payload = trigger.json()
+    assert payload["episode_id"] == str(legacy.id)
+    assert payload["status"] == "ready"
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, legacy.id)
+
+    assert refreshed is not None
+    assert refreshed.user_id == singleton_owner_id
+    assert scheduled == []
 
 
 def test_trigger_digest_podcast_preserves_existing_one_off_trigger(
@@ -1234,6 +1376,50 @@ def test_trigger_digest_podcast_preserves_existing_one_off_trigger(
         assert refreshed is not None
         assert refreshed.status == "pending"
         assert refreshed.trigger == "one_off"
+
+
+def test_trigger_digest_podcast_does_not_reclassify_scheduled_episode(
+    client, monkeypatch
+):
+    from datetime import timedelta
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    user_id, headers = _create_auth_headers_for_user("manual_scheduled_owner")
+    digest_id, article_ids = _create_digest_with_articles(article_count=2)
+    scheduled = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        trigger="scheduled",
+        user_id=user_id,
+    )
+    old_time = datetime.utcnow() - timedelta(days=2)
+    with Session(engine) as session:
+        scheduled_episode = session.get(PodcastEpisode, scheduled.id)
+        assert scheduled_episode is not None
+        scheduled_episode.created_at = old_time
+        scheduled_episode.updated_at = old_time
+        scheduled_episode.completed_at = old_time
+        session.add(scheduled_episode)
+        session.commit()
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=headers)
+    assert trigger.status_code == 200
+    manual_episode_id = UUID(trigger.json()["episode_id"])
+    assert manual_episode_id != scheduled.id
+
+    with Session(engine) as session:
+        refreshed_scheduled = session.get(PodcastEpisode, scheduled.id)
+        manual_episode = session.get(PodcastEpisode, manual_episode_id)
+
+    assert refreshed_scheduled is not None
+    assert refreshed_scheduled.trigger == "scheduled"
+    assert refreshed_scheduled.digest_ids == [str(digest_id)]
+    assert manual_episode is not None
+    assert manual_episode.trigger == "manual"
+    assert manual_episode.digest_ids == [str(digest_id)]
 
 
 @pytest.mark.asyncio
@@ -1463,6 +1649,122 @@ def test_feed_token_is_scoped_to_token_owner(client):
     assert own_download.content == b"user-b-audio"
 
 
+def test_feed_info_uses_authenticated_token_owner(client):
+    user_a_id, _headers_a = _create_auth_headers_for_user("feed_info_owner_a")
+    user_b_id, headers_b = _create_auth_headers_for_user("feed_info_owner_b")
+
+    with Session(engine) as session:
+        session.add(
+            PodcastPreferences(
+                user_id=user_a_id,
+                podcast_feed_enabled=True,
+                podcast_feed_token="feed_token_info_user_a",
+            )
+        )
+        session.commit()
+
+    info = client.get("/api/podcast/feed/info", headers=headers_b)
+    assert info.status_code == 200
+    feed_url = info.json()["feed_url"]
+    assert "feed_token_info_user_a" not in feed_url
+
+    with Session(engine) as session:
+        prefs_b = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == user_b_id)
+        ).one()
+
+    assert prefs_b.podcast_feed_token
+    assert prefs_b.podcast_feed_token in feed_url
+
+
+def test_feed_info_does_not_claim_legacy_preferences(client):
+    _owner_id, _owner_headers = _create_auth_headers_for_user("feed_info_legacy_owner")
+    user_id, headers = _create_auth_headers_for_user("feed_info_legacy_secondary")
+
+    with Session(engine) as session:
+        legacy_prefs = PodcastPreferences(
+            user_id=None,
+            podcast_feed_enabled=True,
+            podcast_feed_token="feed_token_legacy_unowned",
+            openai_api_key="legacy-sensitive-key",
+        )
+        session.add(legacy_prefs)
+        session.commit()
+        legacy_prefs_id = legacy_prefs.id
+
+    info = client.get("/api/podcast/feed/info", headers=headers)
+    assert info.status_code == 200
+    feed_url = info.json()["feed_url"]
+    assert "feed_token_legacy_unowned" not in feed_url
+
+    with Session(engine) as session:
+        legacy_prefs = session.get(PodcastPreferences, legacy_prefs_id)
+        singleton_owner = session.exec(
+            select(User).order_by(User.created_at.asc())
+        ).first()
+        prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == user_id)
+        ).one()
+
+    assert legacy_prefs is not None
+    assert singleton_owner is not None
+    assert legacy_prefs.user_id == singleton_owner.id
+    assert legacy_prefs.user_id != user_id
+    assert legacy_prefs.openai_api_key == "legacy-sensitive-key"
+    assert prefs.podcast_feed_token
+    assert prefs.podcast_feed_token in feed_url
+
+
+def test_legacy_feed_migration_preserves_existing_episodes(client, auth_headers):
+    with Session(engine) as session:
+        owner = session.exec(select(User).order_by(User.created_at.asc())).first()
+        assert owner is not None
+        owner_id = owner.id
+
+    digest_id, article_ids = _create_digest_with_articles(article_count=1)
+    settings = get_settings()
+    podcasts_dir = Path(settings.output_dir) / "podcasts"
+    podcasts_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = podcasts_dir / f"legacy-{uuid4()}.mp3"
+    audio_path.write_bytes(b"legacy-audio")
+
+    with Session(engine) as session:
+        session.add(
+            PodcastPreferences(
+                user_id=None,
+                podcast_feed_enabled=True,
+                podcast_feed_token="feed_token_legacy_history",
+            )
+        )
+        session.commit()
+
+    episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_path,
+        user_id=None,
+    )
+
+    prefs = client.get("/api/podcast/preferences", headers=auth_headers)
+    assert prefs.status_code == 200
+
+    feed = client.get("/api/podcast/feed.xml?token=feed_token_legacy_history")
+    assert feed.status_code == 200
+    root = ET.fromstring(feed.content)
+    enclosure_urls = [
+        enclosure.attrib["url"]
+        for enclosure in root.findall("./channel/item/enclosure")
+    ]
+    assert any(str(episode.id) in url for url in enclosure_urls)
+
+    with Session(engine) as session:
+        migrated_episode = session.get(PodcastEpisode, episode.id)
+
+    assert migrated_episode is not None
+    assert migrated_episode.user_id == owner_id
+
+
 def test_stream_and_download_reject_paths_outside_podcast_output_dir(client, tmp_path):
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
     outside_audio = tmp_path / "outside.mp3"
@@ -1515,12 +1817,18 @@ def test_feed_artwork_rejects_paths_outside_podcast_artwork_dir(client):
         outside_artwork.unlink(missing_ok=True)
 
 
-def test_feed_uses_configured_public_base_url(client, auth_headers):
+def test_feed_uses_configured_public_base_url(client):
+    user_id, headers = _create_auth_headers_for_user("feed_public_base")
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
-    _create_episode(digest_id=digest_id, article_ids=article_ids, status="ready")
+    _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        user_id=user_id,
+    )
 
     with Session(engine) as session:
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.podcast_feed_enabled = True
         prefs.podcast_feed_token = "feed_token_public_url"
         prefs.podcast_feed_base_url = "https://podcasts.example.com"
@@ -1535,14 +1843,15 @@ def test_feed_uses_configured_public_base_url(client, auth_headers):
     assert enclosure is not None
     assert enclosure.attrib["url"].startswith("https://podcasts.example.com/")
 
-    info = client.get("/api/podcast/feed/info", headers=auth_headers)
+    info = client.get("/api/podcast/feed/info", headers=headers)
     assert info.status_code == 200
     assert info.json()["feed_url"].startswith(
         "https://podcasts.example.com/api/podcast/feed.xml?token="
     )
 
 
-def test_feed_artwork_upload_and_serve(client, auth_headers):
+def test_feed_artwork_upload_and_serve(client):
+    user_id, headers = _create_auth_headers_for_user("artwork_upload")
     image = Image.new("RGB", (1500, 1500), color=(10, 20, 30))
     buffer = BytesIO()
     image.save(buffer, format="JPEG")
@@ -1551,7 +1860,7 @@ def test_feed_artwork_upload_and_serve(client, auth_headers):
     upload = client.post(
         "/api/podcast/feed/artwork",
         files={"file": ("artwork.jpg", buffer.getvalue(), "image/jpeg")},
-        headers=auth_headers,
+        headers=headers,
     )
     assert upload.status_code == 200
     upload_payload = upload.json()
@@ -1560,7 +1869,7 @@ def test_feed_artwork_upload_and_serve(client, auth_headers):
     assert upload_payload["height"] == 1500
 
     with Session(engine) as session:
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.podcast_feed_enabled = True
         prefs.updated_at = datetime.utcnow()
         token = prefs.podcast_feed_token
@@ -1571,10 +1880,62 @@ def test_feed_artwork_upload_and_serve(client, auth_headers):
     assert artwork.status_code == 200
     assert artwork.headers["content-type"].startswith("image/")
 
-    info = client.get("/api/podcast/feed/info", headers=auth_headers)
+    info = client.get("/api/podcast/feed/info", headers=headers)
     assert info.status_code == 200
     info_payload = info.json()
     assert "feed.xml?token=" in info_payload["feed_url"]
+
+
+def test_feed_artwork_upload_authenticates_before_validation(client):
+    _create_auth_headers_for_user("artwork_auth_guard")
+
+    upload = client.post(
+        "/api/podcast/feed/artwork",
+        files={"file": ("not-image.txt", b"not image", "text/plain")},
+    )
+    assert upload.status_code == 401
+
+
+def test_feed_artwork_upload_is_scoped_to_token_owner(client, tmp_path):
+    owner_id, _owner_headers = _create_auth_headers_for_user("artwork_owner")
+    user_id, headers = _create_auth_headers_for_user("artwork_secondary")
+    owner_artwork = tmp_path / "owner.jpg"
+    owner_artwork.write_bytes(b"owner-artwork")
+
+    with Session(engine) as session:
+        owner_prefs = podcast_service.get_or_create_preferences(
+            session,
+            user_id=owner_id,
+        )
+        owner_prefs.podcast_feed_enabled = True
+        owner_prefs.podcast_feed_token = "feed_token_artwork_owner"
+        owner_prefs.podcast_feed_artwork_path = str(owner_artwork)
+        session.add(owner_prefs)
+        session.commit()
+
+    image = Image.new("RGB", (1500, 1500), color=(30, 20, 10))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+
+    upload = client.post(
+        "/api/podcast/feed/artwork",
+        files={"file": ("secondary.jpg", buffer.getvalue(), "image/jpeg")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+
+    with Session(engine) as session:
+        owner_prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == owner_id)
+        ).first()
+        prefs = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == user_id)
+        ).one()
+
+    assert owner_prefs is not None
+    assert owner_prefs.podcast_feed_artwork_path == str(owner_artwork)
+    assert prefs.podcast_feed_artwork_path
+    assert prefs.podcast_feed_artwork_path != str(owner_artwork)
 
 
 def test_scheduled_podcast_generation(monkeypatch):
