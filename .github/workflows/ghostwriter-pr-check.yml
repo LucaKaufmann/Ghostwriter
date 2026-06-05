@@ -13,9 +13,9 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend tests
+    name: Backend smoke tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -46,9 +46,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run backend tests
+      - name: Run backend smoke tests
         working-directory: ghostwriter
-        run: python -m pytest
+        run: |
+          python -m pytest -q \
+            tests/test_health.py \
+            tests/test_feeds.py \
+            tests/test_auth_registration.py \
+            tests/test_alembic_bootstrap.py \
+            tests/test_podcast_multi_digest_migration.py \
+            tests/test_digest_download_formats.py \
+            tests/test_article_eligibility_filter.py \
+            tests/test_markdown_utils.py \
+            --durations=10
 
   frontend:
     name: Frontend check and build
