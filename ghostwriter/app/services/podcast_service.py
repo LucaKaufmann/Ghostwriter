@@ -12,7 +12,7 @@ import shutil
 import tempfile
 from concurrent.futures import Future
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -20,6 +20,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
+from sqlalchemy import exists
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
@@ -27,6 +28,7 @@ from app.core.database import engine
 from app.models.article_feedback import ArticleFeedback, ArticleFeedbackUpsert
 from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle
+from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
 from app.models.podcast_preferences import PodcastPreferences, PodcastPreferencesUpdate
 from app.models.user import User
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 SCRIPT_STATUSES = {"pending", "generating_script", "generating_audio", "ready", "failed"}
 RUNNING_STATUSES = {"generating_script", "generating_audio"}
+ONE_OFF_SYNTHETIC_FEED_URL = "synthetic://one-off"
 SUPPORTED_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
 SUPPORTED_TTS_PROVIDERS = {"openai", "elevenlabs"}
 SCRIPT_LINE_RE = re.compile(r"^\[(HOST_A|HOST_B)\]:\s+(.+)$")
@@ -92,6 +95,7 @@ SCRIPT_BRIEF_CHUNK_SIZE = 3
 SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
 MIN_EPISODE_DURATION_SECONDS = 30
 SOURCE_DIVERSITY_TARGET_FRACTION = 0.35
+ONE_OFF_MAX_EPISODE_ARTICLES = 20
 CONCRETE_DETAIL_RE = re.compile(
     r"(\b\d+(?:[.,]\d+)?\b|[$]\s?\d+|\b\d+%|\b20\d{2}\b|\"[^\"]{12,}\"|\*[^\*]{12,}\*)"
 )
@@ -437,16 +441,71 @@ class PodcastDigestService:
         """Public wrapper for singleton user resolution."""
         return self._resolve_user_id(session)
 
+    def _assign_legacy_preferences_owner(
+        self,
+        session: Session,
+        now: datetime,
+    ) -> None:
+        """Attach legacy NULL-owner preferences to the singleton owner."""
+        owner_id = self._resolve_user_id(session)
+        if owner_id is None:
+            return
+
+        legacy_rows = session.exec(
+            select(PodcastPreferences)
+            .where(PodcastPreferences.user_id.is_(None))
+            .order_by(PodcastPreferences.created_at.asc())
+        ).all()
+        if not legacy_rows:
+            return
+
+        for prefs in legacy_rows:
+            prefs.user_id = owner_id
+            prefs.updated_at = now
+            if not prefs.podcast_feed_token:
+                prefs.podcast_feed_token = self._generate_feed_token()
+            session.add(prefs)
+
+        legacy_episodes = session.exec(
+            select(PodcastEpisode).where(PodcastEpisode.user_id.is_(None))
+        ).all()
+        for episode in legacy_episodes:
+            episode.user_id = owner_id
+            episode.updated_at = now
+            session.add(episode)
+
+        session.commit()
+
     def get_or_create_preferences(
         self,
         session: Session,
         user_id: UUID | None = None,
     ) -> PodcastPreferences:
         """Get podcast preferences, creating a singleton row when missing."""
-        prefs = session.exec(
-            select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
-        ).first()
         now = datetime.utcnow()
+
+        if user_id is not None:
+            self._assign_legacy_preferences_owner(session, now)
+            prefs = session.exec(
+                select(PodcastPreferences)
+                .where(PodcastPreferences.user_id == user_id)
+                .order_by(PodcastPreferences.created_at.asc())
+            ).first()
+            if prefs is None:
+                prefs = PodcastPreferences(
+                    user_id=user_id,
+                    podcast_feed_token=self._generate_feed_token(),
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(prefs)
+                session.commit()
+                session.refresh(prefs)
+                return prefs
+        else:
+            prefs = session.exec(
+                select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
+            ).first()
 
         if prefs is None:
             prefs = PodcastPreferences(
@@ -455,14 +514,6 @@ class PodcastDigestService:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(prefs)
-            session.commit()
-            session.refresh(prefs)
-            return prefs
-
-        if prefs.user_id is None and user_id is not None:
-            prefs.user_id = user_id
-            prefs.updated_at = now
             session.add(prefs)
             session.commit()
             session.refresh(prefs)
@@ -672,6 +723,7 @@ class PodcastDigestService:
         *,
         user_id: UUID | None = None,
         force: bool = False,
+        trigger: str = "manual",
     ) -> PodcastEpisode:
         """Queue podcast generation for a single digest (manual trigger)."""
         digest = session.get(Digest, digest_id)
@@ -687,12 +739,32 @@ class PodcastDigestService:
         all_episodes = session.exec(
             select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
         ).all()
+        legacy_owner_id = self._resolve_user_id(session) if user_id is not None else None
         episode = next(
-            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),
+            (
+                ep
+                for ep in all_episodes
+                if digest_id_str in (ep.digest_ids or [])
+                and (
+                    ep.user_id == user_id
+                    or (
+                        ep.user_id is None
+                        and user_id is not None
+                        and user_id == legacy_owner_id
+                    )
+                )
+                and ep.trigger == trigger
+            ),
             None,
         )
 
         if episode is not None:
+            if episode.user_id is None and user_id is not None:
+                episode.user_id = user_id
+                episode.updated_at = now
+                session.add(episode)
+                session.commit()
+                session.refresh(episode)
             if episode.status in RUNNING_STATUSES:
                 logger.info(
                     "Podcast generation already running for digest",
@@ -739,7 +811,7 @@ class PodcastDigestService:
 
         episode = PodcastEpisode(
             digest_ids=[digest_id_str],
-            trigger="manual",
+            trigger=trigger,
             user_id=user_id,
             status="pending",
             created_at=now,
@@ -754,6 +826,29 @@ class PodcastDigestService:
         )
         self._schedule_episode_task(episode.id)
         return episode
+
+    @staticmethod
+    def exclude_one_off_digests(statement):
+        """Exclude digests backed by one-off synthetic-feed articles."""
+        one_off_digest_exists = (
+            exists()
+            .where(DigestArticle.digest_id == Digest.id)
+            .where(DigestArticle.feed_id == Feed.id)
+            .where(Feed.url == ONE_OFF_SYNTHETIC_FEED_URL)
+        )
+        return statement.where(~one_off_digest_exists)
+
+    @staticmethod
+    def is_one_off_digest(session: Session, digest_id: UUID) -> bool:
+        """Return true when a digest contains one-off synthetic-feed articles."""
+        statement = (
+            select(DigestArticle.id)
+            .join(Feed, DigestArticle.feed_id == Feed.id)
+            .where(DigestArticle.digest_id == digest_id)
+            .where(Feed.url == ONE_OFF_SYNTHETIC_FEED_URL)
+            .limit(1)
+        )
+        return session.exec(statement).first() is not None
 
     def queue_multi_digest_episode(
         self,
@@ -838,8 +933,8 @@ class PodcastDigestService:
             else:
                 return None
 
-            start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
-            end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+            start_utc = start_local.astimezone(UTC).replace(tzinfo=None)
+            end_utc = end_local.astimezone(UTC).replace(tzinfo=None)
 
             # Deduplicate: skip if a non-failed episode already exists for this window
             existing_statement = select(PodcastEpisode).where(
@@ -856,13 +951,14 @@ class PodcastDigestService:
                 return None
 
             # Find completed digests in the time window
-            digests = session.exec(
+            statement = self.exclude_one_off_digests(
                 select(Digest).where(
                     Digest.status == "completed",
                     Digest.created_at >= start_utc,
                     Digest.created_at < end_utc,
                 )
-            ).all()
+            )
+            digests = session.exec(statement).all()
 
             if not digests:
                 logger.info(
@@ -914,7 +1010,9 @@ class PodcastDigestService:
                 return None
 
             # Find digests completed after the schedule's last run
-            stmt = select(Digest).where(Digest.status == "completed")
+            stmt = self.exclude_one_off_digests(
+                select(Digest).where(Digest.status == "completed")
+            )
             if schedule.last_run_at is not None:
                 stmt = stmt.where(Digest.created_at > schedule.last_run_at)
             stmt = stmt.order_by(Digest.created_at.asc())
@@ -1069,6 +1167,7 @@ class PodcastDigestService:
                     digest_ids=episode_digest_ids,
                     prefs=runtime_prefs,
                     user_id=user_id,
+                    trigger=episode.trigger,
                 )
                 logger.info(
                     "Podcast article selection complete",
@@ -1211,6 +1310,7 @@ class PodcastDigestService:
         digest_ids: list[UUID],
         prefs: PodcastGenerationPreferences,
         user_id: UUID | None,
+        trigger: str | None = None,
     ) -> list[DigestArticle]:
         """Rank articles from one or more digests and pick top items for script generation."""
         articles = session.exec(
@@ -1224,6 +1324,22 @@ class PodcastDigestService:
                 extra={"digest_ids": [str(d) for d in digest_ids]},
             )
             return []
+
+        if trigger == "one_off":
+            selected = [
+                article
+                for article in articles
+                if re.sub(r"\s+", " ", article.content or "").strip()
+            ][:ONE_OFF_MAX_EPISODE_ARTICLES]
+            logger.info(
+                "One-off podcast article selection preserved source order",
+                extra={
+                    "digest_ids": [str(d) for d in digest_ids],
+                    "total_article_count": len(articles),
+                    "selected_count": len(selected),
+                },
+            )
+            return selected
 
         # Deduplicate articles by URL across digests
         seen_urls: set[str] = set()
