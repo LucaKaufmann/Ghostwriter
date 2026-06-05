@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from email.utils import format_datetime
-from pathlib import Path
-from typing import Iterator
-from uuid import UUID
 import logging
 import mimetypes
 import os
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
+from datetime import datetime, timezone
+from email.utils import format_datetime
+from pathlib import Path
+from typing import Annotated, Literal
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
@@ -23,13 +24,14 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from fastapi.security import HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.security import security, verify_api_key
+from app.core.security import get_current_user, security, verify_api_key
 from app.models.article_feedback import ArticleFeedbackRead, ArticleFeedbackUpsert
 from app.models.digest import DigestArticle
 from app.models.podcast_episode import PodcastEpisode, PodcastEpisodeArticleRead
@@ -43,6 +45,15 @@ from app.models.podcast_schedule import (
     PodcastScheduleCreate,
     PodcastScheduleRead,
     PodcastScheduleUpdate,
+)
+from app.models.user import User
+from app.services.one_off_podcast_service import (
+    ONE_OFF_MAX_BRIEF_CHARS,
+    ONE_OFF_MAX_SOURCES,
+    ONE_OFF_MAX_TITLE_CHARS,
+    OneOffPodcastError,
+    one_off_podcast_service,
+    one_off_source_from_payload,
 )
 from app.services.podcast_service import podcast_service
 
@@ -96,6 +107,26 @@ class PodcastTriggerResponse(BaseModel):
     digest_ids: list[str]
     status: str
     message: str
+
+
+class OneOffPodcastSourceRequest(BaseModel):
+    """One source for one-off podcast generation."""
+
+    type: Literal["url", "text"]
+    title: str | None = Field(default=None, max_length=ONE_OFF_MAX_TITLE_CHARS)
+    url: str | None = None
+    content: str | None = None
+
+
+class OneOffPodcastCreateRequest(BaseModel):
+    """Request to create a podcast episode from ad hoc source material."""
+
+    title: str | None = Field(default=None, max_length=ONE_OFF_MAX_TITLE_CHARS)
+    brief: str | None = Field(default=None, max_length=ONE_OFF_MAX_BRIEF_CHARS)
+    sources: list[OneOffPodcastSourceRequest] = Field(
+        min_length=1,
+        max_length=ONE_OFF_MAX_SOURCES,
+    )
 
 
 class DigestPodcastStatusResponse(BaseModel):
@@ -190,6 +221,17 @@ def _resolve_episode_articles(
     return ordered
 
 
+def _episode_for_digest(session: Session, digest_id: UUID) -> PodcastEpisode | None:
+    digest_id_str = str(digest_id)
+    all_episodes = session.exec(
+        select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
+    ).all()
+    return next(
+        (episode for episode in all_episodes if digest_id_str in (episode.digest_ids or [])),
+        None,
+    )
+
+
 def _parse_range(range_header: str | None, file_size: int) -> tuple[int, int] | None:
     if not range_header:
         return None
@@ -275,6 +317,60 @@ async def _authorize_standard_or_feed_token(
     return None
 
 
+async def _current_user_for_request(request: Request, session: Session) -> User:
+    credentials = await security(request)
+    return await get_current_user(request, credentials, session)
+
+
+async def _ensure_one_off_episode_access(
+    request: Request,
+    session: Session,
+    episode: PodcastEpisode,
+) -> None:
+    if episode.user_id is None:
+        return
+
+    current_user = await _current_user_for_request(request, session)
+    if episode.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
+
+
+async def _ensure_one_off_digest_episode_access(
+    request: Request,
+    session: Session,
+    digest_id: UUID,
+) -> None:
+    if not podcast_service.is_one_off_digest(session, digest_id):
+        return
+
+    episode = _episode_for_digest(session, digest_id)
+    if episode is None:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
+    await _ensure_one_off_episode_access(request, session, episode)
+
+
+async def _resolve_podcast_preferences_user_id(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+    session: Session,
+) -> UUID | None:
+    try:
+        user = await get_current_user(request, credentials, session)
+        return user.id
+    except HTTPException as exc:
+        settings = get_settings()
+        has_users = session.exec(select(User)).first() is not None
+        if exc.status_code == 401 and not has_users:
+            token = None
+            if credentials and credentials.credentials:
+                token = credentials.credentials
+            else:
+                token = request.headers.get("x-api-key")
+            if not settings.api_key or token == settings.api_key:
+                return None
+        raise
+
+
 def _to_rfc2822(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -295,12 +391,22 @@ def _format_duration(seconds: int | None) -> str:
 @router.get(
     "/podcast/preferences",
     response_model=PodcastPreferencesRead,
-    dependencies=[Depends(verify_api_key)],
 )
-async def get_podcast_preferences(session: Session = Depends(get_session)):
-    """Get podcast preferences for the singleton user."""
-    user_id = podcast_service.resolve_user_id(session)
-    prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+async def get_podcast_preferences(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    session: Session = Depends(get_session),
+):
+    """Get podcast preferences for the authenticated user."""
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+    prefs = podcast_service.get_or_create_preferences(
+        session,
+        user_id=user_id,
+    )
     return PodcastPreferencesRead(
         enabled=prefs.enabled,
         schedule=prefs.schedule,
@@ -333,18 +439,38 @@ async def get_podcast_preferences(session: Session = Depends(get_session)):
 @router.put(
     "/podcast/preferences",
     response_model=PodcastPreferencesRead,
-    dependencies=[Depends(verify_api_key)],
 )
 async def update_podcast_preferences(
     update: PodcastPreferencesUpdate,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Update podcast preferences."""
     from app.worker.scheduler import update_podcast_schedule
 
-    user_id = podcast_service.resolve_user_id(session)
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+    schedule_fields = ("enabled", "schedule", "schedule_time", "schedule_day")
+    singleton_user_id = podcast_service.resolve_user_id(session)
+    if (
+        user_id is not None
+        and user_id != singleton_user_id
+        and any(getattr(update, field) is not None for field in schedule_fields)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Podcast schedule settings can only be changed by the singleton owner",
+        )
     try:
-        prefs = podcast_service.update_preferences(session, update, user_id=user_id)
+        prefs = podcast_service.update_preferences(
+            session,
+            update,
+            user_id=user_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -439,16 +565,27 @@ async def delete_article_feedback(
 )
 async def trigger_digest_podcast(
     digest_id: UUID,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Manually queue podcast generation for one digest."""
-    user_id = podcast_service.resolve_user_id(session)
+    await _ensure_one_off_digest_episode_access(request, session, digest_id)
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+    trigger = (
+        "one_off" if podcast_service.is_one_off_digest(session, digest_id) else "manual"
+    )
     try:
         episode = podcast_service.queue_episode_generation(
             session,
             digest_id=digest_id,
             user_id=user_id,
             force=False,
+            trigger=trigger,
         )
     except ValueError as exc:
         message = str(exc)
@@ -496,6 +633,35 @@ async def generate_podcast_now(
     )
 
 
+@router.post(
+    "/podcast/episodes/one-off",
+    response_model=PodcastTriggerResponse,
+)
+async def create_one_off_podcast_episode(
+    payload: OneOffPodcastCreateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Session = Depends(get_session),
+):
+    """Create a podcast episode from caller-supplied URL and text sources."""
+    try:
+        episode = await one_off_podcast_service.create_episode(
+            session,
+            title=payload.title,
+            brief=payload.brief,
+            sources=[one_off_source_from_payload(source) for source in payload.sources],
+            user_id=current_user.id,
+        )
+    except OneOffPodcastError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return PodcastTriggerResponse(
+        episode_id=episode.id,
+        digest_ids=episode.digest_ids or [],
+        status=episode.status,
+        message="One-off podcast generation queued",
+    )
+
+
 @router.get(
     "/digests/{digest_id}/podcast",
     response_model=DigestPodcastStatusResponse,
@@ -504,17 +670,35 @@ async def generate_podcast_now(
 async def get_digest_podcast_status(
     digest_id: UUID,
     request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Get podcast generation status for a digest."""
+    await _ensure_one_off_digest_episode_access(request, session, digest_id)
     digest_id_str = str(digest_id)
     try:
         # Find episodes that contain this digest_id in their digest_ids JSON array
         all_episodes = session.exec(
             select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
         ).all()
+        user_id = await _resolve_podcast_preferences_user_id(
+            request,
+            credentials,
+            session,
+        )
+        matching_episodes = [
+            ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])
+        ]
+        user_episodes = (
+            [ep for ep in matching_episodes if ep.user_id == user_id]
+            if user_id is not None
+            else []
+        )
+        legacy_episodes = [
+            ep for ep in matching_episodes if ep.user_id is None
+        ]
         episode = next(
-            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),
+            iter(user_episodes or legacy_episodes),
             None,
         )
     except SQLAlchemyTimeoutError as exc:
@@ -544,12 +728,14 @@ async def get_digest_podcast_status(
 )
 async def retry_podcast_episode(
     episode_id: UUID,
+    request: Request,
     session: Session = Depends(get_session),
 ):
     """Retry failed podcast generation."""
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    await _ensure_one_off_episode_access(request, session, episode)
     if episode.status != "failed":
         raise HTTPException(
             status_code=409, detail="Only failed episodes can be retried"
@@ -566,6 +752,7 @@ async def retry_podcast_episode(
         digest_id=first_digest_id,
         user_id=episode.user_id,
         force=True,
+        trigger=episode.trigger,
     )
     return PodcastTriggerResponse(
         episode_id=retried.id,
@@ -588,6 +775,13 @@ async def list_podcast_episodes(
     episodes = session.exec(
         select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
     ).all()
+    if any(episode.user_id is not None for episode in episodes):
+        current_user = await _current_user_for_request(request, session)
+        episodes = [
+            episode
+            for episode in episodes
+            if episode.user_id is None or episode.user_id == current_user.id
+        ]
     return [_build_episode_status(request, episode) for episode in episodes]
 
 
@@ -605,6 +799,7 @@ async def get_podcast_episode(
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    await _ensure_one_off_episode_access(request, session, episode)
     status_payload = _build_episode_status(request, episode)
     return PodcastEpisodeDetailRead(
         **status_payload.model_dump(),
@@ -620,6 +815,7 @@ async def get_podcast_episode(
 )
 async def delete_podcast_episode(
     episode_id: UUID,
+    request: Request,
     session: Session = Depends(get_session),
 ):
     """Delete one podcast episode and local audio artifact."""
@@ -627,6 +823,7 @@ async def delete_podcast_episode(
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    await _ensure_one_off_episode_access(request, session, episode)
 
     audio_path: Path | None = None
     if episode.audio_path and os.path.exists(episode.audio_path):
@@ -665,6 +862,8 @@ async def stream_podcast_episode(
         raise HTTPException(status_code=404, detail="Podcast episode not found")
     if token_prefs is not None and episode.user_id != token_prefs.user_id:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    if token_prefs is None:
+        await _ensure_one_off_episode_access(request, session, episode)
     if episode.status != "ready":
         raise HTTPException(status_code=409, detail="Podcast episode is not ready")
     if not episode.audio_path or not os.path.exists(episode.audio_path):
@@ -721,6 +920,8 @@ async def download_podcast_episode(
         raise HTTPException(status_code=404, detail="Podcast episode not found")
     if token_prefs is not None and episode.user_id != token_prefs.user_id:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    if token_prefs is None:
+        await _ensure_one_off_episode_access(request, session, episode)
     if episode.status != "ready":
         raise HTTPException(status_code=409, detail="Podcast episode is not ready")
     if not episode.audio_path or not os.path.exists(episode.audio_path):
@@ -845,15 +1046,22 @@ async def get_podcast_feed_xml(
 @router.get(
     "/podcast/feed/info",
     response_model=PodcastFeedInfoResponse,
-    dependencies=[Depends(verify_api_key)],
 )
 async def get_podcast_feed_info(
     request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Return feed URL and setup instructions for podcast apps."""
-    user_id = podcast_service.resolve_user_id(session)
-    prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+    prefs = podcast_service.get_or_create_preferences(
+        session,
+        user_id=user_id,
+    )
     base_url = _podcast_base_url(request, prefs.podcast_feed_base_url)
     feed_url = f"{base_url}/api/podcast/feed.xml?token={prefs.podcast_feed_token}"
 
@@ -894,13 +1102,20 @@ async def get_podcast_feed_artwork(
 @router.post(
     "/podcast/feed/artwork",
     response_model=PodcastArtworkUploadResponse,
-    dependencies=[Depends(verify_api_key)],
 )
 async def upload_podcast_feed_artwork(
+    request: Request,
     file: UploadFile = File(...),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Upload custom podcast feed artwork (minimum 1400x1400)."""
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+
     try:
         from PIL import Image
     except Exception as exc:  # pragma: no cover - Pillow is an install dependency.
@@ -932,7 +1147,6 @@ async def upload_podcast_feed_artwork(
     if ext == "jpeg":
         ext = "jpg"
 
-    user_id = podcast_service.resolve_user_id(session)
     prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
 
     settings = get_settings()

@@ -40,6 +40,15 @@ _SYNTHETIC_FEED_URLS = {
     "newsletter": "synthetic://newsletter",
     "podcast": "synthetic://podcast",
     "youtube": "synthetic://youtube",
+    "one_off": "synthetic://one-off",
+}
+
+_SYNTHETIC_FEED_TITLES = {
+    "wallabag": "Wallabag",
+    "newsletter": "Newsletter",
+    "podcast": "Podcast",
+    "youtube": "YouTube",
+    "one_off": "One-off Podcast",
 }
 
 
@@ -51,7 +60,7 @@ def get_or_create_synthetic_feed(session: Session, source: str) -> Feed:
     if feed is None:
         feed = Feed(
             url=url,
-            title=source.capitalize(),
+            title=_SYNTHETIC_FEED_TITLES.get(source, source.capitalize()),
             is_active=False,  # Not a real RSS feed; never fetched
             mode="raw",
             max_articles=0,
@@ -101,6 +110,7 @@ class BinderyPipeline:
         self._newsletter_feed_id: UUID | None = None
         self._podcast_feed_id: UUID | None = None
         self._youtube_feed_id: UUID | None = None
+        self._one_off_feed_id: UUID | None = None
 
     def _get_synthetic_feed_id(self, source: str) -> UUID:
         """Get the synthetic feed ID, creating the feed row if needed."""
@@ -1028,10 +1038,10 @@ class BinderyPipeline:
                 eligibility = self.article_filter.check(
                     url=article.url,
                     title=article.title,
-                    summary=article.summary,
-                    content=article.content,
-                    tags=article.tags,
-                    author=article.author,
+                    summary=getattr(article, "summary", None),
+                    content=getattr(article, "content", None),
+                    tags=getattr(article, "tags", None),
+                    author=getattr(article, "author", None),
                     source=feed.title,
                 )
                 if not eligibility.eligible:
