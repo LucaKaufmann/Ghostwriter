@@ -359,8 +359,14 @@ async def _resolve_podcast_preferences_user_id(
     except HTTPException as exc:
         settings = get_settings()
         has_users = session.exec(select(User)).first() is not None
-        if exc.status_code == 401 and not has_users and not settings.api_key:
-            return None
+        if exc.status_code == 401 and not has_users:
+            token = None
+            if credentials and credentials.credentials:
+                token = credentials.credentials
+            else:
+                token = request.headers.get("x-api-key")
+            if not settings.api_key or token == settings.api_key:
+                return None
         raise
 
 
@@ -548,11 +554,16 @@ async def delete_article_feedback(
 async def trigger_digest_podcast(
     digest_id: UUID,
     request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Manually queue podcast generation for one digest."""
     await _ensure_one_off_digest_episode_access(request, session, digest_id)
-    user_id = podcast_service.resolve_user_id(session)
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
     try:
         episode = podcast_service.queue_episode_generation(
             session,

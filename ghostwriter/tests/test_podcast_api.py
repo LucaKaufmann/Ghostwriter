@@ -427,6 +427,25 @@ def test_trigger_digest_podcast_and_list_episodes(client, monkeypatch, auth_head
     assert episode_id in ids
 
 
+def test_trigger_digest_podcast_uses_authenticated_token_owner(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    _owner_id, _owner_headers = _create_auth_headers_for_user("manual_podcast_owner")
+    user_id, headers = _create_auth_headers_for_user("manual_podcast_secondary")
+    digest_id, _ = _create_digest_with_articles(article_count=2)
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=headers)
+    assert trigger.status_code == 200
+    episode_id = UUID(trigger.json()["episode_id"])
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+
+    assert episode is not None
+    assert episode.user_id == user_id
+
+
 def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_headers):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
