@@ -1311,6 +1311,43 @@ def test_trigger_digest_podcast_requeues_failed_episode(client, monkeypatch):
     assert scheduled == [failed.id]
 
 
+def test_trigger_digest_podcast_reuses_legacy_singleton_episode(
+    client, monkeypatch, auth_headers
+):
+    scheduled: list[UUID] = []
+    monkeypatch.setattr(
+        podcast_service,
+        "_schedule_episode_task",
+        lambda episode_id: scheduled.append(episode_id),
+    )
+    digest_id, article_ids = _create_digest_with_articles(article_count=2)
+    legacy = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        user_id=None,
+    )
+    with Session(engine) as session:
+        singleton_owner = session.exec(
+            select(User).order_by(User.created_at.asc())
+        ).first()
+        assert singleton_owner is not None
+        singleton_owner_id = singleton_owner.id
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=auth_headers)
+    assert trigger.status_code == 200
+    payload = trigger.json()
+    assert payload["episode_id"] == str(legacy.id)
+    assert payload["status"] == "ready"
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, legacy.id)
+
+    assert refreshed is not None
+    assert refreshed.user_id == singleton_owner_id
+    assert scheduled == []
+
+
 def test_trigger_digest_podcast_preserves_existing_one_off_trigger(
     client, monkeypatch
 ):

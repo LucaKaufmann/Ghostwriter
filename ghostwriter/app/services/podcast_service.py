@@ -739,18 +739,32 @@ class PodcastDigestService:
         all_episodes = session.exec(
             select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
         ).all()
+        legacy_owner_id = self._resolve_user_id(session) if user_id is not None else None
         episode = next(
             (
                 ep
                 for ep in all_episodes
                 if digest_id_str in (ep.digest_ids or [])
-                and ep.user_id == user_id
+                and (
+                    ep.user_id == user_id
+                    or (
+                        ep.user_id is None
+                        and user_id is not None
+                        and user_id == legacy_owner_id
+                    )
+                )
                 and ep.trigger == trigger
             ),
             None,
         )
 
         if episode is not None:
+            if episode.user_id is None and user_id is not None:
+                episode.user_id = user_id
+                episode.updated_at = now
+                session.add(episode)
+                session.commit()
+                session.refresh(episode)
             if episode.status in RUNNING_STATUSES:
                 logger.info(
                     "Podcast generation already running for digest",
