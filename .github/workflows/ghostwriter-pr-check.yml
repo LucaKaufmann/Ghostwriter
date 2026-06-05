@@ -15,6 +15,7 @@ jobs:
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
 
@@ -52,6 +53,7 @@ jobs:
   frontend:
     name: Frontend check and build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
 
