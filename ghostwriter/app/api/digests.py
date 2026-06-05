@@ -471,16 +471,21 @@ async def get_digest_article_source(
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
 
-    # For media content (podcasts, YouTube), return the stored digest content
-    # directly instead of fetching upstream HTML which will fail for these URLs.
-    if article.content_type in ("podcast", "youtube"):
+    # Return stored digest content for non-fetchable source URLs instead of
+    # trying to retrieve upstream HTML.
+    if article.content_type in ("podcast", "youtube") or article.url.startswith(
+        "one-off://"
+    ):
         formatted_html = format_digest_content_to_html(article.content)
+        stored_type = article.content_type
+        if article.url.startswith("one-off://"):
+            stored_type = "one-off"
         return DigestArticleSourceResponse(
             digest_id=digest_id,
             article_id=article_id,
             url=article.url,
             final_url=article.url,
-            content_type=f"text/html; ghostwriter-{article.content_type}",
+            content_type=f"text/html; ghostwriter-{stored_type}",
             fetched_at=datetime.utcnow(),
             size_bytes=len(formatted_html.encode("utf-8")),
             html=formatted_html,

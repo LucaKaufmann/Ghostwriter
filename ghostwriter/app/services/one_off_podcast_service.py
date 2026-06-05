@@ -157,12 +157,12 @@ class OneOffPodcastService:
                 output_filename=filename,
             )
         except Exception as exc:
-            digest.status = "failed"
-            digest.stage = "failed"
-            digest.error_message = f"Failed to generate one-off digest EPUB: {exc}"
-            session.add(digest)
+            error_message = f"Failed to generate one-off digest EPUB: {exc}"
+            for article in articles:
+                session.delete(article)
+            session.delete(digest)
             session.commit()
-            raise OneOffPodcastError(digest.error_message) from exc
+            raise OneOffPodcastError(error_message) from exc
 
         digest.status = "completed"
         digest.stage = "completed"

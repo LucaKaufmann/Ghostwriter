@@ -453,6 +453,14 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("application/epub+zip")
 
+    source = client.get(
+        f"/api/digests/{digest_id}/articles/{articles[0].id}/source",
+        headers=auth_headers,
+    )
+    assert source.status_code == 200
+    assert source.json()["content_type"] == "text/html; ghostwriter-one-off"
+    assert "selected documents" in source.json()["html"]
+
 
 def test_one_off_episode_trigger_is_persisted_before_scheduling(
     client, monkeypatch, auth_headers
@@ -534,6 +542,55 @@ def test_one_off_digest_is_not_committed_before_article_markers(
         digest_count_after = len(session.exec(select(Digest)).all())
 
     assert digest_count_after == digest_count_before
+
+
+def test_failed_one_off_epub_generation_removes_private_digest(
+    client, monkeypatch, auth_headers
+):
+    class FailingEpubGenerator:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *_args, **_kwargs):
+            raise RuntimeError("epub unavailable")
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    monkeypatch.setattr(
+        "app.services.one_off_podcast_service.EpubGenerator",
+        FailingEpubGenerator,
+    )
+    with Session(engine) as session:
+        digest_count_before = len(session.exec(select(Digest)).all())
+        article_count_before = len(session.exec(select(DigestArticle)).all())
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Failed EPUB private source",
+                    "content": (
+                        "This private source is long enough to create one-off "
+                        "article markers, but EPUB generation fails before an "
+                        "owning podcast episode can be created."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "epub unavailable" in response.json()["detail"]
+    with Session(engine) as session:
+        digest_count_after = len(session.exec(select(Digest)).all())
+        article_count_after = len(session.exec(select(DigestArticle)).all())
+
+    assert digest_count_after == digest_count_before
+    assert article_count_after == article_count_before
 
 
 def test_one_off_digest_access_requires_episode_owner(client, monkeypatch):
