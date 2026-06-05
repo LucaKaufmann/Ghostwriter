@@ -577,6 +577,97 @@ def test_one_off_digest_access_requires_episode_owner(client, monkeypatch):
     assert other_filename_download.status_code == 404
 
 
+def test_one_off_episode_access_requires_episode_owner(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    owner_id, owner_headers = _create_auth_headers_for_user("episode_owner")
+    _other_id, other_headers = _create_auth_headers_for_user("episode_other")
+
+    digest_id, article_ids = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    settings = get_settings()
+    podcasts_dir = Path(settings.output_dir) / "podcasts"
+    podcasts_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = podcasts_dir / f"one-off-private-{uuid4()}.mp3"
+    audio_path.write_bytes(b"private one-off audio")
+
+    ready_episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_path,
+        trigger="one_off",
+        user_id=owner_id,
+    )
+    failed_episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="failed",
+        trigger="one_off",
+        user_id=owner_id,
+    )
+
+    owner_list = client.get("/api/podcast/episodes", headers=owner_headers)
+    assert owner_list.status_code == 200
+    assert str(ready_episode.id) in {item["id"] for item in owner_list.json()}
+
+    other_list = client.get("/api/podcast/episodes", headers=other_headers)
+    assert other_list.status_code == 200
+    assert str(ready_episode.id) not in {item["id"] for item in other_list.json()}
+
+    owner_detail = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}",
+        headers=owner_headers,
+    )
+    assert owner_detail.status_code == 200
+
+    other_detail = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}",
+        headers=other_headers,
+    )
+    assert other_detail.status_code == 404
+
+    owner_stream = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}/stream",
+        headers=owner_headers,
+    )
+    assert owner_stream.status_code == 200
+
+    other_stream = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}/stream",
+        headers=other_headers,
+    )
+    assert other_stream.status_code == 404
+
+    owner_download = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}/download",
+        headers=owner_headers,
+    )
+    assert owner_download.status_code == 200
+
+    other_download = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}/download",
+        headers=other_headers,
+    )
+    assert other_download.status_code == 404
+
+    other_retry = client.post(
+        f"/api/podcast/episodes/{failed_episode.id}/retry",
+        headers=other_headers,
+    )
+    assert other_retry.status_code == 404
+
+    other_delete = client.delete(
+        f"/api/podcast/episodes/{ready_episode.id}",
+        headers=other_headers,
+    )
+    assert other_delete.status_code == 404
+
+
 def test_one_off_podcast_uses_unique_digest_filenames(
     client, monkeypatch, auth_headers
 ):
@@ -827,10 +918,11 @@ def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
         assert refreshed.status == "pending"
 
 
-def test_retry_failed_one_off_episode_preserves_trigger(client, monkeypatch, auth_headers):
+def test_retry_failed_one_off_episode_preserves_trigger(client, monkeypatch):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
+    owner_id, owner_headers = _create_auth_headers_for_user("retry_oneoff_owner")
     digest_id, article_ids = _create_digest_with_articles(
         article_count=2,
         feed_url="synthetic://one-off",
@@ -841,10 +933,11 @@ def test_retry_failed_one_off_episode_preserves_trigger(client, monkeypatch, aut
         article_ids=article_ids,
         status="failed",
         trigger="one_off",
+        user_id=owner_id,
     )
 
     retry = client.post(
-        f"/api/podcast/episodes/{failed.id}/retry", headers=auth_headers
+        f"/api/podcast/episodes/{failed.id}/retry", headers=owner_headers
     )
     assert retry.status_code == 200
     payload = retry.json()
@@ -889,6 +982,34 @@ def test_trigger_digest_podcast_requeues_failed_episode(
         assert refreshed.completed_at is None
 
     assert scheduled == [failed.id]
+
+
+def test_trigger_digest_podcast_preserves_existing_one_off_trigger(
+    client, monkeypatch, auth_headers
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    digest_id, article_ids = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    failed = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="failed",
+        trigger="one_off",
+    )
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=auth_headers)
+    assert trigger.status_code == 200
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, failed.id)
+        assert refreshed is not None
+        assert refreshed.status == "pending"
+        assert refreshed.trigger == "one_off"
 
 
 @pytest.mark.asyncio

@@ -698,6 +698,8 @@ class PodcastDigestService:
         )
 
         if episode is not None:
+            if episode.trigger == "one_off" and trigger != "one_off":
+                trigger = episode.trigger
             if episode.trigger != trigger:
                 episode.trigger = trigger
                 episode.updated_at = now

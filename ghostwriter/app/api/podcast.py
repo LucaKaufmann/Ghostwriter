@@ -305,6 +305,24 @@ async def _authorize_standard_or_feed_token(
     return None
 
 
+async def _current_user_for_request(request: Request, session: Session) -> User:
+    credentials = await security(request)
+    return await get_current_user(request, credentials, session)
+
+
+async def _ensure_one_off_episode_access(
+    request: Request,
+    session: Session,
+    episode: PodcastEpisode,
+) -> None:
+    if episode.trigger != "one_off":
+        return
+
+    current_user = await _current_user_for_request(request, session)
+    if episode.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
+
+
 def _to_rfc2822(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -603,12 +621,14 @@ async def get_digest_podcast_status(
 )
 async def retry_podcast_episode(
     episode_id: UUID,
+    request: Request,
     session: Session = Depends(get_session),
 ):
     """Retry failed podcast generation."""
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    await _ensure_one_off_episode_access(request, session, episode)
     if episode.status != "failed":
         raise HTTPException(
             status_code=409, detail="Only failed episodes can be retried"
@@ -648,6 +668,13 @@ async def list_podcast_episodes(
     episodes = session.exec(
         select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
     ).all()
+    if any(episode.trigger == "one_off" for episode in episodes):
+        current_user = await _current_user_for_request(request, session)
+        episodes = [
+            episode
+            for episode in episodes
+            if episode.trigger != "one_off" or episode.user_id == current_user.id
+        ]
     return [_build_episode_status(request, episode) for episode in episodes]
 
 
@@ -665,6 +692,7 @@ async def get_podcast_episode(
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    await _ensure_one_off_episode_access(request, session, episode)
     status_payload = _build_episode_status(request, episode)
     return PodcastEpisodeDetailRead(
         **status_payload.model_dump(),
@@ -680,6 +708,7 @@ async def get_podcast_episode(
 )
 async def delete_podcast_episode(
     episode_id: UUID,
+    request: Request,
     session: Session = Depends(get_session),
 ):
     """Delete one podcast episode and local audio artifact."""
@@ -687,6 +716,7 @@ async def delete_podcast_episode(
     episode = session.get(PodcastEpisode, episode_id)
     if episode is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    await _ensure_one_off_episode_access(request, session, episode)
 
     audio_path: Path | None = None
     if episode.audio_path and os.path.exists(episode.audio_path):
@@ -725,6 +755,8 @@ async def stream_podcast_episode(
         raise HTTPException(status_code=404, detail="Podcast episode not found")
     if token_prefs is not None and episode.user_id != token_prefs.user_id:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    if token_prefs is None:
+        await _ensure_one_off_episode_access(request, session, episode)
     if episode.status != "ready":
         raise HTTPException(status_code=409, detail="Podcast episode is not ready")
     if not episode.audio_path or not os.path.exists(episode.audio_path):
@@ -781,6 +813,8 @@ async def download_podcast_episode(
         raise HTTPException(status_code=404, detail="Podcast episode not found")
     if token_prefs is not None and episode.user_id != token_prefs.user_id:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+    if token_prefs is None:
+        await _ensure_one_off_episode_access(request, session, episode)
     if episode.status != "ready":
         raise HTTPException(status_code=409, detail="Podcast episode is not ready")
     if not episode.audio_path or not os.path.exists(episode.audio_path):
