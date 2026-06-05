@@ -93,6 +93,7 @@ class OneOffPodcastService:
             (source, self._content_with_lead_in(source.content, lead_in))
             for source in normalized
         ]
+        feed = get_or_create_synthetic_feed(session, "one_off")
         digest = Digest(
             filename=filename,
             period="manual",
@@ -106,10 +107,7 @@ class OneOffPodcastService:
             articles_enriched=len(normalized),
         )
         session.add(digest)
-        session.commit()
-        session.refresh(digest)
-
-        feed = get_or_create_synthetic_feed(session, "one_off")
+        session.flush()
 
         articles: list[DigestArticle] = []
         epub_articles: list[ExtractedArticle] = []

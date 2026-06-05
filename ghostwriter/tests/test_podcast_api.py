@@ -491,6 +491,51 @@ def test_one_off_episode_trigger_is_persisted_before_scheduling(
     assert scheduled_triggers == ["one_off"]
 
 
+def test_one_off_digest_is_not_committed_before_article_markers(
+    client, monkeypatch, auth_headers
+):
+    from app.services.one_off_podcast_service import OneOffPodcastError
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    def _raise_before_digest_marker_commit(*_args, **_kwargs):
+        raise OneOffPodcastError("synthetic feed unavailable")
+
+    monkeypatch.setattr(
+        "app.services.one_off_podcast_service.get_or_create_synthetic_feed",
+        _raise_before_digest_marker_commit,
+    )
+    with Session(engine) as session:
+        digest_count_before = len(session.exec(select(Digest)).all())
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Uncommitted private source",
+                    "content": (
+                        "This private source is long enough to be accepted but "
+                        "synthetic feed setup fails before the digest should be "
+                        "visible to normal digest list or sync responses."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "synthetic feed unavailable" in response.json()["detail"]
+    with Session(engine) as session:
+        digest_count_after = len(session.exec(select(Digest)).all())
+
+    assert digest_count_after == digest_count_before
+
+
 def test_one_off_digest_access_requires_episode_owner(client, monkeypatch):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
