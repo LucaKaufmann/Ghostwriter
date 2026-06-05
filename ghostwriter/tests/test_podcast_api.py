@@ -1634,6 +1634,56 @@ def test_feed_info_does_not_claim_legacy_preferences(client):
     assert prefs.podcast_feed_token in feed_url
 
 
+def test_legacy_feed_migration_preserves_existing_episodes(client, auth_headers):
+    with Session(engine) as session:
+        owner = session.exec(select(User).order_by(User.created_at.asc())).first()
+        assert owner is not None
+        owner_id = owner.id
+
+    digest_id, article_ids = _create_digest_with_articles(article_count=1)
+    settings = get_settings()
+    podcasts_dir = Path(settings.output_dir) / "podcasts"
+    podcasts_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = podcasts_dir / f"legacy-{uuid4()}.mp3"
+    audio_path.write_bytes(b"legacy-audio")
+
+    with Session(engine) as session:
+        session.add(
+            PodcastPreferences(
+                user_id=None,
+                podcast_feed_enabled=True,
+                podcast_feed_token="feed_token_legacy_history",
+            )
+        )
+        session.commit()
+
+    episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_path,
+        user_id=None,
+    )
+
+    prefs = client.get("/api/podcast/preferences", headers=auth_headers)
+    assert prefs.status_code == 200
+
+    feed = client.get("/api/podcast/feed.xml?token=feed_token_legacy_history")
+    assert feed.status_code == 200
+    root = ET.fromstring(feed.content)
+    enclosure_urls = [
+        enclosure.attrib["url"]
+        for enclosure in root.findall("./channel/item/enclosure")
+    ]
+    assert any(str(episode.id) in url for url in enclosure_urls)
+
+    with Session(engine) as session:
+        migrated_episode = session.get(PodcastEpisode, episode.id)
+
+    assert migrated_episode is not None
+    assert migrated_episode.user_id == owner_id
+
+
 def test_stream_and_download_reject_paths_outside_podcast_output_dir(client, tmp_path):
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
     outside_audio = tmp_path / "outside.mp3"

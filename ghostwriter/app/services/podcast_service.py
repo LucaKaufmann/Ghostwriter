@@ -465,6 +465,15 @@ class PodcastDigestService:
             if not prefs.podcast_feed_token:
                 prefs.podcast_feed_token = self._generate_feed_token()
             session.add(prefs)
+
+        legacy_episodes = session.exec(
+            select(PodcastEpisode).where(PodcastEpisode.user_id.is_(None))
+        ).all()
+        for episode in legacy_episodes:
+            episode.user_id = owner_id
+            episode.updated_at = now
+            session.add(episode)
+
         session.commit()
 
     def get_or_create_preferences(
