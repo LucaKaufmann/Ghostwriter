@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-
 READY_STATUSES = {"ready", "failed"}
 MIN_TEXT_CHARS = 80
 MAX_TITLE_CHARS = 240
@@ -66,10 +65,7 @@ def normalize_api_base(value: str) -> str:
 
 
 def default_env_files() -> list[Path]:
-    return [
-        Path.cwd() / ".env",
-        Path.home() / ".env",
-    ]
+    return [Path.home() / ".env"]
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -759,7 +755,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-default-env-files",
         action="store_true",
-        help="Do not automatically read ./.env or ~/.env when present.",
+        help="Do not automatically read ~/.env when present.",
     )
     parser.add_argument(
         "--token",

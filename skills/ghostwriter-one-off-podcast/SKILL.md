@@ -95,7 +95,7 @@ python3 ~/clawd/skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcas
   --download
 ```
 
-The script automatically reads `./.env` and `~/.env` when present, unless `--no-default-env-files` is passed. CLI flags override exported environment variables, which override env-file values.
+The script automatically reads `~/.env` when present, unless `--no-default-env-files` is passed. It does not automatically read `./.env`; pass project-local env files with `--env-file .env` so the destination for authenticated requests is explicit. CLI flags override exported environment variables, which override env-file values.
 
 The script prints JSON. On creation it includes `episode_id`, `digest_ids`, and `status`. With `--poll`, it prints the final episode detail. With `--download` or `--output`, it polls until ready, saves the MP3, and adds `downloaded_path` to the final JSON.
 
