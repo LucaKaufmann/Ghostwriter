@@ -745,20 +745,12 @@ class PodcastDigestService:
                 for ep in all_episodes
                 if digest_id_str in (ep.digest_ids or [])
                 and ep.user_id == user_id
-                and (trigger == "one_off") == (ep.trigger == "one_off")
+                and ep.trigger == trigger
             ),
             None,
         )
 
         if episode is not None:
-            if episode.trigger == "one_off" and trigger != "one_off":
-                trigger = episode.trigger
-            if episode.trigger != trigger:
-                episode.trigger = trigger
-                episode.updated_at = now
-                session.add(episode)
-                session.commit()
-                session.refresh(episode)
             if episode.status in RUNNING_STATUSES:
                 logger.info(
                     "Podcast generation already running for digest",

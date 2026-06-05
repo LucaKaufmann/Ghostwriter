@@ -1341,6 +1341,50 @@ def test_trigger_digest_podcast_preserves_existing_one_off_trigger(
         assert refreshed.trigger == "one_off"
 
 
+def test_trigger_digest_podcast_does_not_reclassify_scheduled_episode(
+    client, monkeypatch
+):
+    from datetime import timedelta
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    user_id, headers = _create_auth_headers_for_user("manual_scheduled_owner")
+    digest_id, article_ids = _create_digest_with_articles(article_count=2)
+    scheduled = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        trigger="scheduled",
+        user_id=user_id,
+    )
+    old_time = datetime.utcnow() - timedelta(days=2)
+    with Session(engine) as session:
+        scheduled_episode = session.get(PodcastEpisode, scheduled.id)
+        assert scheduled_episode is not None
+        scheduled_episode.created_at = old_time
+        scheduled_episode.updated_at = old_time
+        scheduled_episode.completed_at = old_time
+        session.add(scheduled_episode)
+        session.commit()
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=headers)
+    assert trigger.status_code == 200
+    manual_episode_id = UUID(trigger.json()["episode_id"])
+    assert manual_episode_id != scheduled.id
+
+    with Session(engine) as session:
+        refreshed_scheduled = session.get(PodcastEpisode, scheduled.id)
+        manual_episode = session.get(PodcastEpisode, manual_episode_id)
+
+    assert refreshed_scheduled is not None
+    assert refreshed_scheduled.trigger == "scheduled"
+    assert refreshed_scheduled.digest_ids == [str(digest_id)]
+    assert manual_episode is not None
+    assert manual_episode.trigger == "manual"
+    assert manual_episode.digest_ids == [str(digest_id)]
+
+
 @pytest.mark.asyncio
 async def test_run_episode_generation_uses_runtime_preference_snapshot(monkeypatch):
     monkeypatch.setattr(
