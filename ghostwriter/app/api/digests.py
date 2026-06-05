@@ -1,34 +1,37 @@
 """Digest management and download endpoints."""
 
+import logging
 import os
 import posixpath
 import re
+import zipfile
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
-import zipfile
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
-from app.core.security import verify_api_key
+from app.core.security import get_current_user, security, verify_api_key
 from app.models.client_config import ClientConfig
-from app.models.digest import Digest, DigestArticle, DigestRead, DigestStatus
+from app.models.digest import Digest, DigestArticle, DigestRead
+from app.models.podcast_episode import PodcastEpisode
+from app.services.content_processor import ExtractedArticle
+from app.services.digest_content_formatter import format_digest_content_to_html
+from app.services.pdf_generator import PdfGenerator
+from app.services.podcast_service import podcast_service
 from app.services.reader_service import (
     DocumentTooLargeError,
     NonHtmlContentError,
     fetch_html_document,
 )
-from app.services.digest_content_formatter import format_digest_content_to_html
-from app.services.content_processor import ExtractedArticle
-from app.services.pdf_generator import PdfGenerator
 from app.worker.bindery import generate_digest
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +168,39 @@ def _to_digest_read(digest: Digest, pdf_enabled: bool) -> DigestRead:
     )
 
 
+def _one_off_episode_for_digest(
+    session: Session,
+    digest_id: UUID,
+) -> PodcastEpisode | None:
+    digest_id_str = str(digest_id)
+    episodes = session.exec(
+        select(PodcastEpisode).where(PodcastEpisode.trigger == "one_off")
+    ).all()
+    return next(
+        (episode for episode in episodes if digest_id_str in (episode.digest_ids or [])),
+        None,
+    )
+
+
+async def _ensure_digest_access(
+    *,
+    session: Session,
+    digest_id: UUID,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> None:
+    episode = _one_off_episode_for_digest(session, digest_id)
+    if episode is None:
+        return
+
+    current_user = await get_current_user(request, credentials, session)
+    if episode.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Digest not found",
+        )
+
+
 @router.post("/trigger", response_model=TriggerResponse, dependencies=[Depends(verify_api_key)])
 async def trigger_digest(
     request: TriggerRequest,
@@ -210,7 +246,7 @@ async def list_digests(
     Returns digests ordered by creation date, newest first.
     Supports filtering by creation date, status, and period.
     """
-    statement = select(Digest)
+    statement = podcast_service.exclude_one_off_digests(select(Digest))
 
     # Apply filters
     if since:
@@ -245,7 +281,9 @@ async def get_new_digests(
 
     This endpoint is optimized for clients polling for new digests.
     """
-    statement = select(Digest).where(Digest.status == "completed")
+    statement = podcast_service.exclude_one_off_digests(
+        select(Digest).where(Digest.status == "completed")
+    )
 
     if last_known_id:
         # Get the creation time of the last known digest
@@ -276,8 +314,9 @@ async def get_latest_digest(
     Returns 404 if no completed digests exist.
     """
     statement = (
-        select(Digest)
-        .where(Digest.status == "completed")
+        podcast_service.exclude_one_off_digests(
+            select(Digest).where(Digest.status == "completed")
+        )
         .order_by(Digest.completed_at.desc())
         .limit(1)
     )
@@ -295,6 +334,8 @@ async def get_latest_digest(
 @router.get("/{digest_id}/status", response_model=DigestStatusResponse, dependencies=[Depends(verify_api_key)])
 async def get_digest_status(
     digest_id: UUID,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ) -> DigestStatusResponse:
     """
@@ -309,6 +350,12 @@ async def get_digest_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Digest not found",
         )
+    await _ensure_digest_access(
+        session=session,
+        digest_id=digest_id,
+        request=request,
+        credentials=credentials,
+    )
 
     # Calculate ETA based on progress (rough estimate)
     eta = None
@@ -336,6 +383,8 @@ async def get_digest_status(
 @router.get("/{digest_id}/articles", response_model=DigestArticlesResponse, dependencies=[Depends(verify_api_key)])
 async def get_digest_articles(
     digest_id: UUID,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ) -> DigestArticlesResponse:
     """
@@ -350,6 +399,12 @@ async def get_digest_articles(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Digest not found",
         )
+    await _ensure_digest_access(
+        session=session,
+        digest_id=digest_id,
+        request=request,
+        credentials=credentials,
+    )
 
     # Query articles
     statement = (
@@ -390,10 +445,18 @@ async def get_digest_articles(
 async def get_digest_article_source(
     digest_id: UUID,
     article_id: UUID,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> DigestArticleSourceResponse:
     """Fetch raw upstream HTML for a digest article (SSRF-safe)."""
+    await _ensure_digest_access(
+        session=session,
+        digest_id=digest_id,
+        request=request,
+        credentials=credentials,
+    )
     statement = (
         select(DigestArticle)
         .where(DigestArticle.id == article_id)
@@ -462,6 +525,8 @@ async def get_digest_article_source(
 @router.get("/{digest_id}/cover", dependencies=[Depends(verify_api_key)])
 async def get_digest_cover(
     digest_id: UUID,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -472,6 +537,12 @@ async def get_digest_cover(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Digest not found",
         )
+    await _ensure_digest_access(
+        session=session,
+        digest_id=digest_id,
+        request=request,
+        credentials=credentials,
+    )
 
     if not digest.filename:
         raise HTTPException(
@@ -572,7 +643,9 @@ def _to_extracted_articles(articles: list[DigestArticle]) -> list[ExtractedArtic
 @router.get("/{digest_id}/download", dependencies=[Depends(verify_api_key)])
 async def download_digest_by_id(
     digest_id: UUID,
+    request: Request,
     format: Literal["epub", "pdf"] = Query(default="epub"),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
 ) -> FileResponse:
@@ -583,6 +656,12 @@ async def download_digest_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Digest not found",
         )
+    await _ensure_digest_access(
+        session=session,
+        digest_id=digest_id,
+        request=request,
+        credentials=credentials,
+    )
 
     if digest.status != "completed":
         raise HTTPException(
@@ -648,6 +727,8 @@ async def download_digest_by_id(
 @router.get("/{filename}", dependencies=[Depends(verify_api_key)])
 async def download_digest(
     filename: str,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
 ) -> FileResponse:
@@ -684,6 +765,13 @@ async def download_digest(
 
     # Mark the specific digest as downloaded
     digest = session.exec(select(Digest).where(Digest.filename == filename)).first()
+    if digest:
+        await _ensure_digest_access(
+            session=session,
+            digest_id=digest.id,
+            request=request,
+            credentials=credentials,
+        )
     if digest and not digest.downloaded_at:
         digest.downloaded_at = datetime.utcnow()
         session.add(digest)

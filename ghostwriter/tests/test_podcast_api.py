@@ -222,6 +222,31 @@ def auth_headers() -> dict[str, str]:
     return {"X-API-Key": raw_token}
 
 
+def _create_auth_headers_for_user(username: str) -> tuple[UUID, dict[str, str]]:
+    raw_token = generate_api_token()
+    with Session(engine) as session:
+        user = User(
+            username=f"{username}_{str(uuid4())[:8]}",
+            password_hash="test-hash",
+            is_admin=False,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+        token_row = APIToken(
+            user_id=user.id,
+            name=f"podcast-test-{str(uuid4())[:8]}",
+            token_hash=hash_api_token(raw_token),
+            token_prefix=get_token_prefix(raw_token),
+        )
+        session.add(token_row)
+        session.commit()
+        user_id = user.id
+
+    return user_id, {"X-API-Key": raw_token}
+
+
 def test_podcast_preferences_get_and_update(client, auth_headers):
     response = client.get("/api/podcast/preferences", headers=auth_headers)
     assert response.status_code == 200
@@ -464,6 +489,92 @@ def test_one_off_episode_trigger_is_persisted_before_scheduling(
 
     assert response.status_code == 200
     assert scheduled_triggers == ["one_off"]
+
+
+def test_one_off_digest_access_requires_episode_owner(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    _owner_id, owner_headers = _create_auth_headers_for_user("oneoff_owner")
+    _other_id, other_headers = _create_auth_headers_for_user("oneoff_other")
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Private owner brief",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Private source notes",
+                    "content": (
+                        "These private source notes should be available to the "
+                        "one-off episode owner, but they must not be readable via "
+                        "digest article or EPUB endpoints by another token owner."
+                    ),
+                }
+            ],
+        },
+        headers=owner_headers,
+    )
+
+    assert response.status_code == 200
+    digest_id = response.json()["digest_ids"][0]
+    with Session(engine) as session:
+        digest = session.get(Digest, UUID(digest_id))
+        assert digest is not None
+        filename = digest.filename
+
+    list_response = client.get("/api/digests", headers=owner_headers)
+    assert list_response.status_code == 200
+    assert digest_id not in {item["id"] for item in list_response.json()}
+
+    sync_response = client.get("/api/sync", headers=owner_headers)
+    assert sync_response.status_code == 200
+    sync_digests = sync_response.json()["digests"]["new_digests"]
+    assert digest_id not in {item["id"] for item in sync_digests}
+
+    owner_articles = client.get(
+        f"/api/digests/{digest_id}/articles",
+        headers=owner_headers,
+    )
+    assert owner_articles.status_code == 200
+    article_id = owner_articles.json()["articles"][0]["id"]
+
+    other_articles = client.get(
+        f"/api/digests/{digest_id}/articles",
+        headers=other_headers,
+    )
+    assert other_articles.status_code == 404
+
+    other_source = client.get(
+        f"/api/digests/{digest_id}/articles/{article_id}/source",
+        headers=other_headers,
+    )
+    assert other_source.status_code == 404
+
+    owner_download = client.get(
+        f"/api/digests/{digest_id}/download",
+        headers=owner_headers,
+    )
+    assert owner_download.status_code == 200
+
+    other_download = client.get(
+        f"/api/digests/{digest_id}/download",
+        headers=other_headers,
+    )
+    assert other_download.status_code == 404
+
+    owner_filename_download = client.get(
+        f"/api/digests/{filename}",
+        headers=owner_headers,
+    )
+    assert owner_filename_download.status_code == 200
+
+    other_filename_download = client.get(
+        f"/api/digests/{filename}",
+        headers=other_headers,
+    )
+    assert other_filename_download.status_code == 404
 
 
 def test_one_off_podcast_uses_unique_digest_filenames(
@@ -714,6 +825,37 @@ def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
         refreshed = session.get(PodcastEpisode, failed.id)
         assert refreshed is not None
         assert refreshed.status == "pending"
+
+
+def test_retry_failed_one_off_episode_preserves_trigger(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    digest_id, article_ids = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    failed = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="failed",
+        trigger="one_off",
+    )
+
+    retry = client.post(
+        f"/api/podcast/episodes/{failed.id}/retry", headers=auth_headers
+    )
+    assert retry.status_code == 200
+    payload = retry.json()
+    assert payload["episode_id"] == str(failed.id)
+    assert payload["status"] == "pending"
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, failed.id)
+        assert refreshed is not None
+        assert refreshed.status == "pending"
+        assert refreshed.trigger == "one_off"
 
 
 def test_trigger_digest_podcast_requeues_failed_episode(

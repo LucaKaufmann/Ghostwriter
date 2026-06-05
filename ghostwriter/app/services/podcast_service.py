@@ -767,7 +767,7 @@ class PodcastDigestService:
         return episode
 
     @staticmethod
-    def _exclude_one_off_digests(statement):
+    def exclude_one_off_digests(statement):
         """Exclude digests backed by one-off synthetic-feed articles."""
         one_off_digest_exists = (
             exists()
@@ -878,7 +878,7 @@ class PodcastDigestService:
                 return None
 
             # Find completed digests in the time window
-            statement = self._exclude_one_off_digests(
+            statement = self.exclude_one_off_digests(
                 select(Digest).where(
                     Digest.status == "completed",
                     Digest.created_at >= start_utc,
@@ -937,7 +937,7 @@ class PodcastDigestService:
                 return None
 
             # Find digests completed after the schedule's last run
-            stmt = self._exclude_one_off_digests(
+            stmt = self.exclude_one_off_digests(
                 select(Digest).where(Digest.status == "completed")
             )
             if schedule.last_run_at is not None:

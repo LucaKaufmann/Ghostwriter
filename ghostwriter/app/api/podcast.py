@@ -625,6 +625,7 @@ async def retry_podcast_episode(
         digest_id=first_digest_id,
         user_id=episode.user_id,
         force=True,
+        trigger=episode.trigger,
     )
     return PodcastTriggerResponse(
         episode_id=retried.id,
