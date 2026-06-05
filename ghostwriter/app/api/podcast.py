@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -30,7 +30,7 @@ from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.security import security, verify_api_key
+from app.core.security import get_current_user, security, verify_api_key
 from app.models.article_feedback import ArticleFeedbackRead, ArticleFeedbackUpsert
 from app.models.digest import DigestArticle
 from app.models.podcast_episode import PodcastEpisode, PodcastEpisodeArticleRead
@@ -45,6 +45,7 @@ from app.models.podcast_schedule import (
     PodcastScheduleRead,
     PodcastScheduleUpdate,
 )
+from app.models.user import User
 from app.services.one_off_podcast_service import (
     ONE_OFF_MAX_BRIEF_CHARS,
     ONE_OFF_MAX_SOURCES,
@@ -528,21 +529,20 @@ async def generate_podcast_now(
 @router.post(
     "/podcast/episodes/one-off",
     response_model=PodcastTriggerResponse,
-    dependencies=[Depends(verify_api_key)],
 )
 async def create_one_off_podcast_episode(
     payload: OneOffPodcastCreateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Session = Depends(get_session),
 ):
     """Create a podcast episode from caller-supplied URL and text sources."""
-    user_id = podcast_service.resolve_user_id(session)
     try:
         episode = await one_off_podcast_service.create_episode(
             session,
             title=payload.title,
             brief=payload.brief,
             sources=[one_off_source_from_payload(source) for source in payload.sources],
-            user_id=user_id,
+            user_id=current_user.id,
         )
     except OneOffPodcastError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

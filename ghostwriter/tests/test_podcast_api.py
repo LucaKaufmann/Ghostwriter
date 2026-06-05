@@ -194,8 +194,14 @@ def auth_headers() -> dict[str, str]:
     with Session(engine) as session:
         user = session.exec(select(User).order_by(User.created_at.asc())).first()
         if user is None:
-            # Setup mode: endpoints are intentionally open when no users exist.
-            return {}
+            user = User(
+                username=f"podcast_user_{str(uuid4())[:8]}",
+                password_hash="test-hash",
+                is_admin=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
 
         raw_token = generate_api_token()
         token_row = APIToken(
@@ -461,6 +467,65 @@ def test_one_off_podcast_uses_unique_digest_filenames(
     assert len(filenames) == 2
     assert filenames[0] != filenames[1]
     assert all((Path(get_settings().output_dir) / filename).exists() for filename in filenames)
+
+
+def test_create_one_off_podcast_uses_authenticated_token_owner(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    with Session(engine) as session:
+        user_a = User(
+            username=f"podcast_owner_a_{str(uuid4())[:8]}",
+            password_hash="test-hash",
+            is_admin=False,
+        )
+        user_b = User(
+            username=f"podcast_owner_b_{str(uuid4())[:8]}",
+            password_hash="test-hash",
+            is_admin=False,
+        )
+        session.add(user_a)
+        session.add(user_b)
+        session.commit()
+        session.refresh(user_a)
+        session.refresh(user_b)
+
+        raw_token = generate_api_token()
+        token_row = APIToken(
+            user_id=user_b.id,
+            name=f"podcast-test-{str(uuid4())[:8]}",
+            token_hash=hash_api_token(raw_token),
+            token_prefix=get_token_prefix(raw_token),
+        )
+        session.add(token_row)
+        session.commit()
+        user_b_id = user_b.id
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Private OpenClaw brief",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Private notes",
+                    "content": (
+                        "This private OpenClaw source material should be assigned "
+                        "to the authenticated API token owner, not the first user."
+                    ),
+                }
+            ],
+        },
+        headers={"X-API-Key": raw_token},
+    )
+
+    assert response.status_code == 200
+    episode_id = UUID(response.json()["episode_id"])
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+
+    assert episode is not None
+    assert episode.user_id == user_b_id
 
 
 def test_create_one_off_podcast_rejects_overlong_brief(client, auth_headers):

@@ -20,6 +20,8 @@ from urllib.parse import urljoin
 
 READY_STATUSES = {"ready", "failed"}
 MIN_TEXT_CHARS = 80
+MAX_TITLE_CHARS = 240
+MAX_BRIEF_CHARS = 4_000
 MAX_TEXT_CHARS = 120_000
 DEFAULT_SPLIT_TARGET_CHARS = 90_000
 
@@ -222,7 +224,38 @@ def parse_titled_file(spec: str) -> tuple[str | None, Path]:
 
 def normalize_title(value: str) -> str:
     title = re.sub(r"\s+", " ", value).strip()
-    return title[:240] or "Untitled source"
+    return title[:MAX_TITLE_CHARS] or "Untitled source"
+
+
+def normalize_episode_title(value: Any) -> str | None:
+    if value is None:
+        return None
+    title = re.sub(r"\s+", " ", str(value)).strip()
+    if len(title) > MAX_TITLE_CHARS:
+        fail(f"Episode title exceeds {MAX_TITLE_CHARS} characters", EXIT_CONFIG)
+    return title or None
+
+
+def normalize_brief(value: Any) -> str | None:
+    if value is None:
+        return None
+    brief = re.sub(r"\s+", " ", str(value)).strip()
+    if len(brief) > MAX_BRIEF_CHARS:
+        fail(f"Brief exceeds {MAX_BRIEF_CHARS} characters", EXIT_CONFIG)
+    return brief or None
+
+
+def build_context_lead_in(title: str | None, brief: str | None) -> str:
+    lines: list[str] = []
+    if title:
+        lines.append(f"Episode title: {title}")
+    if brief:
+        lines.append(f"Caller brief: {brief}")
+    return "\n".join(lines)
+
+
+def combined_text_length(content: str, lead_in: str) -> int:
+    return len(content) + len(lead_in) + (2 if lead_in else 0)
 
 
 def clean_markdown(content: str) -> str:
@@ -341,7 +374,7 @@ def resolve_link(target: str, index: dict[str, Path]) -> Path | None:
 
 
 def split_text(content: str, *, target_chars: int) -> list[str]:
-    if len(content) <= MAX_TEXT_CHARS:
+    if len(content) <= target_chars:
         return [content]
 
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n|(?<=\.)\s+", content) if part.strip()]
@@ -350,7 +383,7 @@ def split_text(content: str, *, target_chars: int) -> list[str]:
     current_len = 0
 
     for paragraph in paragraphs:
-        if len(paragraph) > MAX_TEXT_CHARS:
+        if len(paragraph) > target_chars:
             if current:
                 chunks.append(" ".join(current).strip())
                 current = []
@@ -371,6 +404,13 @@ def split_text(content: str, *, target_chars: int) -> list[str]:
     if current:
         chunks.append(" ".join(current).strip())
 
+    if len(chunks) >= 2 and len(chunks[-1]) < MIN_TEXT_CHARS:
+        needed = MIN_TEXT_CHARS - len(chunks[-1])
+        previous = chunks[-2]
+        if len(previous) - needed >= MIN_TEXT_CHARS:
+            chunks[-2] = previous[:-needed].strip()
+            chunks[-1] = f"{previous[-needed:]} {chunks[-1]}".strip()
+
     return [chunk for chunk in chunks if chunk]
 
 
@@ -378,6 +418,7 @@ def candidate_to_sources(
     candidate: SourceCandidate,
     *,
     split_target_chars: int,
+    lead_in: str,
 ) -> tuple[list[dict[str, str]], list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
     content = candidate.content.strip()
@@ -385,15 +426,23 @@ def candidate_to_sources(
         warnings.append(f"Skipped short source: {candidate.origin}")
         return [], [], warnings
 
-    chunks = split_text(content, target_chars=split_target_chars)
+    max_content_chars = MAX_TEXT_CHARS - len(lead_in) - (2 if lead_in else 0)
+    if max_content_chars < MIN_TEXT_CHARS:
+        fail("Title/brief context leaves no room for source content", EXIT_CONFIG)
+
+    effective_target = min(split_target_chars, max_content_chars)
+    chunks = split_text(content, target_chars=effective_target)
     sources: list[dict[str, str]] = []
     metadata: list[dict[str, Any]] = []
     for index, chunk in enumerate(chunks, start=1):
         if len(chunk) < MIN_TEXT_CHARS:
-            warnings.append(f"Skipped short chunk from {candidate.origin}")
-            continue
-        if len(chunk) > MAX_TEXT_CHARS:
-            fail(f"Prepared chunk still exceeds {MAX_TEXT_CHARS} chars: {candidate.origin}", EXIT_CONFIG)
+            fail(f"Prepared chunk is too short to submit: {candidate.origin}", EXIT_CONFIG)
+        if combined_text_length(chunk, lead_in) > MAX_TEXT_CHARS:
+            fail(
+                "Prepared chunk exceeds Ghostwriter's combined title/brief/source "
+                f"limit: {candidate.origin}",
+                EXIT_CONFIG,
+            )
         title = candidate.title
         if len(chunks) > 1:
             title = f"{title} - Part {index}"
@@ -526,6 +575,10 @@ def build_payload_and_preview(args: argparse.Namespace) -> tuple[dict[str, Any],
     if args.source_json:
         payload.update(load_source_json(Path(args.source_json)))
 
+    title = normalize_episode_title(args.title if args.title is not None else payload.get("title"))
+    brief = normalize_brief(args.brief if args.brief is not None else payload.get("brief"))
+    lead_in = build_context_lead_in(title, brief)
+
     sources: list[dict[str, Any]] = list(payload.get("sources") or [])
     metadata.extend(metadata_for_source(source, order=index) for index, source in enumerate(sources))
     candidates, candidate_warnings = build_local_candidates(args)
@@ -535,6 +588,7 @@ def build_payload_and_preview(args: argparse.Namespace) -> tuple[dict[str, Any],
         prepared, prepared_metadata, prepared_warnings = candidate_to_sources(
             candidate,
             split_target_chars=args.split_target_chars,
+            lead_in=lead_in,
         )
         sources.extend(prepared)
         metadata.extend(prepared_metadata)
@@ -580,18 +634,23 @@ def build_payload_and_preview(args: argparse.Namespace) -> tuple[dict[str, Any],
         )
 
     payload["sources"] = deduped_sources
-    if args.title:
-        payload["title"] = args.title
-    elif "title" not in payload:
-        payload["title"] = None
-    if args.brief:
-        payload["brief"] = args.brief
-    elif "brief" not in payload:
-        payload["brief"] = None
+    for source in deduped_sources:
+        if source.get("type") != "text":
+            continue
+        content = str(source.get("content") or "")
+        if combined_text_length(content, lead_in) > MAX_TEXT_CHARS:
+            fail(
+                "Text source exceeds Ghostwriter's combined title/brief/source "
+                f"limit: {source.get('title') or 'untitled source'}",
+                EXIT_CONFIG,
+            )
+
+    payload["title"] = title
+    payload["brief"] = brief
 
     preview = {
-        "title": payload.get("title"),
-        "brief": payload.get("brief"),
+        "title": title,
+        "brief": brief,
         "source_count": len(deduped_sources),
         "text_source_count": sum(1 for source in deduped_sources if source.get("type") == "text"),
         "url_source_count": sum(1 for source in deduped_sources if source.get("type") == "url"),
