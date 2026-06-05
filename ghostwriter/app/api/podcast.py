@@ -967,15 +967,17 @@ async def get_podcast_feed_xml(
 @router.get(
     "/podcast/feed/info",
     response_model=PodcastFeedInfoResponse,
-    dependencies=[Depends(verify_api_key)],
 )
 async def get_podcast_feed_info(
     request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Session = Depends(get_session),
 ):
     """Return feed URL and setup instructions for podcast apps."""
-    user_id = podcast_service.resolve_user_id(session)
-    prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+    prefs = podcast_service.get_or_create_preferences(
+        session,
+        user_id=current_user.id,
+    )
     base_url = _podcast_base_url(request, prefs.podcast_feed_base_url)
     feed_url = f"{base_url}/api/podcast/feed.xml?token={prefs.podcast_feed_token}"
 

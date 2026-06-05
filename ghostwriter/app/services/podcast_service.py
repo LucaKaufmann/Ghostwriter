@@ -447,10 +447,49 @@ class PodcastDigestService:
         user_id: UUID | None = None,
     ) -> PodcastPreferences:
         """Get podcast preferences, creating a singleton row when missing."""
-        prefs = session.exec(
-            select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
-        ).first()
         now = datetime.utcnow()
+
+        if user_id is not None:
+            prefs = session.exec(
+                select(PodcastPreferences)
+                .where(PodcastPreferences.user_id == user_id)
+                .order_by(PodcastPreferences.created_at.asc())
+            ).first()
+            if prefs is None:
+                legacy_prefs = session.exec(
+                    select(PodcastPreferences)
+                    .where(PodcastPreferences.user_id.is_(None))
+                    .order_by(PodcastPreferences.created_at.asc())
+                ).first()
+                has_user_prefs = session.exec(
+                    select(PodcastPreferences.id).where(
+                        PodcastPreferences.user_id.is_not(None)
+                    )
+                ).first()
+                if legacy_prefs is not None and has_user_prefs is None:
+                    legacy_prefs.user_id = user_id
+                    legacy_prefs.updated_at = now
+                    if not legacy_prefs.podcast_feed_token:
+                        legacy_prefs.podcast_feed_token = self._generate_feed_token()
+                    session.add(legacy_prefs)
+                    session.commit()
+                    session.refresh(legacy_prefs)
+                    return legacy_prefs
+
+                prefs = PodcastPreferences(
+                    user_id=user_id,
+                    podcast_feed_token=self._generate_feed_token(),
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(prefs)
+                session.commit()
+                session.refresh(prefs)
+                return prefs
+        else:
+            prefs = session.exec(
+                select(PodcastPreferences).order_by(PodcastPreferences.created_at.asc())
+            ).first()
 
         if prefs is None:
             prefs = PodcastPreferences(
@@ -459,14 +498,6 @@ class PodcastDigestService:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(prefs)
-            session.commit()
-            session.refresh(prefs)
-            return prefs
-
-        if prefs.user_id is None and user_id is not None:
-            prefs.user_id = user_id
-            prefs.updated_at = now
             session.add(prefs)
             session.commit()
             session.refresh(prefs)

@@ -1463,6 +1463,34 @@ def test_feed_token_is_scoped_to_token_owner(client):
     assert own_download.content == b"user-b-audio"
 
 
+def test_feed_info_uses_authenticated_token_owner(client):
+    user_a_id, _headers_a = _create_auth_headers_for_user("feed_info_owner_a")
+    user_b_id, headers_b = _create_auth_headers_for_user("feed_info_owner_b")
+
+    with Session(engine) as session:
+        session.add(
+            PodcastPreferences(
+                user_id=user_a_id,
+                podcast_feed_enabled=True,
+                podcast_feed_token="feed_token_info_user_a",
+            )
+        )
+        session.commit()
+
+    info = client.get("/api/podcast/feed/info", headers=headers_b)
+    assert info.status_code == 200
+    feed_url = info.json()["feed_url"]
+    assert "feed_token_info_user_a" not in feed_url
+
+    with Session(engine) as session:
+        prefs_b = session.exec(
+            select(PodcastPreferences).where(PodcastPreferences.user_id == user_b_id)
+        ).one()
+
+    assert prefs_b.podcast_feed_token
+    assert prefs_b.podcast_feed_token in feed_url
+
+
 def test_stream_and_download_reject_paths_outside_podcast_output_dir(client, tmp_path):
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
     outside_audio = tmp_path / "outside.mp3"
@@ -1515,12 +1543,18 @@ def test_feed_artwork_rejects_paths_outside_podcast_artwork_dir(client):
         outside_artwork.unlink(missing_ok=True)
 
 
-def test_feed_uses_configured_public_base_url(client, auth_headers):
+def test_feed_uses_configured_public_base_url(client):
+    user_id, headers = _create_auth_headers_for_user("feed_public_base")
     digest_id, article_ids = _create_digest_with_articles(article_count=1)
-    _create_episode(digest_id=digest_id, article_ids=article_ids, status="ready")
+    _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        user_id=user_id,
+    )
 
     with Session(engine) as session:
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.podcast_feed_enabled = True
         prefs.podcast_feed_token = "feed_token_public_url"
         prefs.podcast_feed_base_url = "https://podcasts.example.com"
@@ -1535,7 +1569,7 @@ def test_feed_uses_configured_public_base_url(client, auth_headers):
     assert enclosure is not None
     assert enclosure.attrib["url"].startswith("https://podcasts.example.com/")
 
-    info = client.get("/api/podcast/feed/info", headers=auth_headers)
+    info = client.get("/api/podcast/feed/info", headers=headers)
     assert info.status_code == 200
     assert info.json()["feed_url"].startswith(
         "https://podcasts.example.com/api/podcast/feed.xml?token="
