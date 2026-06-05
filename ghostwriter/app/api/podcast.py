@@ -46,7 +46,9 @@ from app.models.podcast_schedule import (
     PodcastScheduleUpdate,
 )
 from app.services.one_off_podcast_service import (
+    ONE_OFF_MAX_BRIEF_CHARS,
     ONE_OFF_MAX_SOURCES,
+    ONE_OFF_MAX_TITLE_CHARS,
     OneOffPodcastError,
     one_off_podcast_service,
     one_off_source_from_payload,
@@ -109,7 +111,7 @@ class OneOffPodcastSourceRequest(BaseModel):
     """One source for one-off podcast generation."""
 
     type: Literal["url", "text"]
-    title: str | None = None
+    title: str | None = Field(default=None, max_length=ONE_OFF_MAX_TITLE_CHARS)
     url: str | None = None
     content: str | None = None
 
@@ -117,8 +119,8 @@ class OneOffPodcastSourceRequest(BaseModel):
 class OneOffPodcastCreateRequest(BaseModel):
     """Request to create a podcast episode from ad hoc source material."""
 
-    title: str | None = None
-    brief: str | None = None
+    title: str | None = Field(default=None, max_length=ONE_OFF_MAX_TITLE_CHARS)
+    brief: str | None = Field(default=None, max_length=ONE_OFF_MAX_BRIEF_CHARS)
     sources: list[OneOffPodcastSourceRequest] = Field(
         min_length=1,
         max_length=ONE_OFF_MAX_SOURCES,

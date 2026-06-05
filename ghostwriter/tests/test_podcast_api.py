@@ -23,6 +23,8 @@ from app.models.podcast_preferences import PodcastPreferences
 from app.models.podcast_schedule import PodcastSchedule
 from app.models.user import User
 from app.services.one_off_podcast_service import (
+    ONE_OFF_MAX_BRIEF_CHARS,
+    ONE_OFF_MAX_TEXT_CHARS,
     ONE_OFF_SOURCE_LABEL,
     one_off_podcast_service,
 )
@@ -413,6 +415,103 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
     )
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("application/epub+zip")
+
+
+def test_one_off_podcast_uses_unique_digest_filenames(
+    client, monkeypatch, auth_headers
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    request = {
+        "title": "OpenClaw planning brief",
+        "sources": [
+            {
+                "type": "text",
+                "title": "OpenClaw notes",
+                "content": (
+                    "OpenClaw should generate one-off podcast episodes from "
+                    "selected documents while preserving the submitted source order."
+                ),
+            }
+        ],
+    }
+
+    first = client.post(
+        "/api/podcast/episodes/one-off",
+        json=request,
+        headers=auth_headers,
+    )
+    second = client.post(
+        "/api/podcast/episodes/one-off",
+        json=request,
+        headers=auth_headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    digest_ids = [
+        UUID(first.json()["digest_ids"][0]),
+        UUID(second.json()["digest_ids"][0]),
+    ]
+    with Session(engine) as session:
+        digests = [session.get(Digest, digest_id) for digest_id in digest_ids]
+
+    filenames = [digest.filename for digest in digests if digest is not None]
+    assert len(filenames) == 2
+    assert filenames[0] != filenames[1]
+    assert all((Path(get_settings().output_dir) / filename).exists() for filename in filenames)
+
+
+def test_create_one_off_podcast_rejects_overlong_brief(client, auth_headers):
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "OpenClaw planning brief",
+            "brief": "x" * (ONE_OFF_MAX_BRIEF_CHARS + 1),
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "OpenClaw notes",
+                    "content": (
+                        "OpenClaw should generate one-off podcast episodes from "
+                        "selected documents while preserving the submitted source order."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_one_off_podcast_rejects_combined_source_over_limit(
+    client,
+    monkeypatch,
+    auth_headers,
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "brief": "This brief pushes the prepared article over the size limit.",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Large OpenClaw notes",
+                    "content": "a" * (ONE_OFF_MAX_TEXT_CHARS - 10),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "Combined one-off source content exceeds" in response.json()["detail"]
 
 
 def test_create_one_off_podcast_from_url_source(client, monkeypatch, auth_headers):

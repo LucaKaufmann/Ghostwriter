@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlmodel import Session
 
@@ -22,6 +22,8 @@ from app.worker.bindery import get_or_create_synthetic_feed
 
 ONE_OFF_SOURCE_LABEL = "One-off Podcast"
 ONE_OFF_MAX_SOURCES = 20
+ONE_OFF_MAX_TITLE_CHARS = 240
+ONE_OFF_MAX_BRIEF_CHARS = 4_000
 ONE_OFF_MAX_TEXT_CHARS = 120_000
 ONE_OFF_MIN_CONTENT_CHARS = 80
 
@@ -67,12 +69,19 @@ class OneOffPodcastService:
         user_id: UUID | None,
     ) -> PodcastEpisode:
         """Create a completed manual digest and queue podcast generation."""
+        title = self._normalize_title(title)
+        brief = self._normalize_brief(brief)
         normalized = await self.normalize_sources(sources)
         if not normalized:
             raise OneOffPodcastError("No usable sources found")
 
         now = datetime.utcnow()
-        filename = self._build_digest_filename(title, now)
+        filename = self._build_digest_filename(title, now, unique_id=uuid4())
+        lead_in = self._build_context_lead_in(title=title, brief=brief)
+        prepared_sources = [
+            (source, self._content_with_lead_in(source.content, lead_in))
+            for source in normalized
+        ]
         digest = Digest(
             filename=filename,
             period="manual",
@@ -90,14 +99,10 @@ class OneOffPodcastService:
         session.refresh(digest)
 
         feed = get_or_create_synthetic_feed(session, "one_off")
-        lead_in = self._build_context_lead_in(title=title, brief=brief)
 
         articles: list[DigestArticle] = []
         epub_articles: list[ExtractedArticle] = []
-        for index, source in enumerate(normalized):
-            content = source.content
-            if lead_in:
-                content = f"{lead_in}\n\n{content}"
+        for index, (source, content) in enumerate(prepared_sources):
             epub_articles.append(
                 ExtractedArticle(
                     guid=source.url,
@@ -245,7 +250,26 @@ class OneOffPodcastService:
 
     @staticmethod
     def _normalize_title(value: str | None) -> str:
-        return re.sub(r"\s+", " ", value or "").strip()[:240]
+        return re.sub(r"\s+", " ", value or "").strip()[:ONE_OFF_MAX_TITLE_CHARS]
+
+    @staticmethod
+    def _normalize_brief(value: str | None) -> str:
+        cleaned = re.sub(r"\s+", " ", value or "").strip()
+        if len(cleaned) > ONE_OFF_MAX_BRIEF_CHARS:
+            raise OneOffPodcastError(
+                f"Brief exceeds {ONE_OFF_MAX_BRIEF_CHARS} characters"
+            )
+        return cleaned
+
+    @staticmethod
+    def _content_with_lead_in(content: str, lead_in: str) -> str:
+        prepared = f"{lead_in}\n\n{content}" if lead_in else content
+        if len(prepared) > ONE_OFF_MAX_TEXT_CHARS:
+            raise OneOffPodcastError(
+                "Combined one-off source content exceeds "
+                f"{ONE_OFF_MAX_TEXT_CHARS} characters after title/brief context"
+            )
+        return prepared
 
     @staticmethod
     def _normalize_content(value: str) -> str:
@@ -268,9 +292,15 @@ class OneOffPodcastService:
         cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", value or "").strip("-").lower()
         return cleaned[:48] or "one-off-podcast"
 
-    def _build_digest_filename(self, title: str | None, created_at: datetime) -> str:
+    def _build_digest_filename(
+        self,
+        title: str | None,
+        created_at: datetime,
+        *,
+        unique_id: UUID,
+    ) -> str:
         timestamp = created_at.strftime("%Y-%m-%d_%H%M%S")
-        return f"{timestamp}_{self._slugify(title)}.epub"
+        return f"{timestamp}_{self._slugify(title)}_{unique_id.hex[:8]}.epub"
 
     @staticmethod
     def _build_context_lead_in(title: str | None, brief: str | None) -> str:
