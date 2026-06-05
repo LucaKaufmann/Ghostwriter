@@ -2,26 +2,40 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import httpx
+import trafilatura
 from sqlmodel import Session
 
 from app.core.config import Settings, get_settings
 from app.models.digest import Digest, DigestArticle
 from app.models.podcast_episode import PodcastEpisode
-from app.services.content_processor import ContentProcessor, ExtractedArticle
+from app.services.content_processor import (
+    ContentProcessor,
+    ExtractedArticle,
+    trafilatura_config,
+)
 from app.services.epub_generator import EpubGenerator
 from app.services.podcast_service import podcast_service
+from app.services.reader_service import (
+    DocumentTooLargeError,
+    NonHtmlContentError,
+    fetch_html_document,
+)
 from app.worker.bindery import get_or_create_synthetic_feed
 
 ONE_OFF_SOURCE_LABEL = "One-off Podcast"
 ONE_OFF_MAX_SOURCES = 20
+ONE_OFF_MAX_TITLE_CHARS = 240
+ONE_OFF_MAX_BRIEF_CHARS = 4_000
 ONE_OFF_MAX_TEXT_CHARS = 120_000
 ONE_OFF_MIN_CONTENT_CHARS = 80
 
@@ -55,7 +69,6 @@ class OneOffPodcastService:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self.content_processor = ContentProcessor(self.settings)
 
     async def create_episode(
         self,
@@ -67,12 +80,20 @@ class OneOffPodcastService:
         user_id: UUID | None,
     ) -> PodcastEpisode:
         """Create a completed manual digest and queue podcast generation."""
+        title = self._normalize_title(title)
+        brief = self._normalize_brief(brief)
         normalized = await self.normalize_sources(sources)
         if not normalized:
             raise OneOffPodcastError("No usable sources found")
 
         now = datetime.utcnow()
-        filename = self._build_digest_filename(title, now)
+        filename = self._build_digest_filename(title, now, unique_id=uuid4())
+        lead_in = self._build_context_lead_in(title=title, brief=brief)
+        prepared_sources = [
+            (source, self._content_with_lead_in(source.content, lead_in))
+            for source in normalized
+        ]
+        feed = get_or_create_synthetic_feed(session, "one_off")
         digest = Digest(
             filename=filename,
             period="manual",
@@ -86,18 +107,11 @@ class OneOffPodcastService:
             articles_enriched=len(normalized),
         )
         session.add(digest)
-        session.commit()
-        session.refresh(digest)
-
-        feed = get_or_create_synthetic_feed(session, "one_off")
-        lead_in = self._build_context_lead_in(title=title, brief=brief)
+        session.flush()
 
         articles: list[DigestArticle] = []
         epub_articles: list[ExtractedArticle] = []
-        for index, source in enumerate(normalized):
-            content = source.content
-            if lead_in:
-                content = f"{lead_in}\n\n{content}"
+        for index, (source, content) in enumerate(prepared_sources):
             epub_articles.append(
                 ExtractedArticle(
                     guid=source.url,
@@ -143,12 +157,12 @@ class OneOffPodcastService:
                 output_filename=filename,
             )
         except Exception as exc:
-            digest.status = "failed"
-            digest.stage = "failed"
-            digest.error_message = f"Failed to generate one-off digest EPUB: {exc}"
-            session.add(digest)
+            error_message = f"Failed to generate one-off digest EPUB: {exc}"
+            for article in articles:
+                session.delete(article)
+            session.delete(digest)
             session.commit()
-            raise OneOffPodcastError(digest.error_message) from exc
+            raise OneOffPodcastError(error_message) from exc
 
         digest.status = "completed"
         digest.stage = "completed"
@@ -162,12 +176,8 @@ class OneOffPodcastService:
             digest_id=digest.id,
             user_id=user_id,
             force=False,
+            trigger="one_off",
         )
-        episode.trigger = "one_off"
-        episode.updated_at = datetime.utcnow()
-        session.add(episode)
-        session.commit()
-        session.refresh(episode)
         return episode
 
     async def normalize_sources(
@@ -230,22 +240,70 @@ class OneOffPodcastService:
         if not url:
             raise OneOffPodcastError(f"URL source {index} is missing a URL")
 
-        content = await self.content_processor.extract_content(url)
+        content, final_url = await self._extract_url_content(url, index)
         content = self._normalize_content(content or "")
         if len(content) < ONE_OFF_MIN_CONTENT_CHARS:
             return None
 
-        title = self._normalize_title(source.title) or self._title_from_url(url, index)
+        title = self._normalize_title(source.title) or self._title_from_url(
+            final_url,
+            index,
+        )
         return NormalizedOneOffSource(
             title=title,
-            url=url,
+            url=final_url,
             content=content,
             word_count=ContentProcessor.count_words(content),
         )
 
+    async def _extract_url_content(self, url: str, index: int) -> tuple[str | None, str]:
+        try:
+            doc = await fetch_html_document(url, settings=self.settings)
+            content = await asyncio.wait_for(
+                asyncio.to_thread(
+                    trafilatura.extract,
+                    doc.html,
+                    url=doc.final_url,
+                    config=trafilatura_config,
+                    include_comments=False,
+                    include_tables=True,
+                    favor_precision=True,
+                    output_format="txt",
+                ),
+                timeout=self.settings.fetch_timeout_seconds,
+            )
+            return content, doc.final_url
+        except (ValueError, NonHtmlContentError, DocumentTooLargeError) as exc:
+            raise OneOffPodcastError(
+                f"URL source {index} could not be fetched: {exc}"
+            ) from exc
+        except (httpx.HTTPError, TimeoutError) as exc:
+            raise OneOffPodcastError(
+                f"URL source {index} could not be fetched"
+            ) from exc
+
     @staticmethod
     def _normalize_title(value: str | None) -> str:
-        return re.sub(r"\s+", " ", value or "").strip()[:240]
+        return re.sub(r"\s+", " ", value or "").strip()[:ONE_OFF_MAX_TITLE_CHARS]
+
+    @staticmethod
+    def _normalize_brief(value: str | None) -> str:
+        cleaned = re.sub(r"\s+", " ", value or "").strip()
+        if len(cleaned) > ONE_OFF_MAX_BRIEF_CHARS:
+            raise OneOffPodcastError(
+                f"Brief exceeds {ONE_OFF_MAX_BRIEF_CHARS} characters"
+            )
+        return cleaned
+
+    @staticmethod
+    def _content_with_lead_in(content: str, lead_in: str) -> str:
+        prepared = f"{lead_in}\n\n{content}" if lead_in else content
+        if len(prepared) > ONE_OFF_MAX_TEXT_CHARS:
+            raise OneOffPodcastError(
+                "Combined one-off source content exceeds "
+                f"{ONE_OFF_MAX_TEXT_CHARS} characters after title/brief context"
+            )
+        return prepared
 
     @staticmethod
     def _normalize_content(value: str) -> str:
@@ -268,9 +326,15 @@ class OneOffPodcastService:
         cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", value or "").strip("-").lower()
         return cleaned[:48] or "one-off-podcast"
 
-    def _build_digest_filename(self, title: str | None, created_at: datetime) -> str:
+    def _build_digest_filename(
+        self,
+        title: str | None,
+        created_at: datetime,
+        *,
+        unique_id: UUID,
+    ) -> str:
         timestamp = created_at.strftime("%Y-%m-%d_%H%M%S")
-        return f"{timestamp}_{self._slugify(title)}.epub"
+        return f"{timestamp}_{self._slugify(title)}_{unique_id.hex[:8]}.epub"
 
     @staticmethod
     def _build_context_lead_in(title: str | None, brief: str | None) -> str:

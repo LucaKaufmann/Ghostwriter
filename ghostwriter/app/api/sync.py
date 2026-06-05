@@ -10,19 +10,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlmodel import Session, col, select
 
+from app.api.config import ConfigResponse, _config_to_response, get_or_create_config
+from app.api.feeds import FeedChangesResponse, FeedTombstone
+from app.api.schedules import ScheduleResponse, _schedule_to_response
 from app.core.database import get_session
+from app.core.logging import digest_logger
 from app.core.security import verify_api_key
 from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
-from app.api.config import ConfigResponse, get_or_create_config, _config_to_response
-from app.api.feeds import FeedChangesResponse, FeedTombstone
-from app.api.schedules import ScheduleResponse, _schedule_to_response
-from app.core.logging import digest_logger
 from app.services.digest_content_formatter import format_digest_content_to_html
+from app.services.podcast_service import podcast_service
 from app.worker import scheduler as scheduler_module
 
 router = APIRouter()
@@ -149,7 +149,9 @@ async def combined_sync(
     if digest_ids:
         known_ids = {id_str.strip() for id_str in digest_ids.split(",") if id_str.strip()}
 
-    digests_statement = select(Digest).where(Digest.status == "completed")
+    digests_statement = podcast_service.exclude_one_off_digests(
+        select(Digest).where(Digest.status == "completed")
+    )
     if known_ids:
         digests_statement = digests_statement.where(
             col(Digest.id).notin_([UUID(id_str) for id_str in known_ids])

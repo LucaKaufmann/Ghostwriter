@@ -23,30 +23,27 @@ from app.models.podcast_preferences import PodcastPreferences
 from app.models.podcast_schedule import PodcastSchedule
 from app.models.user import User
 from app.services.one_off_podcast_service import (
+    ONE_OFF_MAX_BRIEF_CHARS,
+    ONE_OFF_MAX_TEXT_CHARS,
     ONE_OFF_SOURCE_LABEL,
-    one_off_podcast_service,
 )
 from app.services.podcast_service import (
     AudioGenerationResult,
     PodcastGenerationPreferences,
     podcast_service,
 )
+from app.services.reader_service import FetchedHtmlDocument
 
 
 def _create_digest_with_articles(
     *,
     article_count: int = 3,
     completed_at: datetime | None = None,
+    feed_url: str | None = None,
+    feed_title: str | None = None,
 ) -> tuple[UUID, list[UUID]]:
     suffix = str(uuid4())[:8]
     created = completed_at or datetime.utcnow()
-    feed = Feed(
-        url=f"https://example.com/feed/{suffix}.xml",
-        title=f"Feed {suffix}",
-        is_active=True,
-        mode="raw",
-        max_articles=5,
-    )
     digest = Digest(
         filename=f"digest-{suffix}.epub",
         period="manual",
@@ -58,9 +55,20 @@ def _create_digest_with_articles(
     )
 
     with Session(engine) as session:
-        session.add(feed)
-        session.commit()
-        session.refresh(feed)
+        feed = None
+        if feed_url is not None:
+            feed = session.exec(select(Feed).where(Feed.url == feed_url)).first()
+        if feed is None:
+            feed = Feed(
+                url=feed_url or f"https://example.com/feed/{suffix}.xml",
+                title=feed_title or f"Feed {suffix}",
+                is_active=True,
+                mode="raw",
+                max_articles=5,
+            )
+            session.add(feed)
+            session.commit()
+            session.refresh(feed)
 
         session.add(digest)
         session.commit()
@@ -192,8 +200,14 @@ def auth_headers() -> dict[str, str]:
     with Session(engine) as session:
         user = session.exec(select(User).order_by(User.created_at.asc())).first()
         if user is None:
-            # Setup mode: endpoints are intentionally open when no users exist.
-            return {}
+            user = User(
+                username=f"podcast_user_{str(uuid4())[:8]}",
+                password_hash="test-hash",
+                is_admin=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
 
         raw_token = generate_api_token()
         token_row = APIToken(
@@ -206,6 +220,31 @@ def auth_headers() -> dict[str, str]:
         session.commit()
 
     return {"X-API-Key": raw_token}
+
+
+def _create_auth_headers_for_user(username: str) -> tuple[UUID, dict[str, str]]:
+    raw_token = generate_api_token()
+    with Session(engine) as session:
+        user = User(
+            username=f"{username}_{str(uuid4())[:8]}",
+            password_hash="test-hash",
+            is_admin=False,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+        token_row = APIToken(
+            user_id=user.id,
+            name=f"podcast-test-{str(uuid4())[:8]}",
+            token_hash=hash_api_token(raw_token),
+            token_prefix=get_token_prefix(raw_token),
+        )
+        session.add(token_row)
+        session.commit()
+        user_id = user.id
+
+    return user_id, {"X-API-Key": raw_token}
 
 
 def test_podcast_preferences_get_and_update(client, auth_headers):
@@ -414,24 +453,582 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("application/epub+zip")
 
+    source = client.get(
+        f"/api/digests/{digest_id}/articles/{articles[0].id}/source",
+        headers=auth_headers,
+    )
+    assert source.status_code == 200
+    assert source.json()["content_type"] == "text/html; ghostwriter-one-off"
+    assert "selected documents" in source.json()["html"]
+
+
+def test_one_off_episode_trigger_is_persisted_before_scheduling(
+    client, monkeypatch, auth_headers
+):
+    scheduled_triggers: list[str | None] = []
+
+    def capture_scheduled_trigger(episode_id: UUID) -> None:
+        with Session(engine) as session:
+            episode = session.get(PodcastEpisode, episode_id)
+            scheduled_triggers.append(episode.trigger if episode else None)
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", capture_scheduled_trigger
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Pre-schedule trigger check",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Trigger notes",
+                    "content": (
+                        "This source is long enough to become a one-off podcast "
+                        "digest article, and the worker must see the one-off trigger "
+                        "before any asynchronous generation task can begin."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert scheduled_triggers == ["one_off"]
+
+
+def test_one_off_digest_is_not_committed_before_article_markers(
+    client, monkeypatch, auth_headers
+):
+    from app.services.one_off_podcast_service import OneOffPodcastError
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    def _raise_before_digest_marker_commit(*_args, **_kwargs):
+        raise OneOffPodcastError("synthetic feed unavailable")
+
+    monkeypatch.setattr(
+        "app.services.one_off_podcast_service.get_or_create_synthetic_feed",
+        _raise_before_digest_marker_commit,
+    )
+    with Session(engine) as session:
+        digest_count_before = len(session.exec(select(Digest)).all())
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Uncommitted private source",
+                    "content": (
+                        "This private source is long enough to be accepted but "
+                        "synthetic feed setup fails before the digest should be "
+                        "visible to normal digest list or sync responses."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "synthetic feed unavailable" in response.json()["detail"]
+    with Session(engine) as session:
+        digest_count_after = len(session.exec(select(Digest)).all())
+
+    assert digest_count_after == digest_count_before
+
+
+def test_failed_one_off_epub_generation_removes_private_digest(
+    client, monkeypatch, auth_headers
+):
+    class FailingEpubGenerator:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *_args, **_kwargs):
+            raise RuntimeError("epub unavailable")
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    monkeypatch.setattr(
+        "app.services.one_off_podcast_service.EpubGenerator",
+        FailingEpubGenerator,
+    )
+    with Session(engine) as session:
+        digest_count_before = len(session.exec(select(Digest)).all())
+        article_count_before = len(session.exec(select(DigestArticle)).all())
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Failed EPUB private source",
+                    "content": (
+                        "This private source is long enough to create one-off "
+                        "article markers, but EPUB generation fails before an "
+                        "owning podcast episode can be created."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "epub unavailable" in response.json()["detail"]
+    with Session(engine) as session:
+        digest_count_after = len(session.exec(select(Digest)).all())
+        article_count_after = len(session.exec(select(DigestArticle)).all())
+
+    assert digest_count_after == digest_count_before
+    assert article_count_after == article_count_before
+
+
+def test_one_off_digest_access_requires_episode_owner(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    _owner_id, owner_headers = _create_auth_headers_for_user("oneoff_owner")
+    _other_id, other_headers = _create_auth_headers_for_user("oneoff_other")
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Private owner brief",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Private source notes",
+                    "content": (
+                        "These private source notes should be available to the "
+                        "one-off episode owner, but they must not be readable via "
+                        "digest article or EPUB endpoints by another token owner."
+                    ),
+                }
+            ],
+        },
+        headers=owner_headers,
+    )
+
+    assert response.status_code == 200
+    digest_id = response.json()["digest_ids"][0]
+    with Session(engine) as session:
+        digest = session.get(Digest, UUID(digest_id))
+        assert digest is not None
+        filename = digest.filename
+
+    list_response = client.get("/api/digests", headers=owner_headers)
+    assert list_response.status_code == 200
+    assert digest_id not in {item["id"] for item in list_response.json()}
+
+    sync_response = client.get("/api/sync", headers=owner_headers)
+    assert sync_response.status_code == 200
+    sync_digests = sync_response.json()["digests"]["new_digests"]
+    assert digest_id not in {item["id"] for item in sync_digests}
+
+    owner_articles = client.get(
+        f"/api/digests/{digest_id}/articles",
+        headers=owner_headers,
+    )
+    assert owner_articles.status_code == 200
+    article_id = owner_articles.json()["articles"][0]["id"]
+
+    other_articles = client.get(
+        f"/api/digests/{digest_id}/articles",
+        headers=other_headers,
+    )
+    assert other_articles.status_code == 404
+
+    other_source = client.get(
+        f"/api/digests/{digest_id}/articles/{article_id}/source",
+        headers=other_headers,
+    )
+    assert other_source.status_code == 404
+
+    owner_download = client.get(
+        f"/api/digests/{digest_id}/download",
+        headers=owner_headers,
+    )
+    assert owner_download.status_code == 200
+
+    other_download = client.get(
+        f"/api/digests/{digest_id}/download",
+        headers=other_headers,
+    )
+    assert other_download.status_code == 404
+
+    owner_filename_download = client.get(
+        f"/api/digests/{filename}",
+        headers=owner_headers,
+    )
+    assert owner_filename_download.status_code == 200
+
+    other_filename_download = client.get(
+        f"/api/digests/{filename}",
+        headers=other_headers,
+    )
+    assert other_filename_download.status_code == 404
+
+    other_filename_delete = client.delete(
+        f"/api/digests/{filename}",
+        headers=other_headers,
+    )
+    assert other_filename_delete.status_code == 404
+
+    owner_podcast_status = client.get(
+        f"/api/digests/{digest_id}/podcast",
+        headers=owner_headers,
+    )
+    assert owner_podcast_status.status_code == 200
+
+    other_podcast_status = client.get(
+        f"/api/digests/{digest_id}/podcast",
+        headers=other_headers,
+    )
+    assert other_podcast_status.status_code == 404
+
+    other_podcast_trigger = client.post(
+        f"/api/digests/{digest_id}/podcast",
+        headers=other_headers,
+    )
+    assert other_podcast_trigger.status_code == 404
+
+
+def test_orphaned_one_off_digest_fails_closed(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    _owner_id, owner_headers = _create_auth_headers_for_user("orphan_owner")
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Orphaned private digest",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Private orphan source",
+                    "content": (
+                        "This source creates a one-off digest whose podcast episode "
+                        "will be deleted to verify that digest access fails closed."
+                    ),
+                }
+            ],
+        },
+        headers=owner_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    digest_id = payload["digest_ids"][0]
+    episode_id = UUID(payload["episode_id"])
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        assert episode is not None
+        session.delete(episode)
+        session.commit()
+
+    articles = client.get(
+        f"/api/digests/{digest_id}/articles",
+        headers=owner_headers,
+    )
+    assert articles.status_code == 404
+
+    download = client.get(
+        f"/api/digests/{digest_id}/download",
+        headers=owner_headers,
+    )
+    assert download.status_code == 404
+
+
+def test_one_off_episode_access_requires_episode_owner(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    owner_id, owner_headers = _create_auth_headers_for_user("episode_owner")
+    _other_id, other_headers = _create_auth_headers_for_user("episode_other")
+
+    digest_id, article_ids = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    settings = get_settings()
+    podcasts_dir = Path(settings.output_dir) / "podcasts"
+    podcasts_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = podcasts_dir / f"one-off-private-{uuid4()}.mp3"
+    audio_path.write_bytes(b"private one-off audio")
+
+    ready_episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_path,
+        trigger="one_off",
+        user_id=owner_id,
+    )
+    failed_episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="failed",
+        trigger="one_off",
+        user_id=owner_id,
+    )
+
+    owner_list = client.get("/api/podcast/episodes", headers=owner_headers)
+    assert owner_list.status_code == 200
+    assert str(ready_episode.id) in {item["id"] for item in owner_list.json()}
+
+    other_list = client.get("/api/podcast/episodes", headers=other_headers)
+    assert other_list.status_code == 200
+    assert str(ready_episode.id) not in {item["id"] for item in other_list.json()}
+
+    owner_detail = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}",
+        headers=owner_headers,
+    )
+    assert owner_detail.status_code == 200
+
+    other_detail = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}",
+        headers=other_headers,
+    )
+    assert other_detail.status_code == 404
+
+    owner_stream = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}/stream",
+        headers=owner_headers,
+    )
+    assert owner_stream.status_code == 200
+
+    other_stream = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}/stream",
+        headers=other_headers,
+    )
+    assert other_stream.status_code == 404
+
+    owner_download = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}/download",
+        headers=owner_headers,
+    )
+    assert owner_download.status_code == 200
+
+    other_download = client.get(
+        f"/api/podcast/episodes/{ready_episode.id}/download",
+        headers=other_headers,
+    )
+    assert other_download.status_code == 404
+
+    other_retry = client.post(
+        f"/api/podcast/episodes/{failed_episode.id}/retry",
+        headers=other_headers,
+    )
+    assert other_retry.status_code == 404
+
+    other_delete = client.delete(
+        f"/api/podcast/episodes/{ready_episode.id}",
+        headers=other_headers,
+    )
+    assert other_delete.status_code == 404
+
+
+def test_one_off_podcast_uses_unique_digest_filenames(
+    client, monkeypatch, auth_headers
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    request = {
+        "title": "OpenClaw planning brief",
+        "sources": [
+            {
+                "type": "text",
+                "title": "OpenClaw notes",
+                "content": (
+                    "OpenClaw should generate one-off podcast episodes from "
+                    "selected documents while preserving the submitted source order."
+                ),
+            }
+        ],
+    }
+
+    first = client.post(
+        "/api/podcast/episodes/one-off",
+        json=request,
+        headers=auth_headers,
+    )
+    second = client.post(
+        "/api/podcast/episodes/one-off",
+        json=request,
+        headers=auth_headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    digest_ids = [
+        UUID(first.json()["digest_ids"][0]),
+        UUID(second.json()["digest_ids"][0]),
+    ]
+    with Session(engine) as session:
+        digests = [session.get(Digest, digest_id) for digest_id in digest_ids]
+
+    filenames = [digest.filename for digest in digests if digest is not None]
+    assert len(filenames) == 2
+    assert filenames[0] != filenames[1]
+    assert all((Path(get_settings().output_dir) / filename).exists() for filename in filenames)
+
+
+def test_create_one_off_podcast_uses_authenticated_token_owner(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    with Session(engine) as session:
+        user_a = User(
+            username=f"podcast_owner_a_{str(uuid4())[:8]}",
+            password_hash="test-hash",
+            is_admin=False,
+        )
+        user_b = User(
+            username=f"podcast_owner_b_{str(uuid4())[:8]}",
+            password_hash="test-hash",
+            is_admin=False,
+        )
+        session.add(user_a)
+        session.add(user_b)
+        session.commit()
+        session.refresh(user_a)
+        session.refresh(user_b)
+
+        raw_token = generate_api_token()
+        token_row = APIToken(
+            user_id=user_b.id,
+            name=f"podcast-test-{str(uuid4())[:8]}",
+            token_hash=hash_api_token(raw_token),
+            token_prefix=get_token_prefix(raw_token),
+        )
+        session.add(token_row)
+        session.commit()
+        user_b_id = user_b.id
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Private OpenClaw brief",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Private notes",
+                    "content": (
+                        "This private OpenClaw source material should be assigned "
+                        "to the authenticated API token owner, not the first user."
+                    ),
+                }
+            ],
+        },
+        headers={"X-API-Key": raw_token},
+    )
+
+    assert response.status_code == 200
+    episode_id = UUID(response.json()["episode_id"])
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+
+    assert episode is not None
+    assert episode.user_id == user_b_id
+
+
+def test_create_one_off_podcast_rejects_overlong_brief(client, auth_headers):
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "OpenClaw planning brief",
+            "brief": "x" * (ONE_OFF_MAX_BRIEF_CHARS + 1),
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "OpenClaw notes",
+                    "content": (
+                        "OpenClaw should generate one-off podcast episodes from "
+                        "selected documents while preserving the submitted source order."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_one_off_podcast_rejects_combined_source_over_limit(
+    client,
+    monkeypatch,
+    auth_headers,
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "brief": "This brief pushes the prepared article over the size limit.",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Large OpenClaw notes",
+                    "content": "a" * (ONE_OFF_MAX_TEXT_CHARS - 10),
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "Combined one-off source content exceeds" in response.json()["detail"]
+
 
 def test_create_one_off_podcast_from_url_source(client, monkeypatch, auth_headers):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
 
-    async def _extract_content(url: str) -> str:
+    async def _fetch_html_document(url: str, **_kwargs) -> FetchedHtmlDocument:
         assert url == "https://example.com/openclaw-roadmap"
-        return (
-            "The roadmap explains how OpenClaw can package selected research "
-            "documents into a podcast episode. It highlights source mapping, "
-            "script generation, TTS reuse, and feed publication."
+        html = """
+        <html>
+          <head><title>OpenClaw roadmap</title></head>
+          <body>
+            <article>
+              <p>The roadmap explains how OpenClaw can package selected research
+              documents into a podcast episode.</p>
+              <p>It highlights source mapping, script generation, TTS reuse, and
+              feed publication.</p>
+            </article>
+          </body>
+        </html>
+        """
+        return FetchedHtmlDocument(
+            url=url,
+            final_url="https://example.com/openclaw-roadmap",
+            content_type="text/html",
+            html=html,
+            fetched_at=datetime.utcnow(),
+            size_bytes=len(html.encode("utf-8")),
         )
 
     monkeypatch.setattr(
-        one_off_podcast_service.content_processor,
-        "extract_content",
-        _extract_content,
+        "app.services.one_off_podcast_service.fetch_html_document",
+        _fetch_html_document,
     )
 
     response = client.post(
@@ -457,6 +1054,40 @@ def test_create_one_off_podcast_from_url_source(client, monkeypatch, auth_header
     assert article.url == "https://example.com/openclaw-roadmap"
     assert article.title == "openclaw roadmap"
     assert "source mapping" in article.content
+
+
+def test_create_one_off_podcast_rejects_private_url_redirect(
+    client,
+    monkeypatch,
+    auth_headers,
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    async def _fetch_html_document(_url: str, **_kwargs) -> FetchedHtmlDocument:
+        raise ValueError("URL resolves to private address")
+
+    monkeypatch.setattr(
+        "app.services.one_off_podcast_service.fetch_html_document",
+        _fetch_html_document,
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "sources": [
+                {
+                    "type": "url",
+                    "url": "https://example.com/private-redirect",
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "private address" in response.json()["detail"]
 
 
 def test_create_one_off_podcast_rejects_unusable_sources(
@@ -509,6 +1140,39 @@ def test_retry_failed_podcast_episode(client, monkeypatch, auth_headers):
         assert refreshed.status == "pending"
 
 
+def test_retry_failed_one_off_episode_preserves_trigger(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    owner_id, owner_headers = _create_auth_headers_for_user("retry_oneoff_owner")
+    digest_id, article_ids = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    failed = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="failed",
+        trigger="one_off",
+        user_id=owner_id,
+    )
+
+    retry = client.post(
+        f"/api/podcast/episodes/{failed.id}/retry", headers=owner_headers
+    )
+    assert retry.status_code == 200
+    payload = retry.json()
+    assert payload["episode_id"] == str(failed.id)
+    assert payload["status"] == "pending"
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, failed.id)
+        assert refreshed is not None
+        assert refreshed.status == "pending"
+        assert refreshed.trigger == "one_off"
+
+
 def test_trigger_digest_podcast_requeues_failed_episode(
     client, monkeypatch, auth_headers
 ):
@@ -540,6 +1204,36 @@ def test_trigger_digest_podcast_requeues_failed_episode(
         assert refreshed.completed_at is None
 
     assert scheduled == [failed.id]
+
+
+def test_trigger_digest_podcast_preserves_existing_one_off_trigger(
+    client, monkeypatch
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    owner_id, owner_headers = _create_auth_headers_for_user("trigger_oneoff_owner")
+    digest_id, article_ids = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    failed = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="failed",
+        trigger="one_off",
+        user_id=owner_id,
+    )
+
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=owner_headers)
+    assert trigger.status_code == 200
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, failed.id)
+        assert refreshed is not None
+        assert refreshed.status == "pending"
+        assert refreshed.trigger == "one_off"
 
 
 @pytest.mark.asyncio
@@ -907,6 +1601,41 @@ def test_scheduled_podcast_generation(monkeypatch):
         assert str(digest_id) in episode.digest_ids
         assert episode.trigger == "scheduled"
         assert episode.status == "pending"
+
+
+def test_scheduled_podcast_generation_excludes_one_off_digests(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    one_off_digest_id, _ = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    normal_digest_id, _ = _create_digest_with_articles(article_count=2)
+
+    with Session(engine) as session:
+        existing_scheduled = session.exec(
+            select(PodcastEpisode).where(PodcastEpisode.trigger == "scheduled")
+        ).all()
+        for episode in existing_scheduled:
+            session.delete(episode)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs.enabled = True
+        prefs.schedule = "daily"
+        prefs.schedule_time = "00:00"
+        prefs.updated_at = datetime.utcnow()
+        session.add(prefs)
+        session.commit()
+
+    episode_id = podcast_service.generate_scheduled_episode()
+    assert episode_id is not None
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, UUID(str(episode_id)))
+        assert episode is not None
+        assert str(normal_digest_id) in episode.digest_ids
+        assert str(one_off_digest_id) not in episode.digest_ids
 
 
 def test_elevenlabs_tts_normalization_for_spoken_delivery():
@@ -1452,3 +2181,38 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
         episode = session.get(PodcastEpisode, result)
         assert episode is not None
         assert str(new_digest_id) in episode.digest_ids
+
+
+def test_generate_episode_for_schedule_excludes_one_off_digests(client, monkeypatch):
+    """Verify that manual schedule triggers ignore one-off source digests."""
+    from datetime import timedelta
+
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    last_run = datetime.utcnow() + timedelta(days=1)
+    with Session(engine) as session:
+        sched = PodcastSchedule(
+            name="One-off Filter Test",
+            days=["monday"],
+            time="08:00",
+            enabled=True,
+            last_run_at=last_run,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(sched)
+        session.commit()
+        session.refresh(sched)
+        schedule_id = sched.id
+
+    _create_digest_with_articles(
+        article_count=2,
+        completed_at=last_run + timedelta(seconds=1),
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+
+    result = podcast_service.generate_episode_for_schedule(schedule_id)
+    assert result is None

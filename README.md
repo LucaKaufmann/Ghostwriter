@@ -27,6 +27,7 @@ If you want to try the project quickly, start with Ghostwriter.
 - `app/`: Epilogue Android app (Kotlin, Compose, Room, WorkManager).
 - `EpilogueIOS/`: Epilogue iOS app (Swift, SwiftUI, Tuist modules).
 - `ghostwriter/`: FastAPI backend + Svelte web UI, including podcast generation pipeline and TTS integration.
+- `skills/`: distributable agent skills, including the OpenClaw helper for creating one-off Ghostwriter podcast episodes.
 - `docs/`, `examples/`: project docs and sample files.
 
 ## Ghostwriter Quick Start (Docker)
