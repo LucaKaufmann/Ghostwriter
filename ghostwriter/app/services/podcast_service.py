@@ -779,6 +779,18 @@ class PodcastDigestService:
         )
         return statement.where(~one_off_digest_exists)
 
+    @staticmethod
+    def is_one_off_digest(session: Session, digest_id: UUID) -> bool:
+        """Return true when a digest contains one-off synthetic-feed articles."""
+        statement = (
+            select(DigestArticle.id)
+            .join(Feed, DigestArticle.feed_id == Feed.id)
+            .where(DigestArticle.digest_id == digest_id)
+            .where(Feed.url == ONE_OFF_SYNTHETIC_FEED_URL)
+            .limit(1)
+        )
+        return session.exec(statement).first() is not None
+
     def queue_multi_digest_episode(
         self,
         session: Session,

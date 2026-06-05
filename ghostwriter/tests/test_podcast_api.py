@@ -576,6 +576,77 @@ def test_one_off_digest_access_requires_episode_owner(client, monkeypatch):
     )
     assert other_filename_download.status_code == 404
 
+    other_filename_delete = client.delete(
+        f"/api/digests/{filename}",
+        headers=other_headers,
+    )
+    assert other_filename_delete.status_code == 404
+
+    owner_podcast_status = client.get(
+        f"/api/digests/{digest_id}/podcast",
+        headers=owner_headers,
+    )
+    assert owner_podcast_status.status_code == 200
+
+    other_podcast_status = client.get(
+        f"/api/digests/{digest_id}/podcast",
+        headers=other_headers,
+    )
+    assert other_podcast_status.status_code == 404
+
+    other_podcast_trigger = client.post(
+        f"/api/digests/{digest_id}/podcast",
+        headers=other_headers,
+    )
+    assert other_podcast_trigger.status_code == 404
+
+
+def test_orphaned_one_off_digest_fails_closed(client, monkeypatch):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    _owner_id, owner_headers = _create_auth_headers_for_user("orphan_owner")
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Orphaned private digest",
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Private orphan source",
+                    "content": (
+                        "This source creates a one-off digest whose podcast episode "
+                        "will be deleted to verify that digest access fails closed."
+                    ),
+                }
+            ],
+        },
+        headers=owner_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    digest_id = payload["digest_ids"][0]
+    episode_id = UUID(payload["episode_id"])
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        assert episode is not None
+        session.delete(episode)
+        session.commit()
+
+    articles = client.get(
+        f"/api/digests/{digest_id}/articles",
+        headers=owner_headers,
+    )
+    assert articles.status_code == 404
+
+    download = client.get(
+        f"/api/digests/{digest_id}/download",
+        headers=owner_headers,
+    )
+    assert download.status_code == 404
+
 
 def test_one_off_episode_access_requires_episode_owner(client, monkeypatch):
     monkeypatch.setattr(
@@ -985,11 +1056,12 @@ def test_trigger_digest_podcast_requeues_failed_episode(
 
 
 def test_trigger_digest_podcast_preserves_existing_one_off_trigger(
-    client, monkeypatch, auth_headers
+    client, monkeypatch
 ):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
+    owner_id, owner_headers = _create_auth_headers_for_user("trigger_oneoff_owner")
     digest_id, article_ids = _create_digest_with_articles(
         article_count=2,
         feed_url="synthetic://one-off",
@@ -1000,9 +1072,10 @@ def test_trigger_digest_podcast_preserves_existing_one_off_trigger(
         article_ids=article_ids,
         status="failed",
         trigger="one_off",
+        user_id=owner_id,
     )
 
-    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=auth_headers)
+    trigger = client.post(f"/api/digests/{digest_id}/podcast", headers=owner_headers)
     assert trigger.status_code == 200
 
     with Session(engine) as session:

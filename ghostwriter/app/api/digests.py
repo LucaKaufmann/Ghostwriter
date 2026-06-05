@@ -191,6 +191,11 @@ async def _ensure_digest_access(
 ) -> None:
     episode = _one_off_episode_for_digest(session, digest_id)
     if episode is None:
+        if podcast_service.is_one_off_digest(session, digest_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Digest not found",
+            )
         return
 
     current_user = await get_current_user(request, credentials, session)
@@ -787,6 +792,8 @@ async def download_digest(
 @router.delete("/{filename}", dependencies=[Depends(verify_api_key)])
 async def delete_digest(
     filename: str,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -807,6 +814,12 @@ async def delete_digest(
     digest = session.exec(statement).first()
 
     if digest:
+        await _ensure_digest_access(
+            session=session,
+            digest_id=digest.id,
+            request=request,
+            credentials=credentials,
+        )
         session.delete(digest)
         session.commit()
 

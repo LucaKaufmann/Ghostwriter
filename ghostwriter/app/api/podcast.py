@@ -220,6 +220,17 @@ def _resolve_episode_articles(
     return ordered
 
 
+def _episode_for_digest(session: Session, digest_id: UUID) -> PodcastEpisode | None:
+    digest_id_str = str(digest_id)
+    all_episodes = session.exec(
+        select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
+    ).all()
+    return next(
+        (episode for episode in all_episodes if digest_id_str in (episode.digest_ids or [])),
+        None,
+    )
+
+
 def _parse_range(range_header: str | None, file_size: int) -> tuple[int, int] | None:
     if not range_header:
         return None
@@ -321,6 +332,20 @@ async def _ensure_one_off_episode_access(
     current_user = await _current_user_for_request(request, session)
     if episode.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
+
+
+async def _ensure_one_off_digest_episode_access(
+    request: Request,
+    session: Session,
+    digest_id: UUID,
+) -> None:
+    if not podcast_service.is_one_off_digest(session, digest_id):
+        return
+
+    episode = _episode_for_digest(session, digest_id)
+    if episode is None:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
+    await _ensure_one_off_episode_access(request, session, episode)
 
 
 def _to_rfc2822(dt: datetime) -> str:
@@ -487,9 +512,11 @@ async def delete_article_feedback(
 )
 async def trigger_digest_podcast(
     digest_id: UUID,
+    request: Request,
     session: Session = Depends(get_session),
 ):
     """Manually queue podcast generation for one digest."""
+    await _ensure_one_off_digest_episode_access(request, session, digest_id)
     user_id = podcast_service.resolve_user_id(session)
     try:
         episode = podcast_service.queue_episode_generation(
@@ -584,6 +611,7 @@ async def get_digest_podcast_status(
     session: Session = Depends(get_session),
 ):
     """Get podcast generation status for a digest."""
+    await _ensure_one_off_digest_episode_access(request, session, digest_id)
     digest_id_str = str(digest_id)
     try:
         # Find episodes that contain this digest_id in their digest_ids JSON array
