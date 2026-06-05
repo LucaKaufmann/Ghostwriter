@@ -24,6 +24,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlmodel import Session, select
@@ -453,6 +454,17 @@ async def update_podcast_preferences(
         credentials,
         session,
     )
+    schedule_fields = ("enabled", "schedule", "schedule_time", "schedule_day")
+    singleton_user_id = podcast_service.resolve_user_id(session)
+    if (
+        user_id is not None
+        and user_id != singleton_user_id
+        and any(getattr(update, field) is not None for field in schedule_fields)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Podcast schedule settings can only be changed by the singleton owner",
+        )
     try:
         prefs = podcast_service.update_preferences(
             session,
@@ -658,6 +670,7 @@ async def create_one_off_podcast_episode(
 async def get_digest_podcast_status(
     digest_id: UUID,
     request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: Session = Depends(get_session),
 ):
     """Get podcast generation status for a digest."""
@@ -668,8 +681,24 @@ async def get_digest_podcast_status(
         all_episodes = session.exec(
             select(PodcastEpisode).order_by(PodcastEpisode.created_at.desc())
         ).all()
+        user_id = await _resolve_podcast_preferences_user_id(
+            request,
+            credentials,
+            session,
+        )
+        matching_episodes = [
+            ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])
+        ]
+        user_episodes = (
+            [ep for ep in matching_episodes if ep.user_id == user_id]
+            if user_id is not None
+            else []
+        )
+        legacy_episodes = [
+            ep for ep in matching_episodes if ep.user_id is None
+        ]
         episode = next(
-            (ep for ep in all_episodes if digest_id_str in (ep.digest_ids or [])),
+            iter(user_episodes or legacy_episodes),
             None,
         )
     except SQLAlchemyTimeoutError as exc:
@@ -1081,6 +1110,12 @@ async def upload_podcast_feed_artwork(
     session: Session = Depends(get_session),
 ):
     """Upload custom podcast feed artwork (minimum 1400x1400)."""
+    user_id = await _resolve_podcast_preferences_user_id(
+        request,
+        credentials,
+        session,
+    )
+
     try:
         from PIL import Image
     except Exception as exc:  # pragma: no cover - Pillow is an install dependency.
@@ -1112,11 +1147,6 @@ async def upload_podcast_feed_artwork(
     if ext == "jpeg":
         ext = "jpg"
 
-    user_id = await _resolve_podcast_preferences_user_id(
-        request,
-        credentials,
-        session,
-    )
     prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
 
     settings = get_settings()

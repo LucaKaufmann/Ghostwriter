@@ -361,6 +361,14 @@ def test_podcast_preferences_are_scoped_to_token_owner(client):
     assert info_payload["feed_title"] == "Secondary Feed"
     assert "feed_token_prefs_owner" not in info_payload["feed_url"]
 
+    schedule_update = client.put(
+        "/api/podcast/preferences",
+        json={"enabled": True, "schedule": "daily"},
+        headers=headers,
+    )
+    assert schedule_update.status_code == 400
+    assert "schedule settings" in schedule_update.json()["detail"]
+
     with Session(engine) as session:
         owner_prefs = session.exec(
             select(PodcastPreferences).where(PodcastPreferences.user_id == owner_id)
@@ -461,6 +469,10 @@ def test_trigger_digest_podcast_uses_authenticated_token_owner(client, monkeypat
         headers=headers,
     )
     assert owner_detail.status_code == 404
+
+    digest_status = client.get(f"/api/digests/{digest_id}/podcast", headers=headers)
+    assert digest_status.status_code == 200
+    assert digest_status.json()["episode"]["id"] == str(episode_id)
 
     list_response = client.get("/api/podcast/episodes", headers=headers)
     assert list_response.status_code == 200
@@ -1741,6 +1753,16 @@ def test_feed_artwork_upload_and_serve(client):
     assert info.status_code == 200
     info_payload = info.json()
     assert "feed.xml?token=" in info_payload["feed_url"]
+
+
+def test_feed_artwork_upload_authenticates_before_validation(client):
+    _create_auth_headers_for_user("artwork_auth_guard")
+
+    upload = client.post(
+        "/api/podcast/feed/artwork",
+        files={"file": ("not-image.txt", b"not image", "text/plain")},
+    )
+    assert upload.status_code == 401
 
 
 def test_feed_artwork_upload_is_scoped_to_token_owner(client, tmp_path):
