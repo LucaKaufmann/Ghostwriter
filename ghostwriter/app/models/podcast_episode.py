@@ -23,6 +23,7 @@ class PodcastEpisodeBase(SQLModel):
     audio_path: str | None = Field(default=None)
     audio_size_bytes: int | None = Field(default=None, ge=0)
     duration_seconds: int | None = Field(default=None, ge=0)
+    episode_number: int | None = Field(default=None, ge=1)
     article_ids: list[str] = Field(
         default_factory=list,
         sa_column=Column(JSON, nullable=False, server_default="[]"),
@@ -60,6 +61,7 @@ class PodcastEpisodeSummaryRead(SQLModel):
     status: str
     audio_size_bytes: int | None = None
     duration_seconds: int | None = None
+    episode_number: int | None = None
     article_count: int
     generation_cost_cents: int | None = None
     error_message: str | None = None
@@ -82,3 +84,12 @@ class PodcastEpisodeRead(PodcastEpisodeSummaryRead):
     script: str | None = None
     article_ids: list[str]
     articles: list[PodcastEpisodeArticleRead] = []
+
+
+class PodcastEpisodeCounter(SQLModel, table=True):
+    """Per-owner podcast episode number counter."""
+
+    __tablename__ = "podcast_episode_counters"
+
+    owner_key: str = Field(primary_key=True)
+    next_episode_number: int = Field(default=1, ge=1)

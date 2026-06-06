@@ -115,6 +115,7 @@ def _create_episode(
     audio_path: Path | None = None,
     trigger: str = "manual",
     user_id: UUID | None = None,
+    episode_number: int | None = None,
 ) -> PodcastEpisode:
     now = datetime.utcnow()
     episode = PodcastEpisode(
@@ -128,6 +129,7 @@ def _create_episode(
         if audio_path and audio_path.exists()
         else None,
         duration_seconds=95 if audio_path else None,
+        episode_number=episode_number,
         article_ids=[str(article_id) for article_id in article_ids],
         article_count=len(article_ids),
         generation_cost_cents=41 if audio_path else None,
@@ -1423,18 +1425,32 @@ def test_trigger_digest_podcast_does_not_reclassify_scheduled_episode(
 
 
 @pytest.mark.asyncio
-async def test_run_episode_generation_uses_runtime_preference_snapshot(monkeypatch):
+async def test_run_episode_generation_uses_runtime_preference_snapshot(client, monkeypatch):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    user_id, _headers = _create_auth_headers_for_user("episode_number_assignment")
+    prior_digest_id, prior_article_ids = _create_digest_with_articles(article_count=1)
+    _create_episode(
+        digest_id=prior_digest_id,
+        article_ids=prior_article_ids,
+        status="ready",
+        trigger="manual",
+        user_id=user_id,
+        episode_number=7,
     )
     digest_id, _ = _create_digest_with_articles(article_count=2)
 
     with Session(engine) as session:
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.openai_api_key = "test-openai-key"
         session.add(prefs)
         session.commit()
-        episode = podcast_service.queue_episode_generation(session, digest_id=digest_id)
+        episode = podcast_service.queue_episode_generation(
+            session,
+            digest_id=digest_id,
+            user_id=user_id,
+        )
         episode_id = episode.id
 
     async def _fake_generate_script(_articles, prefs, **_kwargs):
@@ -1467,6 +1483,40 @@ async def test_run_episode_generation_uses_runtime_preference_snapshot(monkeypat
         assert refreshed is not None
         assert refreshed.status == "ready"
         assert refreshed.error_message is None
+        assert refreshed.episode_number == 8
+
+
+def test_episode_number_assignment_uses_owner_counter(client):
+    user_id, _headers = _create_auth_headers_for_user("episode_number_counter")
+    first_digest_id, first_article_ids = _create_digest_with_articles(article_count=1)
+    second_digest_id, second_article_ids = _create_digest_with_articles(article_count=1)
+    first = _create_episode(
+        digest_id=first_digest_id,
+        article_ids=first_article_ids,
+        status="pending",
+        trigger="manual",
+        user_id=user_id,
+    )
+    second = _create_episode(
+        digest_id=second_digest_id,
+        article_ids=second_article_ids,
+        status="pending",
+        trigger="manual",
+        user_id=user_id,
+    )
+
+    with Session(engine) as session:
+        first = session.get(PodcastEpisode, first.id)
+        second = session.get(PodcastEpisode, second.id)
+        assert first is not None
+        assert second is not None
+
+        podcast_service._assign_episode_number_if_needed(session, first)
+        podcast_service._assign_episode_number_if_needed(session, second)
+        session.commit()
+
+        assert first.episode_number == 1
+        assert second.episode_number == 2
 
 
 def test_stream_download_and_feed_with_token_auth(client, tmp_path):
@@ -1496,6 +1546,7 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
         status="ready",
         audio_path=audio_path,
         user_id=user_id,
+        episode_number=42,
     )
 
     stream = client.get(
@@ -1530,6 +1581,12 @@ def test_stream_download_and_feed_with_token_auth(client, tmp_path):
     guid = items[0].find("guid")
     assert guid is not None
     assert guid.attrib.get("isPermaLink") == "false"
+    assert items[0].findtext("{http://www.itunes.com/dtds/podcast-1.0.dtd}episode") == (
+        "42"
+    )
+    assert items[0].findtext(
+        "{http://www.itunes.com/dtds/podcast-1.0.dtd}episodeType"
+    ) == "full"
 
 
 def test_feed_includes_ready_one_off_episode(client, tmp_path):
@@ -1559,11 +1616,19 @@ def test_feed_includes_ready_one_off_episode(client, tmp_path):
     feed = client.get("/api/podcast/feed.xml?token=feed_token_one_off_ready")
     assert feed.status_code == 200
     root = ET.fromstring(feed.content)
-    enclosure_urls = [
-        enclosure.attrib["url"]
-        for enclosure in root.findall("./channel/item/enclosure")
-    ]
-    assert any(str(episode.id) in url for url in enclosure_urls)
+    items = root.findall("./channel/item")
+    matching_items = []
+    for candidate in items:
+        enclosure = candidate.find("enclosure")
+        if enclosure is not None and str(episode.id) in enclosure.attrib["url"]:
+            matching_items.append(candidate)
+    assert len(matching_items) == 1
+    item = matching_items[0]
+    assert item.findtext("title", "").startswith("One-off Podcast - ")
+    assert item.find("{http://www.itunes.com/dtds/podcast-1.0.dtd}episode") is None
+    assert item.findtext("{http://www.itunes.com/dtds/podcast-1.0.dtd}episodeType") == (
+        "bonus"
+    )
 
 
 def test_feed_token_is_scoped_to_token_owner(client):
