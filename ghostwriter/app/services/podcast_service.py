@@ -20,7 +20,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
-from sqlalchemy import exists
+from sqlalchemy import exists, text
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
@@ -902,6 +902,73 @@ class PodcastDigestService:
         episode.completed_at = None
         episode.updated_at = now
 
+    def _assign_episode_number_if_needed(
+        self,
+        session: Session,
+        episode: PodcastEpisode,
+    ) -> None:
+        """Assign the next stable number for regular ready podcast episodes."""
+        if episode.trigger == "one_off" or episode.episode_number is not None:
+            return
+
+        owner_key = episode.user_id.hex if episode.user_id is not None else "__legacy__"
+        current_max = session.exec(
+            text(
+                """
+                SELECT MAX(episode_number)
+                FROM podcast_episodes
+                WHERE status = 'ready'
+                  AND COALESCE(trigger, 'manual') != 'one_off'
+                  AND episode_number IS NOT NULL
+                  AND (
+                    (:user_id IS NULL AND user_id IS NULL)
+                    OR user_id = :user_id
+                  )
+                """
+            ),
+            params={
+                "user_id": episode.user_id.hex if episode.user_id is not None else None
+            },
+        ).one()[0]
+        initial_next_episode_number = int(current_max or 0) + 1
+        session.exec(
+            text(
+                """
+                INSERT INTO podcast_episode_counters (
+                    owner_key,
+                    next_episode_number
+                )
+                VALUES (:owner_key, :next_episode_number)
+                ON CONFLICT(owner_key) DO NOTHING
+                """
+            ),
+            params={
+                "owner_key": owner_key,
+                "next_episode_number": initial_next_episode_number,
+            },
+        )
+        session.exec(
+            text(
+                """
+                UPDATE podcast_episode_counters
+                SET next_episode_number = next_episode_number + 1
+                WHERE owner_key = :owner_key
+                """
+            ),
+            params={"owner_key": owner_key},
+        )
+        assigned_number = session.exec(
+            text(
+                """
+                SELECT next_episode_number - 1
+                FROM podcast_episode_counters
+                WHERE owner_key = :owner_key
+                """
+            ),
+            params={"owner_key": owner_key},
+        ).one()[0]
+        episode.episode_number = int(assigned_number)
+
     def generate_scheduled_episode(self) -> UUID | None:
         """Generate a podcast episode from recent digests based on schedule config.
 
@@ -1264,6 +1331,9 @@ class PodcastDigestService:
                     script_chars=len(episode.script or ""),
                     tts_chars=audio_result.synthesized_chars,
                 )
+                if episode.user_id is None and user_id is not None:
+                    episode.user_id = user_id
+                self._assign_episode_number_if_needed(session, episode)
                 episode.status = "ready"
                 episode.error_message = None
                 episode.updated_at = datetime.utcnow()

@@ -83,6 +83,7 @@ class PodcastEpisodeStatusRead(BaseModel):
     status: str
     audio_size_bytes: int | None = None
     duration_seconds: int | None = None
+    episode_number: int | None = None
     article_count: int
     generation_cost_cents: int | None = None
     error_message: str | None = None
@@ -176,6 +177,7 @@ def _build_episode_status(
         status=episode.status,
         audio_size_bytes=episode.audio_size_bytes,
         duration_seconds=episode.duration_seconds,
+        episode_number=episode.episode_number,
         article_count=episode.article_count,
         generation_cost_cents=episode.generation_cost_cents,
         error_message=episode.error_message,
@@ -992,14 +994,15 @@ async def get_podcast_feed_xml(
         image_url = base_url + "/api/podcast/feed/artwork" + f"?token={token}"
         ET.SubElement(channel, "itunes:image", {"href": image_url})
 
-    for index, episode in enumerate(episodes, start=1):
+    for episode in episodes:
         item = ET.SubElement(channel, "item")
         created = episode.completed_at or episode.created_at
         created_local = created.date().isoformat()
 
-        # Build title: include digest count for multi-digest episodes
         digest_count = len(episode.digest_ids or [])
-        if digest_count > 1:
+        if episode.trigger == "one_off":
+            ET.SubElement(item, "title").text = f"One-off Podcast - {created_local}"
+        elif digest_count > 1:
             ET.SubElement(
                 item, "title"
             ).text = f"Digest Podcast - {created_local} ({digest_count} digests)"
@@ -1034,7 +1037,14 @@ async def get_podcast_feed_xml(
         ET.SubElement(item, "itunes:duration").text = _format_duration(
             episode.duration_seconds
         )
-        ET.SubElement(item, "itunes:episode").text = str(index)
+        if episode.trigger == "one_off":
+            ET.SubElement(item, "itunes:episodeType").text = "bonus"
+        else:
+            if episode.episode_number is not None:
+                ET.SubElement(item, "itunes:episode").text = str(
+                    episode.episode_number
+                )
+            ET.SubElement(item, "itunes:episodeType").text = "full"
         ET.SubElement(
             item, "guid", {"isPermaLink": "false"}
         ).text = f"podcast-episode-{episode.id}"
