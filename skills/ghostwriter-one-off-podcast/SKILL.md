@@ -8,8 +8,7 @@ metadata:
     tags: [ghostwriter, podcast, openclaw, documents, audio]
     config:
       - key: ghostwriter.base_url
-        description: Base URL for Ghostwriter without the /api suffix
-        default: "http://gateway.local:8158"
+        description: HTTPS base URL for Ghostwriter without the /api suffix
         prompt: Ghostwriter base URL
       - key: ghostwriter.token_env
         description: Environment variable containing the Ghostwriter API token or JWT
@@ -19,13 +18,14 @@ metadata:
 
 # Ghostwriter One-Off Podcast
 
-Use this skill when Luca asks to turn one or more documents, notes, article URLs, or research sources into a one-off Ghostwriter podcast episode.
+Use this skill when the user asks to turn one or more documents, notes, article URLs, or research sources into a one-off Ghostwriter podcast episode.
 
 ## Requirements
 
-- Ghostwriter endpoint: `http://gateway.local:8158/api/podcast/episodes/one-off`
+- Ghostwriter endpoint: `<GHOSTWRITER_BASE_URL>/api/podcast/episodes/one-off`
 - Authentication: `Authorization: Bearer <token>`
-- Token source: prefer `$GHOSTWRITER_TOKEN`, then `$GW_TOKEN`, then a `--env-file` such as `~/.env`; do not ask Luca to paste secrets into chat if an environment variable or env file can be used.
+- Base URL source: prefer `$GHOSTWRITER_BASE_URL`, then `$GW_BASE`, then `--base-url`. Use HTTPS for remote hosts. The helper only allows plain HTTP for loopback hosts unless `--allow-insecure-http` is explicitly passed.
+- Token source: prefer `$GHOSTWRITER_TOKEN`, then `$GW_TOKEN`, then a `--env-file` such as `~/.env`; do not ask the user to paste secrets into chat if an environment variable or env file can be used.
 - Phase 1 accepts only:
   - `type: "url"` for reachable article URLs
   - `type: "text"` for pasted or extracted document text
@@ -35,10 +35,10 @@ Use this skill when Luca asks to turn one or more documents, notes, article URLs
 
 1. Collect the requested source material.
 2. For Obsidian notes, pass note/folder paths to the helper instead of manually copying Markdown.
-3. Preview the exact Ghostwriter payload before submitting when the request has multiple notes or linked-note expansion.
+3. Preview source counts and warnings before submitting when the request has multiple notes or linked-note expansion.
 4. Create the episode with `scripts/create_one_off_podcast.py`.
 5. Poll until status is `ready` or `failed`.
-6. Download the audio when Luca asked for a file or automation output.
+6. Download the audio when the user asked for a file or automation output.
 7. Report the episode id, final status, source count, downloaded path, and feed/download URL if ready. If failed, report `error_message`.
 
 ## Helper Script
@@ -46,50 +46,60 @@ Use this skill when Luca asks to turn one or more documents, notes, article URLs
 Use the bundled script whenever possible:
 
 ```bash
-python3 ~/clawd/skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
+python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --env-file ~/.env \
-  --title "OpenClaw planning brief" \
+  --title "Project planning brief" \
   --brief "Explain the source documents, tradeoffs, and next actions." \
-  --text-file "OpenClaw Notes=/path/to/openclaw-notes.txt" \
+  --text-file "Project Notes=/path/to/project-notes.txt" \
   --url "https://example.com/article" \
   --download \
-  --output ~/Downloads/openclaw-planning-brief.mp3
+  --output /path/to/project-planning-brief.mp3
 ```
 
 Obsidian preview workflow:
 
 ```bash
-python3 ~/clawd/skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
-  --title "OpenClaw notes podcast" \
+python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
+  --title "Project notes podcast" \
   --brief "Explain these notes as a concise conversational briefing." \
-  --obsidian-note "/path/to/Vault/OpenClaw.md" \
-  --obsidian-folder "/path/to/Vault/Projects/OpenClaw" \
+  --obsidian-note "/path/to/Vault/Project.md" \
+  --obsidian-folder "/path/to/Vault/Projects/Project" \
   --include-linked-notes \
-  --preview \
-  --preview-output /tmp/openclaw-podcast-preview.json
+  --preview
 ```
 
-Submit from the preview:
+Write a full submit-ready preview file only when needed:
 
 ```bash
-python3 ~/clawd/skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
+python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
+  --title "Project notes podcast" \
+  --brief "Explain these notes as a concise conversational briefing." \
+  --obsidian-note "/path/to/Vault/Project.md" \
+  --preview \
+  --preview-output /tmp/project-podcast-preview.json
+```
+
+Submit from a full preview file:
+
+```bash
+python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --env-file ~/.env \
-  --source-json /tmp/openclaw-podcast-preview.json \
+  --source-json /tmp/project-podcast-preview.json \
   --download \
-  --output ~/Downloads/openclaw-notes.mp3
+  --output /path/to/project-notes.mp3
 ```
 
 Environment overrides:
 
 ```bash
-export GHOSTWRITER_BASE_URL="http://gateway.local:8158"
+export GHOSTWRITER_BASE_URL="https://ghostwriter.example.com"
 export GHOSTWRITER_TOKEN="gw_..."
 ```
 
 If using a `.env` file, pass it directly instead of relying on `source ~/.env`; sourced shell variables only reach Python if they are exported:
 
 ```bash
-python3 ~/clawd/skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
+python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --env-file ~/.env \
   --text-file "Note=/path/to/note.md" \
   --download
@@ -99,7 +109,7 @@ The script automatically reads `~/.env` when present, unless `--no-default-env-f
 
 The script prints JSON. On creation it includes `episode_id`, `digest_ids`, and `status`. With `--poll`, it prints the final episode detail. With `--download` or `--output`, it polls until ready, saves the MP3, and adds `downloaded_path` to the final JSON.
 
-Preview JSON includes the submit-ready `title`, `brief`, and `sources` fields plus `_preview` metadata with source counts, word counts, warnings, source origins, and content hashes. The helper accepts its own preview output via `--source-json`.
+Preview stdout includes the payload shape with text source content redacted plus `_preview` metadata with source counts, word counts, warnings, source origins, and content hashes. `--preview-output` writes the full submit-ready JSON to a private file and that file can be passed back with `--source-json`.
 
 Exit codes:
 
@@ -135,10 +145,10 @@ When calling the API directly, send:
 
 ## Operating Rules
 
-- Keep documents in user-provided order unless Luca asks for a different structure.
-- Prefer extracted text for private/local documents; Ghostwriter cannot fetch files from Luca's machine.
+- Keep documents in user-provided order unless the user asks for a different structure.
+- Prefer extracted text for private/local documents; Ghostwriter cannot fetch files from the user's machine.
 - For Obsidian, prefer `--obsidian-note` and `--obsidian-folder`; the helper strips YAML frontmatter, comments, embeds, wikilinks, block IDs, tags, and common Markdown link noise before submitting.
-- Use `--include-linked-notes` only when Luca wants one-hop wikilink context included. Review preview warnings for unresolved links.
+- Use `--include-linked-notes` only when the user wants one-hop wikilink context included. Review preview warnings for unresolved links.
 - For PDFs, DOCX, or web clippings, reduce each source to clean text before submitting.
 - Do not include secrets, API tokens, or private credentials inside source content.
 - If a document is too large, the helper splits it into chunks with titles such as `Roadmap - Part 1`.

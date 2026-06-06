@@ -13,9 +13,10 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 READY_STATUSES = {"ready", "failed"}
 MIN_TEXT_CHARS = 80
@@ -62,6 +63,32 @@ def normalize_api_base(value: str) -> str:
     if not base.endswith("/api"):
         base = f"{base}/api"
     return base
+
+
+def is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    normalized = host.strip().lower()
+    if normalized in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return normalized.endswith(".localhost")
+
+
+def enforce_safe_transport(value: str, *, allow_insecure_http: bool) -> None:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        fail("Ghostwriter URL must be an absolute http(s) URL", EXIT_CONFIG)
+    if parsed.scheme == "http" and not allow_insecure_http:
+        if is_loopback_host(parsed.hostname):
+            return
+        fail(
+            "Refusing to send bearer auth over non-loopback HTTP. "
+            "Use HTTPS, use localhost/127.0.0.1, or pass --allow-insecure-http.",
+            EXIT_CONFIG,
+        )
 
 
 def default_env_files() -> list[Path]:
@@ -189,7 +216,13 @@ def request_json(
         fail(f"Ghostwriter returned non-JSON response: {raw[:500]}", EXIT_API)
 
 
-def request_bytes(*, url: str, token: str) -> tuple[bytes, str | None]:
+def request_bytes(
+    *,
+    url: str,
+    token: str,
+    allow_insecure_http: bool,
+) -> tuple[bytes, str | None]:
+    enforce_safe_transport(url, allow_insecure_http=allow_insecure_http)
     request = urllib.request.Request(
         url,
         headers={
@@ -658,15 +691,43 @@ def build_payload_and_preview(args: argparse.Namespace) -> tuple[dict[str, Any],
     return payload, preview
 
 
+def redact_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    preview_payload = json.loads(json.dumps(payload))
+    for source in preview_payload.get("sources", []):
+        if not isinstance(source, dict) or source.get("type") != "text":
+            continue
+        if "content" not in source:
+            continue
+        content = str(source["content"])
+        source["content"] = (
+            f"<redacted {len(content)} chars; use --preview-output to write "
+            "the full submit-ready payload>"
+        )
+    return preview_payload
+
+
+def write_private_text(path: Path, text: str) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(text)
+    finally:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+
 def write_preview(payload: dict[str, Any], output: str | None) -> None:
-    text = json.dumps(payload, indent=2, sort_keys=True)
     if output:
         path = Path(output).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text + "\n", encoding="utf-8")
+        text = json.dumps(payload, indent=2, sort_keys=True)
+        write_private_text(path, text + "\n")
         print(str(path))
     else:
-        print(text)
+        safe_payload = redact_preview_payload(payload)
+        print(json.dumps(safe_payload, indent=2, sort_keys=True))
 
 
 def poll_episode(
@@ -711,6 +772,7 @@ def download_episode(
     token: str,
     detail: dict[str, Any],
     output: str | None,
+    allow_insecure_http: bool,
 ) -> Path:
     episode_id = str(detail.get("id") or detail.get("episode_id") or "")
     if not episode_id:
@@ -724,7 +786,11 @@ def download_episode(
         root = api_base.removesuffix("/api") + "/"
         url = urljoin(root, url.lstrip("/"))
 
-    data, content_type = request_bytes(url=url, token=token)
+    data, content_type = request_bytes(
+        url=url,
+        token=token,
+        allow_insecure_http=allow_insecure_http,
+    )
     if content_type and "json" in content_type.lower():
         fail(f"Audio download returned JSON instead of audio from {url}", EXIT_DOWNLOAD)
 
@@ -744,7 +810,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="Ghostwriter base URL, with or without /api.",
+        help="Ghostwriter base URL, with or without /api. Defaults to GHOSTWRITER_BASE_URL/GW_BASE.",
+    )
+    parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow bearer auth over non-loopback HTTP. Prefer HTTPS.",
     )
     parser.add_argument(
         "--env-file",
@@ -811,11 +882,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--preview",
         action="store_true",
-        help="Build and print/write the Ghostwriter payload without submitting it.",
+        help="Build the Ghostwriter payload without submitting it. Stdout redacts text content.",
     )
     parser.add_argument(
         "--preview-output",
-        help="Write --preview JSON to this path instead of stdout.",
+        help="Write full --preview JSON to this private file instead of redacted stdout.",
     )
     parser.add_argument(
         "--split-target-chars",
@@ -866,10 +937,10 @@ def main() -> int:
         explicit=args.base_url,
         env_names=["GHOSTWRITER_BASE_URL", "GW_BASE"],
         env_values=env_values,
-        default="http://gateway.local:8158",
         label="base-url",
     )
 
+    enforce_safe_transport(base_url, allow_insecure_http=args.allow_insecure_http)
     api_base = normalize_api_base(base_url)
     submit_payload = {
         key: payload[key]
@@ -911,6 +982,7 @@ def main() -> int:
             token=token,
             detail=final,
             output=args.output,
+            allow_insecure_http=args.allow_insecure_http,
         )
         final["downloaded_path"] = str(path)
 
