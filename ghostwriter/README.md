@@ -281,6 +281,8 @@ The built files are output to `frontend/build/` and served by FastAPI.
 - Stable tags: `ghostwriter-vX.Y.Z` git releases publish `X.Y.Z`, `X.Y`, `X`, and `latest`
 - Traceability tag: each published release also includes a `sha-<commit>` image tag
 
+See [RELEASE.md](RELEASE.md) for the release checklist and release notes.
+
 For conservative deployments, pin `GHOSTWRITER_VERSION` in `.env` or your shell before running Compose:
 
 ```bash
