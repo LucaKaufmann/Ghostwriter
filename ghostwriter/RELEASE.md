@@ -11,6 +11,9 @@ Ghostwriter stable releases are published as Docker images to `ghcr.io/lucakaufm
    ```bash
    source venv/bin/activate
    ```
+   If the venv is not activated, prefix backend commands with
+   `PATH="$PWD/venv/bin:$PATH"` so tests that shell out to `alembic` use the
+   project executable.
 5. Run backend checks:
    ```bash
    python -m pytest -q \
@@ -30,7 +33,7 @@ Ghostwriter stable releases are published as Docker images to `ghcr.io/lucakaufm
    alembic heads
    DATA_DIR="$(mktemp -d)" alembic upgrade head
    ```
-8. Run frontend checks with the same Node major version used by CI:
+8. Run frontend checks with Node 24, matching CI:
    ```bash
    cd frontend
    npm ci
@@ -45,7 +48,19 @@ Ghostwriter stable releases are published as Docker images to `ghcr.io/lucakaufm
     git push origin ghostwriter-vX.Y.Z
     ```
 12. Wait for the `Ghostwriter Image` workflow to publish the multi-arch image.
-13. Verify GHCR tags, a pinned Compose pull, `/api/health`, startup logs, login, settings, digest listing, and podcast feed endpoints.
+13. Verify GHCR package visibility and direct image pull before Compose:
+    ```bash
+    docker manifest inspect ghcr.io/lucakaufmann/ghostwriter:X.Y.Z
+    docker pull ghcr.io/lucakaufmann/ghostwriter:X.Y.Z
+    ```
+    If an unauthenticated public pull is expected, these commands must work
+    without a registry login. If authenticated pulls are intended, document the
+    required `docker login ghcr.io` step in the release notes.
+14. Create a deployment `.env` from `.env.example` before Compose verification;
+    the service uses `env_file: .env`, so `docker compose pull` fails before
+    contacting GHCR when `.env` is missing.
+15. Verify a pinned Compose pull, `/api/health`, startup logs, login, settings,
+    digest listing, and podcast feed endpoints.
 
 The frontend package is private app build metadata and is not used for Docker release versioning; leave `ghostwriter/frontend/package.json` unchanged unless the frontend starts publishing its own package artifact.
 
@@ -91,3 +106,18 @@ The frontend package is private app build metadata and is not used for Docker re
   ```
 - Verify `/api/health` reports `version: "1.1.0"` and container logs show migrations completed.
 - Roll back by pinning `GHOSTWRITER_VERSION=1.0.0`; restore the pre-upgrade data backup if database behavior needs to be reverted.
+
+### Release Process Feedback
+
+- Public consumption was not fully verified during the 1.1.0 release because
+  unauthenticated GHCR manifest inspection and `docker pull` returned
+  `unauthorized` after the publish workflow succeeded. Confirm package
+  visibility or authenticated-pull policy before the next release is announced.
+- `docker compose pull` needs a local `.env`; otherwise Compose fails before it
+  reaches GHCR. Use direct `docker pull` for registry-only verification, then
+  run Compose verification with a real deployment `.env`.
+- Local backend checks are smoother with an activated venv because Alembic tests
+  invoke `alembic` by executable name.
+- CI uses Node 24; local release verification should match that major version.
+- The runtime build currently installs `yt-dlp` without a pinned version, so
+  release image contents can vary over time for the same source commit.
