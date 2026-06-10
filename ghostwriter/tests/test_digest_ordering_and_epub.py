@@ -296,8 +296,8 @@ def test_cover_image_service_extract_source_labels_mixed_sources() -> None:
     assert labels == ["News", "Wallabag", "Newsletter", "Podcast", "YouTube"]
 
 
-def test_cover_image_service_prompt_requests_overlay_safe_space() -> None:
-    """Prompt should reserve clean layout areas for deterministic metadata overlays."""
+def test_cover_image_service_prompt_includes_digest_metadata() -> None:
+    """Prompt should render the digest title and describe the source mix."""
     service = CoverImageService()
     articles = [
         ExtractedArticle(
@@ -325,11 +325,17 @@ def test_cover_image_service_prompt_requests_overlay_safe_space() -> None:
         prompt_suffix="",
     )
 
-    assert "Do not render any readable text or letters" in prompt
-    assert "negative space near the top and bottom" in prompt
     assert "magazine-style cover illustration for a news digest edition" in prompt
+    assert (
+        'Include the digest title prominently at the top: "2026-02-14 - Morning"'
+        in prompt
+    )
+    assert "Do not use the article titles text directly" in prompt
+    assert "5:8 portrait book-cover ratio" in prompt
     assert "original portrait ebook cover illustration" not in prompt
-    assert "Included source types: News, Wallabag." in prompt
+    assert "Content types: News, Wallabag." in prompt
+    assert "Headline one (Tech Feed)" in prompt
+    assert "[Wallabag] Read-later item" in prompt
 
 
 def test_cover_image_service_overlay_metadata_changes_output_bytes() -> None:

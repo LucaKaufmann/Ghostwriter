@@ -68,7 +68,7 @@ async def verify_api_key(
     (LAN-only mode for initial setup).
     """
     # Import here to avoid circular imports
-    from app.core.auth import decode_access_token, verify_api_token
+    from app.core.auth import decode_access_token, get_token_prefix, verify_api_token
     from app.models.api_token import APIToken
     from app.models.user import User
 
@@ -109,9 +109,13 @@ async def verify_api_key(
 
     # Try API token (gw_xxx format)
     if _is_api_token(token):
-        # Find all non-revoked tokens and check against each
+        # Narrow candidates by stored prefix so we only run the expensive
+        # bcrypt check against tokens that can actually match.
         api_tokens = session.exec(
-            select(APIToken).where(APIToken.revoked_at.is_(None))
+            select(APIToken).where(
+                APIToken.revoked_at.is_(None),
+                APIToken.token_prefix == get_token_prefix(token),
+            )
         ).all()
 
         for api_token in api_tokens:
@@ -158,7 +162,7 @@ async def get_current_user(
     For API tokens, returns the user who owns the token.
     For legacy API_KEY, returns None (no user context).
     """
-    from app.core.auth import decode_access_token, verify_api_token
+    from app.core.auth import decode_access_token, get_token_prefix, verify_api_token
     from app.core.config import get_settings
     from app.models.api_token import APIToken
     from app.models.user import User
@@ -192,7 +196,10 @@ async def get_current_user(
     # API token
     if _is_api_token(token):
         api_tokens = session.exec(
-            select(APIToken).where(APIToken.revoked_at.is_(None))
+            select(APIToken).where(
+                APIToken.revoked_at.is_(None),
+                APIToken.token_prefix == get_token_prefix(token),
+            )
         ).all()
 
         for api_token in api_tokens:
