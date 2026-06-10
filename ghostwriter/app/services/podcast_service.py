@@ -4775,10 +4775,18 @@ class PodcastDigestService:
     async def _measure_segment_durations(
         self, paths: list[Path]
     ) -> list[float] | None:
-        """Probe every segment's duration; None when any probe fails."""
-        durations = await asyncio.gather(
-            *(self._probe_audio_duration_precise(path) for path in paths)
-        )
+        """Probe every segment's duration; None when any probe fails.
+
+        Long episodes can have hundreds of segments, so probes run under a
+        small concurrency cap rather than one ffmpeg process per segment.
+        """
+        semaphore = asyncio.Semaphore(4)
+
+        async def probe(path: Path) -> float | None:
+            async with semaphore:
+                return await self._probe_audio_duration_precise(path)
+
+        durations = await asyncio.gather(*(probe(path) for path in paths))
         if any(duration is None for duration in durations):
             return None
         return list(durations)

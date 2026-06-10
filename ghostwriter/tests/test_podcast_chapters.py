@@ -331,7 +331,6 @@ def _ready_episode_with_chapters(chapters=None, token=None):
     if token is not None:
         with Session(engine) as session:
             prefs = podcast_service.get_or_create_preferences(session, user_id=None)
-            prefs.enabled = True
             prefs.podcast_feed_enabled = True
             prefs.podcast_feed_token = token
             prefs.updated_at = datetime.utcnow()
