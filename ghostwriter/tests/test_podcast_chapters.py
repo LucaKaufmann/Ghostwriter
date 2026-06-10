@@ -213,9 +213,9 @@ class TestBuildChapterMarkers:
         assert markers is not None
         assert markers[1] == {"title": "Two", "start_seconds": 16.0}
 
-    def test_fully_skipped_chapter_collapses(self):
-        # Segments 2 and 3 (all of chapter Two) failed TTS: Two collapses
-        # into the same start as Three, so only the later one survives.
+    def test_fully_skipped_chapter_is_dropped(self):
+        # Segments 2 and 3 (all of chapter Two) failed TTS: Two must be
+        # dropped, not allowed to label the start of Three's audio.
         markers = PodcastDigestService._build_chapter_markers(
             self.CHAPTERS,
             synthesized_indexes=[0, 1, 4, 5],
@@ -223,7 +223,7 @@ class TestBuildChapterMarkers:
             gap_durations=[0.5, 0.5, 0.5],
         )
         assert markers is not None
-        assert [m["title"] for m in markers] == ["One", "Two"]
+        assert [m["title"] for m in markers] == ["One", "Three"]
         assert markers[1]["start_seconds"] == 16.0
 
     def test_single_chapter_returns_none(self):

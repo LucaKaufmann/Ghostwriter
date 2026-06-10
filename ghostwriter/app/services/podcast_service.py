@@ -4817,16 +4817,25 @@ class PodcastDigestService:
                 offset += gap_durations[position]
 
         markers: list[dict[str, Any]] = []
-        for chapter in sorted(chapters, key=lambda c: c.segment_index):
+        ordered = sorted(chapters, key=lambda c: c.segment_index)
+        for chapter_position, chapter in enumerate(ordered):
             title = chapter.title.strip()
             if not title:
                 continue
-            # First surviving unit at or after the chapter boundary.
+            # First surviving unit within this chapter's own segment range.
+            # If all of its segments were skipped, drop the chapter rather
+            # than letting its title claim the next chapter's audio.
+            next_boundary = (
+                ordered[chapter_position + 1].segment_index
+                if chapter_position + 1 < len(ordered)
+                else None
+            )
             position = next(
                 (
                     p
                     for p, original in enumerate(synthesized_indexes)
                     if original >= chapter.segment_index
+                    and (next_boundary is None or original < next_boundary)
                 ),
                 None,
             )
@@ -4834,7 +4843,6 @@ class PodcastDigestService:
                 continue
             start = round(start_offsets[position], 3)
             if markers and start <= markers[-1]["start_seconds"]:
-                # Collapsed into the previous chapter (its segments all failed).
                 continue
             markers.append({"title": title, "start_seconds": start})
 
