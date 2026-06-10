@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
+	import type { PodcastChapter } from '$lib/api/types';
 	import { Button } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { formatPlayerTime } from '$lib/utils/episode';
 	import {
+		ListOrdered,
 		Loader2,
 		Pause,
 		Play,
@@ -15,9 +17,10 @@
 	interface Props {
 		episodeId: string;
 		durationHint?: number | null;
+		chapters?: PodcastChapter[] | null;
 	}
 
-	let { episodeId, durationHint = null }: Props = $props();
+	let { episodeId, durationHint = null, chapters = null }: Props = $props();
 
 	let audioEl: HTMLAudioElement | undefined = $state();
 	let blobUrl: string | null = $state(null);
@@ -117,7 +120,27 @@
 		}
 	}
 
+	function seekToChapter(chapter: PodcastChapter) {
+		if (!audioEl) return;
+		audioEl.currentTime = chapter.start_seconds;
+		currentTime = chapter.start_seconds;
+		if (!playing) {
+			audioEl.play();
+		}
+	}
+
 	const progress = $derived(duration > 0 ? (currentTime / duration) * 100 : 0);
+
+	const currentChapterIndex = $derived.by(() => {
+		if (!chapters || chapters.length === 0) return -1;
+		let index = -1;
+		for (let i = 0; i < chapters.length; i++) {
+			if (currentTime >= chapters[i].start_seconds) {
+				index = i;
+			}
+		}
+		return index;
+	});
 </script>
 
 <style>
@@ -272,5 +295,37 @@
 				{formatPlayerTime(duration)}
 			</span>
 		</div>
+
+		<!-- Chapters -->
+		{#if chapters && chapters.length > 0}
+			<div class="space-y-1">
+				<p class="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+					<ListOrdered class="h-3.5 w-3.5" />
+					Chapters
+				</p>
+				<ol class="divide-y rounded-md border">
+					{#each chapters as chapter, index}
+						<li>
+							<button
+								type="button"
+								class="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-muted {index ===
+								currentChapterIndex
+									? 'bg-muted font-medium'
+									: ''}"
+								onclick={() => seekToChapter(chapter)}
+							>
+								<span class="w-10 shrink-0 text-xs tabular-nums text-muted-foreground">
+									{formatPlayerTime(chapter.start_seconds)}
+								</span>
+								<span class="min-w-0 flex-1 truncate">{chapter.title}</span>
+								{#if index === currentChapterIndex && playing}
+									<span class="shrink-0 text-xs text-primary">Playing</span>
+								{/if}
+							</button>
+						</li>
+					{/each}
+				</ol>
+			</div>
+		{/if}
 	</div>
 {/if}

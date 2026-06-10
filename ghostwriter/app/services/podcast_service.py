@@ -21,6 +21,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
+from mutagen.id3 import CHAP, CTOC, ID3, TIT2, CTOCFlags, ID3NoHeaderError
 from sqlalchemy import exists, text
 from sqlmodel import Session, select
 
@@ -58,6 +59,10 @@ GENERATION_OVERRIDE_KEYS = {
     "host_count",
 }
 SCRIPT_LINE_RE = re.compile(r"^\[(HOST_A|HOST_B)\]:\s+(.+)$")
+CHAPTER_LINE_RE = re.compile(r"^\[CHAPTER\]:\s*(.+)$", re.IGNORECASE)
+CHAPTER_TITLE_MAX_CHARS = 80
+# A single chapter spanning the whole episode is noise, not navigation.
+MIN_CHAPTER_COUNT = 2
 SCHEDULE_DAY_TO_WEEKDAY = {
     "monday": 0,
     "tuesday": 1,
@@ -214,6 +219,7 @@ SCRIPT_SYSTEM_PROMPT = (
     """You are a podcast script writer for concise daily briefings.
 Hard rules:
 - Output only dialogue lines in this exact format: [HOST_A]: ... or [HOST_B]: ...
+- The only other allowed line type is a chapter marker on its own line: [CHAPTER]: Short Topic Title
 - No stage directions, bullet points, headings, markdown, or narration outside host lines.
 - Keep language clear and concrete, but conversational.
 - Hosts should have distinct voices and react to each other naturally.
@@ -320,7 +326,12 @@ Requirements:
 - Avoid repetitive sentence templates and "headline summary" cadence on every line.
 - Write approximately {target_words} spoken words in total; do not start the closing before reaching {min_words} words. The word budget is the primary length target.
 - Return {min_lines}-{max_lines} total lines to fit the word budget.
+- Insert a chapter marker line before each topic block: [CHAPTER]: Short Topic Title
+  - The first marker goes at the very top (before the cold open), titled after the lead story.
+  - Add one marker per outline beat / topic transition; titles are at most 6 words, specific to the story (never "Intro" or "Story 2").
+  - Chapter markers are navigation metadata: the hosts never read them aloud or reference them.
 - Output format must be only:
+  [CHAPTER]: ...
   [HOST_A]: ...
   [HOST_B]: ...
 """
@@ -329,6 +340,7 @@ SCRIPT_SOLO_SYSTEM_PROMPT = (
     """You are a podcast script writer for concise solo daily briefings.
 Hard rules:
 - Output only flowing monologue paragraphs — no speaker tags, no bullet points, no headings.
+- The only allowed non-paragraph line is a chapter marker on its own line: [CHAPTER]: Short Topic Title
 - Use ellipses (...) for natural pauses and [pause] markers for breath pauses between topics.
 - Keep language clear and concrete, but conversational — as if talking directly to the listener.
 - Use self-reflective transitions ("Now, what's interesting about this...", "Let me shift gears...").
@@ -394,6 +406,10 @@ Requirements:
 - Use specific_details, tension, listener_angle, and follow_up_question from the briefs when available.
 - Write approximately {target_words} spoken words in total; do not start the closing before reaching {min_words} words. The word budget is the primary length target.
 - Aim for {min_paragraphs}-{max_paragraphs} paragraphs to fit the word budget.
+- Insert a chapter marker line before each topic block: [CHAPTER]: Short Topic Title
+  - The first marker goes at the very top (before the cold open), titled after the lead story.
+  - Add one marker per outline beat / topic transition (where [pause] breaks go); titles are at most 6 words, specific to the story.
+  - Chapter markers are navigation metadata: never read them aloud or reference them.
 - Do not use any [HOST_A] or [HOST_B] tags — this is a solo show.
 """
 
@@ -415,6 +431,7 @@ Rewrite the script at full target length:
 - Expand by deepening existing topics with concrete material from the article briefs: implications, examples, tradeoffs, specific details, tension, and listener angles.
 - Do not pad with filler, repetition, or longer greetings and closings.
 - Do not add audience interaction or show housekeeping: no questions/comments asks, subscriptions, sponsors, or future-episode references.
+- Preserve every [CHAPTER]: marker line from the draft in its original position relative to the surrounding topics.
 - Keep every formatting rule from the original instructions, including the exact output format.
 - Write at least {min_words} spoken words.
 
@@ -442,6 +459,18 @@ class ScriptSegment:
 
 
 @dataclass
+class ScriptChapter:
+    """Chapter boundary parsed from a script.
+
+    segment_index is the 0-based index of the first dialogue segment (or solo
+    paragraph) belonging to this chapter.
+    """
+
+    title: str
+    segment_index: int
+
+
+@dataclass
 class AudioGenerationResult:
     """Audio generation output metadata."""
 
@@ -449,6 +478,9 @@ class AudioGenerationResult:
     audio_size_bytes: int
     duration_seconds: int | None
     synthesized_chars: int
+    # [{"title": str, "start_seconds": float}] in playback order, or None
+    # when the script had no usable chapter markers.
+    chapters: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -1065,6 +1097,7 @@ class PodcastDigestService:
         episode.audio_path = None
         episode.audio_size_bytes = None
         episode.duration_seconds = None
+        episode.chapters = None
         episode.generation_cost_cents = None
         episode.article_ids = []
         episode.article_count = 0
@@ -1603,7 +1636,7 @@ class PodcastDigestService:
                         digest_id=episode_digest_ids[0],
                         episode_context=episode_context,
                     )
-                    segments = self.parse_script_segments(script)
+                    segments, script_chapters = self.parse_script_with_chapters(script)
                     logger.info(
                         "Podcast script generation complete",
                         extra={
@@ -1611,6 +1644,7 @@ class PodcastDigestService:
                             "digest_ids": [str(d) for d in episode_digest_ids],
                             "script_chars": len(script),
                             "segment_count": len(segments),
+                            "chapter_count": len(script_chapters),
                         },
                     )
 
@@ -1658,7 +1692,9 @@ class PodcastDigestService:
                     episode_id, solo_text, runtime_prefs
                 )
             else:
-                audio_result = await self.generate_audio(episode_id, segments, runtime_prefs)
+                audio_result = await self.generate_audio(
+                    episode_id, segments, runtime_prefs, chapters=script_chapters
+                )
 
             if (
                 audio_result.duration_seconds is not None
@@ -1674,6 +1710,24 @@ class PodcastDigestService:
                     f"Most TTS segments likely failed."
                 )
 
+            if audio_result.chapters:
+                # Best-effort: a missing chapter tag never fails the episode.
+                try:
+                    self._write_id3_chapter_tags(
+                        Path(audio_result.audio_path),
+                        audio_result.chapters,
+                        total_duration_seconds=audio_result.duration_seconds,
+                    )
+                    audio_result.audio_size_bytes = (
+                        Path(audio_result.audio_path).stat().st_size
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed writing ID3 chapter tags",
+                        extra={"episode_id": str(episode_id)},
+                        exc_info=True,
+                    )
+
             with Session(engine) as session:
                 episode = session.get(PodcastEpisode, episode_id)
                 if episode is None:
@@ -1681,6 +1735,7 @@ class PodcastDigestService:
                 episode.audio_path = audio_result.audio_path
                 episode.audio_size_bytes = audio_result.audio_size_bytes
                 episode.duration_seconds = audio_result.duration_seconds
+                episode.chapters = audio_result.chapters or None
                 episode.generation_cost_cents = self._estimate_generation_cost_cents(
                     script_chars=len(episode.script or ""),
                     tts_chars=audio_result.synthesized_chars,
@@ -2723,11 +2778,13 @@ class PodcastDigestService:
         if re.search(r"\[HOST_[AB]\]:", text):
             raise ValueError("Solo script contains HOST tags")
 
-        # Split into content paragraphs (skip [pause] markers)
+        # Split into content paragraphs (skip [pause] and [CHAPTER] markers)
         paragraphs = [
             p.strip()
             for p in text.split("\n\n")
-            if p.strip() and p.strip().lower() != "[pause]"
+            if p.strip()
+            and p.strip().lower() != "[pause]"
+            and not CHAPTER_LINE_RE.match(p.strip())
         ]
         # Also count single-newline-separated paragraphs
         if len(paragraphs) < 2:
@@ -2736,6 +2793,7 @@ class PodcastDigestService:
                 for p in text.split("\n")
                 if p.strip()
                 and p.strip().lower() != "[pause]"
+                and not CHAPTER_LINE_RE.match(p.strip())
                 and len(p.strip()) > 20
             ]
 
@@ -2773,7 +2831,7 @@ class PodcastDigestService:
         if provider not in SUPPORTED_TTS_PROVIDERS:
             raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
 
-        chunks = self._build_solo_chunks(
+        chunks, script_chapters = self._build_solo_chunks_with_chapters(
             script,
             provider=provider,
             elevenlabs_model_id=prefs.elevenlabs_model_id,
@@ -2803,9 +2861,11 @@ class PodcastDigestService:
             await self._check_elevenlabs_quota(prefs, total_chars)
 
         synthesized_chars = 0
+        chapter_markers: list[dict[str, Any]] | None = None
         request_id_history: dict[str, list[str]] = {}
         with tempfile.TemporaryDirectory(prefix="podcast_solo_tts_") as tmpdir:
             chunk_paths: list[Path] = []
+            synthesized_indexes: list[int] = []
             for idx, normalized in enumerate(chunks, start=1):
                 self._append_tts_debug_entry(
                     debug_path,
@@ -2852,10 +2912,26 @@ class PodcastDigestService:
                 path = Path(tmpdir) / f"chunk_{idx:04d}.mp3"
                 path.write_bytes(audio_bytes)
                 chunk_paths.append(path)
+                synthesized_indexes.append(idx - 1)
                 synthesized_chars += len(normalized)
 
             if not chunk_paths:
                 raise RuntimeError("TTS failed for all solo chunks")
+
+            if script_chapters:
+                durations = await self._measure_segment_durations(chunk_paths)
+                if durations is None:
+                    logger.warning(
+                        "Skipping chapter markers: chunk duration probe failed",
+                        extra={"episode_id": str(episode_id)},
+                    )
+                else:
+                    chapter_markers = self._build_chapter_markers(
+                        script_chapters,
+                        synthesized_indexes=synthesized_indexes,
+                        durations=durations,
+                        gap_durations=None,
+                    )
 
             if len(chunk_paths) == 1:
                 shutil.copyfile(chunk_paths[0], final_path)
@@ -2882,6 +2958,7 @@ class PodcastDigestService:
                 "audio_size_bytes": audio_size,
                 "duration_seconds": duration,
                 "synthesized_chars": synthesized_chars,
+                "chapter_count": len(chapter_markers) if chapter_markers else 0,
             },
         )
         return AudioGenerationResult(
@@ -2889,6 +2966,7 @@ class PodcastDigestService:
             audio_size_bytes=audio_size,
             duration_seconds=duration,
             synthesized_chars=synthesized_chars,
+            chapters=chapter_markers,
         )
 
     @staticmethod
@@ -2898,10 +2976,27 @@ class PodcastDigestService:
         provider: str,
         elevenlabs_model_id: str | None = None,
     ) -> list[str]:
-        """Turn a solo script into normalized, provider-sized TTS request chunks.
+        """Turn a solo script into normalized, provider-sized TTS request chunks."""
+        chunks, _ = PodcastDigestService._build_solo_chunks_with_chapters(
+            script,
+            provider=provider,
+            elevenlabs_model_id=elevenlabs_model_id,
+        )
+        return chunks
+
+    @staticmethod
+    def _build_solo_chunks_with_chapters(
+        script: str,
+        *,
+        provider: str,
+        elevenlabs_model_id: str | None = None,
+    ) -> tuple[list[str], list[ScriptChapter]]:
+        """Build solo TTS chunks plus chapter boundaries at chunk indexes.
 
         Paragraph breaks are preserved inside each chunk because v3 uses them
-        for pacing; whitespace is only collapsed within paragraphs.
+        for pacing; whitespace is only collapsed within paragraphs. Chunks
+        never span a [CHAPTER] marker, so each chapter starts exactly at a
+        chunk seam and its timestamp can be measured from chunk durations.
         """
         model_id = (elevenlabs_model_id or "").strip().lower()
         is_v3 = provider == "elevenlabs" and model_id == "eleven_v3"
@@ -2917,19 +3012,36 @@ class PodcastDigestService:
                 else SOLO_CHUNK_MAX_CHARS_OPENAI
             )
 
-        paragraphs = [
-            paragraph
-            for paragraph in (
-                re.sub(r"\s+", " ", part).strip() for part in cleaned.splitlines()
-            )
-            if paragraph
-        ]
-        if not paragraphs:
-            paragraphs = [re.sub(r"\s+", " ", cleaned).strip()]
+        # Split paragraphs into chapter sections. Section 0 collects any text
+        # before the first marker and has no title.
+        sections: list[tuple[str | None, list[str]]] = [(None, [])]
+        for raw_line in cleaned.splitlines():
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not line:
+                continue
+            chapter_match = CHAPTER_LINE_RE.match(line)
+            if chapter_match:
+                title = chapter_match.group(1).strip()[:CHAPTER_TITLE_MAX_CHARS]
+                sections.append((title or None, []))
+                continue
+            sections[-1][1].append(line)
 
-        chunks = PodcastDigestService._chunk_paragraphs(paragraphs, max_chars=max_chars)
-        normalized_chunks: list[str] = []
-        for chunk in chunks:
+        if not any(paragraphs for _, paragraphs in sections):
+            whole = re.sub(r"\s+", " ", cleaned).strip()
+            sections = [(None, [whole])] if whole else [(None, [])]
+
+        chunk_entries: list[tuple[str, int]] = []
+        for section_index, (_, section_paragraphs) in enumerate(sections):
+            if not section_paragraphs:
+                continue
+            for chunk in PodcastDigestService._chunk_paragraphs(
+                section_paragraphs, max_chars=max_chars
+            ):
+                chunk_entries.append((chunk, section_index))
+
+        chunks: list[str] = []
+        first_chunk_for_section: dict[int, int] = {}
+        for chunk, section_index in chunk_entries:
             parts = [
                 PodcastDigestService._normalize_tts_segment_text(
                     part,
@@ -2940,8 +3052,15 @@ class PodcastDigestService:
             ]
             normalized = "\n\n".join(part for part in parts if part)
             if normalized:
-                normalized_chunks.append(normalized)
-        return normalized_chunks
+                first_chunk_for_section.setdefault(section_index, len(chunks))
+                chunks.append(normalized)
+
+        chapters = [
+            ScriptChapter(title=title, segment_index=first_chunk_for_section[index])
+            for index, (title, _) in enumerate(sections)
+            if title and index in first_chunk_for_section
+        ]
+        return chunks, chapters
 
     @staticmethod
     def _chunk_paragraphs(
@@ -3422,13 +3541,38 @@ class PodcastDigestService:
     @staticmethod
     def parse_script_segments(script: str) -> list[ScriptSegment]:
         """Parse script text into [HOST_A]/[HOST_B] segments."""
+        segments, _ = PodcastDigestService.parse_script_with_chapters(script)
+        return segments
+
+    @staticmethod
+    def parse_script_with_chapters(
+        script: str,
+    ) -> tuple[list[ScriptSegment], list[ScriptChapter]]:
+        """Parse script into host segments plus optional chapter boundaries.
+
+        [CHAPTER]: lines are navigation metadata, never synthesized. Chapters
+        are best-effort: a script without markers is valid and yields an
+        empty chapter list.
+        """
         lines = [line.strip() for line in script.splitlines() if line.strip()]
         if not lines:
             raise ValueError("Script is empty")
 
         segments: list[ScriptSegment] = []
+        chapters: list[ScriptChapter] = []
         speakers: set[str] = set()
         for line in lines:
+            chapter_match = CHAPTER_LINE_RE.match(line)
+            if chapter_match:
+                title = chapter_match.group(1).strip()[:CHAPTER_TITLE_MAX_CHARS]
+                # Consecutive markers collapse to the first; empty titles drop.
+                if title and not (
+                    chapters and chapters[-1].segment_index == len(segments)
+                ):
+                    chapters.append(
+                        ScriptChapter(title=title, segment_index=len(segments))
+                    )
+                continue
             match = SCRIPT_LINE_RE.match(line)
             if not match:
                 raise ValueError("Script contains non-speaker lines")
@@ -3443,13 +3587,16 @@ class PodcastDigestService:
             raise ValueError("Script must contain at least 6 host lines")
         if speakers != {"HOST_A", "HOST_B"}:
             raise ValueError("Script must include both HOST_A and HOST_B")
-        return segments
+        # A trailing marker with no segments after it points nowhere.
+        chapters = [c for c in chapters if c.segment_index < len(segments)]
+        return segments, chapters
 
     async def generate_audio(
         self,
         episode_id: UUID,
         segments: list[ScriptSegment],
         prefs: PodcastGenerationPreferences,
+        chapters: list[ScriptChapter] | None = None,
     ) -> AudioGenerationResult:
         """Synthesize audio for script segments and stitch into one MP3."""
         if not segments:
@@ -3508,14 +3655,17 @@ class PodcastDigestService:
                 prefs=prefs,
                 debug_path=debug_path,
                 final_path=final_path,
+                chapters=chapters,
             )
             if dialogue_result is not None:
                 return dialogue_result
 
         synthesized_chars = 0
+        chapter_markers: list[dict[str, Any]] | None = None
         with tempfile.TemporaryDirectory(prefix="podcast_tts_") as tmpdir:
             segment_paths: list[Path] = []
             stitched_entries: list[tuple[str, str]] = []
+            synthesized_indexes: list[int] = []
             for index, segment in enumerate(segments, start=1):
                 normalized_text = normalized_segment_texts[index - 1]
                 preferred_voice = (
@@ -3591,6 +3741,7 @@ class PodcastDigestService:
                 path.write_bytes(audio_bytes)
                 segment_paths.append(path)
                 stitched_entries.append((normalized_text, segment.speaker))
+                synthesized_indexes.append(index - 1)
                 synthesized_chars += len(segment.text)
                 self._append_tts_debug_entry(
                     debug_path,
@@ -3623,6 +3774,20 @@ class PodcastDigestService:
                 )
                 for pos, (text, speaker) in enumerate(stitched_entries[:-1])
             ]
+            if chapters:
+                durations = await self._measure_segment_durations(segment_paths)
+                if durations is None:
+                    logger.warning(
+                        "Skipping chapter markers: segment duration probe failed",
+                        extra={"episode_id": str(episode_id)},
+                    )
+                else:
+                    chapter_markers = self._build_chapter_markers(
+                        chapters,
+                        synthesized_indexes=synthesized_indexes,
+                        durations=durations,
+                        gap_durations=gap_durations,
+                    )
             await self._stitch_segments(
                 segment_paths,
                 final_path,
@@ -3654,6 +3819,7 @@ class PodcastDigestService:
                 "audio_size_bytes": audio_size,
                 "duration_seconds": duration,
                 "synthesized_chars": synthesized_chars,
+                "chapter_count": len(chapter_markers) if chapter_markers else 0,
             },
         )
         return AudioGenerationResult(
@@ -3661,18 +3827,22 @@ class PodcastDigestService:
             audio_size_bytes=audio_size,
             duration_seconds=duration,
             synthesized_chars=synthesized_chars,
+            chapters=chapter_markers,
         )
 
     @staticmethod
     def _group_dialogue_scenes(
         entries: list[tuple[str, str]],
         max_chars: int = DIALOGUE_SCENE_MAX_CHARS,
+        break_indexes: set[int] | None = None,
     ) -> list[list[int]]:
         """Group consecutive (speaker, text) lines into scene-sized index groups.
 
         Lines are never split. A new scene starts when the budget would be
         exceeded, or early at a HOST_A line once the scene is mostly full —
-        HOST_A opens topics, so those are natural seams.
+        HOST_A opens topics, so those are natural seams. break_indexes force a
+        scene break before those lines: a scene is one synthesized audio blob,
+        so chapter boundaries must land on scene seams to be measurable.
         """
         scenes: list[list[int]] = []
         current: list[int] = []
@@ -3683,6 +3853,7 @@ class PodcastDigestService:
             if current and (
                 current_chars + line_chars > max_chars
                 or (speaker == "HOST_A" and current_chars >= break_threshold)
+                or (break_indexes is not None and index in break_indexes)
             ):
                 scenes.append(current)
                 current = []
@@ -3702,6 +3873,7 @@ class PodcastDigestService:
         prefs: PodcastGenerationPreferences,
         debug_path: Path,
         final_path: Path,
+        chapters: list[ScriptChapter] | None = None,
     ) -> AudioGenerationResult | None:
         """Synthesize a dual-host episode via the v3 text-to-dialogue API.
 
@@ -3715,7 +3887,12 @@ class PodcastDigestService:
             (segment.speaker, normalized_texts[index])
             for index, segment in enumerate(segments)
         ]
-        scene_groups = self._group_dialogue_scenes(entries)
+        chapter_break_indexes = (
+            {chapter.segment_index for chapter in chapters} if chapters else None
+        )
+        scene_groups = self._group_dialogue_scenes(
+            entries, break_indexes=chapter_break_indexes
+        )
         self._append_tts_debug_entry(
             debug_path,
             {
@@ -3728,6 +3905,7 @@ class PodcastDigestService:
         )
 
         synthesized_chars = 0
+        chapter_markers: list[dict[str, Any]] | None = None
         try:
             with tempfile.TemporaryDirectory(prefix="podcast_dialogue_") as tmpdir:
                 scene_paths: list[Path] = []
@@ -3811,6 +3989,24 @@ class PodcastDigestService:
                                 speaker_change=last_speaker != next_speaker,
                             )
                         )
+                    if chapters:
+                        durations = await self._measure_segment_durations(scene_paths)
+                        if durations is None:
+                            logger.warning(
+                                "Skipping chapter markers: scene duration probe failed",
+                                extra={"episode_id": str(episode_id)},
+                            )
+                        else:
+                            # Chapter boundaries were forced onto scene seams,
+                            # so each scene's first line index locates it.
+                            chapter_markers = self._build_chapter_markers(
+                                chapters,
+                                synthesized_indexes=[
+                                    group[0] for group in scene_groups
+                                ],
+                                durations=durations,
+                                gap_durations=gap_durations,
+                            )
                     await self._stitch_segments(
                         scene_paths,
                         final_path,
@@ -3857,6 +4053,7 @@ class PodcastDigestService:
                 "audio_size_bytes": audio_size,
                 "duration_seconds": duration,
                 "synthesized_chars": synthesized_chars,
+                "chapter_count": len(chapter_markers) if chapter_markers else 0,
             },
         )
         return AudioGenerationResult(
@@ -3864,6 +4061,7 @@ class PodcastDigestService:
             audio_size_bytes=audio_size,
             duration_seconds=duration,
             synthesized_chars=synthesized_chars,
+            chapters=chapter_markers,
         )
 
     async def _synthesize_dialogue_scene_with_retry(
@@ -4483,6 +4681,183 @@ class PodcastDigestService:
         if process.returncode != 0:
             stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"{error_prefix}: {stderr[:300]}")
+
+    @staticmethod
+    def _write_id3_chapter_tags(
+        path: Path,
+        chapters: list[dict[str, Any]],
+        *,
+        total_duration_seconds: int | None,
+    ) -> None:
+        """Embed ID3v2 CHAP/CTOC chapter frames into the final MP3.
+
+        This is what podcast apps (Apple Podcasts, Pocket Casts, Overcast)
+        read to show native chapter navigation.
+        """
+        if not chapters or total_duration_seconds is None:
+            return
+        try:
+            tag = ID3(path)
+        except ID3NoHeaderError:
+            tag = ID3()
+        tag.delall("CHAP")
+        tag.delall("CTOC")
+
+        total_ms = int(total_duration_seconds * 1000)
+        element_ids: list[str] = []
+        for index, chapter in enumerate(chapters):
+            start_ms = int(float(chapter.get("start_seconds", 0.0)) * 1000)
+            if index + 1 < len(chapters):
+                end_ms = int(float(chapters[index + 1].get("start_seconds", 0.0)) * 1000)
+            else:
+                end_ms = total_ms
+            end_ms = max(end_ms, start_ms)
+            element_id = f"chp{index}"
+            element_ids.append(element_id)
+            tag.add(
+                CHAP(
+                    element_id=element_id,
+                    start_time=start_ms,
+                    end_time=end_ms,
+                    sub_frames=[
+                        TIT2(encoding=3, text=[str(chapter.get("title", ""))])
+                    ],
+                )
+            )
+        tag.add(
+            CTOC(
+                element_id="toc",
+                flags=CTOCFlags.TOP_LEVEL | CTOCFlags.ORDERED,
+                child_element_ids=element_ids,
+                sub_frames=[TIT2(encoding=3, text=["Chapters"])],
+            )
+        )
+        tag.save(path)
+
+    @staticmethod
+    async def _probe_audio_duration_precise(path: Path) -> float | None:
+        """Measure decoded MP3 duration in fractional seconds.
+
+        Chapter offsets are cumulative sums over many segments, so this must
+        match what the ffmpeg concat stitch actually produces. Header-based
+        ffprobe durations include MP3 encoder padding that the decoder trims
+        (LAME gapless metadata), drifting ~60ms per segment; decoding through
+        the same pipeline the stitch uses avoids that.
+        """
+        process = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-v",
+            "error",
+            "-progress",
+            "pipe:1",
+            "-i",
+            str(path),
+            "-f",
+            "null",
+            "-",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, _ = await process.communicate()
+        if process.returncode != 0:
+            return None
+        duration_us: int | None = None
+        for line in stdout_bytes.decode("utf-8", errors="replace").splitlines():
+            if line.startswith("out_time_us="):
+                try:
+                    duration_us = int(line.split("=", 1)[1].strip())
+                except ValueError:
+                    continue
+        if duration_us is None:
+            return None
+        return max(0.0, duration_us / 1_000_000)
+
+    async def _measure_segment_durations(
+        self, paths: list[Path]
+    ) -> list[float] | None:
+        """Probe every segment's duration; None when any probe fails.
+
+        Long episodes can have hundreds of segments, so probes run under a
+        small concurrency cap rather than one ffmpeg process per segment.
+        """
+        semaphore = asyncio.Semaphore(4)
+
+        async def probe(path: Path) -> float | None:
+            async with semaphore:
+                return await self._probe_audio_duration_precise(path)
+
+        durations = await asyncio.gather(*(probe(path) for path in paths))
+        if any(duration is None for duration in durations):
+            return None
+        return list(durations)
+
+    @staticmethod
+    def _build_chapter_markers(
+        chapters: list[ScriptChapter],
+        *,
+        synthesized_indexes: list[int],
+        durations: list[float],
+        gap_durations: list[float] | None,
+    ) -> list[dict[str, Any]] | None:
+        """Map script chapter boundaries to playback timestamps.
+
+        synthesized_indexes are the original script indexes of the units that
+        actually produced audio, in stitch order (TTS failures skip units, so
+        these can have holes). durations are the matching audio lengths;
+        gap_durations the silence inserted between consecutive units.
+
+        Chapters are best-effort metadata: any inconsistency returns None
+        rather than risking misleading timestamps.
+        """
+        if not chapters or not synthesized_indexes:
+            return None
+        if len(durations) != len(synthesized_indexes):
+            return None
+        if gap_durations is not None and len(gap_durations) != len(durations) - 1:
+            return None
+
+        start_offsets: list[float] = []
+        offset = 0.0
+        for position, duration in enumerate(durations):
+            start_offsets.append(offset)
+            offset += duration
+            if gap_durations is not None and position < len(durations) - 1:
+                offset += gap_durations[position]
+
+        markers: list[dict[str, Any]] = []
+        ordered = sorted(chapters, key=lambda c: c.segment_index)
+        for chapter_position, chapter in enumerate(ordered):
+            title = chapter.title.strip()
+            if not title:
+                continue
+            # First surviving unit within this chapter's own segment range.
+            # If all of its segments were skipped, drop the chapter rather
+            # than letting its title claim the next chapter's audio.
+            next_boundary = (
+                ordered[chapter_position + 1].segment_index
+                if chapter_position + 1 < len(ordered)
+                else None
+            )
+            position = next(
+                (
+                    p
+                    for p, original in enumerate(synthesized_indexes)
+                    if original >= chapter.segment_index
+                    and (next_boundary is None or original < next_boundary)
+                ),
+                None,
+            )
+            if position is None:
+                continue
+            start = round(start_offsets[position], 3)
+            if markers and start <= markers[-1]["start_seconds"]:
+                continue
+            markers.append({"title": title, "start_seconds": start})
+
+        if len(markers) < MIN_CHAPTER_COUNT:
+            return None
+        markers[0]["start_seconds"] = 0.0
+        return markers
 
     @staticmethod
     async def _probe_audio_duration_seconds(path: Path) -> int | None:

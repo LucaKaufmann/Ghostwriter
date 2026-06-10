@@ -70,6 +70,25 @@
 
 	let downloadPending = $state(false);
 
+	const CHAPTER_LINE = /^\[CHAPTER\]:\s*(.+)$/i;
+
+	type ScriptBlock = { kind: 'chapter' | 'text'; content: string };
+
+	function scriptBlocks(script: string): ScriptBlock[] {
+		const blocks: ScriptBlock[] = [];
+		for (const line of script.split('\n')) {
+			const chapterMatch = line.trim().match(CHAPTER_LINE);
+			if (chapterMatch) {
+				blocks.push({ kind: 'chapter', content: chapterMatch[1] });
+			} else if (blocks.length > 0 && blocks[blocks.length - 1].kind === 'text') {
+				blocks[blocks.length - 1].content += '\n' + line;
+			} else {
+				blocks.push({ kind: 'text', content: line });
+			}
+		}
+		return blocks;
+	}
+
 	function formatDate(dateStr: string): string {
 		return formatUTCDate(dateStr, {
 			weekday: 'long',
@@ -211,7 +230,11 @@
 					<Card.Title class="text-base">Audio</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
-					<AudioPlayer episodeId={episode.id} durationHint={episode.duration_seconds} />
+					<AudioPlayer
+						episodeId={episode.id}
+						durationHint={episode.duration_seconds}
+						chapters={episode.chapters}
+					/>
 					<div class="flex items-center gap-2">
 						<Button variant="outline" onclick={() => handleDownload(episode)} disabled={downloadPending}>
 							{#if downloadPending}
@@ -237,8 +260,16 @@
 					</Card.Title>
 				</Card.Header>
 				<Card.Content>
-					<div class="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
-						{episode.script}
+					<div class="prose prose-sm dark:prose-invert max-w-none">
+						{#each scriptBlocks(episode.script) as block}
+							{#if block.kind === 'chapter'}
+								<h3 class="mt-4 mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
+									{block.content}
+								</h3>
+							{:else}
+								<div class="whitespace-pre-wrap">{block.content}</div>
+							{/if}
+						{/each}
 					</div>
 				</Card.Content>
 			</Card.Root>

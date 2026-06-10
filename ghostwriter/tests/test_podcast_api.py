@@ -131,12 +131,14 @@ def _create_episode(
     user_id: UUID | None = None,
     episode_number: int | None = None,
     title: str | None = None,
+    chapters: list[dict] | None = None,
 ) -> PodcastEpisode:
     now = datetime.utcnow()
     episode = PodcastEpisode(
         digest_ids=[str(digest_id)],
         trigger=trigger,
         title=title,
+        chapters=chapters,
         user_id=user_id,
         script="[HOST_A]: Intro\n[HOST_B]: Reply\n[HOST_A]: Outro\n[HOST_B]: End\n"
         "[HOST_A]: Next\n[HOST_B]: Done",
@@ -1610,7 +1612,7 @@ async def test_run_episode_generation_uses_runtime_preference_snapshot(client, m
             "[HOST_B]: Closing\n"
         )
 
-    async def _fake_generate_audio(_episode_id, _segments, prefs):
+    async def _fake_generate_audio(_episode_id, _segments, prefs, chapters=None):
         assert isinstance(prefs, PodcastGenerationPreferences)
         return AudioGenerationResult(
             audio_path="/tmp/podcast-test.mp3",
