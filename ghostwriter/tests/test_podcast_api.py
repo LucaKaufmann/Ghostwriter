@@ -625,6 +625,7 @@ def test_create_one_off_podcast_accepts_generation_overrides(
             "generation": {
                 "tts_provider": "elevenlabs",
                 "elevenlabs_model_id": "eleven_v3",
+                "elevenlabs_expressiveness": "creative",
                 "host_count": 2,
                 "host_a_voice": "voice_a",
                 "host_b_voice": "voice_b",
@@ -656,6 +657,7 @@ def test_create_one_off_podcast_accepts_generation_overrides(
         "overrides": {
             "tts_provider": "elevenlabs",
             "elevenlabs_model_id": "eleven_v3",
+            "elevenlabs_expressiveness": "creative",
             "host_count": 2,
             "host_a_voice": "voice_a",
             "host_b_voice": "voice_b",
@@ -680,6 +682,33 @@ def test_generation_provider_override_resets_inherited_voice_defaults():
     assert resolved.tts_provider == "elevenlabs"
     assert resolved.host_a_voice == "iP95p4xoKVk53GoZ742B"
     assert resolved.host_b_voice == "XrExE9yKIg1WjnnlVkGX"
+
+
+def test_generation_expressiveness_override_applies_and_validates():
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_expressiveness="natural",
+    )
+
+    overrides = podcast_service.sanitize_generation_overrides(
+        {"elevenlabs_expressiveness": "Creative"}
+    )
+    assert overrides == {"elevenlabs_expressiveness": "creative"}
+
+    resolved = podcast_service._apply_generation_overrides(prefs, overrides)
+    assert resolved.elevenlabs_expressiveness == "creative"
+
+    # Saved preference is the fallback when the override omits the field.
+    untouched = podcast_service._apply_generation_overrides(
+        prefs, podcast_service.sanitize_generation_overrides({"host_count": 1})
+    )
+    assert untouched.elevenlabs_expressiveness == "natural"
+
+    with pytest.raises(ValueError, match="elevenlabs_expressiveness"):
+        podcast_service.sanitize_generation_overrides(
+            {"elevenlabs_expressiveness": "dramatic"}
+        )
 
 
 def test_one_off_episode_trigger_is_persisted_before_scheduling(

@@ -126,10 +126,11 @@ Preview stdout includes the payload shape with text source content redacted plus
 
 Generation override flags:
 
-- `--voice-preset`: one of `openai-balanced`, `openai-energetic`, `openai-solo-analysis`, `elevenlabs-research`, or `elevenlabs-formal`.
+- `--voice-preset`: one of `openai-balanced`, `openai-energetic`, `openai-solo-analysis`, `elevenlabs-research`, `elevenlabs-formal`, or `elevenlabs-v3-dialogue`.
 - `--tts-provider`: `openai` or `elevenlabs`.
 - `--host-count`: `1` for solo narration or `2` for a host dialogue.
 - `--host-a-voice` / `--host-b-voice`: provider voice name/ID. For ElevenLabs use voice IDs.
+- `--expressiveness`: ElevenLabs delivery mode — `creative`, `natural` (default), or `robust`. See "Model & Expressiveness Selection" below.
 - `--style`: `casual`, `formal`, or `deep-dive`.
 - `--preferred-length-minutes`, `--script-model`, and `--script-timeout-seconds`: per-episode generation preferences.
 - `--research-briefing`: appends guidance for AI-agent research notes, emphasizing evidence, uncertainty, contradictions, decisions, and next actions.
@@ -172,6 +173,8 @@ Optional per-episode generation overrides are accepted under `generation`:
 {
   "generation": {
     "tts_provider": "elevenlabs",
+    "elevenlabs_model_id": "eleven_v3",
+    "elevenlabs_expressiveness": "creative",
     "host_count": 2,
     "host_a_voice": "iP95p4xoKVk53GoZ742B",
     "host_b_voice": "XrExE9yKIg1WjnnlVkGX",
@@ -180,6 +183,24 @@ Optional per-episode generation overrides are accepted under `generation`:
   }
 }
 ```
+
+## Model & Expressiveness Selection
+
+Pick the ElevenLabs model and expressiveness per task; both are per-episode overrides that do not change saved global preferences.
+
+**Model (`elevenlabs_model_id` / `--elevenlabs-model-id`):**
+
+- `eleven_v3`: most expressive. Unlocks inline audio tags (`[laughs]`, `[excited]`, `[pauses]`, ...) in the script, dialogue-mode synthesis for 2-host episodes (shared scene context and natural turn-taking), and native text normalization. Alpha model — text-to-dialogue access depends on the account plan; Ghostwriter automatically falls back to per-segment synthesis when the endpoint is unavailable.
+- `eleven_turbo_v2_5` (default): fast and roughly half the per-character cost of v3/multilingual. No audio tags — Ghostwriter strips bracketed tags before synthesis. Good for dry factual briefings.
+- `eleven_multilingual_v2`: highest consistency for non-English or mixed-language sources, v3-level cost, no audio tags.
+
+**Expressiveness (`elevenlabs_expressiveness` / `--expressiveness`):**
+
+- `creative`: most emotional and responsive to audio tags; scripts get denser delivery cues. Best for narrative explainers and conversational episodes.
+- `natural` (default): balanced; closest to the neutral baseline of each voice.
+- `robust`: most stable and consistent, least responsive to tags — like the old controlled delivery. Best for formal or information-dense briefings.
+
+Suggested combinations: `eleven_v3` + `creative` for storytelling or banter-heavy dialogue; `eleven_v3` + `natural` for research briefings that should still feel alive; `eleven_turbo_v2_5` + `robust` for fast, low-cost, no-frills news reads. The `elevenlabs-v3-dialogue` preset applies `eleven_v3` + `creative` with the Chris/Matilda pairing.
 
 ## Voice Catalog
 
