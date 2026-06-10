@@ -363,14 +363,33 @@ def parse_frontmatter(content: str) -> dict[str, str]:
     block = match.group(0)
     lines = block.splitlines()[1:-1]
     values: dict[str, str] = {}
-    for line in lines:
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         item = FRONTMATTER_VALUE_RE.match(line)
         if not item:
+            index += 1
             continue
         key = item.group(1).strip().lower()
         value = item.group(2).strip().strip("\"'")
+        if key == "tags" and not value:
+            tag_items: list[str] = []
+            lookahead = index + 1
+            while lookahead < len(lines):
+                next_line = lines[lookahead]
+                if FRONTMATTER_VALUE_RE.match(next_line) and not next_line.startswith((" ", "\t")):
+                    break
+                tag_item = re.match(r"^\s*-\s*(.*?)\s*$", next_line)
+                if tag_item and tag_item.group(1).strip():
+                    tag_items.append(tag_item.group(1).strip().strip("\"'"))
+                lookahead += 1
+            if tag_items:
+                values[key] = ", ".join(tag_items)
+            index = lookahead
+            continue
         if key and value:
             values[key] = value
+        index += 1
     return values
 
 
