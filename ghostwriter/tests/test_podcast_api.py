@@ -30,6 +30,7 @@ from app.services.one_off_podcast_service import (
 )
 from app.services.podcast_service import (
     DIALOGUE_SCENE_MAX_CHARS,
+    EPISODE_TITLE_MAX_CHARS,
     AudioGenerationResult,
     PodcastGenerationPreferences,
     ScriptSegment,
@@ -129,11 +130,13 @@ def _create_episode(
     trigger: str = "manual",
     user_id: UUID | None = None,
     episode_number: int | None = None,
+    title: str | None = None,
 ) -> PodcastEpisode:
     now = datetime.utcnow()
     episode = PodcastEpisode(
         digest_ids=[str(digest_id)],
         trigger=trigger,
+        title=title,
         user_id=user_id,
         script="[HOST_A]: Intro\n[HOST_B]: Reply\n[HOST_A]: Outro\n[HOST_B]: End\n"
         "[HOST_A]: Next\n[HOST_B]: Done",
@@ -578,6 +581,7 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
 
     assert episode is not None
     assert episode.trigger == "one_off"
+    assert episode.title == "OpenClaw planning brief"
     assert str(digest_id) in (episode.digest_ids or [])
     assert digest is not None
     assert digest.status == "completed"
@@ -1839,6 +1843,8 @@ def test_feed_includes_ready_one_off_episode(client, tmp_path):
         session.add(prefs)
         session.commit()
 
+    audio_path_titled = podcasts_dir / f"one-off-{uuid4()}.mp3"
+    audio_path_titled.write_bytes(b"one-off-audio-titled")
     episode = _create_episode(
         digest_id=digest_id,
         article_ids=article_ids,
@@ -1847,22 +1853,42 @@ def test_feed_includes_ready_one_off_episode(client, tmp_path):
         trigger="one_off",
         user_id=user_id,
     )
+    titled_episode = _create_episode(
+        digest_id=digest_id,
+        article_ids=article_ids,
+        status="ready",
+        audio_path=audio_path_titled,
+        trigger="one_off",
+        user_id=user_id,
+        title="Claude Fable 5: Developer Launch Briefing",
+    )
 
     feed = client.get("/api/podcast/feed.xml?token=feed_token_one_off_ready")
     assert feed.status_code == 200
     root = ET.fromstring(feed.content)
     items = root.findall("./channel/item")
-    matching_items = []
-    for candidate in items:
-        enclosure = candidate.find("enclosure")
-        if enclosure is not None and str(episode.id) in enclosure.attrib["url"]:
-            matching_items.append(candidate)
-    assert len(matching_items) == 1
-    item = matching_items[0]
+
+    def _item_for(episode_id):
+        matches = []
+        for candidate in items:
+            enclosure = candidate.find("enclosure")
+            if enclosure is not None and str(episode_id) in enclosure.attrib["url"]:
+                matches.append(candidate)
+        assert len(matches) == 1
+        return matches[0]
+
+    # Untitled one-offs keep the legacy date-based name.
+    item = _item_for(episode.id)
     assert item.findtext("title", "").startswith("One-off Podcast - ")
     assert item.find("{http://www.itunes.com/dtds/podcast-1.0.dtd}episode") is None
     assert item.findtext("{http://www.itunes.com/dtds/podcast-1.0.dtd}episodeType") == (
         "bonus"
+    )
+
+    # Titled one-offs surface their stored title in the feed.
+    titled_item = _item_for(titled_episode.id)
+    assert (
+        titled_item.findtext("title") == "Claude Fable 5: Developer Launch Briefing"
     )
 
 
@@ -3177,6 +3203,99 @@ def test_direct_fallback_prompts_format_with_length_budgets():
         episode_context="Wednesday, June 10, 2026",
     )
     assert "approximately 2610 words" in solo
+
+
+def test_sanitize_episode_title_rules():
+    sanitize = podcast_service._sanitize_episode_title
+    assert sanitize('  "Claude Fable 5: Dev Briefing."  ') == (
+        "Claude Fable 5: Dev Briefing"
+    )
+    # Multi-line LLM output keeps only the title line.
+    assert sanitize("Fable 5 Deep Dive\nHere is why I chose it.") == (
+        "Fable 5 Deep Dive"
+    )
+    assert sanitize(None) is None
+    assert sanitize("   ") is None
+    assert sanitize('"..."') is None
+    long_title = sanitize("x" * 300)
+    assert long_title is not None
+    assert len(long_title) == EPISODE_TITLE_MAX_CHARS
+
+
+def test_one_off_episode_titles_are_unique(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    def _create(title):
+        response = client.post(
+            "/api/podcast/episodes/one-off",
+            json={
+                "title": title,
+                "sources": [
+                    {
+                        "type": "text",
+                        "title": "Notes",
+                        "content": (
+                            "This source is long enough to create a one-off podcast "
+                            "digest article so the episode can be queued for "
+                            "generation with a caller-provided title."
+                        ),
+                    }
+                ],
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        return UUID(response.json()["episode_id"])
+
+    first_id = _create("Fable 5 Briefing")
+    second_id = _create("Fable 5 Briefing")
+    third_id = _create("Fable 5 Briefing")
+
+    with Session(engine) as session:
+        titles = [
+            session.get(PodcastEpisode, episode_id).title
+            for episode_id in (first_id, second_id, third_id)
+        ]
+    assert titles == [
+        "Fable 5 Briefing",
+        "Fable 5 Briefing (2)",
+        "Fable 5 Briefing (3)",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generate_one_off_episode_title_sanitizes_output(monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def _fake_completion(prompt, model, retries, **kwargs):
+        captured["prompt"] = prompt
+        return '"Fable 5: What Developers Get."\nIt highlights the launch.', False
+
+    monkeypatch.setattr(
+        podcast_service.llm_service, "_run_completion", _fake_completion
+    )
+    title = await podcast_service._generate_one_off_episode_title(
+        "[HOST_A]: Welcome to the Fable 5 launch special.\n[HOST_B]: Let's dig in.",
+        model="test-model",
+        timeout_seconds=60,
+    )
+    assert title == "Fable 5: What Developers Get"
+    assert "Fable 5 launch special" in captured["prompt"]
+
+    async def _failed_completion(prompt, model, retries, **kwargs):
+        return "", True
+
+    monkeypatch.setattr(
+        podcast_service.llm_service, "_run_completion", _failed_completion
+    )
+    assert (
+        await podcast_service._generate_one_off_episode_title(
+            "[HOST_A]: Hello.", model="test-model", timeout_seconds=60
+        )
+        is None
+    )
 
 
 def test_briefs_carry_source_for_attribution():

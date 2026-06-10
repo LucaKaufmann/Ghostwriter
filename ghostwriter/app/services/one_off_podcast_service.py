@@ -197,6 +197,7 @@ class OneOffPodcastService:
             force=False,
             trigger="one_off",
             generation_overrides=self._generation_overrides(generation),
+            title=title or None,
         )
         return episode
 

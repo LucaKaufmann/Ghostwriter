@@ -140,6 +140,8 @@ SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
 # is attempted first when it falls short).
 SCRIPT_WORDS_PER_MINUTE = 145
 SCRIPT_LENGTH_ACCEPT_FRACTION = 0.75
+# Hard cap for stored episode titles; the title prompt asks for ~60 chars.
+EPISODE_TITLE_MAX_CHARS = 90
 # Per-request character caps for solo synthesis. Eleven v3 rejects requests
 # over ~3,000 chars; older ElevenLabs models accept far more but moderate
 # chunks keep prosody steady via previous/next context.
@@ -376,6 +378,17 @@ Requirements:
 - Aim for {min_paragraphs}-{max_paragraphs} paragraphs to fit the word budget.
 - Do not use any [HOST_A] or [HOST_B] tags — this is a solo show.
 """
+
+ONE_OFF_TITLE_PROMPT_TEMPLATE = """Write a title for this podcast episode.
+
+Rules:
+- Maximum 60 characters.
+- Specific to the episode's actual content — never generic like "Daily Briefing", "One-off Podcast", or "Special Episode".
+- No quotes, no emojis, no trailing punctuation.
+- Return only the title text on a single line.
+
+Episode script excerpt:
+{script_excerpt}"""
 
 SCRIPT_EXPANSION_PROMPT_TEMPLATE = """The podcast script draft below is too short: about {draft_words} spoken words (~{draft_minutes} minutes), against an episode target of {length_minutes} minutes — approximately {target_words} words.
 
@@ -836,6 +849,7 @@ class PodcastDigestService:
         force: bool = False,
         trigger: str = "manual",
         generation_overrides: dict[str, Any] | None = None,
+        title: str | None = None,
     ) -> PodcastEpisode:
         """Queue podcast generation for a single digest (manual trigger)."""
         digest = session.get(Digest, digest_id)
@@ -844,6 +858,7 @@ class PodcastDigestService:
         if digest.status != "completed":
             raise ValueError("Digest must be completed before podcast generation")
         cleaned_overrides = self.sanitize_generation_overrides(generation_overrides)
+        cleaned_title = self._sanitize_episode_title(title)
 
         digest_id_str = str(digest_id)
         now = datetime.utcnow()
@@ -874,6 +889,14 @@ class PodcastDigestService:
         if episode is not None:
             if episode.user_id is None and user_id is not None:
                 episode.user_id = user_id
+                episode.updated_at = now
+                session.add(episode)
+                session.commit()
+                session.refresh(episode)
+            if cleaned_title and not (episode.title or "").strip():
+                episode.title = self._dedupe_episode_title(
+                    session, cleaned_title, exclude_episode_id=episode.id
+                )
                 episode.updated_at = now
                 session.add(episode)
                 session.commit()
@@ -934,6 +957,11 @@ class PodcastDigestService:
         episode = PodcastEpisode(
             digest_ids=[digest_id_str],
             trigger=trigger,
+            title=(
+                self._dedupe_episode_title(session, cleaned_title)
+                if cleaned_title
+                else None
+            ),
             user_id=user_id,
             generation_preferences=(
                 {"overrides": cleaned_overrides} if cleaned_overrides else {}
@@ -1567,6 +1595,29 @@ class PodcastDigestService:
                         },
                     )
 
+                if episode.trigger == "one_off" and not (episode.title or "").strip():
+                    generated_title = await self._generate_one_off_episode_title(
+                        script,
+                        model=(
+                            (runtime_prefs.script_model or "").strip()
+                            or self.settings.get_llm_model_string()
+                        ),
+                        timeout_seconds=max(
+                            30, min(600, int(runtime_prefs.script_timeout_seconds))
+                        ),
+                    )
+                    if generated_title:
+                        episode.title = self._dedupe_episode_title(
+                            session, generated_title, exclude_episode_id=episode.id
+                        )
+                        logger.info(
+                            "One-off episode title generated",
+                            extra={
+                                "episode_id": str(episode_id),
+                                "title": episode.title,
+                            },
+                        )
+
                 episode.script = script
                 episode.article_ids = [str(article.id) for article in selected_articles]
                 episode.article_count = len(selected_articles)
@@ -2062,6 +2113,63 @@ class PodcastDigestService:
             if self._spoken_word_count(candidate) > draft_words:
                 return candidate
         return None
+
+    @staticmethod
+    def _sanitize_episode_title(value: str | None) -> str | None:
+        """Normalize a caller- or LLM-provided episode title; None if unusable."""
+        raw = (value or "").strip()
+        if not raw:
+            return None
+        # LLMs sometimes return explanations after the title; keep line one.
+        first_line = raw.splitlines()[0]
+        title = re.sub(r"\s+", " ", first_line).strip().strip("\"'“”‘’")
+        title = title.rstrip(".,;:").strip()
+        if not title:
+            return None
+        return title[:EPISODE_TITLE_MAX_CHARS].rstrip()
+
+    @staticmethod
+    def _dedupe_episode_title(
+        session: Session,
+        title: str,
+        *,
+        exclude_episode_id: UUID | None = None,
+    ) -> str:
+        """Make the title unique across episodes by suffixing " (2)", " (3)", …"""
+        candidate = title
+        suffix = 2
+        while True:
+            statement = select(PodcastEpisode.id).where(PodcastEpisode.title == candidate)
+            if exclude_episode_id is not None:
+                statement = statement.where(PodcastEpisode.id != exclude_episode_id)
+            if session.exec(statement).first() is None:
+                return candidate
+            candidate = f"{title} ({suffix})"
+            suffix += 1
+
+    async def _generate_one_off_episode_title(
+        self,
+        script: str,
+        *,
+        model: str,
+        timeout_seconds: int,
+    ) -> str | None:
+        """Generate a short episode title from the finished script.
+
+        Best effort: returns None on LLM failure so the caller can fall back
+        to the date-based feed naming — never fails the episode.
+        """
+        excerpt = "\n".join(script.splitlines()[:20])[:4000]
+        prompt = ONE_OFF_TITLE_PROMPT_TEMPLATE.format(script_excerpt=excerpt)
+        text, failed = await self.llm_service._run_completion(
+            prompt,
+            model,
+            retries=1,
+            timeout_seconds=timeout_seconds,
+        )
+        if failed:
+            return None
+        return self._sanitize_episode_title(text)
 
     @staticmethod
     def _format_episode_context(now_local: datetime, schedule: str | None = None) -> str:

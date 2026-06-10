@@ -82,6 +82,7 @@ class PodcastEpisodeStatusRead(BaseModel):
     id: UUID
     digest_ids: list[str]
     trigger: str = "manual"
+    title: str | None = None
     status: str
     audio_size_bytes: int | None = None
     duration_seconds: int | None = None
@@ -223,6 +224,7 @@ def _build_episode_status(
         id=episode.id,
         digest_ids=episode.digest_ids or [],
         trigger=episode.trigger or "manual",
+        title=episode.title,
         status=episode.status,
         audio_size_bytes=episode.audio_size_bytes,
         duration_seconds=episode.duration_seconds,
@@ -1064,7 +1066,9 @@ async def get_podcast_feed_xml(
 
         digest_count = len(episode.digest_ids or [])
         if episode.trigger == "one_off":
-            ET.SubElement(item, "title").text = f"One-off Podcast - {created_local}"
+            ET.SubElement(item, "title").text = (
+                episode.title or ""
+            ).strip() or f"One-off Podcast - {created_local}"
         elif digest_count > 1:
             ET.SubElement(
                 item, "title"

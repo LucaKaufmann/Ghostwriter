@@ -19,6 +19,9 @@ class PodcastEpisodeBase(SQLModel):
         default="manual",
         sa_column=Column(String, nullable=False, server_default="manual"),
     )
+    # Display title; only one-off episodes set it (caller-provided or
+    # LLM-generated), digest episodes keep their date-based feed naming.
+    title: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
     script: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     audio_path: str | None = Field(default=None)
@@ -63,6 +66,7 @@ class PodcastEpisodeSummaryRead(SQLModel):
     id: UUID
     digest_ids: list[str]
     trigger: str = "manual"
+    title: str | None = None
     status: str
     audio_size_bytes: int | None = None
     duration_seconds: int | None = None
