@@ -10,6 +10,7 @@ import re
 import secrets
 import shutil
 import tempfile
+from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
@@ -133,6 +134,12 @@ DOLLAR_AMOUNT_RE = re.compile(
 )
 SCRIPT_BRIEF_CHUNK_SIZE = 3
 SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
+# Word budget for script length. LLMs cannot estimate spoken minutes, so all
+# length-target prompts are expressed in words at this speaking rate, and a
+# script is accepted once it reaches the fraction below (one expansion pass
+# is attempted first when it falls short).
+SCRIPT_WORDS_PER_MINUTE = 145
+SCRIPT_LENGTH_ACCEPT_FRACTION = 0.75
 # Per-request character caps for solo synthesis. Eleven v3 rejects requests
 # over ~3,000 chars; older ElevenLabs models accept far more but moderate
 # chunks keep prosody steady via previous/next context.
@@ -250,7 +257,8 @@ Article briefs:
 {briefs_block}
 
 Requirements:
-- Provide 8-14 ordered outline beats.
+- Provide {min_beats}-{max_beats} ordered outline beats.
+- Assign each beat a rough minute budget; the budgets must sum to about {length_minutes} minutes.
 - The first beat must be a cold-open teaser of the strongest story, before any greeting.
 - Lead with the strongest hook, tension, or listener-relevant question.
 - Group related articles into coherent segments when that creates a better arc.
@@ -262,7 +270,7 @@ Requirements:
 SCRIPT_PROMPT_TEMPLATE = """Create an English conversational podcast script.
 
 User preferences:
-- Length target: about {length_minutes} minutes
+- Length target: about {length_minutes} minutes of spoken audio at roughly 145 words per minute — approximately {target_words} words of dialogue
 - Style: {style}
 - Host A voice persona: analytical and concise
 - Host B voice persona: explanatory and contextual
@@ -295,7 +303,8 @@ Requirements:
 - For at least 4 topics, have one host go one level deeper with concrete implications, examples, tradeoffs, or why a listener should care.
 - Use specific_details, tension, listener_angle, and follow_up_question from the briefs when available.
 - Avoid repetitive sentence templates and "headline summary" cadence on every line.
-- Return 30-80 total lines, depending on length target.
+- Write approximately {target_words} spoken words in total; do not start the closing before reaching {min_words} words. The word budget is the primary length target.
+- Return {min_lines}-{max_lines} total lines to fit the word budget.
 - Output format must be only:
   [HOST_A]: ...
   [HOST_B]: ...
@@ -319,7 +328,8 @@ Article briefs:
 {briefs_block}
 
 Requirements:
-- Provide 6-10 ordered outline beats.
+- Provide {min_beats}-{max_beats} ordered outline beats.
+- Assign each beat a rough minute budget; the budgets must sum to about {length_minutes} minutes.
 - The first beat must be a cold-open teaser of the strongest story, before any greeting.
 - Lead with the strongest hook, tension, or listener-relevant question.
 - Group related articles into coherent segments when that creates a better arc.
@@ -331,7 +341,7 @@ Requirements:
 SCRIPT_SOLO_PROMPT_TEMPLATE = """Create an English solo podcast monologue script.
 
 User preferences:
-- Length target: about {length_minutes} minutes (~130-150 words per minute)
+- Length target: about {length_minutes} minutes of spoken audio at roughly 145 words per minute — approximately {target_words} words
 - Style: {style}
 - Style guidance: {style_guidance}
 - TTS delivery guidance: {tts_delivery_guidance}
@@ -362,9 +372,27 @@ Requirements:
   - Go one level deeper on at least 3 topics with concrete implications, examples, tradeoffs, or why a listener should care.
   - Use transitions that feel organic ("Speaking of which...", "Now here's where it gets interesting...").
 - Use specific_details, tension, listener_angle, and follow_up_question from the briefs when available.
-- Aim for 6-15 paragraphs depending on length target.
+- Write approximately {target_words} spoken words in total; do not start the closing before reaching {min_words} words. The word budget is the primary length target.
+- Aim for {min_paragraphs}-{max_paragraphs} paragraphs to fit the word budget.
 - Do not use any [HOST_A] or [HOST_B] tags — this is a solo show.
 """
+
+SCRIPT_EXPANSION_PROMPT_TEMPLATE = """The podcast script draft below is too short: about {draft_words} spoken words (~{draft_minutes} minutes), against an episode target of {length_minutes} minutes — approximately {target_words} words.
+
+Rewrite the script at full target length:
+- Keep the draft's structure, topics, ordering, and conversational flow.
+- Expand by deepening existing topics with concrete material from the article briefs: implications, examples, tradeoffs, specific details, tension, and listener angles.
+- Do not pad with filler, repetition, or longer greetings and closings.
+- Keep every formatting rule from the original instructions, including the exact output format.
+- Write at least {min_words} spoken words.
+
+Article briefs:
+{briefs_block}
+
+Draft script:
+{draft_script}
+
+Return only the complete expanded script."""
 
 _podcast_tasks: set[asyncio.Task[None] | Future[None]] = set()
 
@@ -1882,6 +1910,160 @@ class PodcastDigestService:
         return best_topic
 
     @staticmethod
+    def _script_length_targets(length_minutes: int) -> dict[str, int]:
+        """Word, line, paragraph, and outline-beat budgets for a duration.
+
+        Everything is derived from the word budget: ~145 spoken wpm, dialogue
+        lines of roughly 32-48 words, solo paragraphs of roughly 90-150 words,
+        and outline beats of roughly one to one-and-a-half minutes each.
+        """
+        minutes = max(1, int(length_minutes or 0))
+        target_words = minutes * SCRIPT_WORDS_PER_MINUTE
+        return {
+            "target_words": target_words,
+            "min_words": int(target_words * 0.85),
+            "min_lines": max(8, round(target_words / 48)),
+            "max_lines": max(12, round(target_words / 32)),
+            "min_paragraphs": max(6, round(target_words / 150)),
+            "max_paragraphs": max(10, round(target_words / 90)),
+            "min_beats": min(20, max(6, round(minutes * 0.7))),
+            "max_beats": min(24, max(10, round(minutes * 1.1))),
+        }
+
+    @staticmethod
+    def _spoken_word_count(script: str) -> int:
+        """Count words that will actually be spoken, excluding speaker tags."""
+        cleaned = re.sub(r"\[HOST_[AB]\]:", " ", script or "")
+        return len(cleaned.split())
+
+    async def _enforce_script_length(
+        self,
+        script: str,
+        *,
+        model: str,
+        timeout_seconds: int,
+        length_minutes: int,
+        length_targets: dict[str, int],
+        briefs_block: str,
+        system_prompt: str,
+        validate: Callable[[str], object],
+        debug_path: Path | None,
+        episode_id: UUID | None,
+        digest_id: UUID | None,
+        stage: str,
+    ) -> str:
+        """Return the script, expanded once if it badly undershoots the target.
+
+        A structurally valid script is never rejected for length — when the
+        expansion pass fails or still falls short, the best draft ships.
+        """
+        words = self._spoken_word_count(script)
+        accept_words = int(
+            length_targets["target_words"] * SCRIPT_LENGTH_ACCEPT_FRACTION
+        )
+        if words >= accept_words:
+            return script
+        logger.warning(
+            "Podcast script under length target (%s words vs %s target, %s minimum); "
+            "attempting expansion pass",
+            words,
+            length_targets["target_words"],
+            accept_words,
+        )
+        expanded = await self._expand_short_script(
+            script,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            length_minutes=length_minutes,
+            length_targets=length_targets,
+            briefs_block=briefs_block,
+            system_prompt=system_prompt,
+            validate=validate,
+            debug_path=debug_path,
+            episode_id=episode_id,
+            digest_id=digest_id,
+            stage=stage,
+        )
+        if expanded is not None:
+            logger.info(
+                "Podcast script expanded from %s to %s words (target %s)",
+                words,
+                self._spoken_word_count(expanded),
+                length_targets["target_words"],
+            )
+            return expanded
+        logger.warning(
+            "Podcast script expansion failed; keeping short draft (%s words)", words
+        )
+        return script
+
+    async def _expand_short_script(
+        self,
+        draft: str,
+        *,
+        model: str,
+        timeout_seconds: int,
+        length_minutes: int,
+        length_targets: dict[str, int],
+        briefs_block: str,
+        system_prompt: str,
+        validate: Callable[[str], object],
+        debug_path: Path | None,
+        episode_id: UUID | None,
+        digest_id: UUID | None,
+        stage: str,
+    ) -> str | None:
+        """One feedback pass asking the LLM to rewrite a short draft at length.
+
+        Returns None when no valid candidate longer than the draft came back.
+        """
+        draft_words = self._spoken_word_count(draft)
+        prompt = SCRIPT_EXPANSION_PROMPT_TEMPLATE.format(
+            draft_words=draft_words,
+            draft_minutes=max(1, round(draft_words / SCRIPT_WORDS_PER_MINUTE)),
+            length_minutes=length_minutes,
+            target_words=length_targets["target_words"],
+            min_words=length_targets["min_words"],
+            briefs_block=briefs_block,
+            draft_script=draft,
+        )
+        if debug_path is not None:
+            self._write_script_prompt_debug(
+                debug_path,
+                {
+                    "stage": stage,
+                    "episode_id": str(episode_id) if episode_id else None,
+                    "digest_id": str(digest_id) if digest_id else None,
+                    "model": model,
+                    "draft_words": draft_words,
+                    "target_words": length_targets["target_words"],
+                    "system_prompt": system_prompt,
+                    "user_prompt": prompt,
+                },
+            )
+        for attempt in range(2):
+            text, failed = await self.llm_service._run_completion(
+                prompt,
+                model,
+                retries=1,
+                system_prompt=system_prompt,
+                timeout_seconds=timeout_seconds,
+            )
+            if failed or not text.strip():
+                continue
+            candidate = text.strip()
+            try:
+                validate(candidate)
+            except ValueError as exc:
+                logger.warning(
+                    "Expanded script failed validation (%s/2): %s", attempt + 1, exc
+                )
+                continue
+            if self._spoken_word_count(candidate) > draft_words:
+                return candidate
+        return None
+
+    @staticmethod
     def _format_episode_context(now_local: datetime, schedule: str | None = None) -> str:
         """Format the recording date (and cadence) for script prompts."""
         date_line = now_local.strftime("%A, %B %d, %Y").replace(" 0", " ")
@@ -1957,6 +2139,7 @@ class PodcastDigestService:
         )
         briefs_block = self._render_briefs_block(briefs)
 
+        length_targets = self._script_length_targets(prefs.preferred_length_minutes)
         outline = await self._generate_script_outline(
             briefs_block=briefs_block,
             model=model,
@@ -1970,6 +2153,10 @@ class PodcastDigestService:
         )
         prompt = SCRIPT_PROMPT_TEMPLATE.format(
             length_minutes=prefs.preferred_length_minutes,
+            target_words=length_targets["target_words"],
+            min_words=length_targets["min_words"],
+            min_lines=length_targets["min_lines"],
+            max_lines=length_targets["max_lines"],
             style=prefs.style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
@@ -2029,7 +2216,20 @@ class PodcastDigestService:
                         "script_chars": len(script.strip()),
                     },
                 )
-                return script.strip()
+                return await self._enforce_script_length(
+                    script.strip(),
+                    model=model,
+                    timeout_seconds=timeout_seconds,
+                    length_minutes=prefs.preferred_length_minutes,
+                    length_targets=length_targets,
+                    briefs_block=briefs_block,
+                    system_prompt=script_system_prompt,
+                    validate=self.parse_script_segments,
+                    debug_path=debug_path,
+                    episode_id=episode_id,
+                    digest_id=digest_id,
+                    stage="script_expansion",
+                )
             except ValueError as exc:
                 logger.warning(
                     "Generated podcast script failed validation (attempt %s/%s): %s",
@@ -2130,6 +2330,7 @@ class PodcastDigestService:
         )
         briefs_block = self._render_briefs_block(briefs)
 
+        length_targets = self._script_length_targets(prefs.preferred_length_minutes)
         outline = await self._generate_solo_script_outline(
             briefs_block=briefs_block,
             model=model,
@@ -2143,6 +2344,10 @@ class PodcastDigestService:
         )
         prompt = SCRIPT_SOLO_PROMPT_TEMPLATE.format(
             length_minutes=prefs.preferred_length_minutes,
+            target_words=length_targets["target_words"],
+            min_words=length_targets["min_words"],
+            min_paragraphs=length_targets["min_paragraphs"],
+            max_paragraphs=length_targets["max_paragraphs"],
             style=prefs.style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
@@ -2198,7 +2403,20 @@ class PodcastDigestService:
                         "script_chars": len(script.strip()),
                     },
                 )
-                return script.strip()
+                return await self._enforce_script_length(
+                    script.strip(),
+                    model=model,
+                    timeout_seconds=timeout_seconds,
+                    length_minutes=prefs.preferred_length_minutes,
+                    length_targets=length_targets,
+                    briefs_block=briefs_block,
+                    system_prompt=script_system_prompt,
+                    validate=self.parse_solo_script,
+                    debug_path=debug_path,
+                    episode_id=episode_id,
+                    digest_id=digest_id,
+                    stage="solo_script_expansion",
+                )
             except ValueError as exc:
                 logger.warning(
                     "Generated solo script failed validation (attempt %s/%s): %s",
@@ -2248,8 +2466,11 @@ class PodcastDigestService:
         digest_id: UUID | None,
     ) -> str:
         """Generate episode outline for a solo monologue."""
+        length_targets = self._script_length_targets(length_minutes)
         prompt = SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE.format(
             length_minutes=length_minutes,
+            min_beats=length_targets["min_beats"],
+            max_beats=length_targets["max_beats"],
             style=style,
             style_guidance=style_guidance,
             briefs_block=briefs_block,
@@ -2303,8 +2524,13 @@ class PodcastDigestService:
                 f"Source detail for context, stakes, and examples: {clean_snippet}"
             )
         articles_block = "\n\n".join(articles_block_lines)
+        length_targets = self._script_length_targets(length_minutes)
         return SCRIPT_SOLO_PROMPT_TEMPLATE.format(
             length_minutes=length_minutes,
+            target_words=length_targets["target_words"],
+            min_words=length_targets["min_words"],
+            min_paragraphs=length_targets["min_paragraphs"],
+            max_paragraphs=length_targets["max_paragraphs"],
             style=style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
@@ -2875,8 +3101,11 @@ class PodcastDigestService:
         digest_id: UUID | None,
     ) -> str:
         """Generate episode outline from chunked article briefs."""
+        length_targets = self._script_length_targets(length_minutes)
         prompt = SCRIPT_OUTLINE_PROMPT_TEMPLATE.format(
             length_minutes=length_minutes,
+            min_beats=length_targets["min_beats"],
+            max_beats=length_targets["max_beats"],
             style=style,
             style_guidance=style_guidance,
             briefs_block=briefs_block,
@@ -2930,8 +3159,13 @@ class PodcastDigestService:
                 f"Source detail for context, stakes, and examples: {clean_snippet}"
             )
         articles_block = "\n\n".join(articles_block_lines)
+        length_targets = self._script_length_targets(length_minutes)
         return SCRIPT_PROMPT_TEMPLATE.format(
             length_minutes=length_minutes,
+            target_words=length_targets["target_words"],
+            min_words=length_targets["min_words"],
+            min_lines=length_targets["min_lines"],
+            max_lines=length_targets["max_lines"],
             style=style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,

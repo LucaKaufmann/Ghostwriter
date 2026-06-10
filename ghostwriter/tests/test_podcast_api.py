@@ -3008,9 +3008,175 @@ def test_script_prompts_include_episode_context_and_informative_beats():
         assert "{episode_context}" in template
         assert "cold open" in template
         assert "source by name" in template
+        # Length is a word budget, not just minutes — LLMs can't count minutes.
+        assert "{target_words}" in template
+        assert "{min_words}" in template
     for template in (SCRIPT_OUTLINE_PROMPT_TEMPLATE, SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE):
         assert "cold-open teaser" in template
         assert "broader trend" in template
+        # Outline size scales with episode length instead of a fixed range.
+        assert "{min_beats}" in template
+        assert "{max_beats}" in template
+
+
+def test_script_length_targets_scale_with_minutes():
+    targets = podcast_service._script_length_targets(18)
+    assert targets["target_words"] == 18 * 145
+    assert targets["min_words"] == int(18 * 145 * 0.85)
+    # 18 minutes must demand far more than the old static "30-80 lines" floor.
+    assert targets["min_lines"] >= 50
+    assert targets["max_lines"] > targets["min_lines"]
+    assert targets["min_beats"] == 13
+    assert targets["max_beats"] == 20
+
+    short = podcast_service._script_length_targets(5)
+    assert short["target_words"] == 5 * 145
+    assert short["min_lines"] >= 8
+    assert short["min_beats"] >= 6
+    assert short["max_beats"] >= short["min_beats"]
+
+    # Degenerate input falls back to a 1-minute floor instead of crashing.
+    assert podcast_service._script_length_targets(0)["target_words"] == 145
+
+
+def test_spoken_word_count_ignores_speaker_tags():
+    script = "[HOST_A]: One two three.\n[HOST_B]: Four five."
+    assert podcast_service._spoken_word_count(script) == 5
+    assert podcast_service._spoken_word_count("") == 0
+    assert podcast_service._spoken_word_count("Plain solo words here.") == 4
+
+
+def _short_two_host_script() -> str:
+    lines = []
+    for index in range(6):
+        speaker = "HOST_A" if index % 2 == 0 else "HOST_B"
+        lines.append(f"[{speaker}]: Quick line number {index} here.")
+    return "\n".join(lines)
+
+
+def _long_two_host_script(words_per_line: int = 300) -> str:
+    filler = " ".join(["word"] * words_per_line)
+    lines = []
+    for index in range(6):
+        speaker = "HOST_A" if index % 2 == 0 else "HOST_B"
+        lines.append(f"[{speaker}]: {filler}.")
+    return "\n".join(lines)
+
+
+@pytest.mark.asyncio
+async def test_enforce_script_length_expands_short_scripts(monkeypatch):
+    calls = {"n": 0}
+    expanded_script = _long_two_host_script()
+
+    async def _fake_completion(prompt, model, retries, **kwargs):
+        calls["n"] += 1
+        assert "too short" in prompt
+        assert "Draft script:" in prompt
+        return expanded_script, False
+
+    monkeypatch.setattr(
+        podcast_service.llm_service, "_run_completion", _fake_completion
+    )
+    targets = podcast_service._script_length_targets(15)
+
+    result = await podcast_service._enforce_script_length(
+        _short_two_host_script(),
+        model="test-model",
+        timeout_seconds=60,
+        length_minutes=15,
+        length_targets=targets,
+        briefs_block="briefs",
+        system_prompt="system",
+        validate=podcast_service.parse_script_segments,
+        debug_path=None,
+        episode_id=None,
+        digest_id=None,
+        stage="script_expansion",
+    )
+
+    assert calls["n"] == 1
+    assert result == expanded_script
+
+
+@pytest.mark.asyncio
+async def test_enforce_script_length_skips_when_target_met(monkeypatch):
+    async def _fail_completion(*args, **kwargs):
+        raise AssertionError("LLM must not be called when length target is met")
+
+    monkeypatch.setattr(
+        podcast_service.llm_service, "_run_completion", _fail_completion
+    )
+    targets = podcast_service._script_length_targets(5)
+    script = _long_two_host_script(words_per_line=150)  # 900 words > 75% of 725
+
+    result = await podcast_service._enforce_script_length(
+        script,
+        model="test-model",
+        timeout_seconds=60,
+        length_minutes=5,
+        length_targets=targets,
+        briefs_block="briefs",
+        system_prompt="system",
+        validate=podcast_service.parse_script_segments,
+        debug_path=None,
+        episode_id=None,
+        digest_id=None,
+        stage="script_expansion",
+    )
+    assert result == script
+
+
+@pytest.mark.asyncio
+async def test_enforce_script_length_keeps_draft_when_expansion_invalid(monkeypatch):
+    async def _fake_completion(prompt, model, retries, **kwargs):
+        return "No speaker tags at all, just prose.", False
+
+    monkeypatch.setattr(
+        podcast_service.llm_service, "_run_completion", _fake_completion
+    )
+    targets = podcast_service._script_length_targets(15)
+    draft = _short_two_host_script()
+
+    result = await podcast_service._enforce_script_length(
+        draft,
+        model="test-model",
+        timeout_seconds=60,
+        length_minutes=15,
+        length_targets=targets,
+        briefs_block="briefs",
+        system_prompt="system",
+        validate=podcast_service.parse_script_segments,
+        debug_path=None,
+        episode_id=None,
+        digest_id=None,
+        stage="script_expansion",
+    )
+    # A structurally valid short draft must never be lost to a bad expansion.
+    assert result == draft
+
+
+def test_direct_fallback_prompts_format_with_length_budgets():
+    articles = [
+        _podcast_test_article(title="Story", content="Body text. " * 50),
+    ]
+    dual = podcast_service._build_direct_script_prompt(
+        articles=articles,
+        length_minutes=18,
+        style="deep-dive",
+        style_guidance="guidance",
+        tts_delivery_guidance="tts",
+        episode_context="Wednesday, June 10, 2026",
+    )
+    assert "approximately 2610 words" in dual
+    solo = podcast_service._build_direct_solo_script_prompt(
+        articles=articles,
+        length_minutes=18,
+        style="deep-dive",
+        style_guidance="guidance",
+        tts_delivery_guidance="tts",
+        episode_context="Wednesday, June 10, 2026",
+    )
+    assert "approximately 2610 words" in solo
 
 
 def test_briefs_carry_source_for_attribution():
