@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import UTC, datetime, time, timedelta
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from PIL import Image
@@ -105,6 +106,16 @@ def _create_digest_with_articles(
         article_ids = [article.id for article in articles]
 
     return digest_id, article_ids
+
+
+def _timestamp_inside_current_podcast_schedule_window() -> datetime:
+    try:
+        tz = ZoneInfo(get_settings().timezone)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    now_local = datetime.now(tz)
+    start_local = datetime.combine(now_local.date(), time.min, tzinfo=tz)
+    return (start_local + timedelta(hours=12)).astimezone(UTC).replace(tzinfo=None)
 
 
 def _create_episode(
@@ -2169,14 +2180,18 @@ def test_feed_artwork_upload_is_scoped_to_token_owner(client, tmp_path):
     assert prefs.podcast_feed_artwork_path != str(owner_artwork)
 
 
-def test_scheduled_podcast_generation(monkeypatch):
+def test_scheduled_podcast_generation(client, monkeypatch):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
-    digest_id, _ = _create_digest_with_articles(article_count=2)
+    digest_id, _ = _create_digest_with_articles(
+        article_count=2,
+        completed_at=_timestamp_inside_current_podcast_schedule_window(),
+    )
 
     with Session(engine) as session:
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        user_id = podcast_service.resolve_user_id(session)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.enabled = True
         prefs.schedule = "daily"
         prefs.schedule_time = "00:00"
@@ -2199,12 +2214,17 @@ def test_scheduled_podcast_generation_excludes_one_off_digests(client, monkeypat
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
+    scheduled_window_time = _timestamp_inside_current_podcast_schedule_window()
     one_off_digest_id, _ = _create_digest_with_articles(
         article_count=2,
+        completed_at=scheduled_window_time,
         feed_url="synthetic://one-off",
         feed_title=ONE_OFF_SOURCE_LABEL,
     )
-    normal_digest_id, _ = _create_digest_with_articles(article_count=2)
+    normal_digest_id, _ = _create_digest_with_articles(
+        article_count=2,
+        completed_at=scheduled_window_time,
+    )
 
     with Session(engine) as session:
         existing_scheduled = session.exec(
@@ -2212,7 +2232,8 @@ def test_scheduled_podcast_generation_excludes_one_off_digests(client, monkeypat
         ).all()
         for episode in existing_scheduled:
             session.delete(episode)
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        user_id = podcast_service.resolve_user_id(session)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.enabled = True
         prefs.schedule = "daily"
         prefs.schedule_time = "00:00"
