@@ -1,6 +1,7 @@
 """Podcast episode model and API schemas."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import JSON, Column, Index, String, Text
@@ -30,6 +31,10 @@ class PodcastEpisodeBase(SQLModel):
     )
     article_count: int = Field(default=0, ge=0)
     generation_cost_cents: int | None = Field(default=None, ge=0)
+    generation_preferences: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default="{}"),
+    )
     status: str = Field(
         default="pending",
         sa_column=Column(String, nullable=False, server_default="pending"),

@@ -53,6 +53,7 @@ from app.services.one_off_podcast_service import (
     ONE_OFF_MAX_TITLE_CHARS,
     OneOffPodcastError,
     one_off_podcast_service,
+    one_off_generation_from_payload,
     one_off_source_from_payload,
 )
 from app.services.podcast_service import podcast_service
@@ -86,6 +87,7 @@ class PodcastEpisodeStatusRead(BaseModel):
     episode_number: int | None = None
     article_count: int
     generation_cost_cents: int | None = None
+    generation_preferences: dict[str, object] = Field(default_factory=dict)
     error_message: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
@@ -119,6 +121,22 @@ class OneOffPodcastSourceRequest(BaseModel):
     content: str | None = None
 
 
+class OneOffPodcastGenerationRequest(BaseModel):
+    """Per-episode podcast generation overrides for one-off episodes."""
+
+    preferred_length_minutes: int | None = Field(default=None, ge=5, le=60)
+    script_model: str | None = None
+    script_timeout_seconds: int | None = Field(default=None, ge=30, le=600)
+    style: Literal["casual", "formal", "deep-dive"] | None = None
+    tts_provider: Literal["openai", "elevenlabs"] | None = None
+    openai_tts_model: str | None = None
+    elevenlabs_model_id: str | None = None
+    elevenlabs_output_format: str | None = None
+    host_a_voice: str | None = None
+    host_b_voice: str | None = None
+    host_count: int | None = Field(default=None, ge=1, le=2)
+
+
 class OneOffPodcastCreateRequest(BaseModel):
     """Request to create a podcast episode from ad hoc source material."""
 
@@ -128,6 +146,7 @@ class OneOffPodcastCreateRequest(BaseModel):
         min_length=1,
         max_length=ONE_OFF_MAX_SOURCES,
     )
+    generation: OneOffPodcastGenerationRequest | None = None
 
 
 class DigestPodcastStatusResponse(BaseModel):
@@ -180,6 +199,7 @@ def _build_episode_status(
         episode_number=episode.episode_number,
         article_count=episode.article_count,
         generation_cost_cents=episode.generation_cost_cents,
+        generation_preferences=episode.generation_preferences or {},
         error_message=episode.error_message,
         created_at=episode.created_at,
         completed_at=episode.completed_at,
@@ -651,6 +671,7 @@ async def create_one_off_podcast_episode(
             title=payload.title,
             brief=payload.brief,
             sources=[one_off_source_from_payload(source) for source in payload.sources],
+            generation=one_off_generation_from_payload(payload.generation),
             user_id=current_user.id,
         )
     except OneOffPodcastError as exc:

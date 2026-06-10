@@ -55,6 +55,23 @@ class OneOffPodcastSourceInput:
 
 
 @dataclass(frozen=True)
+class OneOffPodcastGenerationInput:
+    """Optional per-episode generation preferences for one-off podcasts."""
+
+    preferred_length_minutes: int | None = None
+    script_model: str | None = None
+    script_timeout_seconds: int | None = None
+    style: str | None = None
+    tts_provider: str | None = None
+    openai_tts_model: str | None = None
+    elevenlabs_model_id: str | None = None
+    elevenlabs_output_format: str | None = None
+    host_a_voice: str | None = None
+    host_b_voice: str | None = None
+    host_count: int | None = None
+
+
+@dataclass(frozen=True)
 class NormalizedOneOffSource:
     """Source ready to persist as a digest article."""
 
@@ -77,6 +94,7 @@ class OneOffPodcastService:
         title: str | None,
         brief: str | None,
         sources: list[OneOffPodcastSourceInput],
+        generation: OneOffPodcastGenerationInput | None,
         user_id: UUID | None,
     ) -> PodcastEpisode:
         """Create a completed manual digest and queue podcast generation."""
@@ -177,6 +195,7 @@ class OneOffPodcastService:
             user_id=user_id,
             force=False,
             trigger="one_off",
+            generation_overrides=self._generation_overrides(generation),
         )
         return episode
 
@@ -347,6 +366,18 @@ class OneOffPodcastService:
             lines.append(f"Caller brief: {cleaned_brief}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _generation_overrides(
+        generation: OneOffPodcastGenerationInput | None,
+    ) -> dict[str, Any]:
+        if generation is None:
+            return {}
+        return {
+            key: value
+            for key, value in generation.__dict__.items()
+            if value is not None
+        }
+
 
 def one_off_source_from_payload(payload: Any) -> OneOffPodcastSourceInput:
     """Convert API payload objects into service input without coupling to Pydantic."""
@@ -355,6 +386,27 @@ def one_off_source_from_payload(payload: Any) -> OneOffPodcastSourceInput:
         title=payload.title,
         url=payload.url,
         content=payload.content,
+    )
+
+
+def one_off_generation_from_payload(
+    payload: Any,
+) -> OneOffPodcastGenerationInput | None:
+    """Convert API generation payload objects into service input."""
+    if payload is None:
+        return None
+    return OneOffPodcastGenerationInput(
+        preferred_length_minutes=payload.preferred_length_minutes,
+        script_model=payload.script_model,
+        script_timeout_seconds=payload.script_timeout_seconds,
+        style=payload.style,
+        tts_provider=payload.tts_provider,
+        openai_tts_model=payload.openai_tts_model,
+        elevenlabs_model_id=payload.elevenlabs_model_id,
+        elevenlabs_output_format=payload.elevenlabs_output_format,
+        host_a_voice=payload.host_a_voice,
+        host_b_voice=payload.host_b_voice,
+        host_count=payload.host_count,
     )
 
 

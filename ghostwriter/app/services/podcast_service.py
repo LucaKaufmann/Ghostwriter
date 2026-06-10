@@ -11,7 +11,7 @@ import secrets
 import shutil
 import tempfile
 from concurrent.futures import Future
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,20 @@ RUNNING_STATUSES = {"generating_script", "generating_audio"}
 ONE_OFF_SYNTHETIC_FEED_URL = "synthetic://one-off"
 SUPPORTED_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
 SUPPORTED_TTS_PROVIDERS = {"openai", "elevenlabs"}
+SUPPORTED_PODCAST_STYLES = {"casual", "formal", "deep-dive"}
+GENERATION_OVERRIDE_KEYS = {
+    "preferred_length_minutes",
+    "script_model",
+    "script_timeout_seconds",
+    "style",
+    "tts_provider",
+    "openai_tts_model",
+    "elevenlabs_model_id",
+    "elevenlabs_output_format",
+    "host_a_voice",
+    "host_b_voice",
+    "host_count",
+}
 SCRIPT_LINE_RE = re.compile(r"^\[(HOST_A|HOST_B)\]:\s+(.+)$")
 SCHEDULE_DAY_TO_WEEKDAY = {
     "monday": 0,
@@ -724,6 +738,7 @@ class PodcastDigestService:
         user_id: UUID | None = None,
         force: bool = False,
         trigger: str = "manual",
+        generation_overrides: dict[str, Any] | None = None,
     ) -> PodcastEpisode:
         """Queue podcast generation for a single digest (manual trigger)."""
         digest = session.get(Digest, digest_id)
@@ -731,6 +746,7 @@ class PodcastDigestService:
             raise ValueError("Digest not found")
         if digest.status != "completed":
             raise ValueError("Digest must be completed before podcast generation")
+        cleaned_overrides = self.sanitize_generation_overrides(generation_overrides)
 
         digest_id_str = str(digest_id)
         now = datetime.utcnow()
@@ -761,6 +777,15 @@ class PodcastDigestService:
         if episode is not None:
             if episode.user_id is None and user_id is not None:
                 episode.user_id = user_id
+                episode.updated_at = now
+                session.add(episode)
+                session.commit()
+                session.refresh(episode)
+            if cleaned_overrides:
+                episode.generation_preferences = {
+                    **(episode.generation_preferences or {}),
+                    "overrides": cleaned_overrides,
+                }
                 episode.updated_at = now
                 session.add(episode)
                 session.commit()
@@ -813,6 +838,9 @@ class PodcastDigestService:
             digest_ids=[digest_id_str],
             trigger=trigger,
             user_id=user_id,
+            generation_preferences=(
+                {"overrides": cleaned_overrides} if cleaned_overrides else {}
+            ),
             status="pending",
             created_at=now,
             updated_at=now,
@@ -1185,6 +1213,123 @@ class PodcastDigestService:
             host_count=int(prefs.host_count or 2),
         )
 
+    def sanitize_generation_overrides(
+        self,
+        overrides: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Validate per-episode generation preference overrides."""
+        if not overrides:
+            return {}
+
+        unknown = sorted(set(overrides) - GENERATION_OVERRIDE_KEYS)
+        if unknown:
+            raise ValueError(f"Unsupported podcast generation override: {unknown[0]}")
+
+        cleaned: dict[str, Any] = {}
+        for key, raw_value in overrides.items():
+            if raw_value is None:
+                continue
+            if isinstance(raw_value, str):
+                value: Any = raw_value.strip()
+            else:
+                value = raw_value
+
+            if key == "preferred_length_minutes":
+                minutes = int(value)
+                if not 5 <= minutes <= 60:
+                    raise ValueError("preferred_length_minutes must be between 5 and 60")
+                cleaned[key] = minutes
+            elif key == "script_timeout_seconds":
+                timeout = int(value)
+                if not 30 <= timeout <= 600:
+                    raise ValueError("script_timeout_seconds must be between 30 and 600")
+                cleaned[key] = timeout
+            elif key == "host_count":
+                host_count = int(value)
+                if host_count not in {1, 2}:
+                    raise ValueError("host_count must be 1 or 2")
+                cleaned[key] = host_count
+            elif key == "style":
+                style = str(value).lower()
+                if style not in SUPPORTED_PODCAST_STYLES:
+                    raise ValueError("style must be 'casual', 'formal', or 'deep-dive'")
+                cleaned[key] = style
+            elif key == "tts_provider":
+                provider = str(value).lower()
+                if provider not in SUPPORTED_TTS_PROVIDERS:
+                    raise ValueError("tts_provider must be 'openai' or 'elevenlabs'")
+                cleaned[key] = provider
+            elif key == "script_model":
+                cleaned[key] = str(value) or None
+            else:
+                text = str(value)
+                if text:
+                    cleaned[key] = text
+
+        return cleaned
+
+    def _apply_generation_overrides(
+        self,
+        prefs: PodcastGenerationPreferences,
+        overrides: dict[str, Any],
+    ) -> PodcastGenerationPreferences:
+        """Apply sanitized per-episode overrides to a runtime preference snapshot."""
+        if not overrides:
+            return prefs
+
+        values = {key: getattr(prefs, key) for key in GENERATION_OVERRIDE_KEYS}
+        values.update(overrides)
+        provider = str(values.get("tts_provider") or "openai").strip().lower()
+        if provider not in SUPPORTED_TTS_PROVIDERS:
+            raise ValueError("tts_provider must be 'openai' or 'elevenlabs'")
+
+        host_a_voice = str(values.get("host_a_voice") or "").strip()
+        host_b_voice = str(values.get("host_b_voice") or "").strip()
+        if provider == "openai":
+            host_a_voice = self._ensure_supported_voice(host_a_voice, "alloy")
+            host_b_voice = self._ensure_supported_voice(host_b_voice, "echo")
+        else:
+            host_a_voice = host_a_voice or ELEVENLABS_DEFAULT_HOST_A_VOICE
+            host_b_voice = host_b_voice or ELEVENLABS_DEFAULT_HOST_B_VOICE
+
+        return replace(
+            prefs,
+            preferred_length_minutes=int(values["preferred_length_minutes"]),
+            script_model=(str(values.get("script_model") or "").strip() or None),
+            script_timeout_seconds=int(values["script_timeout_seconds"]),
+            style=str(values["style"]),
+            tts_provider=provider,
+            openai_tts_model=str(values["openai_tts_model"] or "tts-1"),
+            elevenlabs_model_id=str(
+                values["elevenlabs_model_id"] or "eleven_turbo_v2_5"
+            ),
+            elevenlabs_output_format=str(
+                values["elevenlabs_output_format"] or "mp3_44100_128"
+            ),
+            host_a_voice=host_a_voice,
+            host_b_voice=host_b_voice,
+            host_count=int(values["host_count"]),
+        )
+
+    @staticmethod
+    def _public_generation_preferences(
+        prefs: PodcastGenerationPreferences,
+    ) -> dict[str, Any]:
+        """Serialize non-secret generation preferences for audit/debug metadata."""
+        return {
+            "preferred_length_minutes": prefs.preferred_length_minutes,
+            "script_model": prefs.script_model,
+            "script_timeout_seconds": prefs.script_timeout_seconds,
+            "style": prefs.style,
+            "tts_provider": prefs.tts_provider,
+            "openai_tts_model": prefs.openai_tts_model,
+            "elevenlabs_model_id": prefs.elevenlabs_model_id,
+            "elevenlabs_output_format": prefs.elevenlabs_output_format,
+            "host_a_voice": prefs.host_a_voice,
+            "host_b_voice": prefs.host_b_voice,
+            "host_count": prefs.host_count,
+        }
+
     async def _run_episode_generation(self, episode_id: UUID) -> None:
         """Run end-to-end script and audio generation for one episode."""
         now = datetime.utcnow()
@@ -1228,7 +1373,23 @@ class PodcastDigestService:
 
                 user_id = episode.user_id or self._resolve_user_id(session)
                 prefs = self.get_or_create_preferences(session, user_id=user_id)
-                runtime_prefs = self._snapshot_generation_preferences(prefs)
+                saved_prefs = self._snapshot_generation_preferences(prefs)
+                existing_generation_preferences = episode.generation_preferences or {}
+                generation_overrides = self.sanitize_generation_overrides(
+                    existing_generation_preferences.get("overrides")
+                )
+                runtime_prefs = self._apply_generation_overrides(
+                    saved_prefs,
+                    generation_overrides,
+                )
+                episode.generation_preferences = {
+                    **existing_generation_preferences,
+                    "overrides": generation_overrides,
+                    "resolved": self._public_generation_preferences(runtime_prefs),
+                    "resolved_at": datetime.utcnow().isoformat() + "Z",
+                }
+                session.add(episode)
+                session.commit()
                 selected_articles = self.select_articles_for_episode(
                     session,
                     digest_ids=episode_digest_ids,
