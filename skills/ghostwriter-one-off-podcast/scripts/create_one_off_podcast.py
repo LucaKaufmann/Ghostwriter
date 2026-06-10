@@ -76,8 +76,10 @@ VOICE_PRESETS: dict[str, dict[str, Any]] = {
         "elevenlabs_model_id": "eleven_v3",
         "elevenlabs_expressiveness": "creative",
         "host_count": 2,
-        "host_a_voice": "iP95p4xoKVk53GoZ742B",
-        "host_b_voice": "XrExE9yKIg1WjnnlVkGX",
+        # Jessica + Eric: both officially tagged conversational/expressive —
+        # the strongest premade pairing for v3 audio-tag dialogue.
+        "host_a_voice": "cjVigY5qzO86Huf0OWal",
+        "host_b_voice": "cgSgspJ2msm6clMCkdW9",
     },
 }
 
