@@ -1285,6 +1285,11 @@ class PodcastDigestService:
 
         host_a_voice = str(values.get("host_a_voice") or "").strip()
         host_b_voice = str(values.get("host_b_voice") or "").strip()
+        provider_changed = provider != (prefs.tts_provider or "openai").strip().lower()
+        if provider_changed and "host_a_voice" not in overrides:
+            host_a_voice = ""
+        if provider_changed and "host_b_voice" not in overrides:
+            host_b_voice = ""
         if provider == "openai":
             host_a_voice = self._ensure_supported_voice(host_a_voice, "alloy")
             host_b_voice = self._ensure_supported_voice(host_b_voice, "echo")

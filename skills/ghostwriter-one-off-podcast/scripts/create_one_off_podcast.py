@@ -460,6 +460,28 @@ def matches_any_glob(path: Path, root: Path, patterns: list[str]) -> bool:
     return any(fnmatch(candidate, pattern) for pattern in patterns for candidate in candidates)
 
 
+def path_allowed_by_obsidian_filters(
+    path: Path,
+    roots: list[Path],
+    *,
+    include_globs: list[str],
+    exclude_globs: list[str],
+) -> bool:
+    if not include_globs and not exclude_globs:
+        return True
+    root_candidates = [root for root in roots if root.exists()]
+    root_candidates.append(path.parent)
+    if include_globs and not any(
+        matches_any_glob(path, root, include_globs) for root in root_candidates
+    ):
+        return False
+    if exclude_globs and any(
+        matches_any_glob(path, root, exclude_globs) for root in root_candidates
+    ):
+        return False
+    return True
+
+
 def collect_markdown_files(
     folder: Path,
     *,
@@ -776,7 +798,8 @@ def build_local_candidates(args: argparse.Namespace) -> tuple[list[SourceCandida
         roots = [path.parent for path in explicit_note_paths]
         roots.extend(folder_paths)
         roots.extend(Path(raw).expanduser() for raw in args.obsidian_root)
-        index = build_note_index([root for root in roots if root.exists()])
+        existing_roots = [root for root in roots if root.exists()]
+        index = build_note_index(existing_roots)
         if args.include_linked_notes:
             depth = max(1, args.linked_note_depth)
             frontier = list(note_candidates)
@@ -790,6 +813,14 @@ def build_local_candidates(args: argparse.Namespace) -> tuple[list[SourceCandida
                             continue
                         resolved = linked_path.resolve()
                         if resolved in seen_note_paths:
+                            continue
+                        if not path_allowed_by_obsidian_filters(
+                            linked_path,
+                            existing_roots,
+                            include_globs=args.obsidian_include,
+                            exclude_globs=args.obsidian_exclude,
+                        ):
+                            warnings.append(f"Skipped linked note excluded by filters: {linked_path}")
                             continue
                         linked_candidate = read_obsidian_note(linked_path, order=order)
                         if not candidate_has_required_tags(linked_candidate, args.obsidian_tag):
@@ -807,6 +838,14 @@ def build_local_candidates(args: argparse.Namespace) -> tuple[list[SourceCandida
             for linked_path in backlink_paths(selected_paths=seen_note_paths, index=index):
                 resolved = linked_path.resolve()
                 if resolved in seen_note_paths:
+                    continue
+                if not path_allowed_by_obsidian_filters(
+                    linked_path,
+                    existing_roots,
+                    include_globs=args.obsidian_include,
+                    exclude_globs=args.obsidian_exclude,
+                ):
+                    warnings.append(f"Skipped backlink excluded by filters: {linked_path}")
                     continue
                 backlink_candidate = read_obsidian_note(linked_path, order=order)
                 if not candidate_has_required_tags(backlink_candidate, args.obsidian_tag):

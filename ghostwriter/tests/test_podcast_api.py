@@ -653,6 +653,23 @@ def test_create_one_off_podcast_accepts_generation_overrides(
     }
 
 
+def test_generation_provider_override_resets_inherited_voice_defaults():
+    prefs = _test_podcast_preferences(
+        tts_provider="openai",
+        host_a_voice="alloy",
+        host_b_voice="echo",
+    )
+    overrides = podcast_service.sanitize_generation_overrides(
+        {"tts_provider": "elevenlabs"}
+    )
+
+    resolved = podcast_service._apply_generation_overrides(prefs, overrides)
+
+    assert resolved.tts_provider == "elevenlabs"
+    assert resolved.host_a_voice == "iP95p4xoKVk53GoZ742B"
+    assert resolved.host_b_voice == "XrExE9yKIg1WjnnlVkGX"
+
+
 def test_one_off_episode_trigger_is_persisted_before_scheduling(
     client, monkeypatch, auth_headers
 ):
