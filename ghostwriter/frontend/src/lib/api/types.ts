@@ -541,6 +541,28 @@ export interface PodcastArtworkUploadResponse {
 	height: number;
 }
 
+export interface PodcastVoiceCatalogEntry {
+	provider: 'openai' | 'elevenlabs';
+	name: string;
+	id: string;
+	vibe: string;
+	best_suited_for: string;
+	pairing_notes: string;
+}
+
+export interface PodcastVoicePairPreset {
+	provider: 'openai' | 'elevenlabs';
+	label: string;
+	host_a_voice: string;
+	host_b_voice: string;
+	best_suited_for: string;
+}
+
+export interface PodcastVoiceCatalogResponse {
+	voices: PodcastVoiceCatalogEntry[];
+	pair_presets: PodcastVoicePairPreset[];
+}
+
 export interface PodcastPreferencesResponse {
 	enabled: boolean;
 	schedule: 'daily' | 'weekly' | 'manual';
@@ -609,6 +631,7 @@ export interface PodcastEpisodeStatusResponse {
 	duration_seconds: number | null;
 	article_count: number;
 	generation_cost_cents: number | null;
+	generation_preferences: Record<string, unknown>;
 	error_message: string | null;
 	created_at: string;
 	completed_at: string | null;

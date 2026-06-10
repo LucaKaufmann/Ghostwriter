@@ -327,6 +327,22 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert "podcast_feed_base_url" in invalid_feed_base_url.json()["detail"]
 
 
+def test_podcast_voice_catalog_lists_voice_ids(client, auth_headers):
+    response = client.get("/api/podcast/voices", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    voices = payload["voices"]
+    pairs = payload["pair_presets"]
+    assert {voice["provider"] for voice in voices} == {"openai", "elevenlabs"}
+    assert any(voice["id"] == "alloy" and voice["name"] == "Alloy" for voice in voices)
+    assert any(
+        voice["id"] == "iP95p4xoKVk53GoZ742B" and voice["name"] == "Chris"
+        for voice in voices
+    )
+    assert any(pair["label"] == "Alloy + Echo" for pair in pairs)
+
+
 def test_podcast_preferences_are_scoped_to_token_owner(client):
     owner_id, _owner_headers = _create_auth_headers_for_user("prefs_owner")
     user_id, headers = _create_auth_headers_for_user("prefs_secondary")

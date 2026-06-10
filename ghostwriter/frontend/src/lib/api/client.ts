@@ -52,6 +52,7 @@ import type {
 	PodcastArtworkUploadResponse,
 	PodcastPreferencesResponse,
 	PodcastPreferencesUpdate,
+	PodcastVoiceCatalogResponse,
 	PodcastTriggerResponse,
 	PodcastEpisodeStatusResponse,
 	PodcastEpisodeDetailResponse,
@@ -603,6 +604,10 @@ class ApiClient {
 
 	async getPodcastPreferences(): Promise<PodcastPreferencesResponse> {
 		return this.request<PodcastPreferencesResponse>('/podcast/preferences');
+	}
+
+	async getPodcastVoiceCatalog(): Promise<PodcastVoiceCatalogResponse> {
+		return this.request<PodcastVoiceCatalogResponse>('/podcast/voices');
 	}
 
 	async updatePodcastPreferences(data: PodcastPreferencesUpdate): Promise<PodcastPreferencesResponse> {

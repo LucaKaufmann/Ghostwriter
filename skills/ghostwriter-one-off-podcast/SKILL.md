@@ -147,6 +147,45 @@ When calling the API directly, send:
 }
 ```
 
+Optional per-episode generation overrides are accepted under `generation`:
+
+```json
+{
+  "generation": {
+    "tts_provider": "elevenlabs",
+    "host_count": 2,
+    "host_a_voice": "iP95p4xoKVk53GoZ742B",
+    "host_b_voice": "XrExE9yKIg1WjnnlVkGX",
+    "style": "deep-dive",
+    "preferred_length_minutes": 12
+  }
+}
+```
+
+## Voice Catalog
+
+Ghostwriter exposes the shared catalog at `/api/podcast/voices`. Use these IDs in one-off `generation` overrides or helper flags.
+
+| Provider | Name | ID | Vibe | Best suited for |
+| --- | --- | --- | --- | --- |
+| OpenAI | Alloy | `alloy` | Balanced, neutral, clear | General research briefings and mixed-source summaries |
+| OpenAI | Echo | `echo` | Warm, conversational, steady | Context-setting, explanatory turns, and recaps |
+| OpenAI | Fable | `fable` | Expressive, story-forward, lighter | Narrative explainers and approachable solo summaries |
+| OpenAI | Onyx | `onyx` | Deep, calm, authoritative | Serious analysis, longer-form synthesis, and solo narration |
+| OpenAI | Nova | `nova` | Bright, quick, energetic | Hooks, momentum, and lively research updates |
+| OpenAI | Shimmer | `shimmer` | Polished, friendly, precise | Executive-style briefings and concise summaries |
+| ElevenLabs | Chris | `iP95p4xoKVk53GoZ742B` | Natural, confident, presenter-like | Host A in research briefings and decision summaries |
+| ElevenLabs | Matilda | `XrExE9yKIg1WjnnlVkGX` | Warm, clear, explanatory | Host B context, definitions, and clarifying questions |
+| ElevenLabs | George | `JBFqnCBsd6RMkjVDRZzb` | Measured, grounded, direct | Formal analysis and slower-paced synthesis |
+| ElevenLabs | Bella | `hpp4J3VqNfWAUOO0d1Us` | Friendly, responsive, conversational | Accessible companion host and lighter recap segments |
+
+Useful pairings:
+
+- `Alloy + Echo`: balanced OpenAI research briefing.
+- `Nova + Fable`: more energetic narrative episode.
+- `Chris + Matilda`: default ElevenLabs research briefing.
+- `George + Bella`: formal analysis with warmer companion context.
+
 ## Operating Rules
 
 - Keep documents in user-provided order unless the user asks for a different structure.

@@ -57,6 +57,7 @@ from app.services.one_off_podcast_service import (
     one_off_source_from_payload,
 )
 from app.services.podcast_service import podcast_service
+from app.services.podcast_voice_catalog import podcast_voice_catalog_payload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -173,6 +174,34 @@ class PodcastArtworkUploadResponse(BaseModel):
     artwork_path: str
     width: int
     height: int
+
+
+class PodcastVoiceCatalogEntryRead(BaseModel):
+    """Display metadata for a configured podcast voice."""
+
+    provider: Literal["openai", "elevenlabs"]
+    name: str
+    id: str
+    vibe: str
+    best_suited_for: str
+    pairing_notes: str
+
+
+class PodcastVoicePairPresetRead(BaseModel):
+    """Named host voice pair preset."""
+
+    provider: Literal["openai", "elevenlabs"]
+    label: str
+    host_a_voice: str
+    host_b_voice: str
+    best_suited_for: str
+
+
+class PodcastVoiceCatalogRead(BaseModel):
+    """Podcast voice catalog response."""
+
+    voices: list[PodcastVoiceCatalogEntryRead]
+    pair_presets: list[PodcastVoicePairPresetRead]
 
 
 def _build_episode_status(
@@ -456,6 +485,16 @@ async def get_podcast_preferences(
         podcast_feed_artwork_path=prefs.podcast_feed_artwork_path,
         updated_at=prefs.updated_at,
     )
+
+
+@router.get(
+    "/podcast/voices",
+    response_model=PodcastVoiceCatalogRead,
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_podcast_voice_catalog():
+    """Return provider voice IDs and pairing guidance for podcast generation."""
+    return podcast_voice_catalog_payload()
 
 
 @router.put(
