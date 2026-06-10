@@ -133,6 +133,7 @@ class OneOffPodcastGenerationRequest(BaseModel):
     openai_tts_model: str | None = None
     elevenlabs_model_id: str | None = None
     elevenlabs_output_format: str | None = None
+    elevenlabs_expressiveness: Literal["creative", "natural", "robust"] | None = None
     host_a_voice: str | None = None
     host_b_voice: str | None = None
     host_count: int | None = Field(default=None, ge=1, le=2)

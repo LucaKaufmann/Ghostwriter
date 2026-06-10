@@ -66,6 +66,7 @@ class OneOffPodcastGenerationInput:
     openai_tts_model: str | None = None
     elevenlabs_model_id: str | None = None
     elevenlabs_output_format: str | None = None
+    elevenlabs_expressiveness: str | None = None
     host_a_voice: str | None = None
     host_b_voice: str | None = None
     host_count: int | None = None
@@ -404,6 +405,7 @@ def one_off_generation_from_payload(
         openai_tts_model=payload.openai_tts_model,
         elevenlabs_model_id=payload.elevenlabs_model_id,
         elevenlabs_output_format=payload.elevenlabs_output_format,
+        elevenlabs_expressiveness=payload.elevenlabs_expressiveness,
         host_a_voice=payload.host_a_voice,
         host_b_voice=payload.host_b_voice,
         host_count=payload.host_count,

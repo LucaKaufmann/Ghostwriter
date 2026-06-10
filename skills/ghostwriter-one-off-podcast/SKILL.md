@@ -126,10 +126,11 @@ Preview stdout includes the payload shape with text source content redacted plus
 
 Generation override flags:
 
-- `--voice-preset`: one of `openai-balanced`, `openai-energetic`, `openai-solo-analysis`, `elevenlabs-research`, or `elevenlabs-formal`.
+- `--voice-preset`: one of `openai-balanced`, `openai-energetic`, `openai-solo-analysis`, `elevenlabs-research`, `elevenlabs-formal`, or `elevenlabs-v3-dialogue`.
 - `--tts-provider`: `openai` or `elevenlabs`.
 - `--host-count`: `1` for solo narration or `2` for a host dialogue.
 - `--host-a-voice` / `--host-b-voice`: provider voice name/ID. For ElevenLabs use voice IDs.
+- `--expressiveness`: ElevenLabs delivery mode — `creative`, `natural` (default), or `robust`. See "Model & Expressiveness Selection" below.
 - `--style`: `casual`, `formal`, or `deep-dive`.
 - `--preferred-length-minutes`, `--script-model`, and `--script-timeout-seconds`: per-episode generation preferences.
 - `--research-briefing`: appends guidance for AI-agent research notes, emphasizing evidence, uncertainty, contradictions, decisions, and next actions.
@@ -172,6 +173,8 @@ Optional per-episode generation overrides are accepted under `generation`:
 {
   "generation": {
     "tts_provider": "elevenlabs",
+    "elevenlabs_model_id": "eleven_v3",
+    "elevenlabs_expressiveness": "creative",
     "host_count": 2,
     "host_a_voice": "iP95p4xoKVk53GoZ742B",
     "host_b_voice": "XrExE9yKIg1WjnnlVkGX",
@@ -180,6 +183,24 @@ Optional per-episode generation overrides are accepted under `generation`:
   }
 }
 ```
+
+## Model & Expressiveness Selection
+
+Pick the ElevenLabs model and expressiveness per task; both are per-episode overrides that do not change saved global preferences.
+
+**Model (`elevenlabs_model_id` / `--elevenlabs-model-id`):**
+
+- `eleven_v3`: most expressive. Unlocks inline audio tags (`[laughs]`, `[excited]`, `[pauses]`, ...) in the script, dialogue-mode synthesis for 2-host episodes (shared scene context and natural turn-taking), and native text normalization. Alpha model — text-to-dialogue access depends on the account plan; Ghostwriter automatically falls back to per-segment synthesis when the endpoint is unavailable.
+- `eleven_turbo_v2_5` (default): fast and roughly half the per-character cost of v3/multilingual. No audio tags — Ghostwriter strips bracketed tags before synthesis. Good for dry factual briefings.
+- `eleven_multilingual_v2`: highest consistency for non-English or mixed-language sources, v3-level cost, no audio tags.
+
+**Expressiveness (`elevenlabs_expressiveness` / `--expressiveness`):**
+
+- `creative`: most emotional and responsive to audio tags; scripts get denser delivery cues. Best for narrative explainers and conversational episodes.
+- `natural` (default): balanced; closest to the neutral baseline of each voice.
+- `robust`: most stable and consistent, least responsive to tags — like the old controlled delivery. Best for formal or information-dense briefings.
+
+Suggested combinations: `eleven_v3` + `creative` for storytelling or banter-heavy dialogue; `eleven_v3` + `natural` for research briefings that should still feel alive; `eleven_turbo_v2_5` + `robust` for fast, low-cost, no-frills news reads. The `elevenlabs-v3-dialogue` preset applies `eleven_v3` + `creative` with the Eric/Jessica pairing (see the voice inventory below).
 
 ## Voice Catalog
 
@@ -204,6 +225,48 @@ Useful pairings:
 - `Nova + Fable`: more energetic narrative episode.
 - `Chris + Matilda`: default ElevenLabs research briefing.
 - `George + Bella`: formal analysis with warmer companion context.
+
+Note: `Bella` (`hpp4J3VqNfWAUOO0d1Us`) is not part of the current ElevenLabs premade set — it must exist in the account's My Voices. All other ElevenLabs IDs in the curated catalog are premade voices from the inventory below.
+
+## ElevenLabs Premade Voice Inventory (v3-ready)
+
+Every ElevenLabs account created before ~March 2026 includes these 20 premade voices. Voice IDs are model-independent — the same ID works with `eleven_turbo_v2_5`, `eleven_multilingual_v2`, and `eleven_v3`; only `model_id` changes. ElevenLabs' v3 guidance: voice choice is the single most important v3 parameter — expressive/conversational voices respond best to audio tags, while neutral news/narration voices are the most stable baseline.
+
+| Name | Voice ID | Gender | Accent | Official label | Podcast fit |
+| --- | --- | --- | --- | --- | --- |
+| Aria | `9BWtsMINqrJLrRacOk9x` | Female | American | expressive, social media | Expressive — strong audio-tag response on v3 |
+| Roger | `CwhRBWXzGAHq8TQ4Fs17` | Male | American | confident, social media | Confident co-host |
+| Sarah | `EXAVITQu4vr4xnSDxMaL` | Female | American | soft, news | Stable neutral baseline |
+| Laura | `FGY2WhTYpPnrIDTdsKH5` | Female | American | upbeat, social media | Energetic host |
+| Charlie | `IKne3meq5aSn9XLyUdCD` | Male | Australian | natural, conversational | Natural dialogue host |
+| George | `JBFqnCBsd6RMkjVDRZzb` | Male | British | warm, narration | Warm narrator/anchor |
+| Callum | `N2lVS1w4EtoT3dr4eOWO` | Male | Transatlantic | intense, characters | Character voice; avoid for neutral hosting |
+| River | `SAz9YHcvj6GT2YYXdXww` | Non-binary | American | confident, social media | Confident host |
+| Liam | `TX3LPaxmHKxFdv7VOQHJ` | Male | American | articulate, narration | Clear young narrator |
+| Charlotte | `XB0fDUnXU5powFXDhCwa` | Female | Swedish | seductive, characters | Character voice |
+| Alice | `Xb7hH8MSUJpSbSDYk0k2` | Female | British | confident, news | Stable news/anchor tone |
+| Matilda | `XrExE9yKIg1WjnnlVkGX` | Female | American | friendly, narration | Friendly explainer host |
+| Will | `bIHbv24MWmeRgasZH58o` | Male | American | friendly, social media | Casual young host |
+| Jessica | `cgSgspJ2msm6clMCkdW9` | Female | American | expressive, conversational | Strong v3 dialogue pick |
+| Eric | `cjVigY5qzO86Huf0OWal` | Male | American | friendly, conversational | Strong podcast pick |
+| Chris | `iP95p4xoKVk53GoZ742B` | Male | American | casual, conversational | Casual conversational host |
+| Brian | `nPczCjzI2devNBz1zQrb` | Male | American | deep, narration | Deep, very stable narrator |
+| Daniel | `onwK4e9ZLuTAKqWW03F9` | Male | British | authoritative, news | News-anchor delivery |
+| Lily | `pFZP5JQG7iQjIQuC4Bku` | Female | British | warm, narration | Warm narrator |
+| Bill | `pqHfZKP75CvOlQylNhV4` | Male | American | trustworthy, narration | Older, trustworthy narrator |
+
+Additional v3-focused pairings from this inventory:
+
+- `Jessica + Eric`: expressive + friendly conversational — best premade pairing for `eleven_v3` + `creative` dialogue episodes.
+- `Charlie + Laura`: natural + upbeat for lively casual episodes.
+- `Daniel + Alice`: authoritative + confident British news tone for formal briefings (`robust`).
+- `Brian + Lily`: deep + warm narration for measured long-form synthesis.
+
+Caveats:
+
+- **Premade voices expire 2026-12-31.** ElevenLabs is replacing Default voices; legacy voice IDs will auto-route to replacements via the API. Before hardcoding IDs in automation, check the account's current voices and the replacement table in the "What are Default voices?" help article (help.elevenlabs.io).
+- ElevenLabs also curates a "Best voices for Eleven v3" collection in the voice library (e.g. Hope, Jane, James, Mark - Natural Conversations) — these often outperform premade voices on v3 but must be added to the account's My Voices before the API can use them.
+- Professional voice clones are not fully optimized for v3; prefer premade or designed voices for v3 episodes.
 
 ## Operating Rules
 
