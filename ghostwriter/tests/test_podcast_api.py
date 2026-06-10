@@ -271,6 +271,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert payload["script_timeout_seconds"] == 60
     assert payload["tts_provider"] == "openai"
     assert payload["openai_tts_model"] == "tts-1"
+    assert payload["elevenlabs_expressiveness"] == "natural"
     assert payload["podcast_feed_base_url"] is None
 
     update = client.put(
@@ -288,6 +289,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
             "tts_provider": "elevenlabs",
             "elevenlabs_model_id": "eleven_flash_v2_5",
             "elevenlabs_output_format": "mp3_44100_128",
+            "elevenlabs_expressiveness": "creative",
             "elevenlabs_api_key": "xi-test-key",
             "host_a_voice": "nova",
             "host_b_voice": "echo",
@@ -309,6 +311,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert updated["tts_provider"] == "elevenlabs"
     assert updated["elevenlabs_model_id"] == "eleven_flash_v2_5"
     assert updated["elevenlabs_output_format"] == "mp3_44100_128"
+    assert updated["elevenlabs_expressiveness"] == "creative"
     assert updated["boost_keywords"] == ["AI", "Swift"]
     assert updated["podcast_feed_enabled"] is True
     assert updated["podcast_feed_title"] == "My Test Feed"
@@ -328,6 +331,13 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
         headers=auth_headers,
     )
     assert invalid_provider.status_code == 422
+
+    invalid_expressiveness = client.put(
+        "/api/podcast/preferences",
+        json={"elevenlabs_expressiveness": "dramatic"},
+        headers=auth_headers,
+    )
+    assert invalid_expressiveness.status_code == 422
 
     invalid_feed_base_url = client.put(
         "/api/podcast/preferences",
@@ -2272,7 +2282,7 @@ def test_elevenlabs_tts_normalization_for_spoken_delivery():
     normalized = podcast_service._normalize_tts_segment_text(
         "Dr. Lee said revenue hit $42.50 at 14:30 on 2026-02-20 via https://example.com/path",
         provider="elevenlabs",
-        elevenlabs_model_id="eleven_v3",
+        elevenlabs_model_id="eleven_turbo_v2_5",
     )
     assert "Doctor Lee" in normalized
     assert "42 dollars and 50 cents" in normalized
@@ -2281,7 +2291,54 @@ def test_elevenlabs_tts_normalization_for_spoken_delivery():
     assert "example dot com" in normalized
 
 
-def test_eleven_v3_prompt_guidance_includes_sparse_audio_tag_rules():
+def test_elevenlabs_tts_normalization_handles_currency_magnitudes():
+    normalized = podcast_service._normalize_tts_segment_text(
+        "Funding hit $1.5 billion, then $3 million more, and one user paid $1.",
+        provider="elevenlabs",
+        elevenlabs_model_id="eleven_turbo_v2_5",
+    )
+    assert "1.5 billion dollars" in normalized
+    assert "3 million dollars" in normalized
+    assert "1 dollar." in normalized
+    assert "dollars billion" not in normalized
+    assert "dollars million" not in normalized
+
+
+def test_eleven_v3_normalization_defers_numbers_to_api():
+    normalized = podcast_service._normalize_tts_segment_text(
+        "Dr. Lee said revenue hit $42.50 at 14:30 on 2026-02-20.",
+        provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+    )
+    # Abbreviations are still expanded locally...
+    assert "Doctor Lee" in normalized
+    # ...but currency/time/date stay raw for the API's own normalization.
+    assert "$42.50" in normalized
+    assert "14:30" in normalized
+    assert "2026-02-20" in normalized
+
+
+def test_audio_tag_sanitization_keeps_whitelist_only_on_v3():
+    text = "[laughs] That's wild... [smiles warmly] but [pauses] true."
+    v3 = podcast_service._normalize_tts_segment_text(
+        text, provider="elevenlabs", elevenlabs_model_id="eleven_v3"
+    )
+    assert "[laughs]" in v3
+    assert "[pauses]" in v3
+    assert "[smiles warmly]" not in v3
+
+    turbo = podcast_service._normalize_tts_segment_text(
+        text, provider="elevenlabs", elevenlabs_model_id="eleven_turbo_v2_5"
+    )
+    assert "[" not in turbo
+    assert "laughs" not in turbo
+
+    openai = podcast_service._normalize_tts_segment_text(text, provider="openai")
+    assert "[" not in openai
+    assert "That's wild... but true." in openai
+
+
+def test_eleven_v3_prompt_guidance_includes_audio_tag_vocabulary():
     guidance = podcast_service._tts_script_delivery_guidance(
         provider="elevenlabs",
         elevenlabs_model_id="eleven_v3",
@@ -2291,9 +2348,43 @@ def test_eleven_v3_prompt_guidance_includes_sparse_audio_tag_rules():
         elevenlabs_model_id="eleven_v3",
     )
     assert "audio/emotion tags" in guidance
-    assert "one tag every 4-8 lines" in guidance
+    assert "[laughs]" in guidance
+    assert "[thoughtful]" in guidance
+    assert "one tag every 2-4 lines" in guidance
     assert "Do not overuse tags" in guidance
+    assert "[laughs]" in system_prompt
     assert "Keep tags sparse and intentional" in system_prompt
+
+    robust_guidance = podcast_service._tts_script_delivery_guidance(
+        provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        expressiveness="robust",
+    )
+    assert "one tag every 4-8 lines" in robust_guidance
+
+
+def test_elevenlabs_voice_settings_mapping():
+    assert podcast_service._elevenlabs_voice_settings("eleven_v3", "creative") == {
+        "stability": 0.0
+    }
+    assert podcast_service._elevenlabs_voice_settings("eleven_v3", "natural") == {
+        "stability": 0.5
+    }
+    assert podcast_service._elevenlabs_voice_settings("eleven_v3", "robust") == {
+        "stability": 1.0
+    }
+    # Unknown modes fall back to natural.
+    assert podcast_service._elevenlabs_voice_settings("eleven_v3", "dramatic") == {
+        "stability": 0.5
+    }
+
+    v2 = podcast_service._elevenlabs_voice_settings("eleven_turbo_v2_5", "robust")
+    assert v2 == {
+        "stability": 0.75,
+        "similarity_boost": 0.75,
+        "style": 0.0,
+        "use_speaker_boost": True,
+    }
 
 
 def test_article_scoring_prefers_podcast_worthy_source_material():
@@ -2555,6 +2646,7 @@ async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(
         elevenlabs_api_key="xi-test-key",
         host_a_voice="voice_a",
         host_b_voice="voice_b",
+        elevenlabs_expressiveness="creative",
     )
 
     result = await podcast_service._synthesize_segment_elevenlabs(
@@ -2569,6 +2661,7 @@ async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(
     payload = captured["json"]
     assert isinstance(payload, dict)
     assert payload["apply_text_normalization"] == "on"
+    assert payload["voice_settings"] == {"stability": 0.0}
     assert "previous_text" not in payload
     assert "next_text" not in payload
 
@@ -2619,6 +2712,12 @@ async def test_elevenlabs_non_v3_synthesis_includes_context(monkeypatch):
     assert payload["apply_text_normalization"] == "auto"
     assert payload["previous_text"] == "Previous context line"
     assert payload["next_text"] == "Next context line"
+    assert payload["voice_settings"] == {
+        "stability": 0.5,
+        "similarity_boost": 0.75,
+        "style": 0.2,
+        "use_speaker_boost": True,
+    }
 
 
 # ======================== Podcast Schedules CRUD ========================

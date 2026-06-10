@@ -105,6 +105,31 @@ TOPIC_KEYWORDS = {
 }
 ELEVENLABS_DEFAULT_HOST_A_VOICE = "iP95p4xoKVk53GoZ742B"
 ELEVENLABS_DEFAULT_HOST_B_VOICE = "XrExE9yKIg1WjnnlVkGX"
+SUPPORTED_EXPRESSIVENESS_MODES = {"creative", "natural", "robust"}
+# Eleven v3 only accepts these discrete stability values.
+ELEVENLABS_V3_STABILITY = {"creative": 0.0, "natural": 0.5, "robust": 1.0}
+# (stability, style) tuning for non-v3 ElevenLabs models.
+ELEVENLABS_V2_VOICE_TUNING = {
+    "creative": (0.35, 0.4),
+    "natural": (0.5, 0.2),
+    "robust": (0.75, 0.0),
+}
+# Single source of truth for v3 audio tags: used both to build prompt guidance
+# and to whitelist tags before synthesis so the two can never drift apart.
+AUDIO_TAG_VOCABULARY: dict[str, tuple[str, ...]] = {
+    "emotions": ("excited", "curious", "nervous", "calm", "thoughtful"),
+    "reactions": ("laughs", "chuckles", "sighs", "gasps", "whispers"),
+    "cognitive beats": ("pause", "pauses", "hesitates"),
+    "tone cues": ("cheerfully", "deadpan", "flatly", "playfully"),
+    "pacing": ("rushed", "drawn out"),
+    "dialogue": ("interrupting",),
+}
+AUDIO_TAG_WHITELIST = {tag for tags in AUDIO_TAG_VOCABULARY.values() for tag in tags}
+AUDIO_TAG_RE = re.compile(r"\[([^\[\]]{1,40})\]")
+DOLLAR_AMOUNT_RE = re.compile(
+    r"\$(\d[\d,]*(?:\.\d{1,2})?)(\s*(?:million|billion|trillion))?\b",
+    re.IGNORECASE,
+)
 SCRIPT_BRIEF_CHUNK_SIZE = 3
 SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
 MIN_EPISODE_DURATION_SECONDS = 30
@@ -352,6 +377,7 @@ class PodcastGenerationPreferences:
     host_a_voice: str
     host_b_voice: str
     host_count: int
+    elevenlabs_expressiveness: str = "natural"
 
 
 class PodcastDigestService:
@@ -600,6 +626,13 @@ class PodcastDigestService:
             prefs.elevenlabs_output_format = (
                 update.elevenlabs_output_format.strip() or "mp3_44100_128"
             )
+        if update.elevenlabs_expressiveness is not None:
+            mode = update.elevenlabs_expressiveness.strip().lower()
+            if mode not in SUPPORTED_EXPRESSIVENESS_MODES:
+                raise ValueError(
+                    "elevenlabs_expressiveness must be 'creative', 'natural', or 'robust'"
+                )
+            prefs.elevenlabs_expressiveness = mode
         if update.host_a_voice is not None:
             voice_value = update.host_a_voice.strip()
             if prefs.tts_provider == "openai":
@@ -650,6 +683,7 @@ class PodcastDigestService:
                 "openai_tts_model": prefs.openai_tts_model,
                 "elevenlabs_model_id": prefs.elevenlabs_model_id,
                 "elevenlabs_output_format": prefs.elevenlabs_output_format,
+                "elevenlabs_expressiveness": prefs.elevenlabs_expressiveness,
                 "podcast_feed_enabled": prefs.podcast_feed_enabled,
                 "podcast_feed_base_url": prefs.podcast_feed_base_url,
             },
@@ -1211,6 +1245,9 @@ class PodcastDigestService:
             host_a_voice=str(prefs.host_a_voice or "alloy"),
             host_b_voice=str(prefs.host_b_voice or "echo"),
             host_count=int(prefs.host_count or 2),
+            elevenlabs_expressiveness=(
+                str(prefs.elevenlabs_expressiveness or "natural").strip().lower()
+            ),
         )
 
     def sanitize_generation_overrides(
@@ -1807,6 +1844,7 @@ class PodcastDigestService:
         tts_delivery_guidance = self._tts_script_delivery_guidance(
             provider=prefs.tts_provider,
             elevenlabs_model_id=prefs.elevenlabs_model_id,
+            expressiveness=prefs.elevenlabs_expressiveness,
         )
         script_system_prompt = self._script_system_prompt_for_tts(
             provider=prefs.tts_provider,
@@ -1974,6 +2012,7 @@ class PodcastDigestService:
         tts_delivery_guidance = self._tts_script_delivery_guidance(
             provider=prefs.tts_provider,
             elevenlabs_model_id=prefs.elevenlabs_model_id,
+            expressiveness=prefs.elevenlabs_expressiveness,
         )
         script_system_prompt = self._script_system_prompt_for_tts_solo(
             provider=prefs.tts_provider,
@@ -2214,7 +2253,9 @@ class PodcastDigestService:
                 [
                     "- Keep paragraphs substantial enough for stable prosody.",
                     "- Use punctuation and conversational cadence cues instead of SSML tags.",
-                    "- Optional inline audio tags are allowed (for example [laughs], [sighs]).",
+                    "- Inline audio tags are allowed, chosen only from this vocabulary: "
+                    + PodcastDigestService._render_audio_tag_vocabulary()
+                    + ".",
                     "- Keep tags sparse and intentional.",
                 ]
             )
@@ -2790,14 +2831,29 @@ class PodcastDigestService:
                 [
                     "- Avoid ultra-short lines; most turns should be substantial enough for stable prosody.",
                     "- Use punctuation and conversational cadence cues instead of SSML tags.",
-                    "- Optional inline audio tags are allowed inside host lines (for example [laughs], [sighs], [whispers]).",
+                    "- Inline audio tags are allowed inside host lines, chosen only from this vocabulary: "
+                    + PodcastDigestService._render_audio_tag_vocabulary()
+                    + ".",
                     "- Keep tags sparse and intentional; avoid tag-heavy delivery.",
                 ]
             )
         return SCRIPT_SYSTEM_PROMPT + "\n" + "\n".join(extra)
 
     @staticmethod
-    def _tts_script_delivery_guidance(*, provider: str, elevenlabs_model_id: str) -> str:
+    def _render_audio_tag_vocabulary() -> str:
+        """Render the audio tag whitelist as compact prompt guidance."""
+        return "; ".join(
+            f"{category}: " + ", ".join(f"[{tag}]" for tag in tags)
+            for category, tags in AUDIO_TAG_VOCABULARY.items()
+        )
+
+    @staticmethod
+    def _tts_script_delivery_guidance(
+        *,
+        provider: str,
+        elevenlabs_model_id: str,
+        expressiveness: str = "natural",
+    ) -> str:
         """Return prompt guidance that improves natural TTS delivery for selected provider."""
         normalized_provider = (provider or "openai").strip().lower()
         if normalized_provider != "elevenlabs":
@@ -2807,14 +2863,28 @@ class PodcastDigestService:
 
         model_id = (elevenlabs_model_id or "").strip().lower()
         if model_id == "eleven_v3":
+            mode = (expressiveness or "natural").strip().lower()
+            if mode == "robust":
+                tag_density = (
+                    "Use tags sparingly: at most one tag every 4-8 lines, never more than "
+                    "one tag in a line."
+                )
+            else:
+                tag_density = (
+                    "Target about one tag every 2-4 lines where it matches the emotional "
+                    "beat, never more than one tag in a line, and avoid repeating the same "
+                    "tag in adjacent turns."
+                )
             return (
                 "Optimize for Eleven v3 natural dialogue: keep most lines around 12-40 words, "
                 "avoid ultra-short one-liners, vary pacing with punctuation, use occasional conversational "
                 "asides, and ensure numbers/dates/currency/abbreviations are spoken naturally. "
-                "Use sparse inline audio/emotion tags within host lines (e.g. [laughs], [sighs], [whispers], "
-                "[excited], [thoughtful]) only where they add realism. Do not overuse tags: target about one "
-                "tag every 4-8 lines, never more than one tag in a line, and avoid repeating the same tag in "
-                "adjacent turns."
+                "Use ellipses (...) for hesitation and CAPITALIZE at most one key word per line for emphasis. "
+                "Add inline audio/emotion tags within host lines, chosen only from this vocabulary — "
+                f"{PodcastDigestService._render_audio_tag_vocabulary()}. "
+                "Match tags to the story's mood: tension or skepticism suits [thoughtful], [hesitates], or "
+                "[pauses]; banter and levity suit [laughs], [chuckles], or [playfully]. "
+                f"{tag_density} Do not overuse tags; delivery should feel natural, not theatrical."
             )
         return (
             "Optimize for ElevenLabs TTS clarity: expand symbols, dates, times, currency, and abbreviations "
@@ -3233,6 +3303,9 @@ class PodcastDigestService:
             "text": text,
             "model_id": model_id,
             "apply_text_normalization": self._elevenlabs_text_normalization_mode(model_id),
+            "voice_settings": self._elevenlabs_voice_settings(
+                model_id, prefs.elevenlabs_expressiveness
+            ),
         }
         if self._elevenlabs_supports_context_window(model_id):
             if previous_text:
@@ -3259,6 +3332,26 @@ class PodcastDigestService:
             return response.content
 
     @staticmethod
+    def _elevenlabs_voice_settings(model_id: str, expressiveness: str) -> dict[str, Any]:
+        """Map the expressiveness preference onto model-specific voice settings.
+
+        Stability is the main dial for how strongly v3 responds to audio tags:
+        creative is most expressive, robust is most consistent.
+        """
+        mode = (expressiveness or "natural").strip().lower()
+        if mode not in SUPPORTED_EXPRESSIVENESS_MODES:
+            mode = "natural"
+        if (model_id or "").strip().lower() == "eleven_v3":
+            return {"stability": ELEVENLABS_V3_STABILITY[mode]}
+        stability, style = ELEVENLABS_V2_VOICE_TUNING[mode]
+        return {
+            "stability": stability,
+            "similarity_boost": 0.75,
+            "style": style,
+            "use_speaker_boost": True,
+        }
+
+    @staticmethod
     def _elevenlabs_text_normalization_mode(model_id: str) -> str:
         """Return safe normalization mode supported by chosen ElevenLabs model."""
         normalized = (model_id or "").strip().lower()
@@ -3273,6 +3366,31 @@ class PodcastDigestService:
         return (model_id or "").strip().lower() != "eleven_v3"
 
     @staticmethod
+    def _sanitize_audio_tags(
+        text: str,
+        *,
+        provider: str,
+        elevenlabs_model_id: str | None = None,
+    ) -> str:
+        """Keep whitelisted v3 audio tags; strip every other bracketed token.
+
+        Non-v3 models and OpenAI read bracketed tags out loud (or mispronounce
+        them), and v3 itself can receive hallucinated tags from the script LLM.
+        """
+        is_v3 = (
+            (provider or "").strip().lower() == "elevenlabs"
+            and (elevenlabs_model_id or "").strip().lower() == "eleven_v3"
+        )
+
+        def _replace(match: re.Match[str]) -> str:
+            tag = match.group(1).strip().lower()
+            if is_v3 and tag in AUDIO_TAG_WHITELIST:
+                return f"[{tag}]"
+            return " "
+
+        return AUDIO_TAG_RE.sub(_replace, text)
+
+    @staticmethod
     def _normalize_tts_segment_text(
         text: str,
         *,
@@ -3284,6 +3402,11 @@ class PodcastDigestService:
         if not normalized:
             return normalized
 
+        normalized = PodcastDigestService._sanitize_audio_tags(
+            normalized,
+            provider=provider,
+            elevenlabs_model_id=elevenlabs_model_id,
+        )
         normalized = normalized.replace("&", " and ")
         normalized = re.sub(r"\s+", " ", normalized).strip()
 
@@ -3310,43 +3433,54 @@ class PodcastDigestService:
         normalized = re.sub(r"(\d)\s*%\b", r"\1 percent", normalized)
         normalized = re.sub(r"\bCtrl\s*\+\s*([A-Za-z])\b", r"control \1", normalized)
 
-        # Convert simple ISO dates to spoken-friendly month/day/year.
-        def _replace_iso_date(match: re.Match[str]) -> str:
-            raw = match.group(0)
-            try:
-                parsed = datetime.strptime(raw, "%Y-%m-%d")
-                return parsed.strftime("%B %d, %Y").replace(" 0", " ")
-            except ValueError:
-                return raw
+        # v3 normalizes numbers, dates, times, and currency natively
+        # (apply_text_normalization is "on"); expanding here too risks
+        # double-mangling, so leave those to the API.
+        model_id = (elevenlabs_model_id or "").strip().lower()
+        if model_id != "eleven_v3":
+            # Convert simple ISO dates to spoken-friendly month/day/year.
+            def _replace_iso_date(match: re.Match[str]) -> str:
+                raw = match.group(0)
+                try:
+                    parsed = datetime.strptime(raw, "%Y-%m-%d")
+                    return parsed.strftime("%B %d, %Y").replace(" 0", " ")
+                except ValueError:
+                    return raw
 
-        normalized = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", _replace_iso_date, normalized)
+            normalized = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", _replace_iso_date, normalized)
 
-        # Convert 24h time to 12h spoken form when obvious.
-        def _replace_time(match: re.Match[str]) -> str:
-            raw = match.group(0)
-            try:
-                parsed = datetime.strptime(raw, "%H:%M")
-                spoken = parsed.strftime("%I:%M %p").lstrip("0")
-                return spoken
-            except ValueError:
-                return raw
+            # Convert 24h time to 12h spoken form when obvious.
+            def _replace_time(match: re.Match[str]) -> str:
+                raw = match.group(0)
+                try:
+                    parsed = datetime.strptime(raw, "%H:%M")
+                    spoken = parsed.strftime("%I:%M %p").lstrip("0")
+                    return spoken
+                except ValueError:
+                    return raw
 
-        normalized = re.sub(r"\b([01]?\d|2[0-3]):[0-5]\d\b", _replace_time, normalized)
+            normalized = re.sub(
+                r"\b([01]?\d|2[0-3]):[0-5]\d\b", _replace_time, normalized
+            )
 
-        # Expand simple monetary amounts for clearer readout.
-        def _replace_dollars(match: re.Match[str]) -> str:
-            raw_amount = match.group(1).replace(",", "")
-            try:
-                amount = float(raw_amount)
-            except ValueError:
-                return match.group(0)
-            dollars = int(amount)
-            cents = int(round((amount - dollars) * 100))
-            if cents:
-                return f"{dollars} dollars and {cents} cents"
-            return f"{dollars} dollars"
+            # Expand simple monetary amounts for clearer readout.
+            def _replace_dollars(match: re.Match[str]) -> str:
+                raw_amount = match.group(1).replace(",", "")
+                magnitude = (match.group(2) or "").strip().lower()
+                try:
+                    amount = float(raw_amount)
+                except ValueError:
+                    return match.group(0)
+                if magnitude:
+                    return f"{match.group(1)} {magnitude} dollars"
+                dollars = int(amount)
+                cents = int(round((amount - dollars) * 100))
+                if cents:
+                    return f"{dollars} dollars and {cents} cents"
+                unit = "dollar" if dollars == 1 else "dollars"
+                return f"{dollars} {unit}"
 
-        normalized = re.sub(r"\$(\d[\d,]*(?:\.\d{1,2})?)", _replace_dollars, normalized)
+            normalized = DOLLAR_AMOUNT_RE.sub(_replace_dollars, normalized)
 
         # Make URLs and domains easier to pronounce.
         normalized = re.sub(
@@ -3375,7 +3509,6 @@ class PodcastDigestService:
         )
 
         # v3 behaves better with richer turns; avoid ultra-short fragments.
-        model_id = (elevenlabs_model_id or "").strip().lower()
         if model_id == "eleven_v3" and len(normalized) < 18 and not normalized.endswith("."):
             normalized += "."
 
