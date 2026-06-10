@@ -43,6 +43,10 @@ Use this skill when the user asks to turn one or more documents, notes, article 
 
 ## Helper Script
 
+The script automatically reads `~/.env` when present, unless `--no-default-env-files` is passed. This handles the common case where `source ~/.env` appears to load values but Python cannot see them because the variables were not exported in the parent shell. It does not automatically read `./.env`; pass project-local env files with `--env-file .env` so the destination for authenticated requests is explicit. CLI flags override exported environment variables, which override env-file values.
+
+Source title format: `--text-file "Title with spaces=/abs/path/to/file.md"` uses the text before `=` as the Ghostwriter source title. If you omit `=`, the filename is used.
+
 Use the bundled script whenever possible:
 
 ```bash
@@ -52,6 +56,7 @@ python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --brief "Explain the source documents, tradeoffs, and next actions." \
   --text-file "Project Notes=/path/to/project-notes.txt" \
   --url "https://example.com/article" \
+  --save-response /path/to/project-planning-brief-response.json \
   --download \
   --output /path/to/project-planning-brief.mp3
 ```
@@ -85,6 +90,7 @@ Submit from a full preview file:
 python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --env-file ~/.env \
   --source-json /tmp/project-podcast-preview.json \
+  --save-response /path/to/project-notes-response.json \
   --download \
   --output /path/to/project-notes.mp3
 ```
@@ -105,9 +111,7 @@ python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --download
 ```
 
-The script automatically reads `~/.env` when present, unless `--no-default-env-files` is passed. It does not automatically read `./.env`; pass project-local env files with `--env-file .env` so the destination for authenticated requests is explicit. CLI flags override exported environment variables, which override env-file values.
-
-The script prints JSON. On creation it includes `episode_id`, `digest_ids`, and `status`. With `--poll`, it prints the final episode detail. With `--download` or `--output`, it polls until ready, saves the MP3, and adds `downloaded_path` to the final JSON.
+The script prints JSON. On creation it includes `episode_id`, `digest_ids`, and `status`. With `--poll`, it prints the final episode detail. With `--download` or `--output`, it polls until ready, saves the MP3, and adds `downloaded_path` to the final JSON. Use `--save-response PATH` to write the final response JSON, including the transcript when returned, to a private file. `--save-transcript PATH` is accepted as an alias for agents that think in transcript-retention terms. Use `--quiet` for automation that should print only one concise status line.
 
 Preview stdout includes the payload shape with text source content redacted plus `_preview` metadata with source counts, word counts, warnings, source origins, and content hashes. `--preview-output` writes the full submit-ready JSON to a private file and that file can be passed back with `--source-json`.
 
@@ -151,6 +155,7 @@ When calling the API directly, send:
 - Use `--include-linked-notes` only when the user wants one-hop wikilink context included. Review preview warnings for unresolved links.
 - For PDFs, DOCX, or web clippings, reduce each source to clean text before submitting.
 - Do not include secrets, API tokens, or private credentials inside source content.
+- For wiki or research use cases, persist the Ghostwriter response with `--save-response` so the generated synthesis remains auditable separately from verbatim source material.
 - If a document is too large, the helper splits it into chunks with titles such as `Roadmap - Part 1`.
 - If preview produces more than 20 sources after splitting and linked-note expansion, narrow the selection before submitting.
 - If the episode remains in `generating_script` or `generating_audio`, continue polling at a reasonable interval instead of retrying immediately.

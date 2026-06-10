@@ -730,6 +730,51 @@ def write_preview(payload: dict[str, Any], output: str | None) -> None:
         print(json.dumps(safe_payload, indent=2, sort_keys=True))
 
 
+def response_path_for_output(value: str) -> Path:
+    path = Path(value).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def episode_identifier(result: dict[str, Any]) -> str:
+    return str(result.get("episode_id") or result.get("id") or "unknown")
+
+
+def write_saved_response(result: dict[str, Any], output: str) -> Path:
+    path = response_path_for_output(output)
+    result["saved_response_path"] = str(path)
+    text = json.dumps(result, indent=2, sort_keys=True)
+    write_private_text(path, text + "\n")
+    return path
+
+
+def print_response(result: dict[str, Any], *, quiet: bool) -> None:
+    if not quiet:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+
+    status = str(result.get("status") or "created")
+    parts = [f"episode {episode_identifier(result)}: {status}"]
+    if result.get("downloaded_path"):
+        parts.append(f"downloaded={result['downloaded_path']}")
+    if result.get("saved_response_path"):
+        parts.append(f"response={result['saved_response_path']}")
+    print(" ".join(parts))
+
+
+def finish_response(
+    result: dict[str, Any],
+    *,
+    save_response: str | None,
+    quiet: bool,
+    exit_code: int,
+) -> int:
+    if save_response:
+        write_saved_response(result, save_response)
+    print_response(result, quiet=quiet)
+    return exit_code
+
+
 def poll_episode(
     *,
     api_base: str,
@@ -889,6 +934,24 @@ def parse_args() -> argparse.Namespace:
         help="Write full --preview JSON to this private file instead of redacted stdout.",
     )
     parser.add_argument(
+        "--save-response",
+        "--save-transcript",
+        dest="save_response",
+        metavar="PATH",
+        help=(
+            "Write the final Ghostwriter response JSON, including transcript when "
+            "returned, to this private file. Useful for research audit trails."
+        ),
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help=(
+            "Suppress full stdout JSON and print only episode id, final status, "
+            "and saved/downloaded paths. Errors still print to stderr."
+        ),
+    )
+    parser.add_argument(
         "--split-target-chars",
         type=int,
         default=DEFAULT_SPLIT_TARGET_CHARS,
@@ -957,12 +1020,21 @@ def main() -> int:
 
     should_poll = args.poll or args.download or bool(args.output)
     if not should_poll:
-        print(json.dumps(created, indent=2, sort_keys=True))
-        return 0
+        return finish_response(
+            created,
+            save_response=args.save_response,
+            quiet=args.quiet,
+            exit_code=0,
+        )
 
     episode_id = created.get("episode_id")
     if not episode_id:
-        print(json.dumps(created, indent=2, sort_keys=True))
+        finish_response(
+            created,
+            save_response=args.save_response,
+            quiet=args.quiet,
+            exit_code=EXIT_API,
+        )
         fail("Create response did not include episode_id", EXIT_API)
 
     final = poll_episode(
@@ -975,8 +1047,12 @@ def main() -> int:
 
     if args.download or args.output:
         if final.get("status") != "ready":
-            print(json.dumps(final, indent=2, sort_keys=True))
-            return EXIT_EPISODE_FAILED
+            return finish_response(
+                final,
+                save_response=args.save_response,
+                quiet=args.quiet,
+                exit_code=EXIT_EPISODE_FAILED,
+            )
         path = download_episode(
             api_base=api_base,
             token=token,
@@ -986,8 +1062,12 @@ def main() -> int:
         )
         final["downloaded_path"] = str(path)
 
-    print(json.dumps(final, indent=2, sort_keys=True))
-    return 0 if final.get("status") == "ready" else EXIT_EPISODE_FAILED
+    return finish_response(
+        final,
+        save_response=args.save_response,
+        quiet=args.quiet,
+        exit_code=0 if final.get("status") == "ready" else EXIT_EPISODE_FAILED,
+    )
 
 
 if __name__ == "__main__":
