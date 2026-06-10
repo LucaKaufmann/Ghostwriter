@@ -2409,7 +2409,14 @@ async def test_generate_solo_audio_chunks_long_v3_scripts(monkeypatch):
     synthesized_texts: list[str] = []
 
     async def _fake_synth(
-        *, text, voice, provider, prefs, previous_text=None, next_text=None
+        *,
+        text,
+        voice,
+        provider,
+        prefs,
+        previous_text=None,
+        next_text=None,
+        request_id_history=None,
     ):
         synthesized_texts.append(text)
         return b"a" * 2048, None
@@ -2575,7 +2582,7 @@ async def test_generate_audio_falls_back_when_dialogue_unavailable(monkeypatch):
     async def _fake_probe(path):
         return 80
 
-    async def _fake_stitch(segment_paths, output_path):
+    async def _fake_stitch(segment_paths, output_path, gap_durations=None):
         output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
 
     monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
@@ -2602,6 +2609,182 @@ async def test_generate_audio_falls_back_when_dialogue_unavailable(monkeypatch):
     assert len(per_segment_calls) == len(segments)
     assert result.audio_size_bytes > 0
     assert result.synthesized_chars > 0
+
+
+def test_inter_segment_gap_seconds_punctuation_rules():
+    assert podcast_service._inter_segment_gap_seconds("Really?") == 0.15
+    assert podcast_service._inter_segment_gap_seconds("No way!") == 0.15
+    assert podcast_service._inter_segment_gap_seconds("And that wraps it up...") == 0.45
+    assert podcast_service._inter_segment_gap_seconds("Plain statement.") == 0.3
+    assert podcast_service._inter_segment_gap_seconds("") == 0.3
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_request_stitching_tracks_request_ids(monkeypatch):
+    captured_payloads: list[dict] = []
+    counter = {"n": 0}
+
+    class _Response:
+        status_code = 200
+        content = b"audio"
+        text = ""
+
+        def __init__(self, request_id):
+            self.headers = {"request-id": request_id}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            captured_payloads.append(json)
+            counter["n"] += 1
+            return _Response(f"req-{counter['n']}")
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_turbo_v2_5",
+        elevenlabs_api_key="xi-test-key",
+    )
+    history: dict[str, list[str]] = {}
+    for text, voice in (
+        ("Line one.", "voice_a"),
+        ("Line two.", "voice_a"),
+        ("Line three.", "voice_b"),
+    ):
+        await podcast_service._synthesize_segment_elevenlabs(
+            text=text, voice=voice, prefs=prefs, request_id_history=history
+        )
+
+    assert "previous_request_ids" not in captured_payloads[0]
+    assert captured_payloads[1]["previous_request_ids"] == ["req-1"]
+    # A different voice starts its own continuity chain.
+    assert "previous_request_ids" not in captured_payloads[2]
+    assert history == {"voice_a": ["req-1", "req-2"], "voice_b": ["req-3"]}
+
+    # v3 has no context window support; request stitching is skipped.
+    v3_prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+    )
+    v3_history: dict[str, list[str]] = {"voice_a": ["req-1"]}
+    await podcast_service._synthesize_segment_elevenlabs(
+        text="Line.", voice="voice_a", prefs=v3_prefs, request_id_history=v3_history
+    )
+    assert "previous_request_ids" not in captured_payloads[3]
+    assert v3_history == {"voice_a": ["req-1"]}
+
+
+@pytest.mark.asyncio
+async def test_stitch_segments_variable_gaps_and_loudnorm(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+    concat_contents: dict[str, str] = {}
+
+    async def _fake_run(cmd, error_prefix):
+        commands.append(cmd)
+        if "lavfi" in cmd:
+            Path(cmd[-1]).write_bytes(b"sil")
+        elif "concat" in cmd:
+            input_index = cmd.index("-i") + 1
+            concat_contents["text"] = Path(cmd[input_index]).read_text(encoding="utf-8")
+            Path(cmd[-1]).write_bytes(b"out")
+
+    monkeypatch.setattr(podcast_service, "_run_subprocess", _fake_run)
+
+    segment_paths = []
+    for index in range(3):
+        path = tmp_path / f"seg{index}.mp3"
+        path.write_bytes(b"seg")
+        segment_paths.append(path)
+    output = tmp_path / "out.mp3"
+
+    await podcast_service._stitch_segments(
+        segment_paths, output, gap_durations=[0.15, 0.45]
+    )
+
+    silence_cmds = [cmd for cmd in commands if "lavfi" in cmd]
+    durations = {cmd[cmd.index("-t") + 1] for cmd in silence_cmds}
+    assert durations == {"0.15", "0.45"}
+    stitch_cmd = commands[-1]
+    assert "loudnorm=I=-16:TP=-1.5:LRA=11" in stitch_cmd
+    assert "128k" in stitch_cmd
+    assert "silence_150ms" in concat_contents["text"]
+    assert "silence_450ms" in concat_contents["text"]
+
+
+def test_script_prompts_include_episode_context_and_informative_beats():
+    from app.services.podcast_service import (
+        SCRIPT_OUTLINE_PROMPT_TEMPLATE,
+        SCRIPT_PROMPT_TEMPLATE,
+        SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE,
+        SCRIPT_SOLO_PROMPT_TEMPLATE,
+    )
+
+    assert (
+        podcast_service._format_episode_context(datetime(2026, 6, 10, 8, 0), "daily")
+        == "Wednesday, June 10, 2026 — daily briefing"
+    )
+    assert (
+        podcast_service._format_episode_context(datetime(2026, 6, 10, 8, 0))
+        == "Wednesday, June 10, 2026"
+    )
+
+    for template in (SCRIPT_PROMPT_TEMPLATE, SCRIPT_SOLO_PROMPT_TEMPLATE):
+        assert "{episode_context}" in template
+        assert "cold open" in template
+        assert "source by name" in template
+    for template in (SCRIPT_OUTLINE_PROMPT_TEMPLATE, SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE):
+        assert "cold-open teaser" in template
+        assert "broader trend" in template
+
+
+def test_briefs_carry_source_for_attribution():
+    brief = {
+        "index": 1,
+        "title": "AI rollout",
+        "summary": "A company launched a new AI feature.",
+        "key_points": [],
+        "explainers": [],
+        "why_it_matters": "",
+        "tension": "",
+        "specific_details": [],
+        "listener_angle": "",
+        "follow_up_question": "",
+        "banter_hook": "",
+        "source": "The Verge",
+    }
+    block = podcast_service._render_briefs_block([brief])
+    assert "Source: The Verge" in block
+
+
+def test_generation_cost_estimate_is_provider_aware():
+    openai_cost = podcast_service._estimate_generation_cost_cents(
+        script_chars=5000, tts_chars=10000, tts_provider="openai"
+    )
+    turbo_cost = podcast_service._estimate_generation_cost_cents(
+        script_chars=5000,
+        tts_chars=10000,
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_turbo_v2_5",
+    )
+    v3_cost = podcast_service._estimate_generation_cost_cents(
+        script_chars=5000,
+        tts_chars=10000,
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+    )
+    assert openai_cost == 35
+    assert turbo_cost == 130
+    assert v3_cost == 240
 
 
 def test_elevenlabs_voice_settings_mapping():

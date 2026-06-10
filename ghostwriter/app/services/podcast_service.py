@@ -248,8 +248,10 @@ Article briefs:
 
 Requirements:
 - Provide 8-14 ordered outline beats.
+- The first beat must be a cold-open teaser of the strongest story, before any greeting.
 - Lead with the strongest hook, tension, or listener-relevant question.
 - Group related articles into coherent segments when that creates a better arc.
+- Where stories overlap topically, include one beat that connects 2-3 of them into a broader trend.
 - Each beat should include: topic focus, which host leads, one callback/depth angle, and one concrete detail to mention.
 - Contrast stories where useful instead of giving every item the same recap treatment.
 - Ensure all article indexes are covered at least once.
@@ -264,6 +266,9 @@ User preferences:
 - Style guidance: {style_guidance}
 - TTS delivery guidance: {tts_delivery_guidance}
 
+Episode context:
+- Recording date: {episode_context}
+
 Episode outline:
 {outline_block}
 
@@ -273,6 +278,9 @@ Article briefs to ground factual details:
 Requirements:
 - Alternate naturally between HOST_A and HOST_B, with occasional short follow-up turns.
 - Cover each listed article brief index at least once.
+- Start with a 1-2 line cold open teasing the strongest story before any greeting or show intro.
+- Work the recording date or day of week naturally into the opening lines; do not read it verbatim.
+- Mention each story's source by name at least once (for example "according to The Verge").
 - Include a short opening and short closing.
 - Keep each line 1-3 sentences, but vary rhythm (some punchy, some more detailed).
 - Open segments with stakes, tension, or a specific detail, not generic phrases like "next up" or "this article says."
@@ -309,8 +317,10 @@ Article briefs:
 
 Requirements:
 - Provide 6-10 ordered outline beats.
+- The first beat must be a cold-open teaser of the strongest story, before any greeting.
 - Lead with the strongest hook, tension, or listener-relevant question.
 - Group related articles into coherent segments when that creates a better arc.
+- Where stories overlap topically, include one beat that connects 2-3 of them into a broader trend.
 - Each beat should include: topic focus, depth angle, transition hook to the next beat, and one concrete detail to mention.
 - Ensure all article indexes are covered at least once.
 - Include an opening and closing beat.
@@ -323,6 +333,9 @@ User preferences:
 - Style guidance: {style_guidance}
 - TTS delivery guidance: {tts_delivery_guidance}
 
+Episode context:
+- Recording date: {episode_context}
+
 Episode outline:
 {outline_block}
 
@@ -332,6 +345,9 @@ Article briefs to ground factual details:
 Requirements:
 - Write as flowing paragraphs — NO [HOST_A]: or [HOST_B]: tags or any speaker labels.
 - Cover each listed article brief index at least once.
+- Start with a 1-2 sentence cold open teasing the strongest story before any greeting.
+- Work the recording date or day of week naturally into the opening; do not read it verbatim.
+- Mention each story's source by name at least once (for example "according to The Verge").
 - Include a short, engaging opening and a reflective closing.
 - Use [pause] between major topic transitions for natural breath pauses.
 - Use ellipses (...) for brief thinking pauses within sentences.
@@ -1448,6 +1464,10 @@ class PodcastDigestService:
                 }
                 session.add(episode)
                 session.commit()
+                episode_context = self._format_episode_context(
+                    datetime.now(self._resolve_timezone(session)),
+                    prefs.schedule if episode.trigger == "scheduled" else None,
+                )
                 selected_articles = self.select_articles_for_episode(
                     session,
                     digest_ids=episode_digest_ids,
@@ -1474,6 +1494,7 @@ class PodcastDigestService:
                         runtime_prefs,
                         episode_id=episode_id,
                         digest_id=episode_digest_ids[0],
+                        episode_context=episode_context,
                     )
                     solo_text = self.parse_solo_script(script)
                     logger.info(
@@ -1490,6 +1511,7 @@ class PodcastDigestService:
                         runtime_prefs,
                         episode_id=episode_id,
                         digest_id=episode_digest_ids[0],
+                        episode_context=episode_context,
                     )
                     segments = self.parse_script_segments(script)
                     logger.info(
@@ -1549,6 +1571,8 @@ class PodcastDigestService:
                 episode.generation_cost_cents = self._estimate_generation_cost_cents(
                     script_chars=len(episode.script or ""),
                     tts_chars=audio_result.synthesized_chars,
+                    tts_provider=runtime_prefs.tts_provider,
+                    elevenlabs_model_id=runtime_prefs.elevenlabs_model_id,
                 )
                 if episode.user_id is None and user_id is not None:
                     episode.user_id = user_id
@@ -1842,6 +1866,17 @@ class PodcastDigestService:
                 best_count = count
         return best_topic
 
+    @staticmethod
+    def _format_episode_context(now_local: datetime, schedule: str | None = None) -> str:
+        """Format the recording date (and cadence) for script prompts."""
+        date_line = now_local.strftime("%A, %B %d, %Y").replace(" 0", " ")
+        label = {"daily": "daily briefing", "weekly": "weekly digest"}.get(
+            (schedule or "").strip().lower()
+        )
+        if label:
+            return f"{date_line} — {label}"
+        return date_line
+
     async def generate_script(
         self,
         articles: list[DigestArticle],
@@ -1849,10 +1884,13 @@ class PodcastDigestService:
         *,
         episode_id: UUID | None = None,
         digest_id: UUID | None = None,
+        episode_context: str | None = None,
     ) -> str:
         """Generate and validate podcast script from selected articles."""
         if not articles:
             raise RuntimeError("No articles available for script generation")
+        if episode_context is None:
+            episode_context = self._format_episode_context(datetime.now(UTC))
 
         model = (prefs.script_model or "").strip() or self.settings.get_llm_model_string()
         timeout_seconds = max(30, min(600, int(prefs.script_timeout_seconds)))
@@ -1920,6 +1958,7 @@ class PodcastDigestService:
             style=prefs.style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
+            episode_context=episode_context,
             outline_block=outline,
             briefs_block=briefs_block,
         )
@@ -1992,6 +2031,7 @@ class PodcastDigestService:
             style=prefs.style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
+            episode_context=episode_context,
         )
         for attempt in range(retries + 1):
             script, failed = await self.llm_service._run_completion(
@@ -2017,10 +2057,13 @@ class PodcastDigestService:
         *,
         episode_id: UUID | None = None,
         digest_id: UUID | None = None,
+        episode_context: str | None = None,
     ) -> str:
         """Generate and validate a solo monologue podcast script."""
         if not articles:
             raise RuntimeError("No articles available for script generation")
+        if episode_context is None:
+            episode_context = self._format_episode_context(datetime.now(UTC))
 
         model = (prefs.script_model or "").strip() or self.settings.get_llm_model_string()
         timeout_seconds = max(30, min(600, int(prefs.script_timeout_seconds)))
@@ -2088,6 +2131,7 @@ class PodcastDigestService:
             style=prefs.style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
+            episode_context=episode_context,
             outline_block=outline,
             briefs_block=briefs_block,
         )
@@ -2156,6 +2200,7 @@ class PodcastDigestService:
             style=prefs.style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
+            episode_context=episode_context,
         )
         for attempt in range(retries + 1):
             script, failed = await self.llm_service._run_completion(
@@ -2228,8 +2273,11 @@ class PodcastDigestService:
         style: str,
         style_guidance: str,
         tts_delivery_guidance: str,
+        episode_context: str | None = None,
     ) -> str:
         """Build one-shot solo prompt as fallback if chunked generation fails."""
+        if episode_context is None:
+            episode_context = self._format_episode_context(datetime.now(UTC))
         articles_block_lines: list[str] = []
         for index, article in enumerate(articles, start=1):
             clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:1200]
@@ -2245,6 +2293,7 @@ class PodcastDigestService:
             style=style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
+            episode_context=episode_context,
             outline_block="Use this source list directly as outline.",
             briefs_block=articles_block,
         )
@@ -2386,6 +2435,7 @@ class PodcastDigestService:
             await self._check_elevenlabs_quota(prefs, total_chars)
 
         synthesized_chars = 0
+        request_id_history: dict[str, list[str]] = {}
         with tempfile.TemporaryDirectory(prefix="podcast_solo_tts_") as tmpdir:
             chunk_paths: list[Path] = []
             for idx, normalized in enumerate(chunks, start=1):
@@ -2408,6 +2458,7 @@ class PodcastDigestService:
                     prefs=prefs,
                     previous_text=chunks[idx - 2] if idx > 1 else None,
                     next_text=chunks[idx] if idx < len(chunks) else None,
+                    request_id_history=request_id_history,
                 )
                 if not audio_bytes:
                     logger.warning(
@@ -2596,10 +2647,12 @@ class PodcastDigestService:
                 "0",
                 "-i",
                 str(concat_list_path),
+                "-af",
+                "loudnorm=I=-16:TP=-1.5:LRA=11",
                 "-c:a",
                 "libmp3lame",
                 "-b:a",
-                "96k",
+                "128k",
                 str(output_path),
             ]
             await self._run_subprocess(cmd, "failed to concatenate solo podcast audio")
@@ -2681,6 +2734,9 @@ class PodcastDigestService:
                 index = int(item["index"])
                 if index not in indexed_briefs:
                     indexed_briefs[index] = self._fallback_brief(item)
+                # Source comes from the article metadata, not the LLM output,
+                # so the script can attribute stories reliably.
+                indexed_briefs[index]["source"] = str(item.get("source") or "")
 
         return [indexed_briefs[idx] for idx in sorted(indexed_briefs)]
 
@@ -2777,6 +2833,7 @@ class PodcastDigestService:
             specific_details = "; ".join(brief.get("specific_details") or [])
             lines.append(
                 f"[{brief['index']}] {brief.get('title','')}\n"
+                f"Source: {brief.get('source','')}\n"
                 f"Summary: {brief.get('summary','')}\n"
                 f"Key points: {key_points}\n"
                 f"Explainers: {explainers}\n"
@@ -2843,8 +2900,11 @@ class PodcastDigestService:
         style: str,
         style_guidance: str,
         tts_delivery_guidance: str,
+        episode_context: str | None = None,
     ) -> str:
         """Build legacy one-shot prompt as fallback if chunked generation fails."""
+        if episode_context is None:
+            episode_context = self._format_episode_context(datetime.now(UTC))
         articles_block_lines: list[str] = []
         for index, article in enumerate(articles, start=1):
             clean_snippet = re.sub(r"\s+", " ", article.content).strip()[:1200]
@@ -2860,6 +2920,7 @@ class PodcastDigestService:
             style=style,
             style_guidance=style_guidance,
             tts_delivery_guidance=tts_delivery_guidance,
+            episode_context=episode_context,
             outline_block="Use this source list directly as outline.",
             briefs_block=articles_block,
         )
@@ -3076,8 +3137,10 @@ class PodcastDigestService:
                 return dialogue_result
 
         synthesized_chars = 0
+        request_id_history: dict[str, list[str]] = {}
         with tempfile.TemporaryDirectory(prefix="podcast_tts_") as tmpdir:
             segment_paths: list[Path] = []
+            stitched_texts: list[str] = []
             for index, segment in enumerate(segments, start=1):
                 normalized_text = normalized_segment_texts[index - 1]
                 preferred_voice = (
@@ -3120,6 +3183,7 @@ class PodcastDigestService:
                     next_text=(
                         normalized_segment_texts[index] if index < len(normalized_segment_texts) else None
                     ),
+                    request_id_history=request_id_history,
                 )
                 if not audio_bytes:
                     logger.warning("Skipping TTS segment after retries: %s", segment.speaker)
@@ -3144,6 +3208,7 @@ class PodcastDigestService:
                 path = Path(tmpdir) / f"segment_{index:04d}.mp3"
                 path.write_bytes(audio_bytes)
                 segment_paths.append(path)
+                stitched_texts.append(normalized_text)
                 synthesized_chars += len(segment.text)
                 self._append_tts_debug_entry(
                     debug_path,
@@ -3169,7 +3234,12 @@ class PodcastDigestService:
                 )
                 raise RuntimeError("TTS failed for all segments")
 
-            await self._stitch_segments(segment_paths, final_path)
+            gap_durations = [
+                self._inter_segment_gap_seconds(text) for text in stitched_texts[:-1]
+            ]
+            await self._stitch_segments(
+                segment_paths, final_path, gap_durations=gap_durations
+            )
 
         audio_size = final_path.stat().st_size
         duration = await self._probe_audio_duration_seconds(final_path)
@@ -3511,6 +3581,7 @@ class PodcastDigestService:
         prefs: PodcastGenerationPreferences,
         previous_text: str | None = None,
         next_text: str | None = None,
+        request_id_history: dict[str, list[str]] | None = None,
     ) -> tuple[bytes, str | None]:
         """Generate one TTS segment with bounded retries.
 
@@ -3527,6 +3598,7 @@ class PodcastDigestService:
                     prefs=prefs,
                     previous_text=previous_text,
                     next_text=next_text,
+                    request_id_history=request_id_history,
                 )
                 return audio, None
             except Exception as exc:
@@ -3561,6 +3633,7 @@ class PodcastDigestService:
         prefs: PodcastGenerationPreferences,
         previous_text: str | None = None,
         next_text: str | None = None,
+        request_id_history: dict[str, list[str]] | None = None,
     ) -> bytes:
         """Call selected TTS provider API."""
         if provider == "openai":
@@ -3572,6 +3645,7 @@ class PodcastDigestService:
                 prefs=prefs,
                 previous_text=previous_text,
                 next_text=next_text,
+                request_id_history=request_id_history,
             )
         raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
 
@@ -3615,8 +3689,14 @@ class PodcastDigestService:
         prefs: PodcastGenerationPreferences,
         previous_text: str | None = None,
         next_text: str | None = None,
+        request_id_history: dict[str, list[str]] | None = None,
     ) -> bytes:
-        """Call ElevenLabs text-to-speech API."""
+        """Call ElevenLabs text-to-speech API.
+
+        When request_id_history is provided (one dict per episode), prior
+        request IDs for the same voice are sent as previous_request_ids so
+        consecutive segments keep prosody continuity (request stitching).
+        """
         api_key = (prefs.elevenlabs_api_key or "").strip()
         if not api_key:
             raise RuntimeError("ElevenLabs API key is required for ElevenLabs podcast TTS")
@@ -3635,11 +3715,16 @@ class PodcastDigestService:
                 model_id, prefs.elevenlabs_expressiveness
             ),
         }
-        if self._elevenlabs_supports_context_window(model_id):
+        supports_context = self._elevenlabs_supports_context_window(model_id)
+        if supports_context:
             if previous_text:
                 payload["previous_text"] = previous_text[:800]
             if next_text:
                 payload["next_text"] = next_text[:800]
+            if request_id_history:
+                previous_ids = request_id_history.get(voice, [])[-3:]
+                if previous_ids:
+                    payload["previous_request_ids"] = previous_ids
         headers = {
             "xi-api-key": api_key,
             "Content-Type": "application/json",
@@ -3657,6 +3742,13 @@ class PodcastDigestService:
                 raise RuntimeError(
                     f"ElevenLabs TTS error {response.status_code}: {response.text[:200]}"
                 )
+            if supports_context and request_id_history is not None:
+                response_headers = getattr(response, "headers", None)
+                request_id = (
+                    response_headers.get("request-id") if response_headers else None
+                )
+                if request_id:
+                    request_id_history.setdefault(voice, []).append(request_id)
             return response.content
 
     @staticmethod
@@ -3848,34 +3940,62 @@ class PodcastDigestService:
 
         return re.sub(r"\s+", " ", normalized).strip()
 
-    async def _stitch_segments(self, segment_paths: list[Path], output_path: Path) -> None:
-        """Stitch MP3 segments with short silence padding using ffmpeg."""
+    @staticmethod
+    def _inter_segment_gap_seconds(previous_text: str) -> float:
+        """Pick the silence gap that follows a line, based on its punctuation.
+
+        Questions and exclamations invite a snappy reply; trailing ellipses
+        signal a thought closing out, which earns a longer beat.
+        """
+        text = (previous_text or "").rstrip()
+        if text.endswith("..."):
+            return 0.45
+        if text.endswith("?") or text.endswith("!"):
+            return 0.15
+        return 0.3
+
+    async def _stitch_segments(
+        self,
+        segment_paths: list[Path],
+        output_path: Path,
+        gap_durations: list[float] | None = None,
+    ) -> None:
+        """Stitch MP3 segments with punctuation-aware silence gaps using ffmpeg."""
         if len(segment_paths) == 1:
             shutil.copyfile(segment_paths[0], output_path)
             return
 
+        if gap_durations is None or len(gap_durations) != len(segment_paths) - 1:
+            gap_durations = [0.3] * (len(segment_paths) - 1)
+
         with tempfile.TemporaryDirectory(prefix="podcast_stitch_") as tmpdir:
             tmp_path = Path(tmpdir)
-            silence_path = tmp_path / "silence.mp3"
             concat_list_path = tmp_path / "concat.txt"
 
-            silence_cmd = [
-                "ffmpeg",
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "anullsrc=r=24000:cl=mono",
-                "-t",
-                "0.3",
-                str(silence_path),
-            ]
-            await self._run_subprocess(silence_cmd, "failed to generate silence padding")
+            silence_paths: dict[float, Path] = {}
+            for duration in sorted(set(gap_durations)):
+                silence_path = tmp_path / f"silence_{int(duration * 1000)}ms.mp3"
+                silence_cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=24000:cl=mono",
+                    "-t",
+                    f"{duration}",
+                    str(silence_path),
+                ]
+                await self._run_subprocess(
+                    silence_cmd, "failed to generate silence padding"
+                )
+                silence_paths[duration] = silence_path
 
             concat_lines: list[str] = []
             for index, segment_path in enumerate(segment_paths):
                 concat_lines.append(f"file '{self._ffmpeg_quote(segment_path)}'")
                 if index < len(segment_paths) - 1:
+                    silence_path = silence_paths[gap_durations[index]]
                     concat_lines.append(f"file '{self._ffmpeg_quote(silence_path)}'")
             concat_list_path.write_text("\n".join(concat_lines), encoding="utf-8")
 
@@ -3888,10 +4008,12 @@ class PodcastDigestService:
                 "0",
                 "-i",
                 str(concat_list_path),
+                "-af",
+                "loudnorm=I=-16:TP=-1.5:LRA=11",
                 "-c:a",
                 "libmp3lame",
                 "-b:a",
-                "96k",
+                "128k",
                 str(output_path),
             ]
             await self._run_subprocess(stitch_cmd, "failed to stitch podcast audio")
@@ -3938,12 +4060,26 @@ class PodcastDigestService:
             return None
 
     @staticmethod
-    def _estimate_generation_cost_cents(*, script_chars: int, tts_chars: int) -> int:
-        """Estimate generation cost in cents (LLM baseline + OpenAI TTS character pricing)."""
+    def _estimate_generation_cost_cents(
+        *,
+        script_chars: int,
+        tts_chars: int,
+        tts_provider: str = "openai",
+        elevenlabs_model_id: str = "",
+    ) -> int:
+        """Estimate generation cost in cents (LLM baseline + TTS character pricing)."""
         if script_chars <= 0 and tts_chars <= 0:
             return 0
         script_cost = 20  # Approximate Sonnet/GPT script cost baseline from PRD.
-        tts_cost = int(round((tts_chars / 1000.0) * 1.5))  # ~$0.015 / 1k chars.
+        provider = (tts_provider or "openai").strip().lower()
+        if provider == "elevenlabs":
+            # Approximate Creator-tier pricing: turbo/flash run at 0.5
+            # credits/char (~$0.11 per 1k chars), other models at 1 credit/char.
+            model_id = (elevenlabs_model_id or "").strip().lower()
+            per_1k_cents = 11.0 if ("turbo" in model_id or "flash" in model_id) else 22.0
+        else:
+            per_1k_cents = 1.5  # OpenAI TTS ~$0.015 / 1k chars.
+        tts_cost = int(round((tts_chars / 1000.0) * per_1k_cents))
         return max(1, script_cost + max(0, tts_cost))
 
 
