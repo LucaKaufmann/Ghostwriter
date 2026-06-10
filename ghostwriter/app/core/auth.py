@@ -1,6 +1,7 @@
 """JWT and authentication utilities."""
 
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 # JWT configuration
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
+
+# bcrypt cost factor. Overridable so tests can use the bcrypt minimum (4)
+# instead of paying ~300ms per hash; production keeps the default of 12.
+BCRYPT_ROUNDS = int(os.environ.get("BCRYPT_ROUNDS", "12"))
 
 
 def get_jwt_secret() -> str:
@@ -60,7 +65,7 @@ def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
     return bcrypt.hashpw(
         password.encode("utf-8"),
-        bcrypt.gensalt(),
+        bcrypt.gensalt(BCRYPT_ROUNDS),
     ).decode("utf-8")
 
 
@@ -124,7 +129,9 @@ def generate_api_token() -> str:
 
 def hash_api_token(token: str) -> str:
     """Hash an API token using bcrypt."""
-    return bcrypt.hashpw(token.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return bcrypt.hashpw(token.encode("utf-8"), bcrypt.gensalt(BCRYPT_ROUNDS)).decode(
+        "utf-8"
+    )
 
 
 def verify_api_token(plain_token: str, hashed_token: str) -> bool:

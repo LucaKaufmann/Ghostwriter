@@ -20,6 +20,10 @@ os.environ["API_KEY"] = ""
 # Avoid starting background schedulers during tests.
 os.environ["SCHEDULE_ENABLED"] = "false"
 
+# Use the cheapest bcrypt cost factor so token/password hashing doesn't
+# dominate test runtime (~300ms per hash at the production default of 12).
+os.environ["BCRYPT_ROUNDS"] = "4"
+
 from app.main import app  # noqa: E402  # env must be set before import
 
 
