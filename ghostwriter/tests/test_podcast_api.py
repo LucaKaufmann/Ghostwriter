@@ -3045,6 +3045,42 @@ def test_script_prompts_include_episode_context_and_informative_beats():
         assert "{max_beats}" in template
 
 
+def test_script_prompts_forbid_audience_interaction():
+    """Private briefings must not pretend to be a real show with an audience."""
+    from app.services.podcast_service import (
+        SCRIPT_EXPANSION_PROMPT_TEMPLATE,
+        SCRIPT_OUTLINE_PROMPT_TEMPLATE,
+        SCRIPT_PRIVATE_BRIEFING_RULES,
+        SCRIPT_PROMPT_TEMPLATE,
+        SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE,
+        SCRIPT_SOLO_PROMPT_TEMPLATE,
+        SCRIPT_SOLO_SYSTEM_PROMPT,
+        SCRIPT_SYSTEM_PROMPT,
+    )
+
+    assert "single listener" in SCRIPT_PRIVATE_BRIEFING_RULES
+    for system_prompt in (SCRIPT_SYSTEM_PROMPT, SCRIPT_SOLO_SYSTEM_PROMPT):
+        assert SCRIPT_PRIVATE_BRIEFING_RULES in system_prompt
+    # The TTS-specific system prompts build on the shared ones, so the rules
+    # reach every provider variant.
+    for provider in ("openai", "elevenlabs"):
+        assert SCRIPT_PRIVATE_BRIEFING_RULES in (
+            podcast_service._script_system_prompt_for_tts(
+                provider=provider, elevenlabs_model_id="eleven_v3"
+            )
+        )
+        assert SCRIPT_PRIVATE_BRIEFING_RULES in (
+            podcast_service._script_system_prompt_for_tts_solo(
+                provider=provider, elevenlabs_model_id="eleven_v3"
+            )
+        )
+    for template in (SCRIPT_PROMPT_TEMPLATE, SCRIPT_SOLO_PROMPT_TEMPLATE):
+        assert "Never address an audience" in template
+    for template in (SCRIPT_OUTLINE_PROMPT_TEMPLATE, SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE):
+        assert "never audience interaction or show housekeeping" in template
+    assert "Do not add audience interaction" in SCRIPT_EXPANSION_PROMPT_TEMPLATE
+
+
 def test_script_length_targets_scale_with_minutes():
     targets = podcast_service._script_length_targets(18)
     assert targets["target_words"] == 18 * 145

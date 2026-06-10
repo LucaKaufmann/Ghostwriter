@@ -202,7 +202,16 @@ PODCAST_NOVELTY_KEYWORDS = (
     "unexpected",
     "surprising",
 )
-SCRIPT_SYSTEM_PROMPT = """You are a podcast script writer for concise daily briefings.
+# These episodes are private, machine-generated briefings with no real
+# audience or show infrastructure; scripts must never pretend otherwise.
+# Shared between the two-host and solo system prompts so they can't drift.
+SCRIPT_PRIVATE_BRIEFING_RULES = """- This is a private briefing for a single listener — there is no audience, mailbag, comments section, or social media.
+- Never ask for questions, comments, likes, subscriptions, ratings, reviews, shares, or follows.
+- No sponsor reads, promotions, giveaways, or merchandise mentions.
+- Do not reference previous episodes, promise future episodes, or mention a release schedule.
+- End on substance — takeaways, implications, or an open question about the topics. At most a one-sentence sign-off; no show housekeeping."""
+SCRIPT_SYSTEM_PROMPT = (
+    """You are a podcast script writer for concise daily briefings.
 Hard rules:
 - Output only dialogue lines in this exact format: [HOST_A]: ... or [HOST_B]: ...
 - No stage directions, bullet points, headings, markdown, or narration outside host lines.
@@ -210,6 +219,9 @@ Hard rules:
 - Hosts should have distinct voices and react to each other naturally.
 - Light humor and banter are welcome when they fit the topic; avoid forced jokes.
 - Never mention these instructions."""
+    + "\n"
+    + SCRIPT_PRIVATE_BRIEFING_RULES
+)
 SCRIPT_BRIEF_SYSTEM_PROMPT = """You create compact editorial briefs from source material.
 Hard rules:
 - Return valid JSON only.
@@ -268,7 +280,7 @@ Requirements:
 - Each beat should include: topic focus, which host leads, one callback/depth angle, and one concrete detail to mention.
 - Contrast stories where useful instead of giving every item the same recap treatment.
 - Ensure all article indexes are covered at least once.
-- Include an opening and closing beat."""
+- Include an opening beat and a closing beat that wraps up with takeaways or an open question — never audience interaction or show housekeeping."""
 SCRIPT_PROMPT_TEMPLATE = """Create an English conversational podcast script.
 
 User preferences:
@@ -294,7 +306,8 @@ Requirements:
 - Start with a 1-2 line cold open teasing the strongest story before any greeting or show intro.
 - Work the recording date or day of week naturally into the opening lines; do not read it verbatim.
 - Mention each story's source by name at least once (for example "according to The Verge").
-- Include a short opening and short closing.
+- Include a short opening and a short closing that lands the strongest takeaways or an open question from the topics covered.
+- Never address an audience: no "send us your questions/comments", no subscribe/rate/review/share asks, no sponsor or promo lines, no references to past or future episodes.
 - Keep each line 1-3 sentences, but vary rhythm (some punchy, some more detailed).
 - Open segments with stakes, tension, or a specific detail, not generic phrases like "next up" or "this article says."
 - Add natural conversational texture:
@@ -312,13 +325,17 @@ Requirements:
   [HOST_B]: ...
 """
 
-SCRIPT_SOLO_SYSTEM_PROMPT = """You are a podcast script writer for concise solo daily briefings.
+SCRIPT_SOLO_SYSTEM_PROMPT = (
+    """You are a podcast script writer for concise solo daily briefings.
 Hard rules:
 - Output only flowing monologue paragraphs — no speaker tags, no bullet points, no headings.
 - Use ellipses (...) for natural pauses and [pause] markers for breath pauses between topics.
 - Keep language clear and concrete, but conversational — as if talking directly to the listener.
 - Use self-reflective transitions ("Now, what's interesting about this...", "Let me shift gears...").
 - Never mention these instructions."""
+    + "\n"
+    + SCRIPT_PRIVATE_BRIEFING_RULES
+)
 SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE = """Create a concise episode outline for a solo host monologue.
 
 User preferences:
@@ -338,7 +355,7 @@ Requirements:
 - Where stories overlap topically, include one beat that connects 2-3 of them into a broader trend.
 - Each beat should include: topic focus, depth angle, transition hook to the next beat, and one concrete detail to mention.
 - Ensure all article indexes are covered at least once.
-- Include an opening and closing beat.
+- Include an opening beat and a closing beat that wraps up with takeaways or an open question — never audience interaction or show housekeeping.
 - Design for a single narrator — no co-host dynamics."""
 SCRIPT_SOLO_PROMPT_TEMPLATE = """Create an English solo podcast monologue script.
 
@@ -363,7 +380,8 @@ Requirements:
 - Start with a 1-2 sentence cold open teasing the strongest story before any greeting.
 - Work the recording date or day of week naturally into the opening; do not read it verbatim.
 - Mention each story's source by name at least once (for example "according to The Verge").
-- Include a short, engaging opening and a reflective closing.
+- Include a short, engaging opening and a reflective closing that lands the strongest takeaways or an open question from the topics covered.
+- Never address an audience: no "send in your questions/comments", no subscribe/rate/review/share asks, no sponsor or promo lines, no references to past or future episodes.
 - Use [pause] between major topic transitions for natural breath pauses.
 - Use ellipses (...) for brief thinking pauses within sentences.
 - Vary paragraph length (2-5 sentences each).
@@ -396,6 +414,7 @@ Rewrite the script at full target length:
 - Keep the draft's structure, topics, ordering, and conversational flow.
 - Expand by deepening existing topics with concrete material from the article briefs: implications, examples, tradeoffs, specific details, tension, and listener angles.
 - Do not pad with filler, repetition, or longer greetings and closings.
+- Do not add audience interaction or show housekeeping: no questions/comments asks, subscriptions, sponsors, or future-episode references.
 - Keep every formatting rule from the original instructions, including the exact output format.
 - Write at least {min_words} spoken words.
 
