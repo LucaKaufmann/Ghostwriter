@@ -138,10 +138,12 @@ SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
 SOLO_CHUNK_MAX_CHARS_ELEVEN_V3 = 2500
 SOLO_CHUNK_MAX_CHARS_ELEVENLABS = 9000
 SOLO_CHUNK_MAX_CHARS_OPENAI = 3900
-# Eleven v3 text-to-dialogue: scene size budget per request, and the HTTP
-# statuses that indicate the endpoint is gated for this account (alpha/plan)
-# rather than a transient failure.
-DIALOGUE_SCENE_MAX_CHARS = 2500
+# Eleven v3 text-to-dialogue: scene size budget per request (API docs
+# recommend <=2,000 total input chars; larger scenes can 422, which we
+# would misread as endpoint gating), and the HTTP statuses that indicate
+# the endpoint is gated for this account (alpha/plan) rather than a
+# transient failure.
+DIALOGUE_SCENE_MAX_CHARS = 2000
 DIALOGUE_SCENE_HOST_A_BREAK_FRACTION = 0.7
 DIALOGUE_UNAVAILABLE_STATUS_CODES = {401, 403, 404, 422}
 MIN_EPISODE_DURATION_SECONDS = 30

@@ -29,6 +29,7 @@ from app.services.one_off_podcast_service import (
     ONE_OFF_SOURCE_LABEL,
 )
 from app.services.podcast_service import (
+    DIALOGUE_SCENE_MAX_CHARS,
     AudioGenerationResult,
     PodcastGenerationPreferences,
     ScriptSegment,
@@ -2481,6 +2482,10 @@ def test_dialogue_scene_grouping_respects_char_cap_and_host_a_seams():
     # A single oversized line still gets its own scene rather than being lost.
     oversized = [("HOST_A", "y" * 3000)]
     assert podcast_service._group_dialogue_scenes(oversized, max_chars=2500) == [[0]]
+
+    # Default budget stays within the documented ~2,000-char dialogue
+    # request limit so long scenes don't 422 into the fallback path.
+    assert DIALOGUE_SCENE_MAX_CHARS <= 2000
 
 
 @pytest.mark.asyncio
