@@ -132,6 +132,12 @@ DOLLAR_AMOUNT_RE = re.compile(
 )
 SCRIPT_BRIEF_CHUNK_SIZE = 3
 SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
+# Per-request character caps for solo synthesis. Eleven v3 rejects requests
+# over ~3,000 chars; older ElevenLabs models accept far more but moderate
+# chunks keep prosody steady via previous/next context.
+SOLO_CHUNK_MAX_CHARS_ELEVEN_V3 = 2500
+SOLO_CHUNK_MAX_CHARS_ELEVENLABS = 9000
+SOLO_CHUNK_MAX_CHARS_OPENAI = 3900
 MIN_EPISODE_DURATION_SECONDS = 30
 SOURCE_DIVERSITY_TARGET_FRACTION = 0.35
 ONE_OFF_MAX_EPISODE_ARTICLES = 20
@@ -2340,9 +2346,12 @@ class PodcastDigestService:
         if provider not in SUPPORTED_TTS_PROVIDERS:
             raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
 
-        # Clean script: replace [pause] markers with ellipses for natural TTS pauses
-        cleaned = re.sub(r"\[pause\]", "...", script, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        chunks = self._build_solo_chunks(
+            script,
+            provider=provider,
+            elevenlabs_model_id=prefs.elevenlabs_model_id,
+        )
+        total_chars = sum(len(chunk) for chunk in chunks)
 
         voice = prefs.host_a_voice
         if provider == "openai":
@@ -2357,90 +2366,72 @@ class PodcastDigestService:
                 "episode_id": str(episode_id),
                 "provider": provider,
                 "voice": voice,
-                "script_chars": len(cleaned),
+                "script_chars": total_chars,
+                "chunk_count": len(chunks),
                 "timestamp_utc": datetime.utcnow().isoformat() + "Z",
             },
         )
 
-        synthesized_chars = 0
-
         if provider == "elevenlabs":
-            await self._check_elevenlabs_quota(prefs, len(cleaned))
-            # ElevenLabs handles long text natively — single API call
-            normalized = self._normalize_tts_segment_text(
-                cleaned,
-                provider=provider,
-                elevenlabs_model_id=prefs.elevenlabs_model_id,
-            )
-            self._append_tts_debug_entry(
-                debug_path,
-                {
-                    "event": "tts_request",
-                    "segment_index": 1,
-                    "speaker": "solo",
-                    "voice": voice,
-                    "provider": provider,
-                    "text_chars": len(normalized),
-                    "timestamp_utc": datetime.utcnow().isoformat() + "Z",
-                },
-            )
-            audio_bytes, tts_error = await self._synthesize_segment_with_retry(
-                text=normalized,
-                voice=voice,
-                provider=provider,
-                prefs=prefs,
-            )
-            if not audio_bytes:
-                raise RuntimeError(f"TTS failed for solo script: {tts_error}")
-            final_path.write_bytes(audio_bytes)
-            synthesized_chars = len(cleaned)
-        else:
-            # OpenAI: chunk at paragraph boundaries (max ~3900 chars per chunk)
-            paragraphs = [p.strip() for p in cleaned.split("\n") if p.strip()]
-            if not paragraphs:
-                paragraphs = [cleaned]
-            chunks = self._chunk_paragraphs_for_openai(paragraphs, max_chars=3900)
+            await self._check_elevenlabs_quota(prefs, total_chars)
 
-            with tempfile.TemporaryDirectory(prefix="podcast_solo_tts_") as tmpdir:
-                chunk_paths: list[Path] = []
-                for idx, chunk_text in enumerate(chunks, start=1):
-                    normalized = self._normalize_tts_segment_text(
-                        chunk_text,
-                        provider=provider,
+        synthesized_chars = 0
+        with tempfile.TemporaryDirectory(prefix="podcast_solo_tts_") as tmpdir:
+            chunk_paths: list[Path] = []
+            for idx, normalized in enumerate(chunks, start=1):
+                self._append_tts_debug_entry(
+                    debug_path,
+                    {
+                        "event": "tts_request",
+                        "segment_index": idx,
+                        "speaker": "solo",
+                        "voice": voice,
+                        "provider": provider,
+                        "text_chars": len(normalized),
+                        "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                    },
+                )
+                audio_bytes, tts_error = await self._synthesize_segment_with_retry(
+                    text=normalized,
+                    voice=voice,
+                    provider=provider,
+                    prefs=prefs,
+                    previous_text=chunks[idx - 2] if idx > 1 else None,
+                    next_text=chunks[idx] if idx < len(chunks) else None,
+                )
+                if not audio_bytes:
+                    logger.warning(
+                        "Skipping solo TTS chunk %d after retries: %s", idx, tts_error
                     )
                     self._append_tts_debug_entry(
                         debug_path,
                         {
-                            "event": "tts_request",
+                            "event": "tts_segment_failed",
                             "segment_index": idx,
                             "speaker": "solo",
                             "voice": voice,
                             "provider": provider,
-                            "text_chars": len(normalized),
+                            "error": tts_error,
                             "timestamp_utc": datetime.utcnow().isoformat() + "Z",
                         },
                     )
-                    audio_bytes, tts_error = await self._synthesize_segment_with_retry(
-                        text=normalized,
-                        voice=voice,
-                        provider=provider,
-                        prefs=prefs,
-                    )
-                    if not audio_bytes:
-                        logger.warning("Skipping solo TTS chunk %d after retries: %s", idx, tts_error)
-                        continue
-                    path = Path(tmpdir) / f"chunk_{idx:04d}.mp3"
-                    path.write_bytes(audio_bytes)
-                    chunk_paths.append(path)
-                    synthesized_chars += len(chunk_text)
+                    if tts_error and "quota_exceeded" in tts_error:
+                        raise RuntimeError(
+                            f"ElevenLabs quota exhausted during solo audio generation: {tts_error}"
+                        )
+                    continue
+                path = Path(tmpdir) / f"chunk_{idx:04d}.mp3"
+                path.write_bytes(audio_bytes)
+                chunk_paths.append(path)
+                synthesized_chars += len(normalized)
 
-                if not chunk_paths:
-                    raise RuntimeError("TTS failed for all solo chunks")
+            if not chunk_paths:
+                raise RuntimeError("TTS failed for all solo chunks")
 
-                if len(chunk_paths) == 1:
-                    shutil.copyfile(chunk_paths[0], final_path)
-                else:
-                    await self._concat_segments_seamless(chunk_paths, final_path)
+            if len(chunk_paths) == 1:
+                shutil.copyfile(chunk_paths[0], final_path)
+            else:
+                await self._concat_segments_seamless(chunk_paths, final_path)
 
         audio_size = final_path.stat().st_size
         duration = await self._probe_audio_duration_seconds(final_path)
@@ -2472,7 +2463,59 @@ class PodcastDigestService:
         )
 
     @staticmethod
-    def _chunk_paragraphs_for_openai(
+    def _build_solo_chunks(
+        script: str,
+        *,
+        provider: str,
+        elevenlabs_model_id: str | None = None,
+    ) -> list[str]:
+        """Turn a solo script into normalized, provider-sized TTS request chunks.
+
+        Paragraph breaks are preserved inside each chunk because v3 uses them
+        for pacing; whitespace is only collapsed within paragraphs.
+        """
+        model_id = (elevenlabs_model_id or "").strip().lower()
+        is_v3 = provider == "elevenlabs" and model_id == "eleven_v3"
+        if is_v3:
+            # v3 understands the native pause tag; older models would read it.
+            cleaned = re.sub(r"\[pause\]", "[pauses]", script, flags=re.IGNORECASE)
+            max_chars = SOLO_CHUNK_MAX_CHARS_ELEVEN_V3
+        else:
+            cleaned = re.sub(r"\[pause\]", "...", script, flags=re.IGNORECASE)
+            max_chars = (
+                SOLO_CHUNK_MAX_CHARS_ELEVENLABS
+                if provider == "elevenlabs"
+                else SOLO_CHUNK_MAX_CHARS_OPENAI
+            )
+
+        paragraphs = [
+            paragraph
+            for paragraph in (
+                re.sub(r"\s+", " ", part).strip() for part in cleaned.splitlines()
+            )
+            if paragraph
+        ]
+        if not paragraphs:
+            paragraphs = [re.sub(r"\s+", " ", cleaned).strip()]
+
+        chunks = PodcastDigestService._chunk_paragraphs(paragraphs, max_chars=max_chars)
+        normalized_chunks: list[str] = []
+        for chunk in chunks:
+            parts = [
+                PodcastDigestService._normalize_tts_segment_text(
+                    part,
+                    provider=provider,
+                    elevenlabs_model_id=elevenlabs_model_id,
+                )
+                for part in chunk.split("\n\n")
+            ]
+            normalized = "\n\n".join(part for part in parts if part)
+            if normalized:
+                normalized_chunks.append(normalized)
+        return normalized_chunks
+
+    @staticmethod
+    def _chunk_paragraphs(
         paragraphs: list[str],
         max_chars: int = 3900,
     ) -> list[str]:
@@ -3509,7 +3552,13 @@ class PodcastDigestService:
         )
 
         # v3 behaves better with richer turns; avoid ultra-short fragments.
-        if model_id == "eleven_v3" and len(normalized) < 18 and not normalized.endswith("."):
+        # Standalone audio tags (e.g. a [pauses] paragraph) stay untouched.
+        if (
+            model_id == "eleven_v3"
+            and len(normalized) < 18
+            and not normalized.endswith(".")
+            and not AUDIO_TAG_RE.fullmatch(normalized)
+        ):
             normalized += "."
 
         return re.sub(r"\s+", " ", normalized).strip()

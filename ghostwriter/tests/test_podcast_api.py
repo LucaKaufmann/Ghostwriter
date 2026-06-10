@@ -2363,6 +2363,91 @@ def test_eleven_v3_prompt_guidance_includes_audio_tag_vocabulary():
     assert "one tag every 4-8 lines" in robust_guidance
 
 
+def test_solo_chunks_respect_v3_character_limit_and_native_pauses():
+    paragraphs = [
+        f"Paragraph {index}. " + ("Detail sentence with real substance here. " * 20)
+        for index in range(12)
+    ]
+    script = "\n\n[pause]\n\n".join(paragraphs)
+
+    chunks = podcast_service._build_solo_chunks(
+        script, provider="elevenlabs", elevenlabs_model_id="eleven_v3"
+    )
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 2500 for chunk in chunks)
+    joined = "\n\n".join(chunks)
+    assert "[pauses]" in joined
+    # Paragraph breaks survive inside chunks (v3 uses them for pacing).
+    assert any("\n\n" in chunk for chunk in chunks)
+    # Full content is covered.
+    assert "Paragraph 0." in chunks[0]
+    assert "Paragraph 11." in chunks[-1]
+
+
+def test_solo_chunks_use_spoken_pause_for_non_v3():
+    script = (
+        "First paragraph about the news.\n\n[pause]\n\n"
+        "Second paragraph with more details."
+    )
+
+    turbo_chunks = podcast_service._build_solo_chunks(
+        script, provider="elevenlabs", elevenlabs_model_id="eleven_turbo_v2_5"
+    )
+    assert len(turbo_chunks) == 1
+    assert "[" not in turbo_chunks[0]
+    assert "..." in turbo_chunks[0]
+
+    openai_chunks = podcast_service._build_solo_chunks(script, provider="openai")
+    assert len(openai_chunks) == 1
+    assert "[" not in openai_chunks[0]
+
+
+@pytest.mark.asyncio
+async def test_generate_solo_audio_chunks_long_v3_scripts(monkeypatch):
+    synthesized_texts: list[str] = []
+
+    async def _fake_synth(
+        *, text, voice, provider, prefs, previous_text=None, next_text=None
+    ):
+        synthesized_texts.append(text)
+        return b"a" * 2048, None
+
+    async def _fake_concat(paths, output_path):
+        output_path.write_bytes(b"".join(p.read_bytes() for p in paths))
+
+    async def _fake_probe(path):
+        return 120
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    monkeypatch.setattr(podcast_service, "_synthesize_segment_with_retry", _fake_synth)
+    monkeypatch.setattr(podcast_service, "_concat_segments_seamless", _fake_concat)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+
+    script = "\n\n".join(
+        "Topic paragraph. " + ("More spoken detail in this sentence. " * 25)
+        for _ in range(10)
+    )
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        host_a_voice="voice_a",
+    )
+
+    result = await podcast_service.generate_solo_audio(uuid4(), script, prefs)
+
+    # Regression: the whole script used to go out as one giant request,
+    # which eleven_v3 rejects above ~3,000 chars.
+    assert len(synthesized_texts) > 1
+    assert all(len(text) <= 2500 for text in synthesized_texts)
+    assert result.audio_size_bytes > 0
+    assert result.duration_seconds == 120
+
+
 def test_elevenlabs_voice_settings_mapping():
     assert podcast_service._elevenlabs_voice_settings("eleven_v3", "creative") == {
         "stability": 0.0
