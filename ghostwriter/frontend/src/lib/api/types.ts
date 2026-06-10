@@ -654,10 +654,16 @@ export interface PodcastEpisodeArticle {
 	feed_title: string;
 }
 
+export interface PodcastChapter {
+	title: string;
+	start_seconds: number;
+}
+
 export interface PodcastEpisodeDetailResponse extends PodcastEpisodeStatusResponse {
 	script: string | null;
 	article_ids: string[];
 	articles: PodcastEpisodeArticle[];
+	chapters: PodcastChapter[] | null;
 }
 
 // ============ Podcast Schedules ============
