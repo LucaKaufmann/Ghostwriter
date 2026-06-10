@@ -798,18 +798,20 @@ def build_local_candidates(args: argparse.Namespace) -> tuple[list[SourceCandida
             )
         )
 
+    requested_note_paths: set[Path] = set()
     seen_note_paths: set[Path] = set()
     note_candidates: list[SourceCandidate] = []
     for path in selected_note_paths:
         resolved = path.resolve()
-        if resolved in seen_note_paths:
+        if resolved in requested_note_paths:
             warnings.append(f"Skipped duplicate note path: {path}")
             continue
-        seen_note_paths.add(resolved)
+        requested_note_paths.add(resolved)
         candidate = read_obsidian_note(path, order=order)
         if not candidate_has_required_tags(candidate, args.obsidian_tag):
             warnings.append(f"Skipped note without required tags: {path}")
             continue
+        seen_note_paths.add(resolved)
         note_candidates.append(candidate)
         order += 1
 
