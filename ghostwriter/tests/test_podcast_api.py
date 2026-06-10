@@ -3291,6 +3291,8 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
     """Verify that only digests created after last_run_at are included."""
     from datetime import timedelta
 
+    from sqlalchemy import func as sa_func
+
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
@@ -3299,8 +3301,14 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
     old_time = datetime.utcnow() - timedelta(hours=2)
     _create_digest_with_articles(article_count=1, completed_at=old_time)
 
-    # Create a schedule with last_run_at after the old digest
-    last_run = datetime.utcnow()
+    # Anchor last_run to be after ALL existing digests (including any future-dated
+    # digests created by other tests that use schedule-window timestamps).
+    with Session(engine) as session:
+        max_ts = session.exec(
+            select(sa_func.max(Digest.created_at))
+        ).first()
+    last_run = (max_ts + timedelta(seconds=1)) if max_ts else datetime.utcnow()
+
     with Session(engine) as session:
         sched = PodcastSchedule(
             name="Filter Test",
