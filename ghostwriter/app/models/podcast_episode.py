@@ -33,6 +33,12 @@ class PodcastEpisodeBase(SQLModel):
         sa_column=Column(JSON, nullable=False, server_default="[]"),
     )
     article_count: int = Field(default=0, ge=0)
+    # [{"title": str, "start_seconds": float}] in playback order; None when
+    # the episode has no chapter markers.
+    chapters: list[dict[str, Any]] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     generation_cost_cents: int | None = Field(default=None, ge=0)
     generation_preferences: dict[str, Any] = Field(
         default_factory=dict,
@@ -93,6 +99,7 @@ class PodcastEpisodeRead(PodcastEpisodeSummaryRead):
     script: str | None = None
     article_ids: list[str]
     articles: list[PodcastEpisodeArticleRead] = []
+    chapters: list[dict[str, Any]] | None = None
 
 
 class PodcastEpisodeCounter(SQLModel, table=True):

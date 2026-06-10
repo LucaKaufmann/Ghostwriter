@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 import os
@@ -97,12 +98,20 @@ class PodcastEpisodeStatusRead(BaseModel):
     download_url: str | None = None
 
 
+class PodcastChapterRead(BaseModel):
+    """One chapter marker within an episode."""
+
+    title: str
+    start_seconds: float
+
+
 class PodcastEpisodeDetailRead(PodcastEpisodeStatusRead):
     """Detailed episode payload including script and source article list."""
 
     script: str | None = None
     article_ids: list[str]
     articles: list[PodcastEpisodeArticleRead]
+    chapters: list[PodcastChapterRead] | None = None
 
 
 class PodcastTriggerResponse(BaseModel):
@@ -238,6 +247,28 @@ def _build_episode_status(
         stream_url=base_url + stream_url,
         download_url=base_url + download_url,
     )
+
+
+def _episode_chapter_reads(
+    episode: PodcastEpisode,
+) -> list[PodcastChapterRead] | None:
+    """Validate stored chapter dicts into typed reads; None when unusable."""
+    if not episode.chapters:
+        return None
+    chapters: list[PodcastChapterRead] = []
+    for raw in episode.chapters:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title") or "").strip()
+        try:
+            start_seconds = float(raw.get("start_seconds", 0.0))
+        except (TypeError, ValueError):
+            continue
+        if title:
+            chapters.append(
+                PodcastChapterRead(title=title, start_seconds=start_seconds)
+            )
+    return chapters or None
 
 
 def _resolve_episode_articles(
@@ -873,6 +904,7 @@ async def get_podcast_episode(
         script=episode.script,
         article_ids=episode.article_ids,
         articles=_resolve_episode_articles(session, episode),
+        chapters=_episode_chapter_reads(episode),
     )
 
 
@@ -1007,6 +1039,44 @@ async def download_podcast_episode(
     )
 
 
+@router.get("/podcast/episodes/{episode_id}/chapters")
+async def get_podcast_episode_chapters(
+    episode_id: UUID,
+    request: Request,
+    token: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+):
+    """Return episode chapters in Podcasting 2.0 JSON chapters format."""
+    token_prefs = await _authorize_standard_or_feed_token(request, session, token)
+
+    episode = session.get(PodcastEpisode, episode_id)
+    if episode is None:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
+    if token_prefs is not None and episode.user_id != token_prefs.user_id:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
+    if token_prefs is None:
+        await _ensure_one_off_episode_access(request, session, episode)
+    if episode.status != "ready":
+        raise HTTPException(status_code=409, detail="Podcast episode is not ready")
+
+    chapters = _episode_chapter_reads(episode)
+    if not chapters:
+        raise HTTPException(status_code=404, detail="Episode has no chapters")
+
+    payload = {
+        "version": "1.2.0",
+        "chapters": [
+            {"startTime": chapter.start_seconds, "title": chapter.title}
+            for chapter in chapters
+        ],
+    }
+    return Response(
+        content=json.dumps(payload),
+        media_type="application/json+chapters",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/podcast/feed.xml")
 async def get_podcast_feed_xml(
     request: Request,
@@ -1031,6 +1101,7 @@ async def get_podcast_feed_xml(
 
     ET.register_namespace("itunes", "http://www.itunes.com/dtds/podcast-1.0.dtd")
     ET.register_namespace("content", "http://purl.org/rss/1.0/modules/content/")
+    ET.register_namespace("podcast", "https://podcastindex.org/namespace/1.0")
 
     rss = ET.Element(
         "rss",
@@ -1038,6 +1109,7 @@ async def get_podcast_feed_xml(
             "version": "2.0",
             "xmlns:itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd",
             "xmlns:content": "http://purl.org/rss/1.0/modules/content/",
+            "xmlns:podcast": "https://podcastindex.org/namespace/1.0",
         },
     )
     channel = ET.SubElement(rss, "channel")
@@ -1104,6 +1176,18 @@ async def get_podcast_feed_xml(
         ET.SubElement(item, "itunes:duration").text = _format_duration(
             episode.duration_seconds
         )
+        if _episode_chapter_reads(episode):
+            ET.SubElement(
+                item,
+                "podcast:chapters",
+                {
+                    "url": (
+                        base_url
+                        + f"/api/podcast/episodes/{episode.id}/chapters?token={token}"
+                    ),
+                    "type": "application/json+chapters",
+                },
+            )
         if episode.trigger == "one_off":
             ET.SubElement(item, "itunes:episodeType").text = "bonus"
         else:
