@@ -2616,7 +2616,9 @@ async def test_generate_audio_falls_back_when_dialogue_unavailable(monkeypatch):
     async def _fake_probe(path):
         return 80
 
-    async def _fake_stitch(segment_paths, output_path, gap_durations=None):
+    async def _fake_stitch(
+        segment_paths, output_path, gap_durations=None, silence_sample_rate=24000
+    ):
         output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
 
     monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
@@ -2684,7 +2686,9 @@ async def test_generate_audio_falls_back_when_dialogue_scene_fails(monkeypatch):
     async def _fake_probe(path):
         return 80
 
-    async def _fake_stitch(segment_paths, output_path, gap_durations=None):
+    async def _fake_stitch(
+        segment_paths, output_path, gap_durations=None, silence_sample_rate=24000
+    ):
         output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
 
     monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
@@ -2723,6 +2727,159 @@ def test_inter_segment_gap_seconds_punctuation_rules():
     assert podcast_service._inter_segment_gap_seconds("And that wraps it up...") == 0.45
     assert podcast_service._inter_segment_gap_seconds("Plain statement.") == 0.3
     assert podcast_service._inter_segment_gap_seconds("") == 0.3
+
+    # Speaker changes get a longer beat so hosts don't cut each other off.
+    gap = podcast_service._inter_segment_gap_seconds
+    assert gap("Really?", speaker_change=True) == 0.35
+    assert gap("No way!", speaker_change=True) == 0.35
+    assert gap("And that wraps it up...", speaker_change=True) == 0.6
+    assert gap("Plain statement.", speaker_change=True) == 0.45
+    assert gap("", speaker_change=True) == 0.45
+
+
+def test_tts_output_sample_rate_matches_provider_format():
+    rate = podcast_service._tts_output_sample_rate
+    assert rate("elevenlabs", "mp3_44100_128") == 44100
+    assert rate("elevenlabs", "mp3_22050_32") == 22050
+    assert rate("elevenlabs", "") == 44100
+    assert rate("openai", "mp3_44100_128") == 24000
+    assert rate("openai", None) == 24000
+
+
+@pytest.mark.asyncio
+async def test_generate_audio_two_hosts_avoids_cross_speaker_continuity(monkeypatch):
+    """Regression: request stitching and cross-speaker next_text conditioned
+    each host to keep talking past the end of their turn, so stitched turns
+    clipped and overlapped each other."""
+    captured_payloads: list[dict] = []
+    stitch_kwargs: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+        content = b"audio-bytes"
+        text = ""
+        headers = {"request-id": "req-should-not-be-used"}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            captured_payloads.append(json)
+            return _Response()
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    async def _fake_probe(path):
+        return 80
+
+    async def _fake_stitch(
+        segment_paths, output_path, gap_durations=None, silence_sample_rate=24000
+    ):
+        stitch_kwargs["gap_durations"] = gap_durations
+        stitch_kwargs["silence_sample_rate"] = silence_sample_rate
+        output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+    monkeypatch.setattr(podcast_service, "_stitch_segments", _fake_stitch)
+
+    segments = [
+        ScriptSegment(speaker="HOST_A", text="Welcome to the show."),
+        ScriptSegment(speaker="HOST_A", text="We have a big story today!"),
+        ScriptSegment(speaker="HOST_B", text="Can't wait to dig in."),
+    ]
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_turbo_v2_5",
+        elevenlabs_api_key="xi-test-key",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    await podcast_service.generate_audio(uuid4(), segments, prefs)
+
+    assert len(captured_payloads) == 3
+    # Request stitching is a single-narrator continuity feature; in dialogue
+    # it also silently disables previous_text, so it must never be sent here.
+    assert all("previous_request_ids" not in p for p in captured_payloads)
+    # next_text only hints continuation when the same host keeps speaking.
+    assert "next_text" in captured_payloads[0]
+    assert "next_text" not in captured_payloads[1]
+    assert "next_text" not in captured_payloads[2]
+    # previous_text still carries conversational context across turns.
+    assert "previous_text" not in captured_payloads[0]
+    assert "previous_text" in captured_payloads[1]
+    assert "previous_text" in captured_payloads[2]
+    # Turn handoffs get the longer speaker-change gap; silence matches the
+    # ElevenLabs output sample rate.
+    assert stitch_kwargs["gap_durations"] == [0.3, 0.35]
+    assert stitch_kwargs["silence_sample_rate"] == 44100
+
+
+@pytest.mark.asyncio
+async def test_dialogue_scenes_stitched_with_turn_gaps(monkeypatch):
+    """v3 dialogue scenes are joined with a turn-sized gap, not butt-spliced."""
+    stitch_kwargs: dict[str, object] = {}
+
+    async def _fake_scene_retry(*, inputs, prefs):
+        return b"scene-audio", None
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    async def _fake_probe(path):
+        return 95
+
+    async def _fake_stitch(
+        segment_paths, output_path, gap_durations=None, silence_sample_rate=24000
+    ):
+        stitch_kwargs["scene_count"] = len(segment_paths)
+        stitch_kwargs["gap_durations"] = gap_durations
+        stitch_kwargs["silence_sample_rate"] = silence_sample_rate
+        output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
+
+    monkeypatch.setattr(
+        podcast_service, "_synthesize_dialogue_scene_with_retry", _fake_scene_retry
+    )
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+    monkeypatch.setattr(podcast_service, "_stitch_segments", _fake_stitch)
+
+    # Two long lines force two dialogue scenes under the 2,000-char cap;
+    # the seam is a HOST_A → HOST_B turn ending in a question.
+    segments = [
+        ScriptSegment(
+            speaker="HOST_A",
+            text=("Opening story detail sentence. " * 60).strip() + " Right?",
+        ),
+        ScriptSegment(
+            speaker="HOST_B",
+            text=("Second story analysis sentence. " * 60).strip(),
+        ),
+    ]
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    result = await podcast_service.generate_audio(uuid4(), segments, prefs)
+
+    assert stitch_kwargs["scene_count"] == 2
+    assert stitch_kwargs["gap_durations"] == [0.35]
+    assert stitch_kwargs["silence_sample_rate"] == 44100
+    assert result.audio_size_bytes > 0
 
 
 @pytest.mark.asyncio
@@ -2814,12 +2971,15 @@ async def test_stitch_segments_variable_gaps_and_loudnorm(monkeypatch, tmp_path)
     output = tmp_path / "out.mp3"
 
     await podcast_service._stitch_segments(
-        segment_paths, output, gap_durations=[0.15, 0.45]
+        segment_paths, output, gap_durations=[0.15, 0.45], silence_sample_rate=44100
     )
 
     silence_cmds = [cmd for cmd in commands if "lavfi" in cmd]
     durations = {cmd[cmd.index("-t") + 1] for cmd in silence_cmds}
     assert durations == {"0.15", "0.45"}
+    # Silence must match the segment sample rate or the concat stream
+    # switches formats at every boundary and glitches the seams.
+    assert all("anullsrc=r=44100:cl=mono" in cmd for cmd in silence_cmds)
     stitch_cmd = commands[-1]
     assert "loudnorm=I=-16:TP=-1.5:LRA=11" in stitch_cmd
     assert "128k" in stitch_cmd
@@ -3248,6 +3408,23 @@ async def test_elevenlabs_non_v3_synthesis_includes_context(monkeypatch):
         "style": 0.2,
         "use_speaker_boost": True,
     }
+
+    # Long context is truncated to the text adjacent to this segment:
+    # the tail of the previous line, the head of the next.
+    long_previous = "p" * 900 + " previous tail"
+    long_next = "next head " + "n" * 900
+    await podcast_service._synthesize_segment_elevenlabs(
+        text="Current line",
+        voice="voice_a",
+        prefs=prefs,
+        previous_text=long_previous,
+        next_text=long_next,
+    )
+    payload = captured["json"]
+    assert payload["previous_text"] == long_previous[-800:]
+    assert payload["previous_text"].endswith("previous tail")
+    assert payload["next_text"] == long_next[:800]
+    assert payload["next_text"].startswith("next head")
 
 
 # ======================== Podcast Schedules CRUD ========================

@@ -3152,10 +3152,9 @@ class PodcastDigestService:
                 return dialogue_result
 
         synthesized_chars = 0
-        request_id_history: dict[str, list[str]] = {}
         with tempfile.TemporaryDirectory(prefix="podcast_tts_") as tmpdir:
             segment_paths: list[Path] = []
-            stitched_texts: list[str] = []
+            stitched_entries: list[tuple[str, str]] = []
             for index, segment in enumerate(segments, start=1):
                 normalized_text = normalized_segment_texts[index - 1]
                 preferred_voice = (
@@ -3195,10 +3194,17 @@ class PodcastDigestService:
                     previous_text=(
                         normalized_segment_texts[index - 2] if index > 1 else None
                     ),
+                    # No request stitching and no cross-speaker next_text here:
+                    # both condition the voice to keep talking past the end of
+                    # its turn, which clips turn endings and bleeds into the
+                    # other host's line. Only hint continuation when the same
+                    # host keeps speaking.
                     next_text=(
-                        normalized_segment_texts[index] if index < len(normalized_segment_texts) else None
+                        normalized_segment_texts[index]
+                        if index < len(segments)
+                        and segments[index].speaker == segment.speaker
+                        else None
                     ),
-                    request_id_history=request_id_history,
                 )
                 if not audio_bytes:
                     logger.warning("Skipping TTS segment after retries: %s", segment.speaker)
@@ -3223,7 +3229,7 @@ class PodcastDigestService:
                 path = Path(tmpdir) / f"segment_{index:04d}.mp3"
                 path.write_bytes(audio_bytes)
                 segment_paths.append(path)
-                stitched_texts.append(normalized_text)
+                stitched_entries.append((normalized_text, segment.speaker))
                 synthesized_chars += len(segment.text)
                 self._append_tts_debug_entry(
                     debug_path,
@@ -3250,10 +3256,19 @@ class PodcastDigestService:
                 raise RuntimeError("TTS failed for all segments")
 
             gap_durations = [
-                self._inter_segment_gap_seconds(text) for text in stitched_texts[:-1]
+                self._inter_segment_gap_seconds(
+                    text,
+                    speaker_change=speaker != stitched_entries[pos + 1][1],
+                )
+                for pos, (text, speaker) in enumerate(stitched_entries[:-1])
             ]
             await self._stitch_segments(
-                segment_paths, final_path, gap_durations=gap_durations
+                segment_paths,
+                final_path,
+                gap_durations=gap_durations,
+                silence_sample_rate=self._tts_output_sample_rate(
+                    provider, prefs.elevenlabs_output_format
+                ),
             )
 
         audio_size = final_path.stat().st_size
@@ -3422,7 +3437,27 @@ class PodcastDigestService:
                 if len(scene_paths) == 1:
                     shutil.copyfile(scene_paths[0], final_path)
                 else:
-                    await self._concat_segments_seamless(scene_paths, final_path)
+                    # Scene seams are conversation turns the dialogue API knows
+                    # nothing about; join them with a turn-sized gap instead of
+                    # butt-splicing two unrelated generations.
+                    gap_durations = []
+                    for group, next_group in zip(scene_groups, scene_groups[1:]):
+                        last_speaker, last_text = entries[group[-1]]
+                        next_speaker = entries[next_group[0]][0]
+                        gap_durations.append(
+                            self._inter_segment_gap_seconds(
+                                last_text,
+                                speaker_change=last_speaker != next_speaker,
+                            )
+                        )
+                    await self._stitch_segments(
+                        scene_paths,
+                        final_path,
+                        gap_durations=gap_durations,
+                        silence_sample_rate=self._tts_output_sample_rate(
+                            "elevenlabs", prefs.elevenlabs_output_format
+                        ),
+                    )
         except ElevenLabsDialogueUnavailableError as exc:
             logger.warning(
                 "Text-to-dialogue unavailable (%s); falling back to per-segment TTS",
@@ -3715,6 +3750,10 @@ class PodcastDigestService:
         When request_id_history is provided (one dict per episode), prior
         request IDs for the same voice are sent as previous_request_ids so
         consecutive segments keep prosody continuity (request stitching).
+        Only the solo path passes this: stitching is a single-narrator
+        feature, and in dialogue it conditions a host's line to continue
+        straight from their previous turn (it also makes the API ignore
+        previous_text), which clips and overlaps turn endings.
         """
         api_key = (prefs.elevenlabs_api_key or "").strip()
         if not api_key:
@@ -3737,7 +3776,9 @@ class PodcastDigestService:
         supports_context = self._elevenlabs_supports_context_window(model_id)
         if supports_context:
             if previous_text:
-                payload["previous_text"] = previous_text[:800]
+                # Continuity is shaped by the text adjacent to this segment,
+                # so keep the tail of the previous line, not its head.
+                payload["previous_text"] = previous_text[-800:]
             if next_text:
                 payload["next_text"] = next_text[:800]
             if request_id_history:
@@ -3960,24 +4001,51 @@ class PodcastDigestService:
         return re.sub(r"\s+", " ", normalized).strip()
 
     @staticmethod
-    def _inter_segment_gap_seconds(previous_text: str) -> float:
+    def _inter_segment_gap_seconds(
+        previous_text: str, *, speaker_change: bool = False
+    ) -> float:
         """Pick the silence gap that follows a line, based on its punctuation.
 
         Questions and exclamations invite a snappy reply; trailing ellipses
-        signal a thought closing out, which earns a longer beat.
+        signal a thought closing out, which earns a longer beat. A speaker
+        change needs extra room for the turn handoff — too little and the
+        hosts sound like they cut each other off.
         """
         text = (previous_text or "").rstrip()
+        if speaker_change:
+            if text.endswith("..."):
+                return 0.6
+            if text.endswith("?") or text.endswith("!"):
+                return 0.35
+            return 0.45
         if text.endswith("..."):
             return 0.45
         if text.endswith("?") or text.endswith("!"):
             return 0.15
         return 0.3
 
+    @staticmethod
+    def _tts_output_sample_rate(provider: str, output_format: str | None) -> int:
+        """Sample rate of the provider's MP3 output, for matching silence.
+
+        Mixed sample rates within one ffmpeg concat stream force filter-graph
+        reinitialization at every file boundary, which audibly glitches the
+        seams between segments.
+        """
+        if (provider or "").strip().lower() == "elevenlabs":
+            # Formats look like "mp3_44100_128" (codec_rate_bitrate).
+            for token in (output_format or "").split("_"):
+                if token.isdigit():
+                    return int(token)
+            return 44100
+        return 24000  # OpenAI tts-1 / tts-1-hd MP3 output is 24 kHz.
+
     async def _stitch_segments(
         self,
         segment_paths: list[Path],
         output_path: Path,
         gap_durations: list[float] | None = None,
+        silence_sample_rate: int = 24000,
     ) -> None:
         """Stitch MP3 segments with punctuation-aware silence gaps using ffmpeg."""
         if len(segment_paths) == 1:
@@ -4000,7 +4068,7 @@ class PodcastDigestService:
                     "-f",
                     "lavfi",
                     "-i",
-                    "anullsrc=r=24000:cl=mono",
+                    f"anullsrc=r={silence_sample_rate}:cl=mono",
                     "-t",
                     f"{duration}",
                     str(silence_path),
