@@ -54,6 +54,7 @@ python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --env-file ~/.env \
   --title "Project planning brief" \
   --brief "Explain the source documents, tradeoffs, and next actions." \
+  --voice-preset openai-balanced \
   --text-file "Project Notes=/path/to/project-notes.txt" \
   --url "https://example.com/article" \
   --save-response /path/to/project-planning-brief-response.json \
@@ -69,7 +70,13 @@ python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --brief "Explain these notes as a concise conversational briefing." \
   --obsidian-note "/path/to/Vault/Project.md" \
   --obsidian-folder "/path/to/Vault/Projects/Project" \
+  --obsidian-include "*.md" \
+  --obsidian-exclude "Archive/*" \
+  --obsidian-tag research \
   --include-linked-notes \
+  --linked-note-depth 2 \
+  --include-backlinks \
+  --source-manifest /tmp/project-podcast-manifest.json \
   --preview
 ```
 
@@ -90,6 +97,8 @@ Submit from a full preview file:
 python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
   --env-file ~/.env \
   --source-json /tmp/project-podcast-preview.json \
+  --research-briefing \
+  --voice-preset elevenlabs-research \
   --save-response /path/to/project-notes-response.json \
   --download \
   --output /path/to/project-notes.mp3
@@ -113,7 +122,17 @@ python3 skills/ghostwriter-one-off-podcast/scripts/create_one_off_podcast.py \
 
 The script prints JSON. On creation it includes `episode_id`, `digest_ids`, and `status`. With `--poll`, it prints the final episode detail. With `--download` or `--output`, it polls until ready, saves the MP3, and adds `downloaded_path` to the final JSON. Use `--save-response PATH` to write the final response JSON, including the transcript when returned, to a private file. `--save-transcript PATH` is accepted as an alias for agents that think in transcript-retention terms. Use `--quiet` for automation that should print only one concise status line.
 
-Preview stdout includes the payload shape with text source content redacted plus `_preview` metadata with source counts, word counts, warnings, source origins, and content hashes. `--preview-output` writes the full submit-ready JSON to a private file and that file can be passed back with `--source-json`.
+Preview stdout includes the payload shape with text source content redacted plus `_preview` metadata with source counts, word counts, estimated source minutes, estimated TTS characters, warnings, source origins, tags, and content hashes. `--preview-output` writes the full submit-ready JSON to a private file and that file can be passed back with `--source-json`. `--source-manifest PATH` writes only the redaction-safe `_preview` metadata to a private JSON file for audit trails.
+
+Generation override flags:
+
+- `--voice-preset`: one of `openai-balanced`, `openai-energetic`, `openai-solo-analysis`, `elevenlabs-research`, or `elevenlabs-formal`.
+- `--tts-provider`: `openai` or `elevenlabs`.
+- `--host-count`: `1` for solo narration or `2` for a host dialogue.
+- `--host-a-voice` / `--host-b-voice`: provider voice name/ID. For ElevenLabs use voice IDs.
+- `--style`: `casual`, `formal`, or `deep-dive`.
+- `--preferred-length-minutes`, `--script-model`, and `--script-timeout-seconds`: per-episode generation preferences.
+- `--research-briefing`: appends guidance for AI-agent research notes, emphasizing evidence, uncertainty, contradictions, decisions, and next actions.
 
 Exit codes:
 
@@ -147,12 +166,51 @@ When calling the API directly, send:
 }
 ```
 
+Optional per-episode generation overrides are accepted under `generation`:
+
+```json
+{
+  "generation": {
+    "tts_provider": "elevenlabs",
+    "host_count": 2,
+    "host_a_voice": "iP95p4xoKVk53GoZ742B",
+    "host_b_voice": "XrExE9yKIg1WjnnlVkGX",
+    "style": "deep-dive",
+    "preferred_length_minutes": 12
+  }
+}
+```
+
+## Voice Catalog
+
+Ghostwriter exposes the shared catalog at `/api/podcast/voices`. Use these IDs in one-off `generation` overrides or helper flags.
+
+| Provider | Name | ID | Vibe | Best suited for |
+| --- | --- | --- | --- | --- |
+| OpenAI | Alloy | `alloy` | Balanced, neutral, clear | General research briefings and mixed-source summaries |
+| OpenAI | Echo | `echo` | Warm, conversational, steady | Context-setting, explanatory turns, and recaps |
+| OpenAI | Fable | `fable` | Expressive, story-forward, lighter | Narrative explainers and approachable solo summaries |
+| OpenAI | Onyx | `onyx` | Deep, calm, authoritative | Serious analysis, longer-form synthesis, and solo narration |
+| OpenAI | Nova | `nova` | Bright, quick, energetic | Hooks, momentum, and lively research updates |
+| OpenAI | Shimmer | `shimmer` | Polished, friendly, precise | Executive-style briefings and concise summaries |
+| ElevenLabs | Chris | `iP95p4xoKVk53GoZ742B` | Natural, confident, presenter-like | Host A in research briefings and decision summaries |
+| ElevenLabs | Matilda | `XrExE9yKIg1WjnnlVkGX` | Warm, clear, explanatory | Host B context, definitions, and clarifying questions |
+| ElevenLabs | George | `JBFqnCBsd6RMkjVDRZzb` | Measured, grounded, direct | Formal analysis and slower-paced synthesis |
+| ElevenLabs | Bella | `hpp4J3VqNfWAUOO0d1Us` | Friendly, responsive, conversational | Accessible companion host and lighter recap segments |
+
+Useful pairings:
+
+- `Alloy + Echo`: balanced OpenAI research briefing.
+- `Nova + Fable`: more energetic narrative episode.
+- `Chris + Matilda`: default ElevenLabs research briefing.
+- `George + Bella`: formal analysis with warmer companion context.
+
 ## Operating Rules
 
 - Keep documents in user-provided order unless the user asks for a different structure.
 - Prefer extracted text for private/local documents; Ghostwriter cannot fetch files from the user's machine.
 - For Obsidian, prefer `--obsidian-note` and `--obsidian-folder`; the helper strips YAML frontmatter, comments, embeds, wikilinks, block IDs, tags, and common Markdown link noise before submitting.
-- Use `--include-linked-notes` only when the user wants one-hop wikilink context included. Review preview warnings for unresolved links.
+- Use `--include-linked-notes` only when the user wants wikilink context included. Keep `--linked-note-depth` bounded and review preview warnings for unresolved links.
 - For PDFs, DOCX, or web clippings, reduce each source to clean text before submitting.
 - Do not include secrets, API tokens, or private credentials inside source content.
 - For wiki or research use cases, persist the Ghostwriter response with `--save-response` so the generated synthesis remains auditable separately from verbatim source material.

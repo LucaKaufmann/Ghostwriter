@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest, type PodcastPreferencesUpdate, type PodcastScheduleResponse, type PodcastScheduleCreate, type PodcastScheduleDay } from '$lib/api';
+	import { api, type Schedule, type ScheduleUpdate, type DigestPeriod, type APITokenResponse, type LogFileInfo, type WallabagConfigResponse, type WallabagConfigUpdate, type PreviewResponse, type ClientConfigUpdate, type KoreaderPluginDownloadRequest, type PodcastPreferencesUpdate, type PodcastScheduleResponse, type PodcastScheduleCreate, type PodcastScheduleDay, type PodcastVoiceCatalogEntry, type PodcastVoicePairPreset } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -82,6 +82,11 @@
 	const podcastPreferencesQuery = createQuery(() => ({
 		queryKey: ['podcast-preferences'],
 		queryFn: () => api.getPodcastPreferences()
+	}));
+
+	const podcastVoiceCatalogQuery = createQuery(() => ({
+		queryKey: ['podcast-voices'],
+		queryFn: () => api.getPodcastVoiceCatalog()
 	}));
 
 	const podcastSchedulesQuery = createQuery(() => ({
@@ -496,13 +501,13 @@
 		monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu',
 		friday: 'Fri', saturday: 'Sat', sunday: 'Sun'
 	};
-	const OPENAI_VOICE_OPTIONS = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
-	const ELEVENLABS_VOICE_PRESETS = [
-		{ label: 'Chris', id: 'iP95p4xoKVk53GoZ742B' },
-		{ label: 'Matilda', id: 'XrExE9yKIg1WjnnlVkGX' },
-		{ label: 'George', id: 'JBFqnCBsd6RMkjVDRZzb' },
-		{ label: 'Bella', id: 'hpp4J3VqNfWAUOO0d1Us' }
-	] as const;
+	function podcastVoicesFor(provider: 'openai' | 'elevenlabs'): PodcastVoiceCatalogEntry[] {
+		return podcastVoiceCatalogQuery.data?.voices.filter((voice) => voice.provider === provider) ?? [];
+	}
+
+	function podcastVoicePairsFor(provider: 'openai' | 'elevenlabs'): PodcastVoicePairPreset[] {
+		return podcastVoiceCatalogQuery.data?.pair_presets.filter((pair) => pair.provider === provider) ?? [];
+	}
 
 	$effect(() => {
 		const data = wallabagConfigQuery.data;
@@ -707,24 +712,9 @@
 		updatePodcastPreferencesMutation.mutate(update);
 	}
 
-	function applyPodcastVoicePreset(preset: 'openai-default' | 'openai-alt' | 'eleven-default' | 'eleven-alt') {
-		if (preset === 'openai-default') {
-			podcastHostAVoice = 'alloy';
-			podcastHostBVoice = 'echo';
-			return;
-		}
-		if (preset === 'openai-alt') {
-			podcastHostAVoice = 'nova';
-			podcastHostBVoice = 'fable';
-			return;
-		}
-		if (preset === 'eleven-default') {
-			podcastHostAVoice = 'iP95p4xoKVk53GoZ742B';
-			podcastHostBVoice = 'XrExE9yKIg1WjnnlVkGX';
-			return;
-		}
-		podcastHostAVoice = 'JBFqnCBsd6RMkjVDRZzb';
-		podcastHostBVoice = 'hpp4J3VqNfWAUOO0d1Us';
+	function applyPodcastVoicePair(pair: PodcastVoicePairPreset) {
+		podcastHostAVoice = pair.host_a_voice;
+		podcastHostBVoice = pair.host_b_voice;
 	}
 
 	function swapPodcastVoices() {
@@ -1691,22 +1681,21 @@
 								<p class="text-sm font-medium">OpenAI voice presets</p>
 								<div class="flex flex-wrap gap-2">
 									{#if podcastHostCount === 1}
-										{#each OPENAI_VOICE_OPTIONS as voice}
-											<Button type="button" size="sm" variant="outline" onclick={() => (podcastHostAVoice = voice)}>
-												{voice.charAt(0).toUpperCase() + voice.slice(1)}
+										{#each podcastVoicesFor('openai') as voice}
+											<Button type="button" size="sm" variant="outline" title={voice.best_suited_for} onclick={() => (podcastHostAVoice = voice.id)}>
+												{voice.name}
 											</Button>
 										{/each}
 									{:else}
-										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-default')}>
-											Default: Alloy + Echo
-										</Button>
-										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('openai-alt')}>
-											Alt: Nova + Fable
-										</Button>
+										{#each podcastVoicePairsFor('openai') as pair}
+											<Button type="button" size="sm" variant="outline" title={pair.best_suited_for} onclick={() => applyPodcastVoicePair(pair)}>
+												{pair.label}
+											</Button>
+										{/each}
 									{/if}
 								</div>
 								<p class="text-xs text-muted-foreground">
-									Supported OpenAI voices: {OPENAI_VOICE_OPTIONS.join(', ')}.
+									Supported OpenAI voices are loaded from the shared Ghostwriter voice catalog.
 								</p>
 							</div>
 						{:else}
@@ -1762,23 +1751,22 @@
 								<p class="text-sm font-medium">{podcastHostCount === 1 ? 'ElevenLabs voice presets' : 'ElevenLabs voice pair presets'}</p>
 								<div class="flex flex-wrap gap-2">
 									{#if podcastHostCount === 1}
-										{#each ELEVENLABS_VOICE_PRESETS as preset}
-											<Button type="button" size="sm" variant="outline" onclick={() => (podcastHostAVoice = preset.id)}>
-												{preset.label}
+										{#each podcastVoicesFor('elevenlabs') as voice}
+											<Button type="button" size="sm" variant="outline" title={voice.best_suited_for} onclick={() => (podcastHostAVoice = voice.id)}>
+												{voice.name}
 											</Button>
 										{/each}
 									{:else}
-										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-default')}>
-											Chris + Matilda
-										</Button>
-										<Button type="button" size="sm" variant="outline" onclick={() => applyPodcastVoicePreset('eleven-alt')}>
-											George + Bella
-										</Button>
+										{#each podcastVoicePairsFor('elevenlabs') as pair}
+											<Button type="button" size="sm" variant="outline" title={pair.best_suited_for} onclick={() => applyPodcastVoicePair(pair)}>
+												{pair.label}
+											</Button>
+										{/each}
 									{/if}
 								</div>
 								<div class="mt-2 text-xs text-muted-foreground">
-									{#each ELEVENLABS_VOICE_PRESETS as preset}
-										<div>{preset.label}: {preset.id}</div>
+									{#each podcastVoicesFor('elevenlabs') as voice}
+										<div>{voice.name}: {voice.id} - {voice.vibe}</div>
 									{/each}
 								</div>
 							</div>

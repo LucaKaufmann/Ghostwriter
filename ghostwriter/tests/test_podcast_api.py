@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import UTC, datetime, time, timedelta
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from PIL import Image
@@ -105,6 +106,16 @@ def _create_digest_with_articles(
         article_ids = [article.id for article in articles]
 
     return digest_id, article_ids
+
+
+def _timestamp_inside_current_podcast_schedule_window() -> datetime:
+    try:
+        tz = ZoneInfo(get_settings().timezone)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    now_local = datetime.now(tz)
+    start_local = datetime.combine(now_local.date(), time.min, tzinfo=tz)
+    return (start_local + timedelta(hours=12)).astimezone(UTC).replace(tzinfo=None)
 
 
 def _create_episode(
@@ -325,6 +336,22 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     )
     assert invalid_feed_base_url.status_code == 400
     assert "podcast_feed_base_url" in invalid_feed_base_url.json()["detail"]
+
+
+def test_podcast_voice_catalog_lists_voice_ids(client, auth_headers):
+    response = client.get("/api/podcast/voices", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    voices = payload["voices"]
+    pairs = payload["pair_presets"]
+    assert {voice["provider"] for voice in voices} == {"openai", "elevenlabs"}
+    assert any(voice["id"] == "alloy" and voice["name"] == "Alloy" for voice in voices)
+    assert any(
+        voice["id"] == "iP95p4xoKVk53GoZ742B" and voice["name"] == "Chris"
+        for voice in voices
+    )
+    assert any(pair["label"] == "Alloy + Echo" for pair in pairs)
 
 
 def test_podcast_preferences_are_scoped_to_token_owner(client):
@@ -567,6 +594,80 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
     assert source.status_code == 200
     assert source.json()["content_type"] == "text/html; ghostwriter-one-off"
     assert "selected documents" in source.json()["html"]
+
+
+def test_create_one_off_podcast_accepts_generation_overrides(
+    client,
+    monkeypatch,
+    auth_headers,
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+
+    response = client.post(
+        "/api/podcast/episodes/one-off",
+        json={
+            "title": "Research voices",
+            "brief": "Use the requested one-off voice setup.",
+            "generation": {
+                "tts_provider": "elevenlabs",
+                "elevenlabs_model_id": "eleven_v3",
+                "host_count": 2,
+                "host_a_voice": "voice_a",
+                "host_b_voice": "voice_b",
+                "preferred_length_minutes": 12,
+                "style": "deep-dive",
+            },
+            "sources": [
+                {
+                    "type": "text",
+                    "title": "Research note",
+                    "content": (
+                        "This source is long enough to create a one-off podcast "
+                        "and should preserve per-request generation overrides "
+                        "without changing saved podcast preferences."
+                    ),
+                },
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    episode_id = UUID(response.json()["episode_id"])
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+
+    assert episode is not None
+    assert episode.generation_preferences == {
+        "overrides": {
+            "tts_provider": "elevenlabs",
+            "elevenlabs_model_id": "eleven_v3",
+            "host_count": 2,
+            "host_a_voice": "voice_a",
+            "host_b_voice": "voice_b",
+            "preferred_length_minutes": 12,
+            "style": "deep-dive",
+        }
+    }
+
+
+def test_generation_provider_override_resets_inherited_voice_defaults():
+    prefs = _test_podcast_preferences(
+        tts_provider="openai",
+        host_a_voice="alloy",
+        host_b_voice="echo",
+    )
+    overrides = podcast_service.sanitize_generation_overrides(
+        {"tts_provider": "elevenlabs"}
+    )
+
+    resolved = podcast_service._apply_generation_overrides(prefs, overrides)
+
+    assert resolved.tts_provider == "elevenlabs"
+    assert resolved.host_a_voice == "iP95p4xoKVk53GoZ742B"
+    assert resolved.host_b_voice == "XrExE9yKIg1WjnnlVkGX"
 
 
 def test_one_off_episode_trigger_is_persisted_before_scheduling(
@@ -1486,6 +1587,99 @@ async def test_run_episode_generation_uses_runtime_preference_snapshot(client, m
         assert refreshed.episode_number == 8
 
 
+@pytest.mark.asyncio
+async def test_one_off_generation_overrides_runtime_preferences_without_mutating_saved(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        podcast_service, "_schedule_episode_task", lambda _episode_id: None
+    )
+    user_id, _headers = _create_auth_headers_for_user("one_off_runtime_overrides")
+    digest_id, _ = _create_digest_with_articles(
+        article_count=2,
+        feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+
+    with Session(engine) as session:
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+        prefs.tts_provider = "openai"
+        prefs.host_a_voice = "alloy"
+        prefs.host_b_voice = "echo"
+        prefs.host_count = 2
+        prefs.preferred_length_minutes = 15
+        session.add(prefs)
+        session.commit()
+        episode = podcast_service.queue_episode_generation(
+            session,
+            digest_id=digest_id,
+            user_id=user_id,
+            trigger="one_off",
+            generation_overrides={
+                "tts_provider": "elevenlabs",
+                "host_count": 1,
+                "host_a_voice": "voice_a",
+                "preferred_length_minutes": 9,
+                "style": "formal",
+            },
+        )
+        episode_id = episode.id
+
+    async def _fake_generate_solo_script(_articles, prefs, **_kwargs):
+        assert isinstance(prefs, PodcastGenerationPreferences)
+        assert prefs.tts_provider == "elevenlabs"
+        assert prefs.host_count == 1
+        assert prefs.host_a_voice == "voice_a"
+        assert prefs.preferred_length_minutes == 9
+        assert prefs.style == "formal"
+        return (
+            "This research briefing opens with the main claim and the reason "
+            "it matters for the listener today.\n\n"
+            "The evidence section connects the selected notes to the decision "
+            "being considered and calls out where the support is strongest.\n\n"
+            "The uncertainty section explains what the notes do not prove yet "
+            "and which assumptions should be treated carefully.\n\n"
+            "The closing section turns the research into concrete next actions "
+            "and names the follow-up questions for the next agent run."
+        )
+
+    async def _fake_generate_solo_audio(_episode_id, _script, prefs):
+        assert isinstance(prefs, PodcastGenerationPreferences)
+        assert prefs.tts_provider == "elevenlabs"
+        assert prefs.host_a_voice == "voice_a"
+        return AudioGenerationResult(
+            audio_path="/tmp/podcast-test.mp3",
+            audio_size_bytes=1234,
+            duration_seconds=42,
+            synthesized_chars=250,
+        )
+
+    monkeypatch.setattr(
+        podcast_service,
+        "_generate_solo_script",
+        _fake_generate_solo_script,
+    )
+    monkeypatch.setattr(podcast_service, "generate_solo_audio", _fake_generate_solo_audio)
+
+    await podcast_service._run_episode_generation(episode_id)
+
+    with Session(engine) as session:
+        refreshed = session.get(PodcastEpisode, episode_id)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
+
+    assert refreshed is not None
+    assert refreshed.status == "ready"
+    assert refreshed.generation_preferences["overrides"]["host_count"] == 1
+    assert refreshed.generation_preferences["resolved"]["tts_provider"] == "elevenlabs"
+    assert refreshed.generation_preferences["resolved"]["host_a_voice"] == "voice_a"
+    assert "openai_api_key" not in refreshed.generation_preferences["resolved"]
+    assert "elevenlabs_api_key" not in refreshed.generation_preferences["resolved"]
+    assert prefs.tts_provider == "openai"
+    assert prefs.host_a_voice == "alloy"
+    assert prefs.host_count == 2
+
+
 def test_episode_number_assignment_uses_owner_counter(client):
     user_id, _headers = _create_auth_headers_for_user("episode_number_counter")
     first_digest_id, first_article_ids = _create_digest_with_articles(article_count=1)
@@ -2003,14 +2197,18 @@ def test_feed_artwork_upload_is_scoped_to_token_owner(client, tmp_path):
     assert prefs.podcast_feed_artwork_path != str(owner_artwork)
 
 
-def test_scheduled_podcast_generation(monkeypatch):
+def test_scheduled_podcast_generation(client, monkeypatch):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
-    digest_id, _ = _create_digest_with_articles(article_count=2)
+    digest_id, _ = _create_digest_with_articles(
+        article_count=2,
+        completed_at=_timestamp_inside_current_podcast_schedule_window(),
+    )
 
     with Session(engine) as session:
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        user_id = podcast_service.resolve_user_id(session)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.enabled = True
         prefs.schedule = "daily"
         prefs.schedule_time = "00:00"
@@ -2033,12 +2231,17 @@ def test_scheduled_podcast_generation_excludes_one_off_digests(client, monkeypat
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
+    scheduled_window_time = _timestamp_inside_current_podcast_schedule_window()
     one_off_digest_id, _ = _create_digest_with_articles(
         article_count=2,
+        completed_at=scheduled_window_time,
         feed_url="synthetic://one-off",
         feed_title=ONE_OFF_SOURCE_LABEL,
     )
-    normal_digest_id, _ = _create_digest_with_articles(article_count=2)
+    normal_digest_id, _ = _create_digest_with_articles(
+        article_count=2,
+        completed_at=scheduled_window_time,
+    )
 
     with Session(engine) as session:
         existing_scheduled = session.exec(
@@ -2046,7 +2249,8 @@ def test_scheduled_podcast_generation_excludes_one_off_digests(client, monkeypat
         ).all()
         for episode in existing_scheduled:
             session.delete(episode)
-        prefs = podcast_service.get_or_create_preferences(session, user_id=None)
+        user_id = podcast_service.resolve_user_id(session)
+        prefs = podcast_service.get_or_create_preferences(session, user_id=user_id)
         prefs.enabled = True
         prefs.schedule = "daily"
         prefs.schedule_time = "00:00"
