@@ -332,6 +332,7 @@
 			podcastOpenAITTSModel = data.openai_tts_model;
 			podcastElevenLabsModelId = data.elevenlabs_model_id;
 			podcastElevenLabsOutputFormat = data.elevenlabs_output_format;
+			podcastElevenLabsExpressiveness = data.elevenlabs_expressiveness;
 			podcastHostAVoice = data.host_a_voice;
 			podcastHostBVoice = data.host_b_voice;
 			podcastHostCount = data.host_count;
@@ -475,6 +476,7 @@
 	let podcastOpenAIAPIKey = $state('');
 	let podcastElevenLabsModelId = $state('eleven_turbo_v2_5');
 	let podcastElevenLabsOutputFormat = $state('mp3_44100_128');
+	let podcastElevenLabsExpressiveness = $state<'creative' | 'natural' | 'robust'>('natural');
 	let podcastElevenLabsAPIKey = $state('');
 	let podcastHostCount = $state<1 | 2>(2);
 	let podcastHostAVoice = $state('alloy');
@@ -571,6 +573,7 @@
 			podcastOpenAITTSModel = data.openai_tts_model;
 			podcastElevenLabsModelId = data.elevenlabs_model_id;
 			podcastElevenLabsOutputFormat = data.elevenlabs_output_format;
+			podcastElevenLabsExpressiveness = data.elevenlabs_expressiveness;
 			podcastHostAVoice = data.host_a_voice;
 			podcastHostBVoice = data.host_b_voice;
 			podcastHostCount = data.host_count;
@@ -673,6 +676,7 @@
 			podcastOpenAITTSModel.trim() !== data.openai_tts_model ||
 			podcastElevenLabsModelId.trim() !== data.elevenlabs_model_id ||
 			podcastElevenLabsOutputFormat.trim() !== data.elevenlabs_output_format ||
+			podcastElevenLabsExpressiveness !== data.elevenlabs_expressiveness ||
 			podcastHostAVoice.trim() !== data.host_a_voice ||
 			podcastHostBVoice.trim() !== data.host_b_voice ||
 			podcastHostCount !== data.host_count ||
@@ -698,6 +702,7 @@
 			openai_tts_model: podcastOpenAITTSModel.trim(),
 			elevenlabs_model_id: podcastElevenLabsModelId.trim(),
 			elevenlabs_output_format: podcastElevenLabsOutputFormat.trim(),
+			elevenlabs_expressiveness: podcastElevenLabsExpressiveness,
 			host_a_voice: podcastHostAVoice.trim(),
 			host_b_voice: podcastHostBVoice.trim(),
 			host_count: podcastHostCount,
@@ -1717,6 +1722,29 @@
 										Use Multilingual v2
 									</Button>
 								</div>
+							</div>
+							<div class="space-y-2">
+								<Label for="podcast-elevenlabs-expressiveness">Expressiveness</Label>
+								<Select.Root
+									type="single"
+									name="podcast-elevenlabs-expressiveness"
+									value={podcastElevenLabsExpressiveness}
+									onValueChange={(value) =>
+										(podcastElevenLabsExpressiveness = value as 'creative' | 'natural' | 'robust')}
+								>
+									<Select.Trigger id="podcast-elevenlabs-expressiveness">
+										<span class="capitalize">{podcastElevenLabsExpressiveness}</span>
+									</Select.Trigger>
+									<Select.Content>
+										<Select.Item value="creative">Creative</Select.Item>
+										<Select.Item value="natural">Natural</Select.Item>
+										<Select.Item value="robust">Robust</Select.Item>
+									</Select.Content>
+								</Select.Root>
+								<p class="text-xs text-muted-foreground">
+									Controls voice stability. Creative is most emotional and reacts strongest to
+									audio tags (v3); Robust is most consistent but less expressive.
+								</p>
 							</div>
 							<div class="space-y-2">
 								<Label for="podcast-elevenlabs-format">ElevenLabs output format</Label>

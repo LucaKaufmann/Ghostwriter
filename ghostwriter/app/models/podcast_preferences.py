@@ -10,6 +10,7 @@ from sqlmodel import Field, SQLModel
 PodcastSchedule = Literal["daily", "weekly", "manual"]
 PodcastStyle = Literal["casual", "formal", "deep-dive"]
 PodcastTTSProvider = Literal["openai", "elevenlabs"]
+PodcastExpressiveness = Literal["creative", "natural", "robust"]
 PodcastScheduleDay = Literal[
     "monday",
     "tuesday",
@@ -70,6 +71,10 @@ class PodcastPreferencesBase(SQLModel):
     elevenlabs_model_id: str = Field(default="eleven_turbo_v2_5")
     elevenlabs_api_key: str | None = Field(default=None)
     elevenlabs_output_format: str = Field(default="mp3_44100_128")
+    elevenlabs_expressiveness: str = Field(
+        default="natural",
+        sa_column=Column(String, nullable=False, server_default="natural"),
+    )
     host_a_voice: str = Field(default="alloy")
     host_b_voice: str = Field(default="echo")
     host_count: int = Field(default=2, ge=1, le=2)
@@ -113,6 +118,7 @@ class PodcastPreferencesRead(SQLModel):
     openai_tts_model: str
     elevenlabs_model_id: str
     elevenlabs_output_format: str
+    elevenlabs_expressiveness: PodcastExpressiveness
     host_a_voice: str
     host_b_voice: str
     host_count: int
@@ -145,6 +151,7 @@ class PodcastPreferencesUpdate(SQLModel):
     elevenlabs_model_id: str | None = None
     elevenlabs_api_key: str | None = None
     elevenlabs_output_format: str | None = None
+    elevenlabs_expressiveness: PodcastExpressiveness | None = None
     host_a_voice: str | None = None
     host_b_voice: str | None = None
     host_count: int | None = Field(default=None, ge=1, le=2)

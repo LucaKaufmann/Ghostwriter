@@ -29,8 +29,10 @@ from app.services.one_off_podcast_service import (
     ONE_OFF_SOURCE_LABEL,
 )
 from app.services.podcast_service import (
+    DIALOGUE_SCENE_MAX_CHARS,
     AudioGenerationResult,
     PodcastGenerationPreferences,
+    ScriptSegment,
     podcast_service,
 )
 from app.services.reader_service import FetchedHtmlDocument
@@ -271,6 +273,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert payload["script_timeout_seconds"] == 60
     assert payload["tts_provider"] == "openai"
     assert payload["openai_tts_model"] == "tts-1"
+    assert payload["elevenlabs_expressiveness"] == "natural"
     assert payload["podcast_feed_base_url"] is None
 
     update = client.put(
@@ -288,6 +291,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
             "tts_provider": "elevenlabs",
             "elevenlabs_model_id": "eleven_flash_v2_5",
             "elevenlabs_output_format": "mp3_44100_128",
+            "elevenlabs_expressiveness": "creative",
             "elevenlabs_api_key": "xi-test-key",
             "host_a_voice": "nova",
             "host_b_voice": "echo",
@@ -309,6 +313,7 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
     assert updated["tts_provider"] == "elevenlabs"
     assert updated["elevenlabs_model_id"] == "eleven_flash_v2_5"
     assert updated["elevenlabs_output_format"] == "mp3_44100_128"
+    assert updated["elevenlabs_expressiveness"] == "creative"
     assert updated["boost_keywords"] == ["AI", "Swift"]
     assert updated["podcast_feed_enabled"] is True
     assert updated["podcast_feed_title"] == "My Test Feed"
@@ -328,6 +333,13 @@ def test_podcast_preferences_get_and_update(client, auth_headers):
         headers=auth_headers,
     )
     assert invalid_provider.status_code == 422
+
+    invalid_expressiveness = client.put(
+        "/api/podcast/preferences",
+        json={"elevenlabs_expressiveness": "dramatic"},
+        headers=auth_headers,
+    )
+    assert invalid_expressiveness.status_code == 422
 
     invalid_feed_base_url = client.put(
         "/api/podcast/preferences",
@@ -2272,7 +2284,7 @@ def test_elevenlabs_tts_normalization_for_spoken_delivery():
     normalized = podcast_service._normalize_tts_segment_text(
         "Dr. Lee said revenue hit $42.50 at 14:30 on 2026-02-20 via https://example.com/path",
         provider="elevenlabs",
-        elevenlabs_model_id="eleven_v3",
+        elevenlabs_model_id="eleven_turbo_v2_5",
     )
     assert "Doctor Lee" in normalized
     assert "42 dollars and 50 cents" in normalized
@@ -2281,7 +2293,54 @@ def test_elevenlabs_tts_normalization_for_spoken_delivery():
     assert "example dot com" in normalized
 
 
-def test_eleven_v3_prompt_guidance_includes_sparse_audio_tag_rules():
+def test_elevenlabs_tts_normalization_handles_currency_magnitudes():
+    normalized = podcast_service._normalize_tts_segment_text(
+        "Funding hit $1.5 billion, then $3 million more, and one user paid $1.",
+        provider="elevenlabs",
+        elevenlabs_model_id="eleven_turbo_v2_5",
+    )
+    assert "1.5 billion dollars" in normalized
+    assert "3 million dollars" in normalized
+    assert "1 dollar." in normalized
+    assert "dollars billion" not in normalized
+    assert "dollars million" not in normalized
+
+
+def test_eleven_v3_normalization_defers_numbers_to_api():
+    normalized = podcast_service._normalize_tts_segment_text(
+        "Dr. Lee said revenue hit $42.50 at 14:30 on 2026-02-20.",
+        provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+    )
+    # Abbreviations are still expanded locally...
+    assert "Doctor Lee" in normalized
+    # ...but currency/time/date stay raw for the API's own normalization.
+    assert "$42.50" in normalized
+    assert "14:30" in normalized
+    assert "2026-02-20" in normalized
+
+
+def test_audio_tag_sanitization_keeps_whitelist_only_on_v3():
+    text = "[laughs] That's wild... [smiles warmly] but [pauses] true."
+    v3 = podcast_service._normalize_tts_segment_text(
+        text, provider="elevenlabs", elevenlabs_model_id="eleven_v3"
+    )
+    assert "[laughs]" in v3
+    assert "[pauses]" in v3
+    assert "[smiles warmly]" not in v3
+
+    turbo = podcast_service._normalize_tts_segment_text(
+        text, provider="elevenlabs", elevenlabs_model_id="eleven_turbo_v2_5"
+    )
+    assert "[" not in turbo
+    assert "laughs" not in turbo
+
+    openai = podcast_service._normalize_tts_segment_text(text, provider="openai")
+    assert "[" not in openai
+    assert "That's wild... but true." in openai
+
+
+def test_eleven_v3_prompt_guidance_includes_audio_tag_vocabulary():
     guidance = podcast_service._tts_script_delivery_guidance(
         provider="elevenlabs",
         elevenlabs_model_id="eleven_v3",
@@ -2291,9 +2350,542 @@ def test_eleven_v3_prompt_guidance_includes_sparse_audio_tag_rules():
         elevenlabs_model_id="eleven_v3",
     )
     assert "audio/emotion tags" in guidance
-    assert "one tag every 4-8 lines" in guidance
+    assert "[laughs]" in guidance
+    assert "[thoughtful]" in guidance
+    assert "one tag every 2-4 lines" in guidance
     assert "Do not overuse tags" in guidance
+    assert "[laughs]" in system_prompt
     assert "Keep tags sparse and intentional" in system_prompt
+
+    robust_guidance = podcast_service._tts_script_delivery_guidance(
+        provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        expressiveness="robust",
+    )
+    assert "one tag every 4-8 lines" in robust_guidance
+
+
+def test_solo_chunks_respect_v3_character_limit_and_native_pauses():
+    paragraphs = [
+        f"Paragraph {index}. " + ("Detail sentence with real substance here. " * 20)
+        for index in range(12)
+    ]
+    script = "\n\n[pause]\n\n".join(paragraphs)
+
+    chunks = podcast_service._build_solo_chunks(
+        script, provider="elevenlabs", elevenlabs_model_id="eleven_v3"
+    )
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 2500 for chunk in chunks)
+    joined = "\n\n".join(chunks)
+    assert "[pauses]" in joined
+    # Paragraph breaks survive inside chunks (v3 uses them for pacing).
+    assert any("\n\n" in chunk for chunk in chunks)
+    # Full content is covered.
+    assert "Paragraph 0." in chunks[0]
+    assert "Paragraph 11." in chunks[-1]
+
+
+def test_solo_chunks_use_spoken_pause_for_non_v3():
+    script = (
+        "First paragraph about the news.\n\n[pause]\n\n"
+        "Second paragraph with more details."
+    )
+
+    turbo_chunks = podcast_service._build_solo_chunks(
+        script, provider="elevenlabs", elevenlabs_model_id="eleven_turbo_v2_5"
+    )
+    assert len(turbo_chunks) == 1
+    assert "[" not in turbo_chunks[0]
+    assert "..." in turbo_chunks[0]
+
+    openai_chunks = podcast_service._build_solo_chunks(script, provider="openai")
+    assert len(openai_chunks) == 1
+    assert "[" not in openai_chunks[0]
+
+
+@pytest.mark.asyncio
+async def test_generate_solo_audio_chunks_long_v3_scripts(monkeypatch):
+    synthesized_texts: list[str] = []
+
+    async def _fake_synth(
+        *,
+        text,
+        voice,
+        provider,
+        prefs,
+        previous_text=None,
+        next_text=None,
+        request_id_history=None,
+    ):
+        synthesized_texts.append(text)
+        return b"a" * 2048, None
+
+    async def _fake_concat(paths, output_path):
+        output_path.write_bytes(b"".join(p.read_bytes() for p in paths))
+
+    async def _fake_probe(path):
+        return 120
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    monkeypatch.setattr(podcast_service, "_synthesize_segment_with_retry", _fake_synth)
+    monkeypatch.setattr(podcast_service, "_concat_segments_seamless", _fake_concat)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+
+    script = "\n\n".join(
+        "Topic paragraph. " + ("More spoken detail in this sentence. " * 25)
+        for _ in range(10)
+    )
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        host_a_voice="voice_a",
+    )
+
+    result = await podcast_service.generate_solo_audio(uuid4(), script, prefs)
+
+    # Regression: the whole script used to go out as one giant request,
+    # which eleven_v3 rejects above ~3,000 chars.
+    assert len(synthesized_texts) > 1
+    assert all(len(text) <= 2500 for text in synthesized_texts)
+    assert result.audio_size_bytes > 0
+    assert result.duration_seconds == 120
+
+
+def test_dialogue_scene_grouping_respects_char_cap_and_host_a_seams():
+    line = "x" * 600
+    entries = [
+        ("HOST_A", line),
+        ("HOST_B", line),
+        ("HOST_A", line),
+        ("HOST_B", line),
+        # Scene is now past the 70% seam threshold; this HOST_A opener
+        # should start a new scene even though it would still fit.
+        ("HOST_A", line),
+        ("HOST_B", line),
+    ]
+
+    scenes = podcast_service._group_dialogue_scenes(entries, max_chars=2500)
+
+    # All lines covered exactly once, in order.
+    assert [i for scene in scenes for i in scene] == list(range(len(entries)))
+    for scene in scenes:
+        assert sum(len(entries[i][1]) for i in scene) <= 2500
+    assert scenes[0] == [0, 1, 2, 3]
+    assert scenes[1] == [4, 5]
+
+    # A single oversized line still gets its own scene rather than being lost.
+    oversized = [("HOST_A", "y" * 3000)]
+    assert podcast_service._group_dialogue_scenes(oversized, max_chars=2500) == [[0]]
+
+    # Default budget stays within the documented ~2,000-char dialogue
+    # request limit so long scenes don't 422 into the fallback path.
+    assert DIALOGUE_SCENE_MAX_CHARS <= 2000
+
+
+@pytest.mark.asyncio
+async def test_generate_audio_uses_dialogue_api_for_v3(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+        content = b"dialogue-audio-bytes"
+        text = ""
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            captured.setdefault("endpoints", []).append(endpoint)
+            captured["params"] = params
+            captured["json"] = json
+            return _Response()
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    async def _fake_probe(path):
+        return 95
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+
+    segments = [
+        ScriptSegment(speaker="HOST_A", text="Welcome back to the show everyone."),
+        ScriptSegment(speaker="HOST_B", text="Great to be here, lots to cover today."),
+        ScriptSegment(speaker="HOST_A", text="Let's start with the big story."),
+    ]
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        elevenlabs_expressiveness="creative",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    result = await podcast_service.generate_audio(uuid4(), segments, prefs)
+
+    endpoints = captured["endpoints"]
+    assert all("text-to-dialogue" in endpoint for endpoint in endpoints)
+    payload = captured["json"]
+    assert payload["model_id"] == "eleven_v3"
+    assert payload["settings"] == {"stability": 0.0}
+    assert [item["voice_id"] for item in payload["inputs"]] == [
+        "voice_a",
+        "voice_b",
+        "voice_a",
+    ]
+    assert all(item["text"] for item in payload["inputs"])
+    assert result.audio_size_bytes == len(b"dialogue-audio-bytes")
+    assert result.duration_seconds == 95
+    assert result.synthesized_chars > 0
+
+
+@pytest.mark.asyncio
+async def test_generate_audio_falls_back_when_dialogue_unavailable(monkeypatch):
+    seen_endpoints: list[str] = []
+
+    class _Response:
+        def __init__(self, status_code, content=b"", text=""):
+            self.status_code = status_code
+            self.content = content
+            self.text = text
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            seen_endpoints.append(endpoint)
+            if "text-to-dialogue" in endpoint:
+                return _Response(404, text="not found")
+            return _Response(200, content=b"segment-audio")
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    async def _fake_probe(path):
+        return 80
+
+    async def _fake_stitch(segment_paths, output_path, gap_durations=None):
+        output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+    monkeypatch.setattr(podcast_service, "_stitch_segments", _fake_stitch)
+
+    segments = [
+        ScriptSegment(speaker="HOST_A", text="Welcome back to the show everyone."),
+        ScriptSegment(speaker="HOST_B", text="Great to be here, lots to cover today."),
+    ]
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    result = await podcast_service.generate_audio(uuid4(), segments, prefs)
+
+    assert any("text-to-dialogue" in endpoint for endpoint in seen_endpoints)
+    per_segment_calls = [e for e in seen_endpoints if "text-to-speech" in e]
+    assert len(per_segment_calls) == len(segments)
+    assert result.audio_size_bytes > 0
+    assert result.synthesized_chars > 0
+
+
+@pytest.mark.asyncio
+async def test_generate_audio_falls_back_when_dialogue_scene_fails(monkeypatch):
+    """A transient failure in any scene must not publish a partial episode."""
+    seen_endpoints: list[str] = []
+    scene_calls = {"n": 0}
+
+    class _Response:
+        def __init__(self, status_code, content=b"", text=""):
+            self.status_code = status_code
+            self.content = content
+            self.text = text
+            self.headers = {}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            seen_endpoints.append(endpoint)
+            return _Response(200, content=b"segment-audio")
+
+    async def _fake_scene_retry(*, inputs, prefs):
+        scene_calls["n"] += 1
+        if scene_calls["n"] == 1:
+            return b"scene-audio", None
+        return b"", "server error"
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    async def _fake_probe(path):
+        return 80
+
+    async def _fake_stitch(segment_paths, output_path, gap_durations=None):
+        output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+    monkeypatch.setattr(
+        podcast_service, "_synthesize_dialogue_scene_with_retry", _fake_scene_retry
+    )
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+    monkeypatch.setattr(podcast_service, "_stitch_segments", _fake_stitch)
+
+    # Two long lines force two dialogue scenes under the 2,000-char cap.
+    segments = [
+        ScriptSegment(speaker="HOST_A", text="Opening story detail. " * 60),
+        ScriptSegment(speaker="HOST_B", text="Second story analysis. " * 60),
+    ]
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    result = await podcast_service.generate_audio(uuid4(), segments, prefs)
+
+    # Scene 1 succeeded, scene 2 failed — the whole episode must go per-segment.
+    assert scene_calls["n"] == 2
+    per_segment_calls = [e for e in seen_endpoints if "text-to-speech" in e]
+    assert len(per_segment_calls) == len(segments)
+    assert result.audio_size_bytes > 0
+
+
+def test_inter_segment_gap_seconds_punctuation_rules():
+    assert podcast_service._inter_segment_gap_seconds("Really?") == 0.15
+    assert podcast_service._inter_segment_gap_seconds("No way!") == 0.15
+    assert podcast_service._inter_segment_gap_seconds("And that wraps it up...") == 0.45
+    assert podcast_service._inter_segment_gap_seconds("Plain statement.") == 0.3
+    assert podcast_service._inter_segment_gap_seconds("") == 0.3
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_request_stitching_tracks_request_ids(monkeypatch):
+    captured_payloads: list[dict] = []
+    counter = {"n": 0}
+
+    class _Response:
+        status_code = 200
+        content = b"audio"
+        text = ""
+
+        def __init__(self, request_id):
+            self.headers = {"request-id": request_id}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            captured_payloads.append(json)
+            counter["n"] += 1
+            return _Response(f"req-{counter['n']}")
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_turbo_v2_5",
+        elevenlabs_api_key="xi-test-key",
+    )
+    history: dict[str, list[str]] = {}
+    for text, voice in (
+        ("Line one.", "voice_a"),
+        ("Line two.", "voice_a"),
+        ("Line three.", "voice_b"),
+    ):
+        await podcast_service._synthesize_segment_elevenlabs(
+            text=text, voice=voice, prefs=prefs, request_id_history=history
+        )
+
+    assert "previous_request_ids" not in captured_payloads[0]
+    assert captured_payloads[1]["previous_request_ids"] == ["req-1"]
+    # A different voice starts its own continuity chain.
+    assert "previous_request_ids" not in captured_payloads[2]
+    assert history == {"voice_a": ["req-1", "req-2"], "voice_b": ["req-3"]}
+
+    # v3 has no context window support; request stitching is skipped.
+    v3_prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+    )
+    v3_history: dict[str, list[str]] = {"voice_a": ["req-1"]}
+    await podcast_service._synthesize_segment_elevenlabs(
+        text="Line.", voice="voice_a", prefs=v3_prefs, request_id_history=v3_history
+    )
+    assert "previous_request_ids" not in captured_payloads[3]
+    assert v3_history == {"voice_a": ["req-1"]}
+
+
+@pytest.mark.asyncio
+async def test_stitch_segments_variable_gaps_and_loudnorm(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+    concat_contents: dict[str, str] = {}
+
+    async def _fake_run(cmd, error_prefix):
+        commands.append(cmd)
+        if "lavfi" in cmd:
+            Path(cmd[-1]).write_bytes(b"sil")
+        elif "concat" in cmd:
+            input_index = cmd.index("-i") + 1
+            concat_contents["text"] = Path(cmd[input_index]).read_text(encoding="utf-8")
+            Path(cmd[-1]).write_bytes(b"out")
+
+    monkeypatch.setattr(podcast_service, "_run_subprocess", _fake_run)
+
+    segment_paths = []
+    for index in range(3):
+        path = tmp_path / f"seg{index}.mp3"
+        path.write_bytes(b"seg")
+        segment_paths.append(path)
+    output = tmp_path / "out.mp3"
+
+    await podcast_service._stitch_segments(
+        segment_paths, output, gap_durations=[0.15, 0.45]
+    )
+
+    silence_cmds = [cmd for cmd in commands if "lavfi" in cmd]
+    durations = {cmd[cmd.index("-t") + 1] for cmd in silence_cmds}
+    assert durations == {"0.15", "0.45"}
+    stitch_cmd = commands[-1]
+    assert "loudnorm=I=-16:TP=-1.5:LRA=11" in stitch_cmd
+    assert "128k" in stitch_cmd
+    assert "silence_150ms" in concat_contents["text"]
+    assert "silence_450ms" in concat_contents["text"]
+
+
+def test_script_prompts_include_episode_context_and_informative_beats():
+    from app.services.podcast_service import (
+        SCRIPT_OUTLINE_PROMPT_TEMPLATE,
+        SCRIPT_PROMPT_TEMPLATE,
+        SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE,
+        SCRIPT_SOLO_PROMPT_TEMPLATE,
+    )
+
+    assert (
+        podcast_service._format_episode_context(datetime(2026, 6, 10, 8, 0), "daily")
+        == "Wednesday, June 10, 2026 — daily briefing"
+    )
+    assert (
+        podcast_service._format_episode_context(datetime(2026, 6, 10, 8, 0))
+        == "Wednesday, June 10, 2026"
+    )
+
+    for template in (SCRIPT_PROMPT_TEMPLATE, SCRIPT_SOLO_PROMPT_TEMPLATE):
+        assert "{episode_context}" in template
+        assert "cold open" in template
+        assert "source by name" in template
+    for template in (SCRIPT_OUTLINE_PROMPT_TEMPLATE, SCRIPT_SOLO_OUTLINE_PROMPT_TEMPLATE):
+        assert "cold-open teaser" in template
+        assert "broader trend" in template
+
+
+def test_briefs_carry_source_for_attribution():
+    brief = {
+        "index": 1,
+        "title": "AI rollout",
+        "summary": "A company launched a new AI feature.",
+        "key_points": [],
+        "explainers": [],
+        "why_it_matters": "",
+        "tension": "",
+        "specific_details": [],
+        "listener_angle": "",
+        "follow_up_question": "",
+        "banter_hook": "",
+        "source": "The Verge",
+    }
+    block = podcast_service._render_briefs_block([brief])
+    assert "Source: The Verge" in block
+
+
+def test_generation_cost_estimate_is_provider_aware():
+    openai_cost = podcast_service._estimate_generation_cost_cents(
+        script_chars=5000, tts_chars=10000, tts_provider="openai"
+    )
+    turbo_cost = podcast_service._estimate_generation_cost_cents(
+        script_chars=5000,
+        tts_chars=10000,
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_turbo_v2_5",
+    )
+    v3_cost = podcast_service._estimate_generation_cost_cents(
+        script_chars=5000,
+        tts_chars=10000,
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+    )
+    assert openai_cost == 35
+    assert turbo_cost == 130
+    assert v3_cost == 240
+
+
+def test_elevenlabs_voice_settings_mapping():
+    assert podcast_service._elevenlabs_voice_settings("eleven_v3", "creative") == {
+        "stability": 0.0
+    }
+    assert podcast_service._elevenlabs_voice_settings("eleven_v3", "natural") == {
+        "stability": 0.5
+    }
+    assert podcast_service._elevenlabs_voice_settings("eleven_v3", "robust") == {
+        "stability": 1.0
+    }
+    # Unknown modes fall back to natural.
+    assert podcast_service._elevenlabs_voice_settings("eleven_v3", "dramatic") == {
+        "stability": 0.5
+    }
+
+    v2 = podcast_service._elevenlabs_voice_settings("eleven_turbo_v2_5", "robust")
+    assert v2 == {
+        "stability": 0.75,
+        "similarity_boost": 0.75,
+        "style": 0.0,
+        "use_speaker_boost": True,
+    }
 
 
 def test_article_scoring_prefers_podcast_worthy_source_material():
@@ -2555,6 +3147,7 @@ async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(
         elevenlabs_api_key="xi-test-key",
         host_a_voice="voice_a",
         host_b_voice="voice_b",
+        elevenlabs_expressiveness="creative",
     )
 
     result = await podcast_service._synthesize_segment_elevenlabs(
@@ -2569,6 +3162,7 @@ async def test_elevenlabs_synthesis_includes_context_and_normalization_mode(
     payload = captured["json"]
     assert isinstance(payload, dict)
     assert payload["apply_text_normalization"] == "on"
+    assert payload["voice_settings"] == {"stability": 0.0}
     assert "previous_text" not in payload
     assert "next_text" not in payload
 
@@ -2619,6 +3213,12 @@ async def test_elevenlabs_non_v3_synthesis_includes_context(monkeypatch):
     assert payload["apply_text_normalization"] == "auto"
     assert payload["previous_text"] == "Previous context line"
     assert payload["next_text"] == "Next context line"
+    assert payload["voice_settings"] == {
+        "stability": 0.5,
+        "similarity_boost": 0.75,
+        "style": 0.2,
+        "use_speaker_boost": True,
+    }
 
 
 # ======================== Podcast Schedules CRUD ========================
@@ -2768,6 +3368,8 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
     """Verify that only digests created after last_run_at are included."""
     from datetime import timedelta
 
+    from sqlalchemy import func as sa_func
+
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
@@ -2776,8 +3378,14 @@ def test_generate_episode_for_schedule_only_includes_new_digests(monkeypatch):
     old_time = datetime.utcnow() - timedelta(hours=2)
     _create_digest_with_articles(article_count=1, completed_at=old_time)
 
-    # Create a schedule with last_run_at after the old digest
-    last_run = datetime.utcnow()
+    # Anchor last_run to be after ALL existing digests (including any future-dated
+    # digests created by other tests that use schedule-window timestamps).
+    with Session(engine) as session:
+        max_ts = session.exec(
+            select(sa_func.max(Digest.created_at))
+        ).first()
+    last_run = (max_ts + timedelta(seconds=1)) if max_ts else datetime.utcnow()
+
     with Session(engine) as session:
         sched = PodcastSchedule(
             name="Filter Test",

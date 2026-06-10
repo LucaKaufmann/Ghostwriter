@@ -580,6 +580,7 @@ export interface PodcastPreferencesResponse {
 	openai_tts_model: string;
 	elevenlabs_model_id: string;
 	elevenlabs_output_format: string;
+	elevenlabs_expressiveness: 'creative' | 'natural' | 'robust';
 	host_a_voice: string;
 	host_b_voice: string;
 	host_count: 1 | 2;
@@ -606,6 +607,7 @@ export interface PodcastPreferencesUpdate {
 	elevenlabs_model_id?: string;
 	elevenlabs_api_key?: string;
 	elevenlabs_output_format?: string;
+	elevenlabs_expressiveness?: 'creative' | 'natural' | 'robust';
 	host_a_voice?: string;
 	host_b_voice?: string;
 	host_count?: 1 | 2;
