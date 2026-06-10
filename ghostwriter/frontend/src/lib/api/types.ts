@@ -628,6 +628,7 @@ export interface PodcastEpisodeStatusResponse {
 	id: string;
 	digest_ids: string[];
 	trigger: string;
+	title: string | null;
 	status: string;
 	audio_size_bytes: number | null;
 	duration_seconds: number | null;

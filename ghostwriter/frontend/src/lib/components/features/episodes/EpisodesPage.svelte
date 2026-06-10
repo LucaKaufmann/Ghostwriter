@@ -370,6 +370,11 @@
 											<Calendar class="h-4 w-4 text-muted-foreground" />
 											{formatDate(episode.created_at)}
 										</div>
+										{#if episode.title}
+											<p class="mt-1 max-w-56 truncate text-sm text-muted-foreground" title={episode.title}>
+												{episode.title}
+											</p>
+										{/if}
 									</Table.Cell>
 									<Table.Cell>
 										<Badge variant={getEpisodeStatusBadgeVariant(episode.status)}>
@@ -466,7 +471,11 @@
 						<div class="space-y-3 p-4">
 							<div class="flex items-start justify-between gap-2">
 								<div class="min-w-0 flex-1">
-									<p class="font-medium capitalize">{episode.trigger} episode</p>
+									{#if episode.title}
+										<p class="truncate font-medium" title={episode.title}>{episode.title}</p>
+									{:else}
+										<p class="font-medium capitalize">{episode.trigger} episode</p>
+									{/if}
 									<p class="text-sm text-muted-foreground">{formatDate(episode.created_at)}</p>
 								</div>
 								<Badge variant={getEpisodeStatusBadgeVariant(episode.status)}>
