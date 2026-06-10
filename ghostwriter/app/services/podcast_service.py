@@ -138,6 +138,12 @@ SCRIPT_MAX_ARTICLE_CHARS_PER_BRIEF = 12000
 SOLO_CHUNK_MAX_CHARS_ELEVEN_V3 = 2500
 SOLO_CHUNK_MAX_CHARS_ELEVENLABS = 9000
 SOLO_CHUNK_MAX_CHARS_OPENAI = 3900
+# Eleven v3 text-to-dialogue: scene size budget per request, and the HTTP
+# statuses that indicate the endpoint is gated for this account (alpha/plan)
+# rather than a transient failure.
+DIALOGUE_SCENE_MAX_CHARS = 2500
+DIALOGUE_SCENE_HOST_A_BREAK_FRACTION = 0.7
+DIALOGUE_UNAVAILABLE_STATUS_CODES = {401, 403, 404, 422}
 MIN_EPISODE_DURATION_SECONDS = 30
 SOURCE_DIVERSITY_TARGET_FRACTION = 0.35
 ONE_OFF_MAX_EPISODE_ARTICLES = 20
@@ -342,6 +348,10 @@ Requirements:
 """
 
 _podcast_tasks: set[asyncio.Task[None] | Future[None]] = set()
+
+
+class ElevenLabsDialogueUnavailableError(RuntimeError):
+    """Raised when the text-to-dialogue endpoint is gated for this account."""
 
 
 @dataclass
@@ -3035,23 +3045,39 @@ class PodcastDigestService:
             },
         )
 
+        provider = (prefs.tts_provider or "openai").strip().lower()
+        if provider not in SUPPORTED_TTS_PROVIDERS:
+            raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
+        normalized_segment_texts = [
+            self._normalize_tts_segment_text(
+                segment.text,
+                provider=provider,
+                elevenlabs_model_id=prefs.elevenlabs_model_id,
+            )
+            for segment in segments
+        ]
+        total_chars = sum(len(t) for t in normalized_segment_texts)
+        if provider == "elevenlabs":
+            await self._check_elevenlabs_quota(prefs, total_chars)
+
+        if (
+            provider == "elevenlabs"
+            and (prefs.elevenlabs_model_id or "").strip().lower() == "eleven_v3"
+        ):
+            dialogue_result = await self._generate_audio_via_dialogue(
+                episode_id=episode_id,
+                segments=segments,
+                normalized_texts=normalized_segment_texts,
+                prefs=prefs,
+                debug_path=debug_path,
+                final_path=final_path,
+            )
+            if dialogue_result is not None:
+                return dialogue_result
+
         synthesized_chars = 0
         with tempfile.TemporaryDirectory(prefix="podcast_tts_") as tmpdir:
             segment_paths: list[Path] = []
-            provider = (prefs.tts_provider or "openai").strip().lower()
-            if provider not in SUPPORTED_TTS_PROVIDERS:
-                raise RuntimeError(f"Unsupported podcast TTS provider: {provider}")
-            normalized_segment_texts = [
-                self._normalize_tts_segment_text(
-                    segment.text,
-                    provider=provider,
-                    elevenlabs_model_id=prefs.elevenlabs_model_id,
-                )
-                for segment in segments
-            ]
-            total_chars = sum(len(t) for t in normalized_segment_texts)
-            if provider == "elevenlabs":
-                await self._check_elevenlabs_quota(prefs, total_chars)
             for index, segment in enumerate(segments, start=1):
                 normalized_text = normalized_segment_texts[index - 1]
                 preferred_voice = (
@@ -3175,6 +3201,265 @@ class PodcastDigestService:
             duration_seconds=duration,
             synthesized_chars=synthesized_chars,
         )
+
+    @staticmethod
+    def _group_dialogue_scenes(
+        entries: list[tuple[str, str]],
+        max_chars: int = DIALOGUE_SCENE_MAX_CHARS,
+    ) -> list[list[int]]:
+        """Group consecutive (speaker, text) lines into scene-sized index groups.
+
+        Lines are never split. A new scene starts when the budget would be
+        exceeded, or early at a HOST_A line once the scene is mostly full —
+        HOST_A opens topics, so those are natural seams.
+        """
+        scenes: list[list[int]] = []
+        current: list[int] = []
+        current_chars = 0
+        break_threshold = int(max_chars * DIALOGUE_SCENE_HOST_A_BREAK_FRACTION)
+        for index, (speaker, text) in enumerate(entries):
+            line_chars = len(text)
+            if current and (
+                current_chars + line_chars > max_chars
+                or (speaker == "HOST_A" and current_chars >= break_threshold)
+            ):
+                scenes.append(current)
+                current = []
+                current_chars = 0
+            current.append(index)
+            current_chars += line_chars
+        if current:
+            scenes.append(current)
+        return scenes
+
+    async def _generate_audio_via_dialogue(
+        self,
+        *,
+        episode_id: UUID,
+        segments: list[ScriptSegment],
+        normalized_texts: list[str],
+        prefs: PodcastGenerationPreferences,
+        debug_path: Path,
+        final_path: Path,
+    ) -> AudioGenerationResult | None:
+        """Synthesize a dual-host episode via the v3 text-to-dialogue API.
+
+        Returns None when the endpoint is unavailable for this account (or no
+        scene could be synthesized), so the caller falls back to per-segment
+        synthesis.
+        """
+        voice_a = (prefs.host_a_voice or "").strip() or ELEVENLABS_DEFAULT_HOST_A_VOICE
+        voice_b = (prefs.host_b_voice or "").strip() or ELEVENLABS_DEFAULT_HOST_B_VOICE
+        entries = [
+            (segment.speaker, normalized_texts[index])
+            for index, segment in enumerate(segments)
+        ]
+        scene_groups = self._group_dialogue_scenes(entries)
+        self._append_tts_debug_entry(
+            debug_path,
+            {
+                "event": "dialogue_generation_started",
+                "episode_id": str(episode_id),
+                "scene_count": len(scene_groups),
+                "segment_count": len(segments),
+                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            },
+        )
+
+        synthesized_chars = 0
+        try:
+            with tempfile.TemporaryDirectory(prefix="podcast_dialogue_") as tmpdir:
+                scene_paths: list[Path] = []
+                for scene_number, indexes in enumerate(scene_groups, start=1):
+                    inputs = [
+                        {
+                            "text": entries[index][1],
+                            "voice_id": (
+                                voice_a if entries[index][0] == "HOST_A" else voice_b
+                            ),
+                        }
+                        for index in indexes
+                    ]
+                    scene_chars = sum(len(item["text"]) for item in inputs)
+                    self._append_tts_debug_entry(
+                        debug_path,
+                        {
+                            "event": "dialogue_scene_request",
+                            "scene_index": scene_number,
+                            "segment_indexes": [index + 1 for index in indexes],
+                            "line_count": len(inputs),
+                            "text_chars": scene_chars,
+                            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                        },
+                    )
+                    audio_bytes, scene_error = (
+                        await self._synthesize_dialogue_scene_with_retry(
+                            inputs=inputs,
+                            prefs=prefs,
+                        )
+                    )
+                    if not audio_bytes:
+                        logger.warning(
+                            "Skipping dialogue scene %d after retries: %s",
+                            scene_number,
+                            scene_error,
+                        )
+                        self._append_tts_debug_entry(
+                            debug_path,
+                            {
+                                "event": "dialogue_scene_failed",
+                                "scene_index": scene_number,
+                                "error": scene_error,
+                                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                            },
+                        )
+                        if scene_error and "quota_exceeded" in scene_error:
+                            raise RuntimeError(
+                                "ElevenLabs quota exhausted during dialogue "
+                                f"generation: {scene_error}"
+                            )
+                        continue
+                    path = Path(tmpdir) / f"scene_{scene_number:04d}.mp3"
+                    path.write_bytes(audio_bytes)
+                    scene_paths.append(path)
+                    synthesized_chars += scene_chars
+
+                if not scene_paths:
+                    logger.warning(
+                        "All dialogue scenes failed; falling back to per-segment TTS"
+                    )
+                    return None
+
+                if len(scene_paths) == 1:
+                    shutil.copyfile(scene_paths[0], final_path)
+                else:
+                    await self._concat_segments_seamless(scene_paths, final_path)
+        except ElevenLabsDialogueUnavailableError as exc:
+            logger.warning(
+                "Text-to-dialogue unavailable (%s); falling back to per-segment TTS",
+                exc,
+            )
+            self._append_tts_debug_entry(
+                debug_path,
+                {
+                    "event": "dialogue_unavailable_fallback",
+                    "error": str(exc)[:300],
+                    "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                },
+            )
+            return None
+
+        audio_size = final_path.stat().st_size
+        duration = await self._probe_audio_duration_seconds(final_path)
+        self._append_tts_debug_entry(
+            debug_path,
+            {
+                "event": "dialogue_generation_completed",
+                "episode_id": str(episode_id),
+                "synthesized_scene_count": len(scene_paths),
+                "audio_size_bytes": audio_size,
+                "duration_seconds": duration,
+                "synthesized_chars": synthesized_chars,
+                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            },
+        )
+        logger.info(
+            "Podcast dialogue audio generation complete",
+            extra={
+                "episode_id": str(episode_id),
+                "scene_count": len(scene_groups),
+                "synthesized_scene_count": len(scene_paths),
+                "audio_size_bytes": audio_size,
+                "duration_seconds": duration,
+                "synthesized_chars": synthesized_chars,
+            },
+        )
+        return AudioGenerationResult(
+            audio_path=str(final_path),
+            audio_size_bytes=audio_size,
+            duration_seconds=duration,
+            synthesized_chars=synthesized_chars,
+        )
+
+    async def _synthesize_dialogue_scene_with_retry(
+        self,
+        *,
+        inputs: list[dict[str, str]],
+        prefs: PodcastGenerationPreferences,
+    ) -> tuple[bytes, str | None]:
+        """Generate one dialogue scene with bounded retries.
+
+        ElevenLabsDialogueUnavailableError propagates immediately — retrying a
+        gated endpoint cannot succeed and the caller needs to fall back.
+        """
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                audio = await self._synthesize_dialogue_scene_elevenlabs(
+                    inputs=inputs,
+                    prefs=prefs,
+                )
+                return audio, None
+            except ElevenLabsDialogueUnavailableError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "Dialogue scene synthesis failed (%s/3): %s", attempt + 1, exc
+                )
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        error_msg = str(last_error)[:300] if last_error else "unknown error"
+        logger.error("Dialogue scene synthesis failed after retries: %s", last_error)
+        return b"", error_msg
+
+    async def _synthesize_dialogue_scene_elevenlabs(
+        self,
+        *,
+        inputs: list[dict[str, str]],
+        prefs: PodcastGenerationPreferences,
+    ) -> bytes:
+        """Call the ElevenLabs text-to-dialogue API for one scene."""
+        api_key = (prefs.elevenlabs_api_key or "").strip()
+        if not api_key:
+            raise RuntimeError("ElevenLabs API key is required for ElevenLabs podcast TTS")
+
+        model_id = (prefs.elevenlabs_model_id or "eleven_v3").strip()
+        output_format = (
+            (prefs.elevenlabs_output_format or "mp3_44100_128").strip()
+            or "mp3_44100_128"
+        )
+        payload: dict[str, Any] = {
+            "inputs": inputs,
+            "model_id": model_id,
+            "settings": self._elevenlabs_voice_settings(
+                model_id, prefs.elevenlabs_expressiveness
+            ),
+        }
+        headers = {
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
+        timeout = httpx.Timeout(300.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                "https://api.elevenlabs.io/v1/text-to-dialogue",
+                params={"output_format": output_format},
+                json=payload,
+                headers=headers,
+            )
+            if response.status_code in DIALOGUE_UNAVAILABLE_STATUS_CODES:
+                raise ElevenLabsDialogueUnavailableError(
+                    f"ElevenLabs text-to-dialogue error {response.status_code}: "
+                    f"{response.text[:200]}"
+                )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"ElevenLabs text-to-dialogue error {response.status_code}: "
+                    f"{response.text[:200]}"
+                )
+            return response.content
 
     async def _check_elevenlabs_quota(
         self,

@@ -31,6 +31,7 @@ from app.services.one_off_podcast_service import (
 from app.services.podcast_service import (
     AudioGenerationResult,
     PodcastGenerationPreferences,
+    ScriptSegment,
     podcast_service,
 )
 from app.services.reader_service import FetchedHtmlDocument
@@ -2446,6 +2447,161 @@ async def test_generate_solo_audio_chunks_long_v3_scripts(monkeypatch):
     assert all(len(text) <= 2500 for text in synthesized_texts)
     assert result.audio_size_bytes > 0
     assert result.duration_seconds == 120
+
+
+def test_dialogue_scene_grouping_respects_char_cap_and_host_a_seams():
+    line = "x" * 600
+    entries = [
+        ("HOST_A", line),
+        ("HOST_B", line),
+        ("HOST_A", line),
+        ("HOST_B", line),
+        # Scene is now past the 70% seam threshold; this HOST_A opener
+        # should start a new scene even though it would still fit.
+        ("HOST_A", line),
+        ("HOST_B", line),
+    ]
+
+    scenes = podcast_service._group_dialogue_scenes(entries, max_chars=2500)
+
+    # All lines covered exactly once, in order.
+    assert [i for scene in scenes for i in scene] == list(range(len(entries)))
+    for scene in scenes:
+        assert sum(len(entries[i][1]) for i in scene) <= 2500
+    assert scenes[0] == [0, 1, 2, 3]
+    assert scenes[1] == [4, 5]
+
+    # A single oversized line still gets its own scene rather than being lost.
+    oversized = [("HOST_A", "y" * 3000)]
+    assert podcast_service._group_dialogue_scenes(oversized, max_chars=2500) == [[0]]
+
+
+@pytest.mark.asyncio
+async def test_generate_audio_uses_dialogue_api_for_v3(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+        content = b"dialogue-audio-bytes"
+        text = ""
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            captured.setdefault("endpoints", []).append(endpoint)
+            captured["params"] = params
+            captured["json"] = json
+            return _Response()
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    async def _fake_probe(path):
+        return 95
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+
+    segments = [
+        ScriptSegment(speaker="HOST_A", text="Welcome back to the show everyone."),
+        ScriptSegment(speaker="HOST_B", text="Great to be here, lots to cover today."),
+        ScriptSegment(speaker="HOST_A", text="Let's start with the big story."),
+    ]
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        elevenlabs_expressiveness="creative",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    result = await podcast_service.generate_audio(uuid4(), segments, prefs)
+
+    endpoints = captured["endpoints"]
+    assert all("text-to-dialogue" in endpoint for endpoint in endpoints)
+    payload = captured["json"]
+    assert payload["model_id"] == "eleven_v3"
+    assert payload["settings"] == {"stability": 0.0}
+    assert [item["voice_id"] for item in payload["inputs"]] == [
+        "voice_a",
+        "voice_b",
+        "voice_a",
+    ]
+    assert all(item["text"] for item in payload["inputs"])
+    assert result.audio_size_bytes == len(b"dialogue-audio-bytes")
+    assert result.duration_seconds == 95
+    assert result.synthesized_chars > 0
+
+
+@pytest.mark.asyncio
+async def test_generate_audio_falls_back_when_dialogue_unavailable(monkeypatch):
+    seen_endpoints: list[str] = []
+
+    class _Response:
+        def __init__(self, status_code, content=b"", text=""):
+            self.status_code = status_code
+            self.content = content
+            self.text = text
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            seen_endpoints.append(endpoint)
+            if "text-to-dialogue" in endpoint:
+                return _Response(404, text="not found")
+            return _Response(200, content=b"segment-audio")
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    async def _fake_probe(path):
+        return 80
+
+    async def _fake_stitch(segment_paths, output_path):
+        output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+    monkeypatch.setattr(podcast_service, "_stitch_segments", _fake_stitch)
+
+    segments = [
+        ScriptSegment(speaker="HOST_A", text="Welcome back to the show everyone."),
+        ScriptSegment(speaker="HOST_B", text="Great to be here, lots to cover today."),
+    ]
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    result = await podcast_service.generate_audio(uuid4(), segments, prefs)
+
+    assert any("text-to-dialogue" in endpoint for endpoint in seen_endpoints)
+    per_segment_calls = [e for e in seen_endpoints if "text-to-speech" in e]
+    assert len(per_segment_calls) == len(segments)
+    assert result.audio_size_bytes > 0
+    assert result.synthesized_chars > 0
 
 
 def test_elevenlabs_voice_settings_mapping():
