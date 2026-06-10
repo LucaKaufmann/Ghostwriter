@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ MAX_TITLE_CHARS = 240
 MAX_BRIEF_CHARS = 4_000
 MAX_TEXT_CHARS = 120_000
 DEFAULT_SPLIT_TARGET_CHARS = 90_000
+DEFAULT_WORDS_PER_MINUTE = 150
 
 EXIT_CONFIG = 2
 EXIT_API = 3
@@ -37,6 +39,46 @@ HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 WIKILINK_RE = re.compile(r"(!?)\[\[([^\]#|]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]")
 BLOCK_ID_RE = re.compile(r"\s+\^[A-Za-z0-9_-]+(?=\s|$)")
 TAG_RE = re.compile(r"(?<!\w)#([A-Za-z][A-Za-z0-9_/-]*)")
+FRONTMATTER_VALUE_RE = re.compile(r"^([A-Za-z0-9_-]+):\s*(.*?)\s*$")
+
+VOICE_PRESETS: dict[str, dict[str, Any]] = {
+    "openai-balanced": {
+        "tts_provider": "openai",
+        "host_count": 2,
+        "host_a_voice": "alloy",
+        "host_b_voice": "echo",
+    },
+    "openai-energetic": {
+        "tts_provider": "openai",
+        "host_count": 2,
+        "host_a_voice": "nova",
+        "host_b_voice": "fable",
+    },
+    "openai-solo-analysis": {
+        "tts_provider": "openai",
+        "host_count": 1,
+        "host_a_voice": "onyx",
+    },
+    "elevenlabs-research": {
+        "tts_provider": "elevenlabs",
+        "host_count": 2,
+        "host_a_voice": "iP95p4xoKVk53GoZ742B",
+        "host_b_voice": "XrExE9yKIg1WjnnlVkGX",
+    },
+    "elevenlabs-formal": {
+        "tts_provider": "elevenlabs",
+        "host_count": 2,
+        "host_a_voice": "JBFqnCBsd6RMkjVDRZzb",
+        "host_b_voice": "hpp4J3VqNfWAUOO0d1Us",
+    },
+}
+
+RESEARCH_BRIEFING_GUIDANCE = (
+    "Turn these AI-agent research notes into an evidence-aware briefing. "
+    "Prioritize claims, supporting evidence, uncertainty, contradictions, "
+    "decisions, risks, and concrete next actions. Distinguish sourced facts "
+    "from agent interpretation."
+)
 
 
 @dataclass
@@ -49,6 +91,7 @@ class SourceCandidate:
     origin: str
     order: int
     links: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 def fail(message: str, code: int) -> None:
@@ -283,6 +326,12 @@ def build_context_lead_in(title: str | None, brief: str | None) -> str:
     return "\n".join(lines)
 
 
+def research_briefing_text(brief: str | None) -> str:
+    if brief:
+        return f"{RESEARCH_BRIEFING_GUIDANCE} Caller focus: {brief}"
+    return RESEARCH_BRIEFING_GUIDANCE
+
+
 def combined_text_length(content: str, lead_in: str) -> int:
     return len(content) + len(lead_in) + (2 if lead_in else 0)
 
@@ -305,6 +354,44 @@ def clean_markdown(content: str) -> str:
     content = re.sub(r"^[ \t]*>{1,}[ \t]?", "", content, flags=re.MULTILINE)
     content = re.sub(r"\n{3,}", "\n\n", content)
     return " ".join(content.split())
+
+
+def parse_frontmatter(content: str) -> dict[str, str]:
+    match = FRONTMATTER_RE.match(content.replace("\r\n", "\n").replace("\r", "\n"))
+    if not match:
+        return {}
+    block = match.group(0)
+    lines = block.splitlines()[1:-1]
+    values: dict[str, str] = {}
+    for line in lines:
+        item = FRONTMATTER_VALUE_RE.match(line)
+        if not item:
+            continue
+        key = item.group(1).strip().lower()
+        value = item.group(2).strip().strip("\"'")
+        if key and value:
+            values[key] = value
+    return values
+
+
+def extract_tags(content: str) -> list[str]:
+    found = {match.group(1).lower() for match in TAG_RE.finditer(content)}
+    frontmatter = parse_frontmatter(content)
+    raw_tags = frontmatter.get("tags")
+    if raw_tags:
+        for item in re.split(r"[\s,\[\]]+", raw_tags):
+            cleaned = item.strip().strip("\"'").removeprefix("#").lower()
+            if cleaned:
+                found.add(cleaned)
+    return sorted(found)
+
+
+def note_title_from_markdown(path: Path, content: str) -> str:
+    frontmatter = parse_frontmatter(content)
+    title = frontmatter.get("title")
+    if title:
+        return normalize_title(title)
+    return normalize_title(path.stem.replace("-", " ").replace("_", " "))
 
 
 def extract_wikilinks(content: str) -> list[str]:
@@ -352,21 +439,49 @@ def read_obsidian_note(path: Path, *, order: int) -> SourceCandidate:
         fail(f"Could not read Obsidian note as UTF-8: {path}", EXIT_CONFIG)
 
     return SourceCandidate(
-        title=normalize_title(path.stem.replace("-", " ").replace("_", " ")),
+        title=note_title_from_markdown(path, raw),
         content=clean_markdown(raw),
         kind="obsidian_note",
         origin=str(path),
         order=order,
         links=extract_wikilinks(raw),
+        tags=extract_tags(raw),
     )
 
 
-def collect_markdown_files(folder: Path) -> list[Path]:
+def matches_any_glob(path: Path, root: Path, patterns: list[str]) -> bool:
+    if not patterns:
+        return False
+    try:
+        rel = path.relative_to(root)
+        candidates = [str(rel), path.name]
+    except ValueError:
+        candidates = [str(path), path.name]
+    return any(fnmatch(candidate, pattern) for pattern in patterns for candidate in candidates)
+
+
+def collect_markdown_files(
+    folder: Path,
+    *,
+    include_globs: list[str] | None = None,
+    exclude_globs: list[str] | None = None,
+) -> list[Path]:
     if not folder.exists():
         fail(f"Obsidian folder not found: {folder}", EXIT_CONFIG)
     if not folder.is_dir():
         fail(f"Obsidian folder source is not a directory: {folder}", EXIT_CONFIG)
-    return sorted(path for path in folder.rglob("*.md") if path.is_file())
+    includes = include_globs or ["*.md"]
+    excludes = exclude_globs or []
+    files: list[Path] = []
+    for path in folder.rglob("*.md"):
+        if not path.is_file():
+            continue
+        if not matches_any_glob(path, folder, includes):
+            continue
+        if matches_any_glob(path, folder, excludes):
+            continue
+        files.append(path)
+    return sorted(files)
 
 
 def note_lookup_keys(path: Path, root: Path) -> list[str]:
@@ -400,6 +515,38 @@ def build_note_index(roots: list[Path]) -> dict[str, Path]:
 def resolve_link(target: str, index: dict[str, Path]) -> Path | None:
     normalized = target.strip().removesuffix(".md").lower()
     return index.get(normalized) or index.get(f"{normalized}.md")
+
+
+def candidate_has_required_tags(candidate: SourceCandidate, required_tags: list[str]) -> bool:
+    if not required_tags:
+        return True
+    tags = {tag.lower().removeprefix("#") for tag in candidate.tags}
+    return all(tag.lower().removeprefix("#") in tags for tag in required_tags)
+
+
+def backlink_paths(
+    *,
+    selected_paths: set[Path],
+    index: dict[str, Path],
+) -> list[Path]:
+    selected_resolved = {path.resolve() for path in selected_paths}
+    results: list[Path] = []
+    seen: set[Path] = set()
+    for path in sorted(set(index.values())):
+        resolved = path.resolve()
+        if resolved in selected_resolved or resolved in seen:
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for link in extract_wikilinks(raw):
+            linked_path = resolve_link(link, index)
+            if linked_path is not None and linked_path.resolve() in selected_resolved:
+                seen.add(resolved)
+                results.append(path)
+                break
+    return results
 
 
 def split_text(content: str, *, target_chars: int) -> list[str]:
@@ -486,6 +633,7 @@ def candidate_to_sources(
                 "words": len(chunk.split()),
                 "sha256": digest,
                 "order": candidate.order,
+                "tags": candidate.tags,
             }
         )
     return sources, metadata, warnings
@@ -502,6 +650,7 @@ def metadata_for_source(source: dict[str, Any], *, order: int) -> dict[str, Any]
             "words": len(content.split()),
             "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
             "order": order,
+            "tags": [],
         }
     return {
         "title": source.get("title") or source.get("url") or f"URL source {order + 1}",
@@ -511,6 +660,7 @@ def metadata_for_source(source: dict[str, Any], *, order: int) -> dict[str, Any]
         "words": None,
         "sha256": None,
         "order": order,
+        "tags": [],
     }
 
 
@@ -547,6 +697,44 @@ def load_source_json(path: Path) -> dict[str, Any]:
     fail("Source JSON must be either a payload object or a sources array", EXIT_CONFIG)
 
 
+def set_if_present(output: dict[str, Any], key: str, value: Any) -> None:
+    if value is None:
+        return
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return
+    output[key] = value
+
+
+def build_generation_payload(
+    args: argparse.Namespace,
+    existing: Any,
+) -> dict[str, Any]:
+    generation = dict(existing or {}) if isinstance(existing, dict) else {}
+
+    if args.voice_preset:
+        preset = VOICE_PRESETS.get(args.voice_preset)
+        if preset is None:
+            available = ", ".join(sorted(VOICE_PRESETS))
+            fail(f"Unknown --voice-preset. Available presets: {available}", EXIT_CONFIG)
+        generation.update(preset)
+
+    set_if_present(generation, "tts_provider", args.tts_provider)
+    set_if_present(generation, "openai_tts_model", args.openai_tts_model)
+    set_if_present(generation, "elevenlabs_model_id", args.elevenlabs_model_id)
+    set_if_present(generation, "elevenlabs_output_format", args.elevenlabs_output_format)
+    set_if_present(generation, "host_a_voice", args.host_a_voice)
+    set_if_present(generation, "host_b_voice", args.host_b_voice)
+    set_if_present(generation, "host_count", args.host_count)
+    set_if_present(generation, "style", args.style)
+    set_if_present(generation, "preferred_length_minutes", args.preferred_length_minutes)
+    set_if_present(generation, "script_model", args.script_model)
+    set_if_present(generation, "script_timeout_seconds", args.script_timeout_seconds)
+
+    return {key: value for key, value in generation.items() if value is not None}
+
+
 def build_local_candidates(args: argparse.Namespace) -> tuple[list[SourceCandidate], list[str]]:
     warnings: list[str] = []
     candidates: list[SourceCandidate] = []
@@ -561,7 +749,13 @@ def build_local_candidates(args: argparse.Namespace) -> tuple[list[SourceCandida
     selected_note_paths: list[Path] = []
     selected_note_paths.extend(explicit_note_paths)
     for folder in folder_paths:
-        selected_note_paths.extend(collect_markdown_files(folder))
+        selected_note_paths.extend(
+            collect_markdown_files(
+                folder,
+                include_globs=args.obsidian_include,
+                exclude_globs=args.obsidian_exclude,
+            )
+        )
 
     seen_note_paths: set[Path] = set()
     note_candidates: list[SourceCandidate] = []
@@ -571,25 +765,55 @@ def build_local_candidates(args: argparse.Namespace) -> tuple[list[SourceCandida
             warnings.append(f"Skipped duplicate note path: {path}")
             continue
         seen_note_paths.add(resolved)
-        note_candidates.append(read_obsidian_note(path, order=order))
+        candidate = read_obsidian_note(path, order=order)
+        if not candidate_has_required_tags(candidate, args.obsidian_tag):
+            warnings.append(f"Skipped note without required tags: {path}")
+            continue
+        note_candidates.append(candidate)
         order += 1
 
-    if args.include_linked_notes and note_candidates:
+    if (args.include_linked_notes or args.include_backlinks) and note_candidates:
         roots = [path.parent for path in explicit_note_paths]
         roots.extend(folder_paths)
         roots.extend(Path(raw).expanduser() for raw in args.obsidian_root)
         index = build_note_index([root for root in roots if root.exists()])
-        for candidate in list(note_candidates):
-            for link in candidate.links:
-                linked_path = resolve_link(link, index)
-                if linked_path is None:
-                    warnings.append(f"Could not resolve wikilink '{link}' from {candidate.origin}")
-                    continue
+        if args.include_linked_notes:
+            depth = max(1, args.linked_note_depth)
+            frontier = list(note_candidates)
+            for _level in range(depth):
+                next_frontier: list[SourceCandidate] = []
+                for candidate in frontier:
+                    for link in candidate.links:
+                        linked_path = resolve_link(link, index)
+                        if linked_path is None:
+                            warnings.append(f"Could not resolve wikilink '{link}' from {candidate.origin}")
+                            continue
+                        resolved = linked_path.resolve()
+                        if resolved in seen_note_paths:
+                            continue
+                        linked_candidate = read_obsidian_note(linked_path, order=order)
+                        if not candidate_has_required_tags(linked_candidate, args.obsidian_tag):
+                            warnings.append(f"Skipped linked note without required tags: {linked_path}")
+                            continue
+                        seen_note_paths.add(resolved)
+                        note_candidates.append(linked_candidate)
+                        next_frontier.append(linked_candidate)
+                        order += 1
+                frontier = next_frontier
+                if not frontier:
+                    break
+
+        if args.include_backlinks:
+            for linked_path in backlink_paths(selected_paths=seen_note_paths, index=index):
                 resolved = linked_path.resolve()
                 if resolved in seen_note_paths:
                     continue
+                backlink_candidate = read_obsidian_note(linked_path, order=order)
+                if not candidate_has_required_tags(backlink_candidate, args.obsidian_tag):
+                    warnings.append(f"Skipped backlink without required tags: {linked_path}")
+                    continue
                 seen_note_paths.add(resolved)
-                note_candidates.append(read_obsidian_note(linked_path, order=order))
+                note_candidates.append(backlink_candidate)
                 order += 1
 
     candidates.extend(note_candidates)
@@ -606,6 +830,8 @@ def build_payload_and_preview(args: argparse.Namespace) -> tuple[dict[str, Any],
 
     title = normalize_episode_title(args.title if args.title is not None else payload.get("title"))
     brief = normalize_brief(args.brief if args.brief is not None else payload.get("brief"))
+    if args.research_briefing:
+        brief = normalize_brief(research_briefing_text(brief))
     lead_in = build_context_lead_in(title, brief)
 
     sources: list[dict[str, Any]] = list(payload.get("sources") or [])
@@ -676,14 +902,24 @@ def build_payload_and_preview(args: argparse.Namespace) -> tuple[dict[str, Any],
 
     payload["title"] = title
     payload["brief"] = brief
+    generation = build_generation_payload(args, payload.get("generation"))
+    if generation:
+        payload["generation"] = generation
 
+    estimated_minutes = round(
+        max(1, sum(meta.get("words") or 0 for meta in deduped_metadata) / DEFAULT_WORDS_PER_MINUTE),
+        1,
+    )
     preview = {
         "title": title,
         "brief": brief,
+        "generation": generation,
         "source_count": len(deduped_sources),
         "text_source_count": sum(1 for source in deduped_sources if source.get("type") == "text"),
         "url_source_count": sum(1 for source in deduped_sources if source.get("type") == "url"),
         "total_words": sum(meta.get("words") or 0 for meta in deduped_metadata),
+        "estimated_source_minutes": estimated_minutes,
+        "estimated_tts_chars": sum(meta.get("chars") or 0 for meta in deduped_metadata),
         "warnings": warnings,
         "sources": deduped_metadata,
     }
@@ -728,6 +964,15 @@ def write_preview(payload: dict[str, Any], output: str | None) -> None:
     else:
         safe_payload = redact_preview_payload(payload)
         print(json.dumps(safe_payload, indent=2, sort_keys=True))
+
+
+def write_manifest(preview: dict[str, Any], output: str | None) -> None:
+    if not output:
+        return
+    path = Path(output).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(preview, indent=2, sort_keys=True)
+    write_private_text(path, text + "\n")
 
 
 def response_path_for_output(value: str) -> Path:
@@ -881,6 +1126,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--title", help="Episode title.")
     parser.add_argument("--brief", help="Focus instructions for the episode.")
     parser.add_argument(
+        "--research-briefing",
+        action="store_true",
+        help=(
+            "Use briefing guidance optimized for AI-agent research notes: "
+            "claims, evidence, uncertainty, contradictions, and next actions."
+        ),
+    )
+    parser.add_argument(
         "--text-file",
         action="append",
         default=[],
@@ -902,6 +1155,27 @@ def parse_args() -> argparse.Namespace:
         help="Folder of Obsidian .md notes to submit recursively. Repeatable.",
     )
     parser.add_argument(
+        "--obsidian-include",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help="Only include Obsidian notes matching this glob relative to each folder. Repeatable.",
+    )
+    parser.add_argument(
+        "--obsidian-exclude",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help="Exclude Obsidian notes matching this glob relative to each folder. Repeatable.",
+    )
+    parser.add_argument(
+        "--obsidian-tag",
+        action="append",
+        default=[],
+        metavar="TAG",
+        help="Require selected Obsidian notes to include this tag. Repeatable; all tags are required.",
+    )
+    parser.add_argument(
         "--obsidian-root",
         action="append",
         default=[],
@@ -911,7 +1185,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-linked-notes",
         action="store_true",
-        help="Include one-hop wikilink targets found in selected Obsidian notes.",
+        help="Include wikilink targets found in selected Obsidian notes.",
+    )
+    parser.add_argument(
+        "--linked-note-depth",
+        type=int,
+        default=1,
+        help="Maximum wikilink expansion depth when --include-linked-notes is used. Default: 1.",
+    )
+    parser.add_argument(
+        "--include-backlinks",
+        action="store_true",
+        help="Also include notes that link back to selected Obsidian notes.",
     )
     parser.add_argument(
         "--url",
@@ -933,6 +1218,29 @@ def parse_args() -> argparse.Namespace:
         "--preview-output",
         help="Write full --preview JSON to this private file instead of redacted stdout.",
     )
+    parser.add_argument(
+        "--source-manifest",
+        "--manifest-output",
+        dest="source_manifest",
+        metavar="PATH",
+        help="Write redaction-safe preview/source metadata to this private JSON file.",
+    )
+    parser.add_argument(
+        "--voice-preset",
+        choices=sorted(VOICE_PRESETS),
+        help="Apply a named voice preset to the one-off generation override.",
+    )
+    parser.add_argument("--tts-provider", choices=["openai", "elevenlabs"])
+    parser.add_argument("--openai-tts-model")
+    parser.add_argument("--elevenlabs-model-id")
+    parser.add_argument("--elevenlabs-output-format")
+    parser.add_argument("--host-a-voice")
+    parser.add_argument("--host-b-voice")
+    parser.add_argument("--host-count", type=int, choices=[1, 2])
+    parser.add_argument("--style", choices=["casual", "formal", "deep-dive"])
+    parser.add_argument("--preferred-length-minutes", type=int, metavar="5-60")
+    parser.add_argument("--script-model")
+    parser.add_argument("--script-timeout-seconds", type=int, metavar="30-600")
     parser.add_argument(
         "--save-response",
         "--save-transcript",
@@ -983,8 +1291,19 @@ def main() -> int:
             f"--split-target-chars must be between {MIN_TEXT_CHARS} and {MAX_TEXT_CHARS}",
             EXIT_CONFIG,
         )
+    if args.linked_note_depth < 1:
+        fail("--linked-note-depth must be at least 1", EXIT_CONFIG)
+    if args.preferred_length_minutes is not None and not (
+        5 <= args.preferred_length_minutes <= 60
+    ):
+        fail("--preferred-length-minutes must be between 5 and 60", EXIT_CONFIG)
+    if args.script_timeout_seconds is not None and not (
+        30 <= args.script_timeout_seconds <= 600
+    ):
+        fail("--script-timeout-seconds must be between 30 and 600", EXIT_CONFIG)
 
-    payload, _preview = build_payload_and_preview(args)
+    payload, preview = build_payload_and_preview(args)
+    write_manifest(preview, args.source_manifest)
     if args.preview:
         write_preview(payload, args.preview_output)
         return 0
@@ -1007,7 +1326,7 @@ def main() -> int:
     api_base = normalize_api_base(base_url)
     submit_payload = {
         key: payload[key]
-        for key in ("title", "brief", "sources")
+        for key in ("title", "brief", "sources", "generation")
         if key in payload
     }
     created = request_json(
