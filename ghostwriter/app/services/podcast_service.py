@@ -3371,11 +3371,6 @@ class PodcastDigestService:
                         )
                     )
                     if not audio_bytes:
-                        logger.warning(
-                            "Skipping dialogue scene %d after retries: %s",
-                            scene_number,
-                            scene_error,
-                        )
                         self._append_tts_debug_entry(
                             debug_path,
                             {
@@ -3390,7 +3385,16 @@ class PodcastDigestService:
                                 "ElevenLabs quota exhausted during dialogue "
                                 f"generation: {scene_error}"
                             )
-                        continue
+                        # A partial episode is worse than no dialogue audio:
+                        # abort so the caller re-synthesizes the whole episode
+                        # per-segment instead of stitching around the gap.
+                        logger.warning(
+                            "Dialogue scene %d failed after retries (%s); "
+                            "falling back to per-segment TTS",
+                            scene_number,
+                            scene_error,
+                        )
+                        return None
                     path = Path(tmpdir) / f"scene_{scene_number:04d}.mp3"
                     path.write_bytes(audio_bytes)
                     scene_paths.append(path)
@@ -3398,7 +3402,7 @@ class PodcastDigestService:
 
                 if not scene_paths:
                     logger.warning(
-                        "All dialogue scenes failed; falling back to per-segment TTS"
+                        "No dialogue scenes to stitch; falling back to per-segment TTS"
                     )
                     return None
 

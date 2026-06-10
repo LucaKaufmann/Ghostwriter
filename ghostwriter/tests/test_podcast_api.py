@@ -2616,6 +2616,78 @@ async def test_generate_audio_falls_back_when_dialogue_unavailable(monkeypatch):
     assert result.synthesized_chars > 0
 
 
+@pytest.mark.asyncio
+async def test_generate_audio_falls_back_when_dialogue_scene_fails(monkeypatch):
+    """A transient failure in any scene must not publish a partial episode."""
+    seen_endpoints: list[str] = []
+    scene_calls = {"n": 0}
+
+    class _Response:
+        def __init__(self, status_code, content=b"", text=""):
+            self.status_code = status_code
+            self.content = content
+            self.text = text
+            self.headers = {}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, *, params=None, json=None, headers=None):
+            seen_endpoints.append(endpoint)
+            return _Response(200, content=b"segment-audio")
+
+    async def _fake_scene_retry(*, inputs, prefs):
+        scene_calls["n"] += 1
+        if scene_calls["n"] == 1:
+            return b"scene-audio", None
+        return b"", "server error"
+
+    async def _fake_quota(prefs, chars):
+        return None
+
+    async def _fake_probe(path):
+        return 80
+
+    async def _fake_stitch(segment_paths, output_path, gap_durations=None):
+        output_path.write_bytes(b"".join(p.read_bytes() for p in segment_paths))
+
+    monkeypatch.setattr("app.services.podcast_service.httpx.AsyncClient", _Client)
+    monkeypatch.setattr(
+        podcast_service, "_synthesize_dialogue_scene_with_retry", _fake_scene_retry
+    )
+    monkeypatch.setattr(podcast_service, "_check_elevenlabs_quota", _fake_quota)
+    monkeypatch.setattr(podcast_service, "_probe_audio_duration_seconds", _fake_probe)
+    monkeypatch.setattr(podcast_service, "_stitch_segments", _fake_stitch)
+
+    # Two long lines force two dialogue scenes under the 2,000-char cap.
+    segments = [
+        ScriptSegment(speaker="HOST_A", text="Opening story detail. " * 60),
+        ScriptSegment(speaker="HOST_B", text="Second story analysis. " * 60),
+    ]
+    prefs = _test_podcast_preferences(
+        tts_provider="elevenlabs",
+        elevenlabs_model_id="eleven_v3",
+        elevenlabs_api_key="xi-test-key",
+        host_a_voice="voice_a",
+        host_b_voice="voice_b",
+    )
+
+    result = await podcast_service.generate_audio(uuid4(), segments, prefs)
+
+    # Scene 1 succeeded, scene 2 failed — the whole episode must go per-segment.
+    assert scene_calls["n"] == 2
+    per_segment_calls = [e for e in seen_endpoints if "text-to-speech" in e]
+    assert len(per_segment_calls) == len(segments)
+    assert result.audio_size_bytes > 0
+
+
 def test_inter_segment_gap_seconds_punctuation_rules():
     assert podcast_service._inter_segment_gap_seconds("Really?") == 0.15
     assert podcast_service._inter_segment_gap_seconds("No way!") == 0.15

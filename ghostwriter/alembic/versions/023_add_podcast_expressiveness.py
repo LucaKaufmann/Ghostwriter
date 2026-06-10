@@ -1,7 +1,7 @@
 """Add elevenlabs_expressiveness column to podcast_preferences.
 
-Revision ID: 022
-Revises: 021
+Revision ID: 023
+Revises: 022
 Create Date: 2026-06-10
 """
 
@@ -10,8 +10,8 @@ from typing import Sequence, Union
 from alembic import context, op
 import sqlalchemy as sa
 
-revision: str = "022"
-down_revision: Union[str, None] = "021"
+revision: str = "023"
+down_revision: Union[str, None] = "022"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
