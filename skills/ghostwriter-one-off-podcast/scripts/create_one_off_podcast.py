@@ -71,6 +71,14 @@ VOICE_PRESETS: dict[str, dict[str, Any]] = {
         "host_a_voice": "JBFqnCBsd6RMkjVDRZzb",
         "host_b_voice": "hpp4J3VqNfWAUOO0d1Us",
     },
+    "elevenlabs-v3-dialogue": {
+        "tts_provider": "elevenlabs",
+        "elevenlabs_model_id": "eleven_v3",
+        "elevenlabs_expressiveness": "creative",
+        "host_count": 2,
+        "host_a_voice": "iP95p4xoKVk53GoZ742B",
+        "host_b_voice": "XrExE9yKIg1WjnnlVkGX",
+    },
 }
 
 RESEARCH_BRIEFING_GUIDANCE = (
@@ -765,6 +773,9 @@ def build_generation_payload(
     set_if_present(generation, "openai_tts_model", args.openai_tts_model)
     set_if_present(generation, "elevenlabs_model_id", args.elevenlabs_model_id)
     set_if_present(generation, "elevenlabs_output_format", args.elevenlabs_output_format)
+    set_if_present(
+        generation, "elevenlabs_expressiveness", args.elevenlabs_expressiveness
+    )
     set_if_present(generation, "host_a_voice", args.host_a_voice)
     set_if_present(generation, "host_b_voice", args.host_b_voice)
     set_if_present(generation, "host_count", args.host_count)
@@ -1294,6 +1305,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--openai-tts-model")
     parser.add_argument("--elevenlabs-model-id")
     parser.add_argument("--elevenlabs-output-format")
+    parser.add_argument(
+        "--expressiveness",
+        dest="elevenlabs_expressiveness",
+        choices=["creative", "natural", "robust"],
+        help=(
+            "ElevenLabs delivery mode for this episode: creative (most "
+            "expressive, strongest audio-tag response), natural (balanced), "
+            "or robust (most consistent, fewest tags)."
+        ),
+    )
     parser.add_argument("--host-a-voice")
     parser.add_argument("--host-b-voice")
     parser.add_argument("--host-count", type=int, choices=[1, 2])

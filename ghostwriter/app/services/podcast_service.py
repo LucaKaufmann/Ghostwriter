@@ -51,6 +51,7 @@ GENERATION_OVERRIDE_KEYS = {
     "openai_tts_model",
     "elevenlabs_model_id",
     "elevenlabs_output_format",
+    "elevenlabs_expressiveness",
     "host_a_voice",
     "host_b_voice",
     "host_count",
@@ -1330,6 +1331,14 @@ class PodcastDigestService:
                 if provider not in SUPPORTED_TTS_PROVIDERS:
                     raise ValueError("tts_provider must be 'openai' or 'elevenlabs'")
                 cleaned[key] = provider
+            elif key == "elevenlabs_expressiveness":
+                mode = str(value).lower()
+                if mode not in SUPPORTED_EXPRESSIVENESS_MODES:
+                    raise ValueError(
+                        "elevenlabs_expressiveness must be 'creative', 'natural', "
+                        "or 'robust'"
+                    )
+                cleaned[key] = mode
             elif key == "script_model":
                 cleaned[key] = str(value) or None
             else:
@@ -1382,6 +1391,9 @@ class PodcastDigestService:
             elevenlabs_output_format=str(
                 values["elevenlabs_output_format"] or "mp3_44100_128"
             ),
+            elevenlabs_expressiveness=str(
+                values["elevenlabs_expressiveness"] or "natural"
+            ),
             host_a_voice=host_a_voice,
             host_b_voice=host_b_voice,
             host_count=int(values["host_count"]),
@@ -1401,6 +1413,7 @@ class PodcastDigestService:
             "openai_tts_model": prefs.openai_tts_model,
             "elevenlabs_model_id": prefs.elevenlabs_model_id,
             "elevenlabs_output_format": prefs.elevenlabs_output_format,
+            "elevenlabs_expressiveness": prefs.elevenlabs_expressiveness,
             "host_a_voice": prefs.host_a_voice,
             "host_b_voice": prefs.host_b_voice,
             "host_count": prefs.host_count,
