@@ -12,6 +12,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.epilogue.data.repository.DigestRepository
+import com.example.epilogue.data.repository.ArticleDeliveryStore
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.DigestPeriod
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -38,7 +39,8 @@ import javax.inject.Singleton
 class DigestScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
-    private val digestRepository: DigestRepository
+    private val digestRepository: DigestRepository,
+    private val deliveryStore: ArticleDeliveryStore
 ) {
 
     companion object {
@@ -56,8 +58,10 @@ class DigestScheduler @Inject constructor(
         internal fun shouldEnqueueCatchUp(
             now: ZonedDateTime,
             periodHour: Int,
-            latestScheduledDigestTimeMillis: Long?
+            latestScheduledDigestTimeMillis: Long?,
+            completedRun: Boolean = false
         ): Boolean {
+            if (completedRun) return false
             val scheduledTimeToday = now.toLocalDate()
                 .atTime(periodHour, 0)
                 .atZone(now.zone)
@@ -202,13 +206,15 @@ class DigestScheduler @Inject constructor(
                 continue
             }
 
+            val completedRun = deliveryStore.coversScheduled(period.name, today.toString())
             val latestScheduledDigestTime = digestRepository.getLatestScheduledDigestTimeForPeriod(period)
-            if (!shouldEnqueueCatchUp(now, period.hour, latestScheduledDigestTime)) {
+            if (!shouldEnqueueCatchUp(now, period.hour, latestScheduledDigestTime, completedRun)) {
                 continue
             }
 
             val inputData = Data.Builder()
                 .putString(DailyDigestWorker.KEY_PERIOD, period.name)
+                .putString(DailyDigestWorker.KEY_OCCURRENCE_DATE, today.toString())
                 .build()
 
             val catchUpRequest = OneTimeWorkRequestBuilder<DailyDigestWorker>()

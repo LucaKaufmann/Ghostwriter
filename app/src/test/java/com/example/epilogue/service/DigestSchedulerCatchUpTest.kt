@@ -1,8 +1,10 @@
 package com.example.epilogue.service
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -62,5 +64,24 @@ class DigestSchedulerCatchUpTest {
         )
 
         assertTrue(shouldEnqueue)
+    }
+
+    @Test
+    fun `completed empty or deferred run suppresses catch up without digest history`() {
+        val now = ZonedDateTime.of(2026, 3, 7, 8, 0, 0, 0, zone)
+        assertFalse(DigestScheduler.shouldEnqueueCatchUp(now, 7, null,
+            completedRun = true))
+        assertTrue(DigestScheduler.shouldEnqueueCatchUp(now, 7, null,
+            completedRun = false))
+    }
+
+    @Test
+    fun `periodic admission uses latest due day when work starts after midnight`() {
+        val beforeHour = ZonedDateTime.of(2026, 3, 8, 1, 0, 0, 0, zone)
+        val afterHour = ZonedDateTime.of(2026, 3, 8, 8, 0, 0, 0, zone)
+        assertEquals(LocalDate.of(2026, 3, 7),
+            DailyDigestWorker.dueOccurrenceDate(beforeHour, 7))
+        assertEquals(LocalDate.of(2026, 3, 8),
+            DailyDigestWorker.dueOccurrenceDate(afterHour, 7))
     }
 }

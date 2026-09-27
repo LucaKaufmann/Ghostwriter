@@ -185,6 +185,16 @@ object DatabaseModule {
         }
     }
 
+    /** Old runs have no provable scheduled occurrence and remain uncovered. */
+    val MIGRATION_10_11 = object : Migration(10, 11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE generation_runs ADD COLUMN triggerType TEXT")
+            db.execSQL("ALTER TABLE generation_runs ADD COLUMN period TEXT")
+            db.execSQL("ALTER TABLE generation_runs ADD COLUMN occurrenceDate TEXT")
+            db.execSQL("ALTER TABLE generation_runs ADD COLUMN workId TEXT")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): EpilogueDatabase {
@@ -202,7 +212,8 @@ object DatabaseModule {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
-                MIGRATION_9_10
+                MIGRATION_9_10,
+                MIGRATION_10_11
             )
             .build()
     }

@@ -17,8 +17,24 @@ class ArticleDeliveryStore @Inject constructor(
     private val deliveries: ArticleDeliveryDao,
     private val runs: GenerationRunDao
 ) {
-    suspend fun startRun(regeneration: Boolean): Long = runs.insert(GenerationRunEntity(
-        startedAt = System.currentTimeMillis(), regeneration = regeneration))
+    suspend fun startRun(regeneration: Boolean, triggerType: String? = null): Long =
+        runs.insert(GenerationRunEntity(startedAt = System.currentTimeMillis(),
+            regeneration = regeneration, triggerType = triggerType))
+
+    /** Admission is serialized by GenerationGate and checked atomically in Room. */
+    suspend fun startScheduledRun(period: String, occurrenceDate: String,
+        workId: String, retry: Boolean, regeneration: Boolean = false): Long? =
+        database.withTransaction {
+            val date = if (retry) runs.latestForWork(workId)?.occurrenceDate ?: occurrenceDate
+                else occurrenceDate
+            if (runs.covered(period, date) != null) return@withTransaction null
+            runs.insert(GenerationRunEntity(startedAt = System.currentTimeMillis(),
+                regeneration = regeneration, triggerType = "SCHEDULED", period = period,
+                occurrenceDate = date, workId = workId))
+        }
+
+    suspend fun coversScheduled(period: String, occurrenceDate: String): Boolean =
+        runs.covered(period, occurrenceDate) != null
 
     suspend fun forFeed(feedUrl: String): Map<String, ArticleDeliveryEntity> =
         deliveries.forFeed(feedUrl).associateBy { it.articleKey }

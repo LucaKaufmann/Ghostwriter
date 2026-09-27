@@ -13,6 +13,15 @@ interface GenerationRunDao {
     @Query("SELECT * FROM generation_runs WHERE runId = :runId")
     suspend fun get(runId: Long): GenerationRunEntity?
 
+    @Query("SELECT * FROM generation_runs WHERE triggerType = 'SCHEDULED' AND period = :period " +
+        "AND occurrenceDate = :occurrenceDate AND outcome IN ('complete','partial','empty','deferred') " +
+        "ORDER BY runId DESC LIMIT 1")
+    suspend fun covered(period: String, occurrenceDate: String): GenerationRunEntity?
+
+    @Query("SELECT * FROM generation_runs WHERE workId = :workId AND triggerType = 'SCHEDULED' " +
+        "ORDER BY runId DESC LIMIT 1")
+    suspend fun latestForWork(workId: String): GenerationRunEntity?
+
     @Query("SELECT * FROM generation_runs WHERE outcome != 'running' ORDER BY runId DESC LIMIT 1")
     fun observeLatestFinished(): Flow<GenerationRunEntity?>
 

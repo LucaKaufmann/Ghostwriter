@@ -1,0 +1,15 @@
+# REVIEW-ANDROID-DELIVERY plan and result
+
+Base: `086afbe120fd9d618dbbf3b092893a5b86fe3ead`, branch `codex/review-android-delivery`.
+
+Plan:
+
+- [x] Keep one generation gate but ingest enabled feeds with bounded concurrent fan-out; preserve input feed order in diagnostics/artifact and propagate cancellation.
+- [x] Use the first nonblank RSS content or description for promotional prefiltering and use neutral partial-run wording.
+- [x] Add nullable scheduled trigger, period, occurrence, and retry identity fields to Room 11; migrate Room 10 without guessing legacy run coverage.
+- [x] Admit scheduled work under the gate only when its exact occurrence has no complete, partial, empty, or deferred run. Catch-up uses both the existing digest-history check and explicit run coverage; manual runs never cover a scheduled occurrence.
+- [x] Verify migration/fresh/reopen/ledger preservation, scheduled empty/deferred/failed/manual and day rollover, parallel fan-out/cancellation, nonblank filtering, fallback copy, and Android build/UI as applicable.
+
+Review: PR104 comments `4115953288`, `4115953290`, and `4115953293` are addressed by a three-feed concurrency bound with ordered results, first-nonblank promotional input, and neutral partial wording. PR82 comment `4115924727` is addressed by exact scheduled-occurrence coverage persisted in `GenerationRun` even when no Digest is created. The periodic worker derives the due day before feed I/O; retries reuse the first attempt's occurrence through the stable WorkRequest ID. Catch-up requests carry the intended day explicitly, so delayed execution does not shift it. The Room 10→11 migration adds only nullable columns and leaves earlier runs unknown. Coverage is committed in the existing history/ledger or no-digest transaction. `complete`, `partial`, `empty`, and `deferred` cover; `failed` and `cancelled` do not. Existing `lastCatchUpDate` and WorkManager retry limits remain: a cancelled catch-up is eligible for manual or the next scheduled run, but is not automatically re-enqueued again on the same day.
+
+Verification: the task-local Android SDK and JDK 17 passed `:shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug` in `/private/tmp/review-android-delivery-final-gate.log`: **59 shared tests**, **170 App tests**, zero failures. Focused Room migration, delivery, worker, scheduler, and Settings outcome suites passed in `/private/tmp/review-android-delivery-focused-final.log`; the later concurrent-worker regression also passed in `/private/tmp/review-android-delivery-worker.log`. Tests include a captured Room 10→11 migration and reopen with preserved delivery ledger, fresh Room 11 reopen, empty/deferred/partial coverage, failed/manual noncoverage, next-day periodic and cross-midnight retry, simultaneous periodic/catch-up admission, bounded ordered fan-out/cancellation, blank-content promotional exclusion, and a full-article fallback with truthful partial message. The only UI change is snackbar copy; its WorkInfo-driven ViewModel path is tested. No new visual fixture was added for this wording-only change.
