@@ -87,7 +87,7 @@ async def _run_media_pipeline_locked() -> None:
         _update_run(run_id, items_discovered=new_items_count)
 
         # Stage 3: Process pending items sequentially
-        processed_count, failed_count = await _process_pending_items(settings)
+        processed_count, failed_count = await _process_pending_items(settings, run_id)
 
         duration_ms = int((time.time() - run_start) * 1000)
 
@@ -235,12 +235,17 @@ async def _fetch_and_create_items(settings) -> int:
     return new_count
 
 
-async def _process_pending_items(settings) -> tuple[int, int]:
+async def _process_pending_items(settings, run_id: UUID) -> tuple[int, int]:
     """Process all pending media items sequentially. Returns (processed, failed) counts."""
     media_processor = MediaProcessor(settings)
     llm_service = LLMService(settings)
     processed_count = 0
     failed_count = 0
+
+    def record_counts() -> None:
+        _update_run(
+            run_id, items_processed=processed_count, items_failed=failed_count
+        )
 
     # Load whisper config
     with Session(engine) as session:
@@ -360,12 +365,15 @@ async def _process_pending_items(settings) -> tuple[int, int]:
 
         except asyncio.CancelledError:
             _update_item_failed(item_id, "Media processing cancelled", start_time)
+            failed_count += 1
             raise
         except Exception as e:
             error_msg = _enrich_timeout_error(str(e)[:500], whisper_timeout_minutes)
             logger.exception(f"Failed to process media item: {item_title}")
             _update_item_failed(item_id, error_msg, start_time)
             failed_count += 1
+        finally:
+            record_counts()
 
     return processed_count, failed_count
 

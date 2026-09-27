@@ -88,10 +88,25 @@ class TranscriptionService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+        except FileNotFoundError:
+            return TranscriptionResult(
+                text="",
+                provider="local",
+                error=f"whisper-cli not found at {binary}",
+            )
+
+        try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
                 timeout=effective_timeout,
             )
+        except asyncio.CancelledError:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.communicate()
+            raise
         except asyncio.TimeoutError:
             process.kill()
             await process.communicate()
@@ -100,13 +115,6 @@ class TranscriptionService:
                 provider="local",
                 error=f"whisper-cli timed out after {effective_timeout}s",
             )
-        except FileNotFoundError:
-            return TranscriptionResult(
-                text="",
-                provider="local",
-                error=f"whisper-cli not found at {binary}",
-            )
-
         if process.returncode != 0:
             err_text = stderr.decode("utf-8", errors="ignore").strip()
             return TranscriptionResult(
@@ -199,7 +207,15 @@ class TranscriptionService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await process.communicate()
+            try:
+                _, stderr = await process.communicate()
+            except asyncio.CancelledError:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.communicate()
+                raise
             if process.returncode != 0:
                 return TranscriptionResult(
                     text="",
