@@ -30,6 +30,8 @@ class ArticleDeliveryStore @Inject constructor(
             val old = deliveries.get(identity.feedUrl, identity.articleKey)
             if (old?.state == "delivered") {
                 if (!regeneration) throw DeliveryClaimConflict()
+                // Rotate a capped regeneration without changing the first delivery claim.
+                deliveries.put(old.copy(lastAttemptSequence = runId))
                 continue
             }
             if (old?.state == "excluded" && old.filterSignature == signature && !regeneration)

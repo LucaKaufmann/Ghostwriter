@@ -1,6 +1,7 @@
 package com.example.epilogue.service
 
 import org.jsoup.Jsoup
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -8,6 +9,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.SocketException
 
 class ContentProcessorTest {
 
@@ -18,6 +22,47 @@ class ContentProcessorTest {
     fun setup() {
         contentAnalyzer = ContentAnalyzer()
         processor = ContentProcessor(contentAnalyzer)
+    }
+
+    @Test
+    fun `failed article fetch remains retryable despite short full-looking RSS`() = runBlocking {
+        val rss = "<p>" + (1..180).joinToString(" ") { "word$it" } + "</p>"
+        val result = processor.processForGeneration(
+            "http://127.0.0.1:1/unreachable", rss, null, "Fixture", null, 300)
+        assertEquals(ContentProcessor.GenerationResult.Failed, result)
+    }
+
+    @Test
+    fun `successfully extracted short article is an intentional exclusion`() = runBlocking {
+        val server = ServerSocket(0, 5, InetAddress.getByName("127.0.0.1"))
+        server.soTimeout = 10_000
+        val body = """<html><head><title>Fixture</title></head><body><article>
+            <h1>Fixture</h1><p>""" + (1..120).joinToString(" ") { "word$it" } +
+            "</p></article></body></html>"
+        val responder = Thread {
+            try {
+                repeat(2) {
+                    server.accept().use { socket ->
+                        val request = socket.getInputStream().bufferedReader()
+                        while (request.readLine()?.isNotEmpty() == true) Unit
+                        val bytes = body.toByteArray()
+                        socket.getOutputStream().write(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                        socket.getOutputStream().write(bytes)
+                        socket.getOutputStream().flush()
+                    }
+                }
+            } catch (_: SocketException) { /* Closed by test. */ }
+        }.apply { isDaemon = true; start() }
+        try {
+            val rss = "<p>" + (1..180).joinToString(" ") { "word$it" } + "</p>"
+            val url = "http://127.0.0.1:" + server.localPort + "/article"
+            val result = processor.processForGeneration(url, rss, null, "Fixture", null, 300)
+            assertEquals(ContentProcessor.GenerationResult.TooShort, result)
+        } finally {
+            server.close()
+            responder.join(1_000)
+        }
     }
 
     @Test
