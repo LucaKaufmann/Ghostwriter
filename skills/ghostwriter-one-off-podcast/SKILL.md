@@ -24,7 +24,7 @@ Use this skill when the user asks to turn one or more documents, notes, article 
 
 - Ghostwriter endpoint: `<GHOSTWRITER_BASE_URL>/api/podcast/episodes/one-off`
 - Authentication: `Authorization: Bearer <token>`
-- Base URL source: prefer `$GHOSTWRITER_BASE_URL`, then `$GW_BASE`, then `--base-url`. Use HTTPS for remote hosts. The helper only allows plain HTTP for loopback hosts unless `--allow-insecure-http` is explicitly passed.
+- Base URL source: prefer `$GHOSTWRITER_BASE_URL`, then `$GW_BASE`, then `--base-url`. Use HTTPS for remote hosts. The helper only allows plain HTTP for loopback hosts unless `--allow-insecure-http` is explicitly passed. Authenticated API and audio requests, including redirects, must stay on the configured URL's scheme, host, and effective port. A cross-origin audio URL or redirect fails the request; `--allow-insecure-http` does not permit HTTPS downgrades.
 - Token source: prefer `$GHOSTWRITER_TOKEN`, then `$GW_TOKEN`, then a `--env-file` such as `~/.env`; do not ask the user to paste secrets into chat if an environment variable or env file can be used.
 - Phase 1 accepts only:
   - `type: "url"` for reachable article URLs

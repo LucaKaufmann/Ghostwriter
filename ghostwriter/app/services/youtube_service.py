@@ -80,10 +80,10 @@ class YouTubeService:
                         None,
                         lambda: ytt_api.list(video_id),
                     )
-                    if not transcript_list:
+                    # TranscriptList is iterable but does not support indexing.
+                    first = next(iter(transcript_list), None)
+                    if first is None:
                         return None
-                    # Get the first available transcript
-                    first = transcript_list[0]
                     transcript = await loop.run_in_executor(
                         None,
                         lambda: first.fetch(),

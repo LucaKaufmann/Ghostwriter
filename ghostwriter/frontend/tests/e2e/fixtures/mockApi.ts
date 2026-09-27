@@ -1,6 +1,7 @@
-import type { Page, Route } from '@playwright/test';
+import { expect, type Page, type Route } from '@playwright/test';
 
 const AUTH_TOKEN = 'playwright-token';
+const unexpectedRequests = new WeakMap<Page, string[]>();
 
 const demoUser = {
 	id: 'user-1',
@@ -115,11 +116,20 @@ export async function mockGhostwriterApi(
 	} = {}
 ) {
 	const authenticated = options.authenticated ?? true;
+	const unexpected: string[] = [];
+	unexpectedRequests.set(page, unexpected);
 
-	await page.route('**/api/**', async (route) => {
+	await page.route('**/*', async (route) => {
 		const request = route.request();
 		const url = new URL(request.url());
 		const method = request.method();
+		if (url.origin !== 'http://127.0.0.1:4173') {
+			unexpected.push(`${method} ${url.origin}${url.pathname}`);
+			return route.abort();
+		}
+		if (!url.pathname.startsWith('/api/')) {
+			return route.continue();
+		}
 		const path = url.pathname.replace(/^\/api/, '');
 
 		if (method === 'GET' && path === '/health') {
@@ -165,6 +175,10 @@ export async function mockGhostwriterApi(
 		}
 
 		if (method === 'POST' && path === '/auth/login') {
+			const credentials = request.postDataJSON() as { username?: string; password?: string };
+			if (credentials.username !== 'demo' || credentials.password !== 'password123') {
+				return json(route, { detail: 'Invalid username or password' }, 401);
+			}
 			return json(route, {
 				access_token: AUTH_TOKEN,
 				token_type: 'bearer',
@@ -178,6 +192,10 @@ export async function mockGhostwriterApi(
 
 		if (method === 'GET' && path === '/digests') {
 			return json(route, getDigestSubset(url));
+		}
+
+		if (method === 'GET' && /^\/digests\/digest-\d+\/cover$/.test(path)) {
+			return json(route, { detail: 'No cover in fixture' }, 404);
 		}
 
 		if (method === 'POST' && path === '/digests/trigger') {
@@ -245,6 +263,18 @@ export async function mockGhostwriterApi(
 				whisper_provider: 'faster-whisper',
 				whisper_model: 'base',
 				whisper_timeout_minutes: 15,
+				media_processing_interval_hours: 6,
+				include_podcasts_in_digest: false,
+				include_youtube_in_digest: false,
+				pdf_enabled: false,
+				pdf_page_size: 'A4',
+				cover_enabled: false,
+				cover_provider: 'gpt-image-1',
+				cover_quality: 'low',
+				cover_prompt: '',
+				cover_overlay_enabled: true,
+				cover_openai_api_key: '',
+				cover_gemini_api_key: '',
 				updated_at: '2026-02-10T00:00:00Z',
 				wallabag: { enabled: true, label: 'Saved' },
 				newsletters: { enabled: true, label: 'Ghostwriter' }
@@ -257,6 +287,78 @@ export async function mockGhostwriterApi(
 
 		if (method === 'GET' && path === '/logs') {
 			return json(route, []);
+		}
+
+		if (method === 'GET' && path === '/config/covers') {
+			return json(route, { covers: [], active_cover_id: null });
+		}
+
+		if (method === 'GET' && path === '/podcast/feed/info') {
+			return json(route, {
+				feed_enabled: false,
+				feed_title: 'Ghostwriter',
+				feed_description: 'Synthetic podcast feed',
+				feed_url: 'http://127.0.0.1:4173/api/podcast/feed',
+				setup_instructions: []
+			});
+		}
+
+		if (method === 'GET' && path === '/podcast/preferences') {
+			return json(route, {
+				enabled: false,
+				schedule: 'manual',
+				schedule_time: '08:00',
+				schedule_day: 'monday',
+				topic_weights: {},
+				boost_sources: [],
+				boost_keywords: [],
+				filter_keywords: [],
+				preferred_length_minutes: 15,
+				script_model: null,
+				script_timeout_seconds: 120,
+				style: 'casual',
+				tts_provider: 'openai',
+				openai_tts_model: 'tts-1',
+				elevenlabs_model_id: '',
+				elevenlabs_output_format: 'mp3_44100_128',
+				elevenlabs_expressiveness: 'natural',
+				host_a_voice: 'alloy',
+				host_b_voice: 'nova',
+				host_count: 1,
+				podcast_feed_enabled: false,
+				podcast_feed_title: 'Ghostwriter',
+				podcast_feed_description: 'Synthetic podcast feed',
+				podcast_feed_base_url: null,
+				podcast_feed_artwork_path: null,
+				updated_at: '2026-02-10T00:00:00Z'
+			});
+		}
+
+		if (method === 'GET' && path === '/podcast/voices') {
+			return json(route, { voices: [], pair_presets: [] });
+		}
+
+		if (method === 'GET' && path === '/podcast/schedules') {
+			return json(route, []);
+		}
+
+		if (method === 'GET' && path === '/podcast/episodes') {
+			return json(route, []);
+		}
+
+		if (method === 'GET' && path === '/media/status') {
+			return json(route, {
+				is_running: false,
+				pending_count: 0,
+				processing_count: 0,
+				completed_count: 0,
+				failed_count: 0,
+				current_item_title: null,
+				current_item_content_type: null,
+				last_completed_at: null,
+				next_run_at: null,
+				last_run: null
+			});
 		}
 
 		if (method === 'GET' && path === '/config/wallabag') {
@@ -303,6 +405,11 @@ export async function mockGhostwriterApi(
 			return route.fulfill({ status: 204, body: '' });
 		}
 
-		return json(route, { detail: `Unhandled mock route: ${method} ${path}` }, 404);
+		unexpected.push(`${method} ${path}`);
+		return route.abort();
 	});
+}
+
+export function expectNoUnexpectedRequests(page: Page) {
+	expect(unexpectedRequests.get(page) ?? []).toEqual([]);
 }
