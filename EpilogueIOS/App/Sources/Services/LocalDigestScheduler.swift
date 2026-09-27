@@ -62,6 +62,8 @@ public final class LocalDigestScheduler: Sendable {
     private let modelContainer: ModelContainer
     private let now: @Sendable () -> Date
     private let calendar: Calendar
+    private let cancelOvernightRequest: @Sendable () -> Void
+    private let submitOvernightRequest: @Sendable (BGProcessingTaskRequest) throws -> Void
     private let logger = Logger(subsystem: "com.epilogue", category: "LocalScheduler")
     private let catchUpGate = AsyncExecutionGate()
 
@@ -71,7 +73,14 @@ public final class LocalDigestScheduler: Sendable {
         settingsRepository: SettingsRepositoryProtocol,
         modelContainer: ModelContainer,
         now: @escaping @Sendable () -> Date = { Date() },
-        calendar: Calendar = .autoupdatingCurrent
+        calendar: Calendar = .autoupdatingCurrent,
+        cancelOvernightRequest: @escaping @Sendable () -> Void = {
+            BGTaskScheduler.shared.cancel(
+                taskRequestWithIdentifier: LocalDigestScheduler.digestTaskIdentifier)
+        },
+        submitOvernightRequest: @escaping @Sendable (BGProcessingTaskRequest) throws -> Void = {
+            try BGTaskScheduler.shared.submit($0)
+        }
     ) {
         self.feedRepository = feedRepository
         self.digestRepository = digestRepository
@@ -79,6 +88,8 @@ public final class LocalDigestScheduler: Sendable {
         self.modelContainer = modelContainer
         self.now = now
         self.calendar = calendar
+        self.cancelOvernightRequest = cancelOvernightRequest
+        self.submitOvernightRequest = submitOvernightRequest
     }
 
     // MARK: - Registration
@@ -111,7 +122,7 @@ public final class LocalDigestScheduler: Sendable {
     /// Schedule overnight digest generation (BGProcessingTask).
     /// Targets 2 hours before the next enabled period, requires charging + network.
     public func scheduleOvernightDigest() async {
-        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.digestTaskIdentifier)
+        cancelOvernightRequest()
 
         do {
             let ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
@@ -139,7 +150,7 @@ public final class LocalDigestScheduler: Sendable {
             request.requiresNetworkConnectivity = true
             request.requiresExternalPower = true
 
-            try BGTaskScheduler.shared.submit(request)
+            try submitOvernightRequest(request)
             logger.info(
                 "Scheduled overnight digest generation: next window \(nextDigestTime), earliest begin \(request.earliestBeginDate ?? nextDigestTime)"
             )

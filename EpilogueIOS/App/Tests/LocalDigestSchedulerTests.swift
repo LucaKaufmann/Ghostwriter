@@ -3,8 +3,40 @@ import XCTest
 import Domain
 import Data
 import SwiftData
+import BackgroundTasks
 
 final class LocalDigestSchedulerTests: XCTestCase {
+    private final class OvernightRequestProbe: @unchecked Sendable {
+        private let lock = NSLock()
+        private var submittedDates: [Date] = []
+        private var pendingDate: Date?
+        private var cancellationCount = 0
+        private var submittedWithRequiredConditions = true
+
+        func cancel() {
+            lock.withLock {
+                cancellationCount += 1
+                pendingDate = nil
+            }
+        }
+
+        func submit(_ request: BGProcessingTaskRequest) {
+            lock.withLock {
+                submittedDates.append(request.earliestBeginDate!)
+                pendingDate = request.earliestBeginDate
+                submittedWithRequiredConditions = submittedWithRequiredConditions &&
+                    request.requiresNetworkConnectivity && request.requiresExternalPower
+            }
+        }
+
+        var snapshot: (dates: [Date], pending: Date?, cancellations: Int, conditions: Bool) {
+            lock.withLock {
+                (submittedDates, pendingDate, cancellationCount,
+                 submittedWithRequiredConditions)
+            }
+        }
+    }
+
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -174,7 +206,7 @@ final class LocalDigestSchedulerTests: XCTestCase {
     }
 
     @MainActor
-    func testProductionCalendarFollowsTimeZoneChangeWhileInjectedCalendarStaysFixed() throws {
+    func testProductionCalendarFollowsTimeZoneChangeWhileInjectedCalendarStaysFixed() async throws {
         let originalTimeZone = NSTimeZone.default
         defer { NSTimeZone.default = originalTimeZone }
         let utc = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
@@ -190,19 +222,27 @@ final class LocalDigestSchedulerTests: XCTestCase {
         let digests = DigestRepository(modelContext: context)
         let settings = SettingsRepository(userDefaults: UserDefaults(
             suiteName: "scheduler-calendar-\(UUID().uuidString)")!)
+        try await settings.setEnabledPeriods([.morning])
+        try await settings.setGhostwriterEnabled(false)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-03-01T10:00:00Z"))
+        let requestProbe = OvernightRequestProbe()
         let production = LocalDigestScheduler(
             feedRepository: feeds, digestRepository: digests,
-            settingsRepository: settings, modelContainer: container)
+            settingsRepository: settings, modelContainer: container,
+            now: { now }, cancelOvernightRequest: { requestProbe.cancel() },
+            submitOvernightRequest: { requestProbe.submit($0) })
         var fixedUTC = Calendar(identifier: .gregorian)
         fixedUTC.timeZone = utc
         let injected = LocalDigestScheduler(
             feedRepository: feeds, digestRepository: digests,
             settingsRepository: settings, modelContainer: container,
             calendar: fixedUTC)
-        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-03-01T10:00:00Z"))
         let periods: Set<DigestPeriod> = [.morning]
         let utcNext = try XCTUnwrap(injected.nextScheduledDigestTime(from: now, periods: periods))
         XCTAssertEqual(production.nextScheduledDigestTime(from: now, periods: periods), utcNext)
+        await production.scheduleOvernightDigest()
+        XCTAssertEqual(requestProbe.snapshot.pending,
+                       utcNext.addingTimeInterval(-LocalDigestScheduler.scheduledGenerationLeadTime))
         XCTAssertEqual(LocalDigestScheduler.latestElapsedPeriod(
             now: now, periods: periods, calendar: .autoupdatingCurrent), .morning)
 
@@ -216,8 +256,25 @@ final class LocalDigestSchedulerTests: XCTestCase {
                        TimeInterval((24 - 10 + DigestPeriod.morning.hour) * 60 * 60))
         XCTAssertNotEqual(localNext, utcNext)
         XCTAssertEqual(injected.nextScheduledDigestTime(from: now, periods: periods), utcNext)
+        await production.scheduleOvernightDigest() // Foreground resubmission.
+        XCTAssertEqual(requestProbe.snapshot.pending,
+                       localNext.addingTimeInterval(-LocalDigestScheduler.scheduledGenerationLeadTime))
+        XCTAssertEqual(requestProbe.snapshot.dates.count, 2)
+        XCTAssertEqual(requestProbe.snapshot.cancellations, 2)
+        XCTAssertTrue(requestProbe.snapshot.conditions)
         XCTAssertNil(LocalDigestScheduler.latestElapsedPeriod(
             now: now, periods: periods, calendar: .autoupdatingCurrent))
+
+        try await settings.setGhostwriterEnabled(true)
+        await production.scheduleOvernightDigest()
+        XCTAssertNil(requestProbe.snapshot.pending)
+        XCTAssertEqual(requestProbe.snapshot.dates.count, 2)
+        try await settings.setGhostwriterEnabled(false)
+        try await settings.setEnabledPeriods([])
+        await production.scheduleOvernightDigest()
+        XCTAssertNil(requestProbe.snapshot.pending)
+        XCTAssertEqual(requestProbe.snapshot.dates.count, 2)
+        XCTAssertEqual(requestProbe.snapshot.cancellations, 4)
     }
 
     private func makeDate(hour: Int, minute: Int) -> Date {
