@@ -1,6 +1,6 @@
 # Digest deletion contract (RETENTION-01)
 
-Accepted policy, 2026-09-27. This contract applies to deletion of a known `Digest` by manual request or the existing completed-digest age rule. It introduces no new retention period, historical orphan sweep, media cleanup, or foreign-key mode change. RETENTION-02 implements it.
+User-confirmed reference-preservation policy; implementation contract under review, 2026-09-27. This contract applies to deletion of a known `Digest` by manual request or the existing completed-digest age rule. It introduces no new retention period, historical orphan sweep, media cleanup, or foreign-key mode change. RETENTION-02 implements it.
 
 ## Eligibility and ownership
 
@@ -8,7 +8,7 @@ An episode reference is any `PodcastEpisode.digest_ids` JSON array containing th
 
 | Object | Ownership and required behavior for an eligible digest |
 | --- | --- |
-| `Digest` | Deletion marker, then delete last. Completed digests qualify for scheduled age rule; an existing marker qualifies for retry regardless of age. Manual deletion of a queued/processing digest conflicts; failed digests need a separate decision and are outside this contract. |
+| `Digest` | Deletion marker, then delete last. Completed digests qualify for scheduled age rule; an existing marker qualifies for retry regardless of age. Manual deletion of a queued/processing digest conflicts; failed digests remain manually deletable through the same safe operation, preserving the existing cleanup control. Scheduled age eligibility remains completed-only apart from retrying an existing deletion marker. |
 | `DigestArticle` | Delete rows with this `digest_id` after files are gone. They contain full source content, including private one-off content. No cross-digest deletion by URL or feed. |
 | `ArticleFeedback` | Delete rows whose `article_id` is in those article rows or whose `digest_id` is this digest. This prevents stale source-linked preference records and foreign-key references. Do not delete other users' independent feedback. |
 | EPUB and cached PDF | Delete only the exact validated `output_dir / digest.filename` and its `_derive_pdf_filename` sibling. Embedded cover is inside the EPUB. Missing files count as already removed. Reject unsafe filenames, paths escaping the output directory, symlinks, and filename/PDF-name collisions with any other live digest; never follow or unlink a shared path. A collision is a conflict requiring repair, not permission to remove either file. |
@@ -25,7 +25,7 @@ One-off privacy is determined while the digest row and articles still exist: the
 
 Both manual and scheduled callers use one service. They pass a digest identifier or resolve a filename to exactly one digest, apply the existing access check for manual calls, and use the same eligibility/reference check. If missing, manual returns 404 (including a repeated request after successful deletion); scheduled does not count it. If referenced, manual returns 409 and scheduled skips. If a file or DB step fails, manual returns a retryable server error and scheduled logs a failure; neither reports success nor increments the deleted count.
 
-1. In one SQLite write transaction (`BEGIN IMMEDIATE` or equivalent), re-read the digest and references, validate status/filenames/collisions, then change `completed` to durable `deleting` and commit. The marker is the retry journal and excludes the row from downloads, list/sync eligibility, PDF generation, and new episode selection. A retry of an existing marker repeats the checks. No new column or Alembic revision is required.
+1. In one SQLite write transaction (`BEGIN IMMEDIATE` or equivalent), re-read the digest and references, validate status/filenames/collisions, then change the eligible completed/failed status to durable `deleting` and commit. The marker is the retry journal and excludes the row from downloads, list/sync eligibility, PDF generation, and new episode selection. A retry of an existing marker repeats the checks. No new column or Alembic revision is required.
 2. Unlink the exact EPUB and PDF paths. Treat `FileNotFoundError` as success; propagate permission and other I/O errors. Revalidate the safe path before each unlink. Files that exist while `deleting` are inaccessible through digest endpoints.
 3. In a fresh write transaction, recheck references and delete feedback, articles and the digest; clear matching media/schedule pointers; commit once. If a reference appeared despite the queue guard, keep the marked digest and stop rather than orphaning the episode. There is no cascade to other objects.
 
@@ -33,7 +33,7 @@ This order handles a crash after marking, after one unlink, or before/failing th
 
 ## Races requiring coordinated seams in RETENTION-02
 
-The write transaction for marking and every episode-creation transaction must serialize on SQLite. `podcast_service.queue_episode_generation` and the scheduled/multi-digest episode creation paths must read `completed` status and persist the `digest_ids` reference inside the same write transaction; never choose a digest, release the lock, then persist a reference. Existing episode retry should see the reference and is unaffected. All statuses are checked in deletion, not only `ready`.
+The write transaction for marking and every episode-creation transaction must serialize on SQLite. `podcast_service.queue_episode_generation` and the scheduled/multi-digest episode creation paths must read `completed` status and persist the `digest_ids` reference inside the same write transaction; never choose a digest, release the lock, then persist a reference. Existing episode retry should see the reference and is unaffected. `podcast_service.upsert_feedback` must likewise re-read the parent status and write within its transaction so feedback cannot appear after the deletion transaction has removed the source; reject writes to a missing/deleting source. All statuses are checked in deletion, not only `ready`.
 
 PDF generation must not publish a PDF after the marker is committed: under the same per-digest coordination, check completed status, render to a temporary file, and publish only while the digest remains eligible. A failed/cancelled render removes its temporary file. A download that already opened an EPUB/PDF may finish; a concurrent request after the marker returns conflict/404 and cannot regenerate content. Because `FileResponse` opens files after the handler returns, RETENTION-02 must either open the file before releasing coordination and stream that handle, or return a clean retryable response if deletion wins; it must not report a successful response whose later lazy open fails. The filename route must check the row before the file. A concurrent second deletion rechecks the marker and safely retries without deleting unrelated files.
 
