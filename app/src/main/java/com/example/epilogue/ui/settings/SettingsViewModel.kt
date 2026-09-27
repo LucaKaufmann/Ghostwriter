@@ -245,7 +245,7 @@ class SettingsViewModel @Inject constructor(
             }
 
             // First, sync feeds to Ghostwriter
-            val syncResult = feedSyncV2UseCase.sync().also { feedV2Store.recordOutcome(it) }
+            val syncResult = feedV2Store.syncAndRecord(feedSyncV2UseCase)
 
             when (syncResult) {
                 is FeedSyncV2Outcome.Complete -> {
@@ -1588,7 +1588,7 @@ class SettingsViewModel @Inject constructor(
 
             // 1. Sync feeds
             run {
-                val feedResult = feedSyncV2UseCase.sync().also { feedV2Store.recordOutcome(it) }
+                val feedResult = feedV2Store.syncAndRecord(feedSyncV2UseCase)
                 when (feedResult) {
                     is FeedSyncV2Outcome.Complete -> {
                         settingsRepository.setLastFeedSyncTime(System.currentTimeMillis())

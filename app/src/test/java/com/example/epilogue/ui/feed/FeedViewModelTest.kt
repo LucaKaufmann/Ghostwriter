@@ -97,7 +97,7 @@ class FeedViewModelTest {
 
     @Test fun `correction preserves sparse edit intent across mandatory pre-submit pull`() = runTest(dispatcher) {
         var pulls = 0
-        coEvery { sync.sync() } answers {
+        coEvery { store.syncAndRecord(sync) } answers {
             pulls++
             FeedSyncV2Outcome.Complete(0, if (pulls == 1) 1 else 0)
         }
@@ -113,9 +113,9 @@ class FeedViewModelTest {
         model().correctRejected("head", FeedCorrectionEdits(title = "Corrected"))
         advanceUntilIdle()
         coVerifyOrder {
-            sync.sync()
+            store.syncAndRecord(sync)
             store.correctRejected("head", any<FeedCorrectionEdits>())
-            sync.sync()
+            store.syncAndRecord(sync)
         }
     }
 

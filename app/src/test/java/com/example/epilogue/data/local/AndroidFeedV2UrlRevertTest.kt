@@ -17,9 +17,12 @@ import io.mockk.mockk
 import io.mockk.mockkConstructor
 import io.mockk.mockkStatic
 import io.mockk.every
+import io.mockk.coEvery
 import io.mockk.unmockkConstructor
 import io.mockk.unmockkStatic
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -73,6 +76,58 @@ class AndroidFeedV2UrlRevertTest {
             Triple(destination, token, binding)
         }
 
+    @Test fun `held A result cannot overwrite status after B to A generation roundtrip`() = runBlocking {
+        val database = db()
+        val settings = SettingsRepository(context, database)
+        settings.setGhostwriterEnabled(true)
+        settings.setGhostwriterUrl(a)
+        val store = AndroidFeedV2Store(database, settings)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val held = mockk<FeedSyncV2UseCase>()
+        coEvery { held.sync() } coAnswers {
+            entered.complete(Unit)
+            release.await()
+            FeedSyncV2Outcome.Failed("pull", "stale binding")
+        }
+        val oldRun = async { store.syncAndRecord(held) }
+        entered.await()
+        val originalGeneration = database.feedSyncStateDao().active()!!.generation
+        settings.setGhostwriterUrl(b)
+        settings.setGhostwriterUrl(a)
+        val restored = database.feedSyncStateDao().active()!!
+        assertEquals(originalGeneration + 2, restored.generation)
+        assertFalse(restored.suspended)
+
+        val current = mockk<FeedSyncV2UseCase>()
+        coEvery { current.sync() } returns FeedSyncV2Outcome.Complete(2, 3)
+        assertEquals(FeedSyncV2Outcome.Complete(2, 3), store.syncAndRecord(current))
+        assertEquals("complete", database.feedSyncStateDao().active()!!.lastOutcome)
+        release.complete(Unit)
+        assertTrue(oldRun.await() is FeedSyncV2Outcome.Failed)
+        assertEquals("complete", database.feedSyncStateDao().active()!!.lastOutcome)
+        database.close()
+    }
+
+    @Test fun `first bind success and disabled outcome persist for the same binding`() = runBlocking {
+        val database = db()
+        val settings = SettingsRepository(context, database)
+        settings.setGhostwriterEnabled(true)
+        settings.setGhostwriterUrl(a)
+        val store = AndroidFeedV2Store(database, settings)
+        assertNull(database.feedSyncStateDao().active())
+        val configured = mockk<FeedSyncV2UseCase>()
+        coEvery { configured.sync() } returns FeedSyncV2Outcome.Complete(0, 0)
+        store.syncAndRecord(configured)
+        assertEquals("complete", database.feedSyncStateDao().active()!!.lastOutcome)
+        settings.setGhostwriterEnabled(false)
+        val disabled = mockk<FeedSyncV2UseCase>()
+        coEvery { disabled.sync() } returns FeedSyncV2Outcome.NotConfigured
+        store.syncAndRecord(disabled)
+        assertEquals("not_configured", database.feedSyncStateDao().active()!!.lastOutcome)
+        database.close()
+    }
+
     @Test fun `transient A to B to A invalidates tokens without suspending or losing outbox across reopen`() = runBlocking {
         var database = db()
         val settings = SettingsRepository(context, database)
@@ -89,7 +144,6 @@ class AndroidFeedV2UrlRevertTest {
         assertEquals(FeedV2StoreResult.StaleBinding,
             store.loadPendingMutations(oldToken, oldBinding, 100))
         assertEquals(FeedV2StoreResult.StaleBinding, store.beginSyncRun(destination))
-        store.recordOutcome(FeedSyncV2Outcome.Complete(0, 0))
         assertEquals(oldOutcome, database.feedSyncStateDao().active()!!.lastOutcome)
         settings.setGhostwriterUrl(a)
         assertEquals(oldGeneration + 2, database.feedSyncStateDao().active()!!.generation)

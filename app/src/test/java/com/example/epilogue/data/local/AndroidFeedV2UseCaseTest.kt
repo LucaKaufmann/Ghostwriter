@@ -79,12 +79,13 @@ class AndroidFeedV2UseCaseTest {
             push = { batch -> FeedV2RemoteResult.Success(FeedMutationBatchResultV2(serverId,
                 listOf(FeedMutationResultV2(batch.mutations.single().opId, "applied", snapshot("Created", 1))))) }
         }
-        val result = FeedSyncV2UseCase(store, store, remote).sync()
+        val result = store.syncAndRecord(FeedSyncV2UseCase(store, store, remote))
         assertTrue(result is FeedSyncV2Outcome.Complete)
         assertEquals(1, remote.batches.size)
         assertEquals(0, remote.batches.single().mutations.single().fields!!.maxArticles)
         assertTrue(db.feedMutationDao().forUrl(url).isEmpty())
         assertEquals(1L, db.feedDao().getFeedByUrl(url)!!.serverVersion)
+        assertEquals("complete", db.feedSyncStateDao().active()!!.lastOutcome)
         db.close()
     }
 
@@ -137,13 +138,12 @@ class AndroidFeedV2UseCaseTest {
                 pull = { FeedV2RemoteResult.HttpFailure(status, null) }
                 push = { error("No v2 mutation should be sent") }
             }
-            val result = FeedSyncV2UseCase(store, store, remote).sync()
+            val result = store.syncAndRecord(FeedSyncV2UseCase(store, store, remote))
             assertEquals(FeedSyncV2Outcome.ServerUpgradeRequired, result)
             assertTrue(remote.batches.isEmpty())
             assertEquals("Offline", db.feedDao().getFeedByUrl(url)!!.name)
             assertEquals(1, db.feedMutationDao().forUrl(url).size)
             assertFalse(db.feedSyncStateDao().active()!!.firstBindingComplete)
-            store.recordOutcome(result)
             assertEquals("server_upgrade_required", db.feedSyncStateDao().active()!!.lastOutcome)
             db.close()
         }

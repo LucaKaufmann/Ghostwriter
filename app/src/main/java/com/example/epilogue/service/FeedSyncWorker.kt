@@ -54,7 +54,7 @@ class FeedSyncWorker @AssistedInject constructor(
         }
 
         return try {
-            when (val outcome = feedSyncUseCase.sync().also { feedV2Store.recordOutcome(it) }) {
+            when (val outcome = feedV2Store.syncAndRecord(feedSyncUseCase)) {
                 is FeedSyncV2Outcome.Complete -> {
                     settingsRepository.setLastFeedSyncTime(System.currentTimeMillis())
                     Log.i(

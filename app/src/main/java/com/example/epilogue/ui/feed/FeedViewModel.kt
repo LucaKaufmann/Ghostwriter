@@ -95,7 +95,7 @@ class FeedViewModel @Inject constructor(
     fun resolve(opId: String, action: String) {
         viewModelScope.launch {
             if (action == "correct") {
-                val refreshed = feedSyncV2UseCase.sync().also { feedV2Store.recordOutcome(it) }
+                val refreshed = feedV2Store.syncAndRecord(feedSyncV2UseCase)
                 if (refreshed is FeedSyncV2Outcome.Failed || refreshed is FeedSyncV2Outcome.ServerChanged ||
                     refreshed is FeedSyncV2Outcome.ServerUpgradeRequired) {
                     _uiState.value = _uiState.value.copy(error = "Refresh server state before correcting this feed")
@@ -106,7 +106,7 @@ class FeedViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(error = "Feed proposal changed; refresh and try again")
                 return@launch
             }
-            when (val outcome = feedSyncV2UseCase.sync().also { feedV2Store.recordOutcome(it) }) {
+            when (val outcome = feedV2Store.syncAndRecord(feedSyncV2UseCase)) {
                 is FeedSyncV2Outcome.Failed -> _uiState.value = _uiState.value.copy(error = outcome.message)
                 FeedSyncV2Outcome.ServerChanged -> _uiState.value = _uiState.value.copy(error = "Server changed; resolve the binding before syncing")
                 FeedSyncV2Outcome.ServerUpgradeRequired -> _uiState.value = _uiState.value.copy(error = "Server upgrade required for feed sync")
@@ -117,7 +117,7 @@ class FeedViewModel @Inject constructor(
 
     fun correctRejected(opId: String, edits: FeedCorrectionEdits) {
         viewModelScope.launch {
-            val refreshed = feedSyncV2UseCase.sync().also { feedV2Store.recordOutcome(it) }
+            val refreshed = feedV2Store.syncAndRecord(feedSyncV2UseCase)
             if (refreshed is FeedSyncV2Outcome.Failed || refreshed is FeedSyncV2Outcome.ServerChanged ||
                 refreshed is FeedSyncV2Outcome.ServerUpgradeRequired) {
                 _uiState.value = _uiState.value.copy(error = "Refresh server state before correcting this feed")
@@ -127,7 +127,7 @@ class FeedViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(error = "Could not correct this proposal")
                 return@launch
             }
-            feedV2Store.recordOutcome(feedSyncV2UseCase.sync())
+            feedV2Store.syncAndRecord(feedSyncV2UseCase)
         }
     }
 
@@ -152,7 +152,7 @@ class FeedViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(error = "Server binding is not paused")
                 return@launch
             }
-            feedV2Store.recordOutcome(feedSyncV2UseCase.sync())
+            feedV2Store.syncAndRecord(feedSyncV2UseCase)
         }
     }
 

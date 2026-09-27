@@ -21,6 +21,7 @@ import com.example.epilogue.shared.sync.FeedV2StorePort
 import com.example.epilogue.shared.sync.FeedV2StoreResult
 import com.example.epilogue.shared.sync.FeedV2WorkSummary
 import com.example.epilogue.shared.sync.FeedSyncV2Outcome
+import com.example.epilogue.shared.sync.FeedSyncV2UseCase
 import com.example.epilogue.shared.sync.SentFeedMutationV2
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.decodeFromString
@@ -210,11 +211,39 @@ class AndroidFeedV2Store @Inject constructor(
     fun unresolved() = mutations.unresolvedFlow()
     fun status() = states.activeFlow()
 
-    suspend fun recordOutcome(outcome: FeedSyncV2Outcome) {
+    private data class OutcomeTicket(
+        val serverKey: String,
+        val generation: Long,
+        val configuredUrl: String?,
+        val enabled: Boolean
+    )
+
+    /** Persist only the result of the binding that actually started this sync. */
+    suspend fun syncAndRecord(useCase: FeedSyncV2UseCase): FeedSyncV2Outcome {
+        // This prepares the same local destination that sync() will select; it makes
+        // the first configured run recordable without any remote request here.
+        currentDestination()
+        val ticket = database.withTransaction {
+            states.active()?.let { state ->
+                OutcomeTicket(state.serverKey, state.generation,
+                    settings.getGhostwriterUrl()?.let(::normalizedUrl),
+                    settings.isGhostwriterConfigured())
+            }
+        }
+        val outcome = useCase.sync()
+        if (ticket != null) recordOutcome(ticket, outcome)
+        return outcome
+    }
+
+    private suspend fun recordOutcome(ticket: OutcomeTicket, outcome: FeedSyncV2Outcome) {
         database.withTransaction {
             val state = states.active() ?: return@withTransaction
             // A run invalidated by a destination or server-identity change cannot hide Review.
-            if (state.suspended || !configuredUrlMatches(state)) return@withTransaction
+            if (state.suspended || state.serverKey != ticket.serverKey ||
+                state.generation != ticket.generation ||
+                settings.getGhostwriterUrl()?.let(::normalizedUrl) != ticket.configuredUrl ||
+                settings.isGhostwriterConfigured() != ticket.enabled ||
+                !configuredUrlMatches(state)) return@withTransaction
             val label = when (outcome) {
                 is FeedSyncV2Outcome.Complete -> "complete"
                 is FeedSyncV2Outcome.Partial -> "partial"

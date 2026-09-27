@@ -40,14 +40,13 @@ class FeedSyncWorkerTest {
     }
 
     @Test fun `transport and invalid response partials retry but actionable partial completes`() = runBlocking {
-        coEvery { store.recordOutcome(any()) } returns Unit
         for (phase in listOf("push", "pull", "invalid_response")) {
-            coEvery { sync.sync() } returns FeedSyncV2Outcome.Partial(0, 0, 1, 0, 0, phase)
+            coEvery { store.syncAndRecord(sync) } returns FeedSyncV2Outcome.Partial(0, 0, 1, 0, 0, phase)
             assertTrue(worker(0).doWork() is ListenableWorker.Result.Retry)
         }
-        coEvery { sync.sync() } returns FeedSyncV2Outcome.Partial(0, 0, 1, 1, 1, "pending")
+        coEvery { store.syncAndRecord(sync) } returns FeedSyncV2Outcome.Partial(0, 0, 1, 1, 1, "pending")
         assertTrue(worker(0).doWork() is ListenableWorker.Result.Success)
-        coEvery { sync.sync() } returns FeedSyncV2Outcome.Partial(0, 0, 1, 0, 0, "push")
+        coEvery { store.syncAndRecord(sync) } returns FeedSyncV2Outcome.Partial(0, 0, 1, 0, 0, "push")
         assertTrue(worker(FeedSyncWorker.MAX_RETRY_ATTEMPTS).doWork() is ListenableWorker.Result.Failure)
     }
 }

@@ -201,11 +201,11 @@ class SettingsViewModelTest {
     fun `persisted enabled Ghostwriter uses backend path`() = runTest(dispatcher) {
         every { settings.isGhostwriterEnabled() } returns true
         every { settings.getGhostwriterUrl() } returns "https://fixture.invalid"
-        coEvery { feedSyncV2.sync() } returns FeedSyncV2Outcome.NotConfigured
+        coEvery { feedV2Store.syncAndRecord(feedSyncV2) } returns FeedSyncV2Outcome.NotConfigured
         val model = viewModel()
         model.runDigestNow()
         advanceUntilIdle()
-        coVerify(exactly = 1) { feedSyncV2.sync() }
+        coVerify(exactly = 1) { feedV2Store.syncAndRecord(feedSyncV2) }
         coVerify(exactly = 0) { ghostwriter.syncFeeds(any()) }
         verify(exactly = 0) { scheduler.runNow(any()) }
         assertFalse(model.uiState.value.isGenerating)

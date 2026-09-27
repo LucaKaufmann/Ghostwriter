@@ -14,6 +14,8 @@ import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
 import com.example.epilogue.shared.sync.FeedV2Binding
 import com.example.epilogue.shared.sync.FeedV2StoreResult
 import com.example.epilogue.shared.sync.FeedSyncV2Outcome
+import com.example.epilogue.shared.sync.FeedSyncV2UseCase
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -582,7 +584,9 @@ class AndroidFeedV2StoreTest {
         val sent = value(store.loadPendingMutations(token, binding, 100)).single()
         store.beforeDestinationChange("https://two.invalid")
         destination = "https://two.invalid"
-        store.recordOutcome(FeedSyncV2Outcome.Failed("pull", "stale binding"))
+        val staleUseCase = mockk<FeedSyncV2UseCase>()
+        coEvery { staleUseCase.sync() } returns FeedSyncV2Outcome.Failed("pull", "stale binding")
+        store.syncAndRecord(staleUseCase)
         assertEquals(binding.destination, store.currentDestination())
         assertTrue(database.feedSyncStateDao().active()!!.suspended)
         assertEquals("server_changed", database.feedSyncStateDao().active()!!.lastOutcome)
