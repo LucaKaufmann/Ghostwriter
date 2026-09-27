@@ -59,7 +59,8 @@ public final class DeliveryStore {
         return value
     }
 
-    public func start(trigger: String, period: String?, at startedAt: Date = Date()) throws -> DeliveryRunHandle {
+    public func start(trigger: String, period: String?, mode: LocalGenerationMode = .normal,
+                      at startedAt: Date = Date()) throws -> DeliveryRunHandle {
         let context = context()
         var result: DeliveryRunHandle?
         do {
@@ -67,7 +68,10 @@ public final class DeliveryStore {
                 let sequence = (try context.fetch(FetchDescriptor<GenerationRun>())
                     .map(\.attemptSequence).max() ?? 0) + 1
                 let run = GenerationRun(attemptSequence: sequence, startedAt: startedAt,
-                                        trigger: trigger, period: period)
+                                        trigger: trigger, period: period,
+                                        diagnosticsJSON: String(data: try JSONEncoder().encode(
+                                            GenerationDiagnostics(feeds: [], mode: mode)),
+                                            encoding: .utf8) ?? "{}")
                 context.insert(run)
                 try context.save()
                 result = DeliveryRunHandle(id: run.runId, attemptSequence: sequence)
@@ -126,6 +130,9 @@ public final class DeliveryStore {
             try context.transaction {
                 let run = try run(handle.id, in: context)
                 guard run.outcome == "running" else { throw DeliveryStoreError.invalidClaim }
+                let startedMode = try JSONDecoder().decode(
+                    GenerationDiagnostics.self, from: Data(run.diagnosticsJSON.utf8)).mode
+                guard startedMode == mode else { throw DeliveryStoreError.invalidClaim }
                 let existing = Dictionary(uniqueKeysWithValues:
                     try context.fetch(FetchDescriptor<ArticleDelivery>()).map { ($0.identity, $0) })
                 let deliveredClaims = claims.filter { $0.state == "delivered" }
@@ -181,7 +188,9 @@ public final class DeliveryStore {
                 run.outcome = outcome.rawValue
                 run.finishedAt = Date()
                 run.digestId = digest?.id
-                run.diagnosticsJSON = String(data: try JSONEncoder().encode(diagnostics),
+                var recordedDiagnostics = diagnostics
+                recordedDiagnostics.mode = mode
+                run.diagnosticsJSON = String(data: try JSONEncoder().encode(recordedDiagnostics),
                                              encoding: .utf8) ?? "{}"
                 if failNextFinalSaveForTesting {
                     failNextFinalSaveForTesting = false
@@ -221,6 +230,9 @@ public final class DeliveryStore {
                     [TriggerType.scheduled.rawValue, TriggerType.manual.rawValue,
                      TriggerType.test.rawValue].contains(run.trigger) {
                     let digest = digests.first { $0.id == run.digestId }
+                    let old = (try? JSONDecoder().decode(
+                        GenerationDiagnostics.self, from: Data(run.diagnosticsJSON.utf8))) ??
+                        GenerationDiagnostics(feeds: [])
                     let usable = digest.map { value in
                         let artifactSize = (try? FileManager.default.attributesOfItem(
                             atPath: value.epubFilePath)[.size]) as? Int64 ?? 0
@@ -234,20 +246,19 @@ public final class DeliveryStore {
                                                           articleKey: identity.articleKey).identity
                                 guard let claim = claims[key], claim.state == "delivered",
                                       let firstDigestId = claim.firstDigestId else { return false }
-                                // Regeneration keeps the first normal claim. Only manual
-                                // generation can reuse it; scheduled runs must own theirs.
-                                return firstDigestId == value.id || run.trigger == TriggerType.manual.rawValue
+                                // Regeneration keeps the first normal claim. Only an
+                                // explicitly recorded manual regeneration can reuse it.
+                                return firstDigestId == value.id ||
+                                    (run.trigger == TriggerType.manual.rawValue && old.mode == .regenerate)
                             }
                     } ?? false
-                    let old = (try? JSONDecoder().decode(
-                        GenerationDiagnostics.self, from: Data(run.diagnosticsJSON.utf8))) ??
-                        GenerationDiagnostics(feeds: [])
                     if usable {
                         run.outcome = old.failedCount > 0 || old.deferredCount > 0 ? "partial" : "complete"
                     } else {
                         run.outcome = "failed"
                         run.diagnosticsJSON = String(data: try JSONEncoder().encode(
-                            GenerationDiagnostics(feeds: old.feeds, runError: "interrupted")),
+                            GenerationDiagnostics(feeds: old.feeds, runError: "interrupted",
+                                                  mode: old.mode)),
                             encoding: .utf8) ?? "{}"
                         if let digest, digest.remoteId == nil,
                            [.scheduled, .manual, .test].contains(digest.triggerType) {
