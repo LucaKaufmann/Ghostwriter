@@ -174,6 +174,35 @@ class DigestSchedulerRegistrationTest {
         }
     }
 
+    @Test fun `period disabled after boot selection is not re-enqueued by child`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        lateinit var scheduler: DigestScheduler
+        var reads = 0
+        every { settings.getSchedulePeriods() } answers {
+            if (reads++ == 0) {
+                // Return the captured boot snapshot, then complete a user disable
+                // before the child allocates its own registration generation.
+                scheduler.cancelPeriod(DigestPeriod.MORNING)
+                setOf(DigestPeriod.MORNING)
+            } else emptySet()
+        }
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.getWorkInfosForUniqueWorkFlow(any()) } returns
+                MutableStateFlow(emptyList())
+            scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            scheduler.scheduleAllPeriodsAwaitPersistence()
+            verify(exactly = 1) { manager.cancelUniqueWork(workName) }
+            verify(exactly = 0) { manager.enqueueUniquePeriodicWork(workName, any(), any()) }
+            assertTrue(reads >= 2)
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
     @Test fun `westbound zone change does not duplicate an anchored occurrence date`() {
         val originalZone = ZoneId.of("Pacific/Kiritimati")
         val westboundZone = ZoneId.of("Pacific/Honolulu")
