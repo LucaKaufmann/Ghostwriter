@@ -5,7 +5,7 @@ import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlmodel import Session, select
@@ -16,6 +16,7 @@ from app.models.client_settings import ClientSettings
 from app.models.feed import Feed
 from app.models.feed_sync import FeedMutationReceipt
 from app.services.content_processor import ContentProcessor
+from app.services.feed_sync import valid_new_feed_port
 from app.services.outbound_fetch import FetchedResource
 from app.worker.cleanup import cleanup_old_tombstones
 
@@ -358,6 +359,62 @@ def test_web_metadata_put_does_not_revalidate_immutable_feed_url(client, public_
                        headers={"If-Match": f'"{feed["version"]}"'})
     assert stale.status_code == 409
     assert client.get(f"/api/feeds/{feed['id']}").json()["title"] == "Unreachable feed"
+
+
+@pytest.mark.parametrize("bad_url", [
+    "https://example.com:/rss", "https://example.com:0/rss",
+    "https://example.com:abc/rss", "https://example.com:99999/rss",
+])
+def test_new_feed_port_syntax_is_rejected_by_web_and_v2(client, public_dns, bad_url):
+    assert client.post("/api/feeds", json={"url": bad_url, "title": "Invalid"}).status_code == 422
+    identity = binding(client)["server_instance_id"]
+    item = {"op_id": str(uuid4()), "url": bad_url, "kind": "upsert",
+            "base_version": None, "fields": {"title": "Invalid", "mode": "raw",
+                                                   "is_active": True, "max_articles": 5}}
+    result = push(client, identity, [item]).json()["results"][0]
+    assert result["status"] == "rejected"
+    assert result["code"] == "invalid_url"
+    with Session(engine) as session:
+        assert session.exec(select(Feed).where(Feed.url == bad_url)).first() is None
+
+
+def test_existing_malformed_port_does_not_block_versioned_metadata_edits(client, public_dns):
+    feed = create(client, url())
+    legacy_url = "https://example.com:abc/legacy.xml"
+    with Session(engine) as session:
+        stored = session.get(Feed, UUID(feed["id"]))
+        stored.url = legacy_url
+        session.add(stored)
+        session.commit()
+    identity = binding(client)["server_instance_id"]
+    item = {"op_id": str(uuid4()), "url": legacy_url, "kind": "upsert",
+            "base_version": feed["version"], "fields": {"title": "Still editable"}}
+    result = push(client, identity, [item]).json()["results"][0]
+    assert result["status"] == "applied"
+    changed = client.put(f"/api/feeds/{feed['id']}", json={"is_active": False},
+                         headers={"If-Match": f'"{result["current"]["version"]}"'})
+    assert changed.status_code == 200
+    assert changed.json()["is_active"] is False
+
+
+def test_new_port_check_allows_valid_ipv6_and_zero_padded_ports():
+    assert valid_new_feed_port("https://[2606:4700:4700::1111]/rss")
+    assert valid_new_feed_port("https://[2606:4700:4700::1111]:00443/rss")
+    assert valid_new_feed_port("https://example.com:00080/rss")
+
+
+def test_private_host_opt_in_does_not_bypass_new_port_syntax(client, monkeypatch):
+    settings = get_settings().model_copy(update={"allow_private_hosts": True})
+    monkeypatch.setattr("app.services.outbound_fetch.get_settings", lambda: settings)
+    bad_url = "http://localhost:abc/rss"
+    assert client.post("/api/feeds", json={"url": bad_url, "title": "Invalid"}).status_code == 422
+    identity = binding(client)["server_instance_id"]
+    item = {"op_id": str(uuid4()), "url": bad_url, "kind": "upsert",
+            "base_version": None, "fields": {"title": "Invalid", "mode": "raw",
+                                                   "is_active": True, "max_articles": 5}}
+    result = push(client, identity, [item]).json()["results"][0]
+    assert result["status"] == "rejected"
+    assert result["code"] == "invalid_url"
 
 
 def test_web_put_cannot_implicitly_restore_tombstone(client, public_dns):

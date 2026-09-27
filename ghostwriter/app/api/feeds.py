@@ -106,7 +106,9 @@ async def mutate_v2(body: dict, session: Session = Depends(get_session)) -> dict
     return {"server_instance_id": instance_id, "results": results}
 
 
-async def _validate_feed_url(url: str) -> None:
+async def _validate_feed_url(url: str, *, new_url: bool = False) -> None:
+    if new_url and not feed_sync.valid_new_feed_port(url):
+        raise HTTPException(status_code=422, detail="Invalid feed URL port")
     try:
         await validate_public_url_bounded(url)
     except ValueError as exc:
@@ -349,7 +351,7 @@ async def create_feed(
     session.rollback()
     if active_snapshot is not None:
         raise HTTPException(409, detail={"code": "feed_conflict", "current": active_snapshot})
-    await _validate_feed_url(feed_data.url)
+    await _validate_feed_url(feed_data.url, new_url=existing is None)
     try:
         return feed_sync.write_web(
             session, url=feed_data.url, kind="upsert",

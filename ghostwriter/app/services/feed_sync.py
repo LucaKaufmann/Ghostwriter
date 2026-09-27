@@ -166,6 +166,16 @@ def _valid_url_shape(url: object) -> bool:
         return False
 
 
+def valid_new_feed_port(url: str) -> bool:
+    """Validate port syntax only when admitting a genuinely new feed URL."""
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return False
+    return not parsed.netloc.endswith(":") and (port is None or 1 <= port <= 65535)
+
+
 async def mutate_one(session: Session, instance_id: str, item: dict) -> dict:
     """One transaction per item; terminal results and writes commit together."""
     op_id = str(UUID(item["op_id"]))
@@ -186,12 +196,15 @@ async def mutate_one(session: Session, instance_id: str, item: dict) -> dict:
     base = item.get("base_version", "missing")
     needs_new_url_admission = url_valid and kind == "upsert" and base is None and not known_url
     if needs_new_url_admission:
-        try:
-            await validate_public_url_bounded(url)
-        except ValueError:
+        if not valid_new_feed_port(url):
             url_valid = False
-        except TimeoutError:
-            raise HTTPException(503, detail={"code": "feed_validation_timeout"}) from None
+        else:
+            try:
+                await validate_public_url_bounded(url)
+            except ValueError:
+                url_valid = False
+            except TimeoutError:
+                raise HTTPException(503, detail={"code": "feed_validation_timeout"}) from None
     _begin_write(session)
     try:
         clock = _clock(session)
