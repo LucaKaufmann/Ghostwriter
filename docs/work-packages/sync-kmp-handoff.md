@@ -1,6 +1,6 @@
 # SYNC-EDITS-KMP implementation handoff
 
-Prepared 2026-09-27 from the accepted [feed sync and local delivery contract](integration/docs/contracts/feed-sync-and-local-delivery.md), [KMP dispatch notes](sync-kmp-plan.md), integration checkout, and the server worker's current v2 route/service shape. This is a read-only design handoff: no implementation, build, commit, or PR is claimed. Root must pin the exact verified server base after its pending review before dispatch.
+Prepared 2026-09-27 from the accepted [feed sync and local delivery contract](https://github.com/LucaKaufmann/Ghostwriter/blob/codex/contract-01-sync-delivery/docs/contracts/feed-sync-and-local-delivery.md), [scoped mobile dispatch notes](mobile.md#sync-edits), integration checkout, and the server worker's current v2 route/service shape. This is a read-only design handoff: no implementation, build, commit, or PR is claimed. Root must pin the exact verified server base after its pending review before dispatch.
 
 ## Existing seams and ownership
 
