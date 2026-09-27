@@ -185,15 +185,23 @@ import socket
 import sys
 from app.core.config import Settings
 Settings.model_config = {**Settings.model_config, "env_file": None}
-original_connect = socket.socket.connect
-def no_ip_connect(sock, *args, **kwargs):
-    if sock.family in (socket.AF_INET, socket.AF_INET6):
-        raise AssertionError("Release fixture must not contact external sources")
-    return original_connect(sock, *args, **kwargs)
-socket.socket.connect = no_ip_connect
-socket.getaddrinfo = lambda host, port, *args, **kwargs: [
-    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port))
-]
+def block_ip(function):
+    def guarded(sock, *args, **kwargs):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            raise AssertionError("Release fixture must not contact external sources")
+        return function(sock, *args, **kwargs)
+    return guarded
+def no_dns(*args, **kwargs):
+    raise AssertionError("Release fixture must not resolve external sources")
+def synthetic_dns(host, port, *args, **kwargs):
+    assert host == "example.com", "Unexpected DNS request in release fixture"
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port))]
+for name in ("connect", "connect_ex", "sendto", "sendmsg"):
+    if hasattr(socket.socket, name):
+        setattr(socket.socket, name, block_ip(getattr(socket.socket, name)))
+for name in ("gethostbyname", "gethostbyname_ex", "gethostbyaddr", "getnameinfo"):
+    setattr(socket, name, no_dns)
+socket.getaddrinfo = synthetic_dns
 from fastapi.testclient import TestClient
 from app.main import app
 client = TestClient(app)
@@ -229,8 +237,8 @@ def test_current_026_027_stopped_restore_keeps_ack_and_rotates_identity(tmp_path
             "(id,digest_id,provider,source_identity,source_config_fingerprint,"
             "external_item_id,action,state,attempt_count,created_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
-            (acknowledgement_id, uuid4().hex, "gmail", "fixture@example.test",
-             "fixture-config", "fixture-message", "mark_read", "pending", 0),
+            (acknowledgement_id, uuid4().hex, "gmail", uuid4().hex * 2,
+             uuid4().hex * 2, "fixture-message", "mark_read", "pending", 0),
         )
         expected_ack = db.execute(
             "SELECT id,provider,source_identity,external_item_id,state,attempt_count "
