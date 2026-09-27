@@ -49,8 +49,10 @@ class FetchedResource:
 
 async def _validate_url(url: str, settings: Settings) -> None:
     """Validate off-loop with a fixed bound on queued and live DNS work."""
-    if not _dns_slots.acquire(blocking=False):
-        raise httpx.PoolTimeout("DNS validation capacity exhausted")
+    # Wait without blocking the loop, within the total deadline. Admission must
+    # not turn ordinary concurrency into an immediate upstream failure.
+    while not _dns_slots.acquire(blocking=False):
+        await asyncio.sleep(0.01)
     try:
         future = _dns_executor.submit(validate_public_url, url, settings)
     except BaseException:
@@ -68,14 +70,19 @@ def _check_content_type(content_type: str | None, kind: str) -> None:
     mime = content_type.partition(";")[0].strip().lower()
     if kind == "html" and mime not in {"text/html", "application/xhtml+xml"}:
         raise NonHtmlContentError(f"Unsupported content-type: {content_type}")
-    if kind == "feed" and mime not in {
-        "application/rss+xml",
-        "application/atom+xml",
-        "application/xml",
-        "text/xml",
-        "text/plain",
-        "application/octet-stream",
-    } and not mime.endswith("+xml"):
+    if (
+        kind == "feed"
+        and mime
+        not in {
+            "application/rss+xml",
+            "application/atom+xml",
+            "application/xml",
+            "text/xml",
+            "text/plain",
+            "application/octet-stream",
+        }
+        and not mime.endswith("+xml")
+    ):
         raise NonFeedContentError(f"Unsupported feed content-type: {content_type}")
 
 
@@ -86,9 +93,7 @@ async def _read_bounded(response: httpx.Response, max_bytes: int) -> bytes:
         raise httpx.DecodingError("Unsupported content encoding")
     length = response.headers.get("content-length")
     if length and length.isdecimal() and int(length) > max_bytes:
-        raise DocumentTooLargeError(
-            f"Document exceeded max size of {max_bytes} bytes"
-        )
+        raise DocumentTooLargeError(f"Document exceeded max size of {max_bytes} bytes")
 
     data = bytearray()
     wire_bytes = 0
@@ -160,7 +165,9 @@ async def fetch_resource(
                         if response.status_code in REDIRECT_STATUSES:
                             location = response.headers.get("location")
                             if not location:
-                                raise ValueError("Redirect response missing Location header")
+                                raise ValueError(
+                                    "Redirect response missing Location header"
+                                )
                             if hop >= max_redirects:
                                 raise ValueError("Too many redirects")
                             next_url = urljoin(str(response.url), location)
@@ -172,16 +179,21 @@ async def fetch_resource(
                         content_type = response.headers.get("content-type")
                         _check_content_type(content_type, kind)
                         data = await _read_bounded(response, max_bytes)
+                        content_location = None
+                        if response.headers.get("content-location"):
+                            try:
+                                content_location = urljoin(
+                                    str(response.url),
+                                    response.headers["content-location"],
+                                )
+                            except ValueError:
+                                pass  # Optional malformed metadata cannot invalidate a body.
                         return FetchedResource(
                             final_url=str(response.url),
                             content_type=content_type,
                             encoding=response.encoding or "utf-8",
                             data=data,
-                            content_location=(
-                                urljoin(str(response.url), response.headers["content-location"])
-                                if response.headers.get("content-location")
-                                else None
-                            ),
+                            content_location=content_location,
                         )
     except TimeoutError as exc:
         raise httpx.ReadTimeout("Outbound fetch timed out") from exc
