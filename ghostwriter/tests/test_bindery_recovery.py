@@ -237,6 +237,47 @@ async def test_failed_publication_rolls_back_all_claims(scene, boundary):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["synthetic", "digest", "config"])
+async def test_pre_pipeline_read_failure_marks_run_failed_and_allows_retry(scene, monkeypatch, boundary):
+    pipeline = scene.new_pipeline()
+    if boundary == "synthetic":
+        monkeypatch.setattr(pipeline, "_ensure_synthetic_feeds", lambda: (_ for _ in ()).throw(
+            RuntimeError("synthetic feed read failed")
+        ))
+        listener = None
+    else:
+        marker = "from digest" if boundary == "digest" else "from client_config"
+        failed_once = False
+
+        def fail_once(_conn, _cursor, statement, _parameters, _context, _executemany):
+            nonlocal failed_once
+            if not failed_once and marker in statement.lower():
+                failed_once = True
+                raise RuntimeError(f"{boundary} read failed")
+
+        listener = fail_once
+        event.listen(scene.database, "before_cursor_execute", listener)
+    try:
+        with pytest.raises(RuntimeError, match="read failed"):
+            await pipeline.run()
+    finally:
+        if listener:
+            event.remove(scene.database, "before_cursor_execute", listener)
+    failed = scene.snapshot(pipeline.digest_id)
+    assert failed.status == "failed"
+    assert failed.rows == [] and failed.seen == [] and failed.receipts == []
+    assert failed.media_owner is None and not failed.artifact
+    with Session(scene.database) as session:
+        digest = session.get(Digest, pipeline.digest_id)
+        assert digest.locked_at is None
+        assert "read failed" in digest.error_message
+
+    retry = scene.new_pipeline()
+    await retry.run()
+    assert scene.snapshot(retry.digest_id).status == "completed"
+
+
+@pytest.mark.asyncio
 async def test_post_commit_logger_error_cannot_demote_completed(scene, monkeypatch):
     pipeline = scene.new_pipeline()
     monkeypatch.setattr(bindery.digest_logger, "pipeline_completed", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("log failure")))
