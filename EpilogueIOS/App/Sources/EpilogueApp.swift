@@ -63,7 +63,19 @@ struct EpilogueApp: App {
         #endif
 
         // Initialize repositories
+        #if DEBUG
+        let settings: SettingsRepository
+        if fixtureRequested {
+            let defaults = UserDefaults(suiteName: "epilogue.feed-v2-ui-fixture")!
+            defaults.removePersistentDomain(forName: "epilogue.feed-v2-ui-fixture")
+            defaults.set("https://server.test", forKey: "ghostwriter_url")
+            settings = SettingsRepository(userDefaults: defaults, modelContainer: persistence.container)
+        } else {
+            settings = SettingsRepository(modelContainer: persistence.container)
+        }
+        #else
         let settings = SettingsRepository(modelContainer: persistence.container)
+        #endif
         let feeds = FeedRepository(modelContext: context)
         let digests = DigestRepository(modelContext: context)
 
