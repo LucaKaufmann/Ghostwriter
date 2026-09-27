@@ -23,7 +23,7 @@ public final class FeedRepository: FeedRepositoryProtocol {
         let descriptor = FetchDescriptor<Feed>(
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
-        return try modelContext.fetch(descriptor)
+        return try modelContext.fetch(descriptor).filter { $0.isLocallyDeleted != true }
     }
 
     public func getEnabledFeeds() async throws -> [Feed] {
@@ -31,7 +31,7 @@ public final class FeedRepository: FeedRepositoryProtocol {
             predicate: #Predicate { $0.isEnabled == true },
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
-        return try modelContext.fetch(descriptor)
+        return try modelContext.fetch(descriptor).filter { $0.isLocallyDeleted != true }
     }
 
     public func getFeed(url: String) async throws -> Feed? {

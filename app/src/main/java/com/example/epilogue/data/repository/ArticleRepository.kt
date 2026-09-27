@@ -8,6 +8,10 @@ import com.example.epilogue.service.ContentProcessor
 import com.example.epilogue.service.OpenAIService
 import com.example.epilogue.service.PromotionalContentFilter
 import com.example.epilogue.service.RssService
+import com.example.epilogue.shared.delivery.ArticleDeliveryIdentity
+import com.example.epilogue.shared.delivery.ArticleIdentityResult
+import kotlinx.coroutines.CancellationException
+import java.security.MessageDigest
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -25,10 +29,112 @@ class ArticleRepository @Inject constructor(
     private val openAIService: OpenAIService,
     private val feedRepository: FeedRepository,
     private val settingsRepository: SettingsRepository,
-    private val promotionalFilter: PromotionalContentFilter
+    private val promotionalFilter: PromotionalContentFilter,
+    private val deliveryStore: ArticleDeliveryStore
 ) {
     companion object {
         private const val TAG = "ArticleRepository"
+        private const val FILTER_REVISION = "android-filter-v1"
+    }
+
+    private val identity = ArticleDeliveryIdentity()
+
+    private fun filterSignature(feed: Feed, minWordCount: Int): String {
+        val value = "$FILTER_REVISION|minWords=$minWordCount|mode=${feed.mode.name}"
+        return MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    /** Parses the available page before identity filtering, fair ordering, and the cap. */
+    suspend fun ingestForGeneration(feed: Feed, runId: Long,
+        regeneration: Boolean = false): FeedIngestionResult {
+        val items = try {
+            rssService.fetchFeedForGeneration(feed.url)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return FeedIngestionResult(feed, 0, 0, emptyList(), emptyList(),
+                emptyList(), 0, feedError = "fetch_failed")
+        }
+        val minWords = settingsRepository.getMinWordCount()
+        val signature = filterSignature(feed, minWords)
+        data class Candidate(val key: String, val index: Int, val item: com.prof18.rssparser.model.RssItem)
+        val issues = mutableListOf<DeliveryIssue>()
+        val seen = mutableSetOf<String>()
+        val candidates = items.mapIndexedNotNull { index, item ->
+            when (val parsed = identity.fromArticleLink(item.link)) {
+                ArticleIdentityResult.Invalid -> {
+                    issues += DeliveryIssue(null, "identity", "invalid_identity")
+                    null
+                }
+                is ArticleIdentityResult.Valid -> if (seen.add(parsed.articleKey))
+                    Candidate(parsed.articleKey, index, item) else null
+            }
+        }
+        val persisted = deliveryStore.forFeed(feed.url)
+        val eligible = candidates.filter { candidate ->
+            val row = persisted[candidate.key]
+            regeneration || (row?.state != "delivered" &&
+                !(row?.state == "excluded" && row.filterSignature == signature))
+        }.sortedWith(compareBy<Candidate> { persisted[it.key]?.lastAttemptSequence ?: 0L }
+            .thenBy { it.index })
+        val selected = if (feed.maxArticles == 0) eligible else eligible.take(feed.maxArticles)
+        val deferred = eligible.size - selected.size
+        deliveryStore.markAttempts(runId, selected.map { DeliveryIdentity(feed.url, it.key) },
+            signature, regeneration)
+
+        val delivered = mutableListOf<DeliveredArticle>()
+        val excluded = mutableListOf<ExcludedArticle>()
+        var fallbacks = 0
+        for (candidate in selected) {
+            val item = candidate.item
+            val id = DeliveryIdentity(feed.url, candidate.key)
+            try {
+                val promotion = promotionalFilter.isPromotional(item.link, item.title,
+                    item.content ?: item.description)
+                if (promotion.isPromotional) {
+                    excluded += ExcludedArticle(id, "promotional", signature)
+                    continue
+                }
+                val processed = when (val result = contentProcessor.processForGeneration(
+                    url = item.link!!, rssContent = item.content,
+                    rssDescription = item.description, rssTitle = item.title,
+                    rssAuthor = item.author, minWordCount = minWords)) {
+                    is ContentProcessor.GenerationResult.Ready -> result.article
+                    ContentProcessor.GenerationResult.TooShort -> {
+                        excluded += ExcludedArticle(id, "content_too_short", signature)
+                        continue
+                    }
+                    ContentProcessor.GenerationResult.Failed -> {
+                        issues += DeliveryIssue(candidate.key, "extraction", "extract_failed")
+                        continue
+                    }
+                }
+                val output = when (feed.mode) {
+                    ProcessingMode.FIDELITY -> processed
+                    ProcessingMode.BRIEFING -> when (val summary = openAIService.summarizeArticle(processed)) {
+                        is OpenAIService.ArticleSummaryResult.Summarized -> summary.article
+                        OpenAIService.ArticleSummaryResult.Promotional -> {
+                            excluded += ExcludedArticle(id, "model_promotional", signature)
+                            continue
+                        }
+                        OpenAIService.ArticleSummaryResult.Failed -> {
+                            fallbacks++
+                            issues += DeliveryIssue(candidate.key, "summary", "full_article_fallback")
+                            processed.copy(isSummary = false)
+                        }
+                    }
+                }
+                delivered += DeliveredArticle(id, output.copy(feedUrl = feed.url, feedName = feed.name),
+                    signature)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                issues += DeliveryIssue(candidate.key, "processing", "process_failed")
+            }
+        }
+        return FeedIngestionResult(feed, items.size, selected.size, delivered, excluded,
+            issues, deferred, fallbackCount = fallbacks)
     }
 
     /**
@@ -37,7 +143,8 @@ class ArticleRepository @Inject constructor(
     data class FeedResult(
         val feed: Feed,
         val articles: List<ProcessedArticle>,
-        val errors: Int
+        val errors: Int,
+        val filtered: Int = 0
     )
 
     /**
@@ -69,6 +176,7 @@ class ArticleRepository @Inject constructor(
             !filterResult.isPromotional
         }
         Log.d(TAG, "Feed ${feed.name}: filtered ${rssItems.size - nonPromotionalItems.size} promotional items")
+        var filteredCount = rssItems.size - nonPromotionalItems.size
         rssItems = nonPromotionalItems
 
         // Apply per-feed max articles limit before processing
@@ -99,10 +207,17 @@ class ArticleRepository @Inject constructor(
             when (feed.mode) {
                 ProcessingMode.FIDELITY -> processed
                 ProcessingMode.BRIEFING -> {
-                    openAIService.summarizeArticle(processed) ?: run {
-                        errorCount++
-                        // Fall back to full article if summarization fails
-                        processed.copy(isSummary = false)
+                    when (val summary = openAIService.summarizeArticle(processed)) {
+                        is OpenAIService.ArticleSummaryResult.Summarized -> summary.article
+                        OpenAIService.ArticleSummaryResult.Promotional -> {
+                            filteredCount++
+                            return@mapNotNull null
+                        }
+                        OpenAIService.ArticleSummaryResult.Failed -> {
+                            errorCount++
+                            // Preserve the full-article fallback for provider/configuration errors.
+                            processed.copy(isSummary = false)
+                        }
                     }
                 }
             }.copy(
@@ -117,7 +232,7 @@ class ArticleRepository @Inject constructor(
         }
 
         Log.d(TAG, "Feed ${feed.name}: processed ${articles.size} articles successfully, $errorCount errors")
-        return FeedResult(feed, articles, errorCount)
+        return FeedResult(feed, articles, errorCount, filteredCount)
     }
 
     /**

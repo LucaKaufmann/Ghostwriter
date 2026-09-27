@@ -85,6 +85,8 @@ class ContentProcessor:
         Returns:
             List of ParsedArticle objects.
         """
+        if max_entries is not None and max_entries < 0:
+            raise ValueError("max_entries must be nonnegative")
         try:
             fetched = await fetch_resource(
                 feed_url,
@@ -214,9 +216,8 @@ class ContentProcessor:
             limit = self.settings.max_articles_per_feed
             if max_entries is not None:
                 limit = max_entries
-
             articles = []
-            for entry in feed.entries[:limit]:
+            for entry in (feed.entries if limit == 0 else feed.entries[:limit]):
                 # Use GUID if available, otherwise hash the URL
                 guid = entry.get("id") or entry.get("guid")
                 url = entry.get("link", "")

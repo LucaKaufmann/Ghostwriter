@@ -2,6 +2,31 @@
 
 Ghostwriter stable releases are published as Docker images to `ghcr.io/lucakaufmann/ghostwriter`.
 
+## Feed sync v2 backup and restore
+
+Back up the database before upgrading. A v2 database must continue running a
+v2-capable server binary: older binaries have unguarded feed write handlers and
+can purge feed tombstones during maintenance. Do not roll the binary back over
+the v2 database, even behind read-only ingress.
+
+After restoring any database backup, **stop the server**, restore the database,
+run its migrations, and rotate the feed sync instance identity before serving
+requests:
+
+```bash
+cd ghostwriter
+alembic upgrade head
+python -m app.cli.rotate_sync_identity
+```
+
+For a container deployment, run those commands inside the stopped service's
+image with the restored data volume mounted, then start the service. The command
+prints the new UUID. Devices bound to the old UUID receive `server_changed` and
+must explicitly reconcile their pending feed edits; never replay them blindly.
+If recovery instead requires an older server binary, restore an isolated pre-v2
+backup and reconcile clients before any later v2 writes, rotating the identity
+again when returning to v2.
+
 ## Release Checklist
 
 1. Start from a clean branch based on current `main`.

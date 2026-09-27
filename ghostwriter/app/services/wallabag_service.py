@@ -213,8 +213,8 @@ class WallabagService:
             )
             if resp.status_code != 200:
                 logger.warning(
-                    f"Wallabag archive entry {entry_id} failed: "
-                    f"HTTP {resp.status_code} - {resp.text[:200]}"
+                    "Wallabag archive entry %s failed: HTTP %s",
+                    entry_id, resp.status_code,
                 )
                 resp.raise_for_status()
 
@@ -228,8 +228,9 @@ class WallabagService:
                 )
                 if resp.status_code != 200:
                     logger.warning(
-                        f"Wallabag tag entry {entry_id} failed: "
-                        f"HTTP {resp.status_code} - {resp.text[:200]}"
+                        "Wallabag tag entry %s failed: HTTP %s",
+                        entry_id, resp.status_code,
                     )
+                    resp.raise_for_status()
 
         logger.debug(f"Marked Wallabag entry {entry_id} as processed")

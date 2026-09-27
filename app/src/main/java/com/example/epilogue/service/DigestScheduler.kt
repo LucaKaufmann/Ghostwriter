@@ -231,7 +231,7 @@ class DigestScheduler @Inject constructor(
      * Triggers an immediate digest generation.
      * Uses expedited work for higher priority execution.
      *
-     * @param fetchAll If true, fetches all articles regardless of lastFetched timestamp
+     * @param fetchAll Explicit regeneration that may repeat already delivered articles.
      */
     fun runNow(fetchAll: Boolean = false): UUID {
         Log.i(TAG, "Triggering immediate digest generation (fetchAll=$fetchAll)")

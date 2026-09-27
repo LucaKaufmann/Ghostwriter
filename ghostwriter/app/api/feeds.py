@@ -8,8 +8,9 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.database import get_session
@@ -18,6 +19,7 @@ from app.core.net import validate_public_url
 from app.core.security import verify_api_key
 from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync, FeedUpdate
 from app.models.seen_article import SeenArticle
+from app.services import feed_sync
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,73 @@ _AUDIO_EXTENSIONS = frozenset({
 })
 
 router = APIRouter()
+
+
+def _if_match(value: str | None) -> int | None:
+    if value is None:
+        return None
+    if not re.fullmatch(r'"(?:0|[1-9][0-9]*)"', value):
+        raise HTTPException(422, detail="If-Match must be a quoted decimal version")
+    version = int(value[1:-1])
+    if not feed_sync.validate_version(version):
+        raise HTTPException(422, detail="Invalid feed version")
+    return version
+
+
+@router.get("/changes-v2", dependencies=[Depends(verify_api_key)])
+async def get_changes_v2(
+    since_version: int | None = None,
+    server_instance_id: UUID | None = None,
+    session: Session = Depends(get_session),
+) -> dict:
+    if since_version is not None and not feed_sync.validate_version(since_version):
+        raise HTTPException(422, detail="Invalid feed cursor")
+    feed_sync._begin_write(session)
+    try:
+        clock = feed_sync._clock(session)
+        if server_instance_id is not None and str(server_instance_id) != clock.server_instance_id:
+            raise feed_sync.server_changed()
+        if since_version is not None and since_version > clock.version:
+            raise feed_sync.server_changed()
+        statement = select(Feed).where(func.substr(Feed.url, 1, 12) != "synthetic://")
+        if since_version is not None:
+            statement = statement.where(Feed.version > since_version)
+        changes = [feed_sync.snapshot(feed) for feed in session.exec(statement.order_by(Feed.version)).all()]
+        result = {"server_instance_id": clock.server_instance_id,
+                  "server_version": clock.version, "changes": changes}
+        session.commit()
+        return result
+    except BaseException:
+        session.rollback()
+        raise
+
+
+@router.post("/mutations-v2", dependencies=[Depends(verify_api_key)])
+async def mutate_v2(body: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        instance_id = str(UUID(body["server_instance_id"]))
+        items = body["mutations"]
+        if not isinstance(items, list) or len(items) > 100:
+            raise ValueError
+        op_ids = [str(UUID(item["op_id"])) for item in items]
+        if len(op_ids) != len(set(op_ids)):
+            raise ValueError
+    except (KeyError, ValueError, TypeError, AttributeError):
+        raise HTTPException(422, detail="Invalid mutation envelope") from None
+    # Bind before processing even an empty batch; a replacement rejects all writes.
+    feed_sync._begin_write(session)
+    try:
+        clock = feed_sync._clock(session)
+        if clock.server_instance_id != instance_id:
+            raise feed_sync.server_changed()
+        session.commit()
+    except BaseException:
+        session.rollback()
+        raise
+    results = []
+    for item in items:
+        results.append(await feed_sync.mutate_one(session, instance_id, item))
+    return {"server_instance_id": instance_id, "results": results}
 
 
 def _validate_feed_url(url: str) -> None:
@@ -77,7 +146,10 @@ async def list_feeds(
 
     Returns all feeds regardless of active status (excludes tombstoned feeds).
     """
-    statement = select(Feed).where(Feed.deleted_at == None).order_by(Feed.title)  # noqa: E711
+    statement = select(Feed).where(
+        Feed.deleted_at == None,  # noqa: E711
+        func.substr(Feed.url, 1, 12) != "synthetic://",
+    ).order_by(Feed.title)
     return list(session.exec(statement).all())
 
 
@@ -99,7 +171,10 @@ async def get_feed_changes(
 
     if since is None:
         # Initial sync: return all active (non-deleted) feeds
-        statement = select(Feed).where(Feed.deleted_at == None).order_by(Feed.title)  # noqa: E711
+        statement = select(Feed).where(
+            Feed.deleted_at == None,  # noqa: E711
+            func.substr(Feed.url, 1, 12) != "synthetic://",
+        ).order_by(Feed.title)
         feeds = list(session.exec(statement).all())
         return FeedChangesResponse(
             feeds=feeds,
@@ -112,6 +187,7 @@ async def get_feed_changes(
     feeds_statement = select(Feed).where(
         Feed.updated_at > since,
         Feed.deleted_at == None,  # noqa: E711
+        func.substr(Feed.url, 1, 12) != "synthetic://",
     ).order_by(Feed.title)
     feeds = list(session.exec(feeds_statement).all())
 
@@ -119,6 +195,7 @@ async def get_feed_changes(
     tombstones_statement = select(Feed).where(
         Feed.deleted_at != None,  # noqa: E711
         Feed.deleted_at > since,
+        func.substr(Feed.url, 1, 12) != "synthetic://",
     )
     tombstoned_feeds = session.exec(tombstones_statement).all()
     tombstones = [
@@ -139,16 +216,10 @@ async def sync_feeds(
     feeds: list[FeedSync],
     session: Session = Depends(get_session),
 ) -> SyncResponse:
-    """
-    Sync feed configuration from the client.
+    """Accept exact legacy snapshots as read-safe no-ops.
 
-    This performs an ADDITIVE merge: new feeds are created, existing feeds
-    are updated, but feeds not in the list are LEFT UNCHANGED. This allows
-    both the app and web UI to manage feeds without conflicts.
-
-    To delete a feed, use DELETE /feeds/{id} explicitly.
-
-    This also records feed sync activity for inactivity tracking.
+    Any create, changed feed, or tombstone rejects the whole batch with an
+    upgrade-required response. Versioned edits use ``/mutations-v2``.
     """
     t0 = time.perf_counter()
 
@@ -164,45 +235,18 @@ async def sync_feeds(
     for feed_data in feeds:
         _validate_feed_url(feed_data.url)
 
-    # Invalid batches must not record activity or write any of their feeds.
+    # The v1 bulk writer is read-safe: reject the entire batch on any change.
+    for feed_data in feeds:
+        feed = existing_feeds.get(feed_data.url)
+        if (feed is None or feed.deleted_at is not None or
+            feed_data.url.startswith("synthetic://") or
+            any(getattr(feed, key) != getattr(feed_data, key)
+                for key in feed_sync.SYNC_FIELDS)):
+            raise HTTPException(409, detail={"code": "legacy_write_requires_upgrade"})
+        unchanged += 1
+
     from app.services import activity_tracker
     activity_tracker.record_feed_sync()
-
-    # Update or create feeds from the sync list
-    for feed_data in feeds:
-        if feed_data.url in existing_feeds:
-            feed = existing_feeds[feed_data.url]
-            # Check if anything actually changed
-            if (feed.title != feed_data.title or
-                feed.is_active != feed_data.is_active or
-                feed.mode != feed_data.mode or
-                feed.max_articles != feed_data.max_articles):
-                # Update existing
-                feed.title = feed_data.title
-                feed.is_active = feed_data.is_active
-                feed.mode = feed_data.mode
-                feed.max_articles = feed_data.max_articles
-                feed.updated_at = datetime.utcnow()
-                session.add(feed)
-                updated += 1
-            else:
-                unchanged += 1
-        else:
-            # Create new
-            feed = Feed(
-                url=feed_data.url,
-                title=feed_data.title,
-                is_active=feed_data.is_active,
-                mode=feed_data.mode,
-                max_articles=feed_data.max_articles,
-            )
-            session.add(feed)
-            created += 1
-
-    # NOTE: We intentionally do NOT deactivate feeds missing from the sync list.
-    # This allows feeds added via web UI to coexist with app-synced feeds.
-
-    session.commit()
 
     duration_ms = (time.perf_counter() - t0) * 1000
     digest_logger.sync_feed_push(
@@ -281,6 +325,7 @@ async def check_feed_url(req: FeedCheckRequest) -> FeedCheckResponse:
 @router.post("", response_model=FeedRead, dependencies=[Depends(verify_api_key)])
 async def create_feed(
     feed_data: FeedCreate,
+    if_match: str | None = Header(None),
     session: Session = Depends(get_session),
 ) -> Feed:
     """
@@ -291,41 +336,17 @@ async def create_feed(
     """
     _validate_feed_url(feed_data.url)
 
-    # Check for existing
-    statement = select(Feed).where(Feed.url == feed_data.url)
-    existing = session.exec(statement).first()
-
-    if existing:
-        if existing.deleted_at is not None:
-            # Restore the soft-deleted feed with new settings
-            existing.title = feed_data.title
-            existing.is_active = feed_data.is_active
-            existing.mode = feed_data.mode
-            existing.max_articles = feed_data.max_articles
-            existing.deleted_at = None
-            existing.updated_at = datetime.utcnow()
-            session.add(existing)
-            session.commit()
-            session.refresh(existing)
-            return existing
-
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Feed with URL already exists: {feed_data.url}",
-        )
-
-    feed = Feed(
-        url=feed_data.url,
-        title=feed_data.title,
-        is_active=feed_data.is_active,
-        mode=feed_data.mode,
-        max_articles=feed_data.max_articles,
+    if not feed_sync.validate_fields(feed_data.model_dump(exclude={"url"}), creating=True):
+        raise HTTPException(422, detail="Invalid feed fields")
+    existing = session.exec(select(Feed).where(Feed.url == feed_data.url)).first()
+    active_snapshot = feed_sync.snapshot(existing) if existing and existing.deleted_at is None else None
+    session.rollback()
+    if active_snapshot is not None:
+        raise HTTPException(409, detail={"code": "feed_conflict", "current": active_snapshot})
+    return feed_sync.write_web(
+        session, url=feed_data.url, kind="upsert",
+        fields=feed_data.model_dump(exclude={"url"}), expected=_if_match(if_match),
     )
-    session.add(feed)
-    session.commit()
-    session.refresh(feed)
-
-    return feed
 
 
 @router.get("/{feed_id}", response_model=FeedRead, dependencies=[Depends(verify_api_key)])
@@ -335,7 +356,7 @@ async def get_feed(
 ) -> Feed:
     """Get a specific feed by ID."""
     feed = session.get(Feed, feed_id)
-    if not feed:
+    if not feed or feed.deleted_at is not None or feed.url.startswith("synthetic://"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Feed not found",
@@ -347,6 +368,7 @@ async def get_feed(
 async def update_feed(
     feed_id: UUID,
     feed_data: FeedUpdate,
+    if_match: str | None = Header(None),
     session: Session = Depends(get_session),
 ) -> Feed:
     """
@@ -361,24 +383,23 @@ async def update_feed(
             detail="Feed not found",
         )
 
-    _validate_feed_url(feed.url)
+    if feed.deleted_at is not None:
+        raise HTTPException(409, detail={"code": "feed_conflict", "current": feed_sync.snapshot(feed)})
 
-    # Update only provided fields
     update_data = feed_data.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(feed, field, value)
-
-    feed.updated_at = datetime.utcnow()
-    session.add(feed)
-    session.commit()
-    session.refresh(feed)
-
-    return feed
+    if not feed_sync.validate_fields(update_data, creating=False):
+        raise HTTPException(422, detail="Invalid feed fields")
+    _validate_feed_url(feed.url)
+    url = feed.url
+    session.rollback()
+    return feed_sync.write_web(session, url=url, kind="upsert", fields=update_data,
+                               expected=_if_match(if_match), feed_id=feed_id)
 
 
 @router.delete("/{feed_id}", dependencies=[Depends(verify_api_key)])
 async def delete_feed(
     feed_id: UUID,
+    if_match: str | None = Header(None),
     session: Session = Depends(get_session),
 ) -> dict:
     """
@@ -394,12 +415,10 @@ async def delete_feed(
             detail="Feed not found",
         )
 
-    now = datetime.utcnow()
-    feed.is_active = False
-    feed.deleted_at = now
-    feed.updated_at = now
-    session.add(feed)
-    session.commit()
+    url = feed.url
+    session.rollback()
+    feed_sync.write_web(session, url=url, kind="delete", fields={},
+                        expected=_if_match(if_match), feed_id=feed_id)
 
     return {"status": "deleted", "id": str(feed_id)}
 
@@ -407,6 +426,7 @@ async def delete_feed(
 @router.delete("/by-url/{feed_url:path}", dependencies=[Depends(verify_api_key)])
 async def delete_feed_by_url(
     feed_url: str,
+    if_match: str | None = Header(None),
     session: Session = Depends(get_session),
 ) -> dict:
     """
@@ -425,12 +445,9 @@ async def delete_feed_by_url(
             detail="Feed not found",
         )
 
-    now = datetime.utcnow()
-    feed.is_active = False
-    feed.deleted_at = now
-    feed.updated_at = now
-    session.add(feed)
-    session.commit()
+    session.rollback()
+    feed_sync.write_web(session, url=feed_url, kind="delete", fields={},
+                        expected=_if_match(if_match))
 
     return {"status": "deleted", "url": feed_url}
 

@@ -15,6 +15,7 @@ const demoUser = {
 const feeds = [
 	{
 		id: 'feed-1',
+		version: 1,
 		url: 'https://example.com/feed.xml',
 		title: 'Example Feed',
 		is_active: true,
@@ -25,6 +26,7 @@ const feeds = [
 	},
 	{
 		id: 'feed-2',
+		version: 2,
 		url: 'https://news.example.org/rss',
 		title: 'Daily News',
 		is_active: true,
@@ -35,6 +37,7 @@ const feeds = [
 	},
 	{
 		id: 'feed-3',
+		version: 3,
 		url: 'https://updates.example.net/atom.xml',
 		title: 'Product Updates',
 		is_active: false,

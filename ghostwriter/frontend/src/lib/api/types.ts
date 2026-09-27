@@ -172,6 +172,7 @@ export type FeedMode = 'raw' | 'summarize';
 
 export interface Feed {
 	id: string;
+	version: number;
 	url: string;
 	title: string;
 	is_active: boolean;
@@ -710,5 +711,5 @@ export interface PodcastScheduleUpdate {
 // ============ API Error ============
 
 export interface APIError {
-	detail: string | { message: string; [key: string]: unknown };
+	detail: string | { message?: string; code?: string; current?: Partial<Feed> & { version: number; kind?: 'feed' | 'tombstone' }; [key: string]: unknown };
 }

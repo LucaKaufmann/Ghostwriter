@@ -15,7 +15,7 @@ from urllib.parse import urljoin
 
 import httpx
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.net import validate_public_url
 
 MAX_DOCUMENT_BYTES = 5_000_000
@@ -93,6 +93,13 @@ async def _validate_url(url: str, settings: Settings) -> None:
     # slot until the OS returns. A queued, cancelled future releases it here too.
     future.add_done_callback(_release_dns_slot)
     await asyncio.wrap_future(future)
+
+
+async def validate_public_url_bounded(url: str, settings: Settings | None = None) -> None:
+    """Validate a public URL without blocking the event loop or unbounded DNS work."""
+    settings = settings or get_settings()
+    async with asyncio.timeout(settings.fetch_timeout_seconds):
+        await _validate_url(url, settings)
 
 
 def _check_content_type(content_type: str | None, kind: str) -> None:

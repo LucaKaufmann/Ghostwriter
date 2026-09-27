@@ -2,6 +2,7 @@ package com.example.epilogue.service
 
 import android.util.Log
 import com.example.epilogue.domain.model.ProcessedArticle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.dankito.readability4j.Readability4J
@@ -21,6 +22,69 @@ import javax.inject.Singleton
 class ContentProcessor @Inject constructor(
     private val contentAnalyzer: ContentAnalyzer
 ) {
+    sealed interface GenerationResult {
+        data class Ready(val article: ProcessedArticle) : GenerationResult
+        data object TooShort : GenerationResult
+        data object Failed : GenerationResult
+    }
+
+    /** A short exclusion requires a successfully extracted source, not a failed URL fetch. */
+    suspend fun processForGeneration(
+        url: String, rssContent: String?, rssDescription: String?, rssTitle: String?,
+        rssAuthor: String?, minWordCount: Int
+    ): GenerationResult = withContext(Dispatchers.IO) {
+        fun classify(article: ProcessedArticle): GenerationResult =
+            if (minWordCount > 0 && countWords(article.content) < minWordCount)
+                GenerationResult.TooShort else GenerationResult.Ready(article)
+
+        suspend fun fetchOnce(): GenerationResult =
+            fetchAndProcess(url, 0)?.let(::classify) ?: GenerationResult.Failed
+
+        val rss = try {
+            val analysis = contentAnalyzer.analyze(rssContent, rssDescription)
+            val rssHtml = rssContent?.takeIf { it.isNotBlank() }
+                ?: rssDescription?.takeIf { it.isNotBlank() } ?: ""
+            val rssArticle = processRssContent(url, rssHtml,
+                rssTitle, rssAuthor, 0)
+            val usableRss = rssArticle?.takeIf {
+                minWordCount <= 0 || countWords(it.content) >= minWordCount
+            }
+            analysis.contentType to usableRss
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Log.w(TAG, "RSS generation analysis failed; trying source extraction")
+            null
+        }
+        if (rss == null) fetchOnce() else {
+            val (contentType, usableRss) = rss
+            when (contentType) {
+                ContentAnalyzer.ContentType.FULL_ARTICLE ->
+                    usableRss?.let { GenerationResult.Ready(it) } ?: fetchOnce()
+                ContentAnalyzer.ContentType.PREVIEW -> {
+                    // A failed fetch may still use substantial RSS content, but a
+                    // short preview cannot become a terminal exclusion.
+                    when (val fetched = fetchOnce()) {
+                        GenerationResult.Failed ->
+                            usableRss?.let { GenerationResult.Ready(it) } ?: fetched
+                        else -> fetched
+                    }
+                }
+                ContentAnalyzer.ContentType.UNCERTAIN -> {
+                    if (usableRss != null &&
+                        countWords(usableRss.content) >= MIN_RSS_CONTENT_WORDS) {
+                        GenerationResult.Ready(usableRss)
+                    } else {
+                        when (val fetched = fetchOnce()) {
+                            GenerationResult.Failed ->
+                                usableRss?.let { GenerationResult.Ready(it) } ?: fetched
+                            else -> fetched
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     companion object {
         private const val TAG = "ContentProcessor"
@@ -117,6 +181,8 @@ class ContentProcessor @Inject constructor(
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error processing with RSS content for $url", e)
             // Fallback to direct URL fetch
@@ -219,6 +285,8 @@ class ContentProcessor @Inject constructor(
         try {
             val document = fetchDocument(url)
             processDocument(url, document, minWordCount)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching from URL: $url", e)
             null
@@ -240,6 +308,8 @@ class ContentProcessor @Inject constructor(
         try {
             val document = fetchDocument(url)
             processDocument(url, document, minWordCount)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             null
         }
