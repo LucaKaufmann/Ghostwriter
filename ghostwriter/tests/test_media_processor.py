@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +10,82 @@ import pytest
 from app.core.config import Settings
 from app.services.media_processor import MediaProcessor, MediaResult
 from app.services.youtube_service import YouTubeResult
+
+
+@pytest.mark.asyncio
+async def test_cancel_audio_conversion_reaps_ffmpeg_before_return(monkeypatch):
+    """Cancellation must stop ffmpeg before the media worker releases its lock."""
+    entered = asyncio.Event()
+
+    class FakeProcess:
+        returncode = None
+        calls = 0
+        killed = False
+        reaped = False
+
+        async def communicate(self):
+            self.calls += 1
+            if self.calls == 1:
+                entered.set()
+                await asyncio.Event().wait()
+            self.reaped = True
+            return b"", b""
+
+        def kill(self):
+            self.killed = True
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+        url = "https://example.com/audio.mp3"
+
+        async def aiter_bytes(self, chunk_size):
+            yield b"synthetic audio"
+
+    class FakeStream:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, _method, _url):
+            return FakeStream()
+
+    process = FakeProcess()
+
+    async def create_process(*_args, **_kwargs):
+        return process
+
+    monkeypatch.setattr("app.services.media_processor.validate_public_url", lambda *_: None)
+    monkeypatch.setattr("app.services.media_processor.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(
+        "app.services.media_processor.asyncio.create_subprocess_exec", create_process
+    )
+    processor = MediaProcessor(settings=MagicMock())
+    task = asyncio.create_task(
+        processor._process_audio(
+            "https://example.com/audio.mp3", "local", "base.en"
+        )
+    )
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert process.killed
+    assert process.reaped
+    assert process.calls == 2
 
 
 @pytest.fixture

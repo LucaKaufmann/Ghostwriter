@@ -22,3 +22,17 @@ Python 3.11.16; isolated, read-only virtual environment from ENV-01. All media a
 ## Review and limits
 
 The fix excludes concurrent tasks within one Python process. It does not coordinate separate worker processes or hosts, and neither a database claim nor a migration was added. Existing persisted `processing` items still gate a run until the 90-minute stale cutoff; cancellation during an active item now marks it failed for explicit API retry. Orchestrator review and PR publication remain next.
+
+## Review follow-up
+
+Root accepted two review findings and authorized the narrow subprocess lifecycle seams. Cancellation while ffmpeg converts audio, ffmpeg segments large audio, or whisper-cli transcribes now kills the child and awaits `communicate()` before propagating cancellation. A process that already exited is tolerated. The existing local-whisper timeout behavior still kills and reaps the child.
+
+The run persists completed and failed counts after each item outcome. Cancellation of a second item therefore records the completed first item and failed canceled item (`items_processed=1`, `items_failed=1`) before the run is finalized as failed. Normal completed-run counts remain unchanged.
+
+Follow-up verification with Python 3.11.16:
+
+- `python -m pytest -q tests/test_media_pipeline_concurrency.py tests/test_media_retry.py tests/test_media_processor.py tests/test_transcription_service.py`: 36 passed, 2 warnings (Starlette deprecation and an existing AsyncMock unawaited-coroutine warning from the transcription tests).
+- `python -m ruff check --select F,B app/worker/media_pipeline.py app/services/media_processor.py app/services/transcription_service.py tests/test_media_pipeline_concurrency.py tests/test_media_processor.py tests/test_transcription_service.py`: passed.
+- `git diff --check`: passed.
+
+All subprocesses, downloads, transcription, and feed discovery in new tests are fakes or synthetic fixtures. No provider or external network call was made. This follow-up remains single-process only and adds no schema changes.

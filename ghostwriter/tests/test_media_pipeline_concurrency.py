@@ -160,6 +160,38 @@ async def test_cancellation_fails_run_and_item_then_allows_retry(media_db, monke
 
 
 @pytest.mark.asyncio
+async def test_cancellation_preserves_prior_completed_and_current_failed_counts(
+    media_db, monkeypatch
+):
+    first_id = add_item(media_db)
+    second_id = add_item(media_db)
+    second_started = asyncio.Event()
+    calls = 0
+
+    async def transcribe(_self, _url, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            second_started.set()
+            await asyncio.Event().wait()
+        return MediaResult(text="first transcript", source="podcast_audio", is_media=True)
+
+    monkeypatch.setattr(media_pipeline.MediaProcessor, "process", transcribe)
+    task = asyncio.create_task(media_pipeline.run_media_pipeline())
+    await second_started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert item_status(media_db, first_id) == "completed"
+    assert item_status(media_db, second_id) == "failed"
+    run = runs(media_db)[0]
+    assert run.status == "failed"
+    assert run.items_processed == 1
+    assert run.items_failed == 1
+
+
+@pytest.mark.asyncio
 async def test_fetch_failure_and_stale_item_allow_later_run(media_db, monkeypatch):
     stale_id = add_item(
         media_db,
