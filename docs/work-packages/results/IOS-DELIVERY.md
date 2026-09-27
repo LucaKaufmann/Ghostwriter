@@ -27,3 +27,5 @@ The transaction probe established an important SwiftData boundary: an explicit `
 ## Follow-on boundary
 
 The existing scheduler still recognizes a legacy pending Digest as period coverage. The separate IOS-RECOVERY package will reconcile abandoned `GenerationRun` rows and legacy pending files before changing that behavior. This package does not contact a live provider or server.
+
+Independent Sol review: initial findings were corrected in86e3ba3 and a46b8a9. Final narrow retention correction review on a46b8a9 returned no actionable findings. Root inspected the refreshed partial-outcome screenshot. IOS-RECOVERY remains a separate follow-on.
