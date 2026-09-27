@@ -51,4 +51,26 @@ class FeedCorrectionDraftTest {
         assertEquals(ProcessingMode.BRIEFING, draft.mode)
         assertFalse(draft.enabled)
     }
+
+    @Test fun `server refresh updates untouched defaults without replacing typed edits`() {
+        val fields = """{"title":"Rejected"}"""
+        val initial = requireNotNull(correctionDraft(rejected(fields,
+            """{"kind":"feed","title":"Server","mode":"raw","is_active":true,"max_articles":0}""")))
+        val typed = correctionForm(initial, "Corrected", null, null, null)
+        assertEquals("Corrected", typed.title)
+        assertEquals(ProcessingMode.FIDELITY, typed.mode)
+        assertTrue(typed.enabled)
+
+        val refreshed = requireNotNull(correctionDraft(rejected(fields,
+            """{"kind":"feed","title":"Server","mode":"summarize","is_active":false,"max_articles":7}""")))
+        val afterPull = correctionForm(refreshed, "Corrected", null, null, null)
+        assertEquals("Corrected", afterPull.title)
+        assertEquals("7", afterPull.cap)
+        assertEquals(ProcessingMode.BRIEFING, afterPull.mode)
+        assertFalse(afterPull.enabled)
+        val intentional = correctionForm(refreshed, "Corrected", "2", false, true)
+        assertEquals("2", intentional.cap)
+        assertEquals(ProcessingMode.FIDELITY, intentional.mode)
+        assertTrue(intentional.enabled)
+    }
 }

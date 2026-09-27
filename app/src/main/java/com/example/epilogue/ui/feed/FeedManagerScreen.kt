@@ -217,6 +217,22 @@ internal data class FeedCorrectionDraft(
     val maxArticles: Int
 )
 
+internal data class FeedCorrectionForm(
+    val title: String,
+    val cap: String,
+    val mode: ProcessingMode,
+    val enabled: Boolean
+)
+
+/** Only edited fields override the latest rejected-head and server values. */
+internal fun correctionForm(draft: FeedCorrectionDraft, titleEdit: String?, capEdit: String?,
+    briefingEdit: Boolean?, enabledEdit: Boolean?): FeedCorrectionForm = FeedCorrectionForm(
+    titleEdit ?: draft.title,
+    capEdit ?: draft.maxArticles.toString(),
+    briefingEdit?.let { if (it) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY } ?: draft.mode,
+    enabledEdit ?: draft.enabled
+)
+
 /** A correction may use the rejected head and its server snapshot, never a later optimistic row. */
 internal fun correctionDraft(proposal: FeedMutationEntity): FeedCorrectionDraft? {
     val fields = runCatching { JSONObject(proposal.fieldsJson) }.getOrNull() ?: return null
@@ -308,42 +324,42 @@ private fun FeedResolutionCard(
         }
     }
     if (correcting && draft != null) {
-        val initial = draft
-        var title by rememberSaveable(proposal.opId) {
-            mutableStateOf(initial.title)
+        var titleEdit by rememberSaveable(proposal.opId) {
+            mutableStateOf<String?>(null)
         }
-        var cap by rememberSaveable(proposal.opId) {
-            mutableStateOf(initial.maxArticles.toString())
+        var capEdit by rememberSaveable(proposal.opId) {
+            mutableStateOf<String?>(null)
         }
-        var mode by rememberSaveable(proposal.opId) {
-            mutableStateOf(initial.mode)
+        var briefingEdit by rememberSaveable(proposal.opId) {
+            mutableStateOf<Boolean?>(null)
         }
-        var enabled by rememberSaveable(proposal.opId) {
-            mutableStateOf(initial.enabled)
+        var enabledEdit by rememberSaveable(proposal.opId) {
+            mutableStateOf<Boolean?>(null)
         }
+        val form = correctionForm(draft, titleEdit, capEdit, briefingEdit, enabledEdit)
         AlertDialog(
             onDismissRequest = { correcting = false },
             title = { Text("Correct feed proposal") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(title, { title = it }, label = { Text("Title") })
-                    OutlinedTextField(cap, { cap = it }, label = { Text("Max articles (0 = unlimited)") })
+                    OutlinedTextField(form.title, { titleEdit = it }, label = { Text("Title") })
+                    OutlinedTextField(form.cap, { capEdit = it }, label = { Text("Max articles (0 = unlimited)") })
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Summarize")
-                        Switch(checked = mode == ProcessingMode.BRIEFING,
-                            onCheckedChange = { mode = if (it) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY })
+                        Switch(checked = form.mode == ProcessingMode.BRIEFING,
+                            onCheckedChange = { briefingEdit = it })
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Enabled")
-                        Switch(checked = enabled, onCheckedChange = { enabled = it })
+                        Switch(checked = form.enabled, onCheckedChange = { enabledEdit = it })
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val number = cap.toIntOrNull()
-                    if (title.isNotBlank() && number != null && number >= 0) {
-                        onCorrect(title, mode, enabled, number)
+                    val number = form.cap.toIntOrNull()
+                    if (form.title.isNotBlank() && number != null && number >= 0) {
+                        onCorrect(form.title, form.mode, form.enabled, number)
                         correcting = false
                     }
                 }) { Text("Save correction") }
