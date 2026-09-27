@@ -196,9 +196,9 @@ public final class DigestGenerator {
                                                   articles: included,
                                                   claims: terminalClaims,
                                                   triggerType: triggerType, period: period)
-            if digest != nil {
+            if let digest {
                 do {
-                    try await deliveryStore.enforceRetentionPolicy()
+                    try deliveryStore.enforceRetentionPolicy(protectedDigestId: digest.id)
                 } catch {
                     // Retention is post-commit housekeeping; the edition and
                     // its claim have already completed successfully.

@@ -240,12 +240,12 @@ public final class DeliveryStore {
 
     /// Reuse the existing history/file retention policy after a successful
     /// delivery transaction. A cleanup failure cannot revoke that delivery.
-    public func enforceRetentionPolicy() async throws {
-        if failNextRetentionForTesting {
-            failNextRetentionForTesting = false
-            throw DeliveryStoreError.injectedRetentionFailure
-        }
+    public func enforceRetentionPolicy(protectedDigestId: UUID) throws {
+        let failBeforeCommit = failNextRetentionForTesting
+        failNextRetentionForTesting = false
         let repository = DigestRepository(modelContext: context())
-        try await repository.enforceRetentionPolicy(maxDigests: 30)
+        try repository.enforceRetentionPolicy(maxDigests: 30,
+                                             protectedDigestId: protectedDigestId,
+                                             failBeforeCommitForTesting: failBeforeCommit)
     }
 }

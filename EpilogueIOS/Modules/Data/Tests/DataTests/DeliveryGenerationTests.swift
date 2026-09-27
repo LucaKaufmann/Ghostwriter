@@ -39,6 +39,36 @@ struct DeliveryGenerationTests {
         (1...count).map { "https://example.test/article/\($0)" }
     }
 
+    private func seedFutureHistory(container: ModelContainer, directory: URL,
+                                   count: Int = 30) throws -> [String] {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        var paths: [String] = []
+        for index in 0..<count {
+            let path = directory.appendingPathComponent("old-\(index).epub").path
+            try Data("OLD".utf8).write(to: URL(fileURLWithPath: path))
+            context.insert(Digest(
+                generatedAt: Date().addingTimeInterval(Double(index + 1) * 86_400),
+                epubFilePath: path, articleCount: 1, triggerType: .manual,
+                isComplete: true))
+            paths.append(path)
+        }
+        try context.save()
+        return paths
+    }
+
+    private func oneArticleGenerator(container: ModelContainer, directory: URL,
+                                     store: DeliveryStore) -> DigestGenerator {
+        DigestGenerator(
+            feedRepository: FixtureFeeds(Feed(url: "https://feed.test/rss", name: "Feed",
+                                            mode: .fidelity)),
+            articleRepository: FixtureArticles(links: ["https://example.test/article"],
+                                               failed: [], filtered: [], fetchFails: false),
+            epubBuilder: FixtureEPUB(), deliveryStore: store,
+            filterSignature: DeliveryFilterSignature.make(minWordCount: 300),
+            documentsDirectory: directory)
+    }
+
     @Test("A cap of two advances through five identities without repeating paid work")
     func testCapFairness() async throws {
         let (generator, articles, container, _) = try setup(maxArticles: 2, links: links(5))
@@ -162,6 +192,51 @@ struct DeliveryGenerationTests {
             .contains { $0.firstDigestId == firstDigestId })
     }
 
+    @Test("A clock-behind edition remains in history and usable after retention")
+    func testRetentionProtectsNewEdition() async throws {
+        let (container, directory) = try diskModel()
+        let priorPaths = try seedFutureHistory(container: container, directory: directory)
+        let generator = oneArticleGenerator(
+            container: container, directory: directory,
+            store: DeliveryStore(container: container))
+        let result = try await generator.generateDigest(triggerType: .manual)
+        let digest = try #require(result.digest)
+        let reopened = ModelContext(container)
+        #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 30)
+        #expect(try reopened.fetch(FetchDescriptor<Digest>()).contains { $0.id == digest.id })
+        #expect(FileManager.default.fileExists(atPath: digest.epubFilePath))
+        #expect(!FileManager.default.fileExists(atPath: priorPaths[0]))
+        #expect(try reopened.fetch(FetchDescriptor<ArticleDelivery>()).first?.firstDigestId == digest.id)
+    }
+
+    @Test("Retention keeps a shared legacy file while another digest references it")
+    func testRetentionRespectsSharedPaths() throws {
+        let (container, directory) = try diskModel()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let shared = directory.appendingPathComponent("shared.epub").path
+        try Data("SHARED".utf8).write(to: URL(fileURLWithPath: shared))
+        var newestID: UUID?
+        for index in 0..<31 {
+            let path = index == 0 || index == 30 ? shared :
+                directory.appendingPathComponent("old-\(index).epub").path
+            if index != 0 && index != 30 {
+                try Data("OLD".utf8).write(to: URL(fileURLWithPath: path))
+            }
+            let digest = Digest(generatedAt: Date().addingTimeInterval(Double(index) * 86_400),
+                                epubFilePath: path, triggerType: .manual, isComplete: true)
+            context.insert(digest)
+            if index == 30 { newestID = digest.id }
+        }
+        try context.save()
+        let store = DeliveryStore(container: container)
+        try store.enforceRetentionPolicy(protectedDigestId: try #require(newestID))
+        let reopened = ModelContext(container)
+        #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 30)
+        #expect(FileManager.default.fileExists(atPath: shared))
+        #expect(try reopened.fetch(FetchDescriptor<Digest>()).contains { $0.epubFilePath == shared })
+    }
+
     @Test("Fetch failure, valid empty page and cancellation retain distinct diagnostics")
     func testFailedEmptyCancelled() async throws {
         let (failedGenerator, _, failedStore, _) = try setup(maxArticles: 0, links: [], fetchFails: true)
@@ -242,23 +317,19 @@ struct DeliveryGenerationTests {
     @Test("Retention failure after commit leaves completed history, claim and artifact usable")
     func testRetentionFailureDoesNotDemote() async throws {
         let (container, directory) = try diskModel()
+        let priorPaths = try seedFutureHistory(container: container, directory: directory)
         let store = DeliveryStore(container: container)
         store.failNextRetentionForTesting = true
-        let link = "https://example.test/article"
-        let generator = DigestGenerator(
-            feedRepository: FixtureFeeds(Feed(url: "https://feed.test/rss", name: "Feed",
-                                            mode: .fidelity)),
-            articleRepository: FixtureArticles(links: [link], failed: [], filtered: [],
-                                               fetchFails: false),
-            epubBuilder: FixtureEPUB(), deliveryStore: store,
-            filterSignature: DeliveryFilterSignature.make(minWordCount: 300),
-            documentsDirectory: directory)
+        let generator = oneArticleGenerator(container: container, directory: directory,
+                                            store: store)
         let result = try await generator.generateDigest(triggerType: .manual)
         let digest = try #require(result.digest)
         #expect(result.outcome == .complete)
         #expect(FileManager.default.fileExists(atPath: digest.epubFilePath))
         let reopened = ModelContext(container)
-        #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 1)
+        #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 31)
+        #expect(priorPaths.allSatisfy { FileManager.default.fileExists(atPath: $0) })
+        #expect(try reopened.fetch(FetchDescriptor<Digest>()).contains { $0.id == digest.id })
         #expect(try reopened.fetch(FetchDescriptor<GenerationRun>()).first?.outcome == "complete")
         #expect(try reopened.fetch(FetchDescriptor<ArticleDelivery>()).first?.state == "delivered")
     }
