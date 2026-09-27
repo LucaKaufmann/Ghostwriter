@@ -1,0 +1,209 @@
+# PR review follow-up ledger
+
+Initial snapshot: 2026-09-27, PR74–105. This is active work, not a completed review claim. Refresh new PRs and updated heads before closeout. Automated status/introductory comments have no additional findings; substantive inline comments are tracked below. Code changes require source validation and affected verification.
+
+| PR / comment | Topic | Disposition / next action |
+|---|---|---|
+| [#74](https://github.com/LucaKaufmann/Ghostwriter/pull/74) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#75 / 4114827157](https://github.com/LucaKaufmann/Ghostwriter/pull/75#discussion_r4114827157) | Preserve the checkout import path for the subprocess | Fixed in PR110/1878202; metadata5 each Python3.11 and requirements-only3.12, reviewed/integrated. |
+| [#76](https://github.com/LucaKaufmann/Ghostwriter/pull/76) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#77 / 4114899136](https://github.com/LucaKaufmann/Ghostwriter/pull/77#discussion_r4114899136) | Enforce the overall cap on non-RSS editions | Fixed PR108/661637c; backend414, Sol clean; integrateda23df75. |
+| [#78](https://github.com/LucaKaufmann/Ghostwriter/pull/78) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#79](https://github.com/LucaKaufmann/Ghostwriter/pull/79) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#80 / 4114947391](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4114947391) | Publish active work before calling the checkpoint portable | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4114947395](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4114947395) | Name a model that the worker launcher can select | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115039084](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115039084) | Honor the confirmed referenced-digest policy | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115039090](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115039090) | Make task attachment conditional on tool availability | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115072041](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115072041) | Honor the confirmed native delivery policy | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115072044](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115072044) | Gate Android delivery on SYNC-DELETE | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115156873](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115156873) | Commit the durable result before publishing | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115156877](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115156877) | Gate iOS sync status on the deletion handoff | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115199472](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115199472) | Freeze migration 026 before implementing RECOVERY-02 | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115199477](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115199477) | Assign tombstone cleanup to the server sync stage | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115270100](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115270100) | Point workers to the full package brief | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115270101](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115270101) | Allocate schema versions for both native sync stages | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#80 / 4115270105](https://github.com/LucaKaufmann/Ghostwriter/pull/80#discussion_r4115270105) | Separate the live main ref from the frozen execution base | Root checked; current checkpoint or prepared brief corrections address this, except model capability claim is incompatible with this environment (Sol explicitly supported). |
+| [#81 / 4114988508](https://github.com/LucaKaufmann/Ghostwriter/pull/81#discussion_r4114988508) | Preserve one-off ownership after deleting its episode | Fixed PR114/b92e5b9 with durable owner028; focused108, Sol clean, combined444 passed. |
+| [#82 / 4115027580](https://github.com/LucaKaufmann/Ghostwriter/pull/82#discussion_r4115027580) | Allow excluded rows to transition during regeneration | Clarified in published contract8ba4026; integrated6e232cd. No new product decision. |
+| [#82 / 4115027582](https://github.com/LucaKaufmann/Ghostwriter/pull/82#discussion_r4115027582) | Include disabled feeds in complete v2 snapshots | Clarified in published contract8ba4026; integrated6e232cd. No new product decision. |
+| [#82 / 4115027588](https://github.com/LucaKaufmann/Ghostwriter/pull/82#discussion_r4115027588) | Exclude synthetic rows from the version backfill | Clarified in published contract8ba4026; integrated6e232cd. No new product decision. |
+| [#82 / 4115027590](https://github.com/LucaKaufmann/Ghostwriter/pull/82#discussion_r4115027590) | Persist terminal rejection details in the outbox | Clarified in published contract8ba4026; integrated6e232cd. No new product decision. |
+| [#82 / 4115027593](https://github.com/LucaKaufmann/Ghostwriter/pull/82#discussion_r4115027593) | Persist the scheduled edition on GenerationRun | Clarified in published contract8ba4026; integrated6e232cd. No new product decision. |
+| [#82 / 4115027594](https://github.com/LucaKaufmann/Ghostwriter/pull/82#discussion_r4115027594) | Update Android's Reset All Data delivery behavior | Clarified in published contract8ba4026; integrated6e232cd. No new product decision. |
+| [#83](https://github.com/LucaKaufmann/Ghostwriter/pull/83) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#84](https://github.com/LucaKaufmann/Ghostwriter/pull/84) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#85 / 4115046703](https://github.com/LucaKaufmann/Ghostwriter/pull/85#discussion_r4115046703) | Serialize reset with concurrent digest inserts | Fixed PR112/5684f17 using explicit current-history snapshot semantics; per-row cancellation protection and ledger preservation,167app57shared1skip/build/Solclean. |
+| [#86 / 4115059184](https://github.com/LucaKaufmann/Ghostwriter/pull/86#discussion_r4115059184) | Preserve valid legacy sessions on account-only 401s | Fixed PR109/f774ccfe; backend417, deterministic asyncDNSrace/cancellation fixtures, final Sol clean; integrated086afbe. |
+| [#87 / 4115074401](https://github.com/LucaKaufmann/Ghostwriter/pull/87#discussion_r4115074401) | Use KOReader's one-shot SHA-256 API | Not accepted: pinned upstream supports sha256() incremental updater; real upstream abc streaming/one-shot probe passed. See evidence below. |
+| [#88](https://github.com/LucaKaufmann/Ghostwriter/pull/88) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#89](https://github.com/LucaKaufmann/Ghostwriter/pull/89) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#90 / 4115123122](https://github.com/LucaKaufmann/Ghostwriter/pull/90#discussion_r4115123122) | Wake only one DNS waiter for each released slot | Fixed PR109/f774ccfe; backend417, deterministic asyncDNSrace/cancellation fixtures, final Sol clean; integrated086afbe. |
+| [#91](https://github.com/LucaKaufmann/Ghostwriter/pull/91) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#92 / 4115126372](https://github.com/LucaKaufmann/Ghostwriter/pull/92#discussion_r4115126372) | Include pre-handler failures in the recovery contract | Fixed PR108/661637c; early-failure/retry fixtures and backend414; integrated. |
+| [#92 / 4115126375](https://github.com/LucaKaufmann/Ghostwriter/pull/92#discussion_r4115126375) | Surface Wallabag tag failures to the acknowledgement worker | Fixed by integrated RECOVERY-02: tag response raises and acknowledgement remains pending for retry. |
+| [#93 / 4115134864](https://github.com/LucaKaufmann/Ghostwriter/pull/93#discussion_r4115134864) | Normalize shared paths on case-insensitive filesystems | Fixed PR108/661637c; conservative case/Unicode/file identity guard; backend414 and Sol clean. |
+| [#94 / 4115131264](https://github.com/LucaKaufmann/Ghostwriter/pull/94#discussion_r4115131264) | Move DNS resolution off the async request loop | Fixed PR109/f774ccfe; backend417, deterministic asyncDNSrace/cancellation fixtures, final Sol clean; integrated086afbe. |
+| [#94 / 4115131269](https://github.com/LucaKaufmann/Ghostwriter/pull/94#discussion_r4115131269) | Preserve the duplicate-feed conflict response | Fixed PR109/f774ccfe; backend417, deterministic asyncDNSrace/cancellation fixtures, final Sol clean; integrated086afbe. |
+| [#95](https://github.com/LucaKaufmann/Ghostwriter/pull/95) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#96 / 4115286299](https://github.com/LucaKaufmann/Ghostwriter/pull/96#discussion_r4115286299) | Require an instance binding for incremental pulls | Fixed PR109/f774ccfe; backend417, deterministic asyncDNSrace/cancellation fixtures, final Sol clean; integrated086afbe. |
+| [#96 / 4115286304](https://github.com/LucaKaufmann/Ghostwriter/pull/96#discussion_r4115286304) | Record successful v2 pulls as feed activity | Fixed PR109/f774ccfe; backend417, deterministic asyncDNSrace/cancellation fixtures, final Sol clean; integrated086afbe. |
+| [#96 / 4115286307](https://github.com/LucaKaufmann/Ghostwriter/pull/96#discussion_r4115286307) | Avoid retrying tombstone edits through PUT | Fixed PR111/ddfe54b; explicit POSTrestore and guarded PUTifconcurrentlyrestored;24browser/check/build, Sol clean. |
+| [#96 / 4115286315](https://github.com/LucaKaufmann/Ghostwriter/pull/96#discussion_r4115286315) | Surface restore conflicts inside the open dialog | Fixed PR111/ddfe54b; dialogsclose, capturedproposalpersists;24browser/check/build, Sol clean. |
+| [#97](https://github.com/LucaKaufmann/Ghostwriter/pull/97) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#98 / 4115324868](https://github.com/LucaKaufmann/Ghostwriter/pull/98#discussion_r4115324868) | Stop Ollama before copying its volume | Fixed PR110/1878202; documented optional writer quiescence and actual service checks; no deployment. |
+| [#99 / 4115376564](https://github.com/LucaKaufmann/Ghostwriter/pull/99#discussion_r4115376564) | Do not suspend bindings when integration is disabled | Fixed3a12d31; shared46 each platform, Sol clean; published99/integrated0e08b1e. |
+| [#99 / 4115376566](https://github.com/LucaKaufmann/Ghostwriter/pull/99#discussion_r4115376566) | Return failed when the incremental pull fails | Fixed3a12d31; shared46 each platform, Sol clean; published99/integrated0e08b1e. |
+| [#100](https://github.com/LucaKaufmann/Ghostwriter/pull/100) | No inline findings | Snapshot review/issue comments contain status boilerplate only. |
+| [#101 / 4115437083](https://github.com/LucaKaufmann/Ghostwriter/pull/101#discussion_r4115437083) | Assert the 409 status on server-change failures | Fixed PR110/1878202; real loopback client/server test1passed requiring409andcode; reviewed/integrated. |
+| [#102 / 4115651395](https://github.com/LucaKaufmann/Ghostwriter/pull/102#discussion_r4115651395) | Keep unresolved legacy feeds available to local workers | Fixed PR112/5684f17;167app57shared1skip/build/Solclean; integrated. Active correctiondraft survivesserverrefresh. |
+| [#102 / 4115651405](https://github.com/LucaKaufmann/Ghostwriter/pull/102#discussion_r4115651405) | Seed rejected-edit corrections from the complete feed state | Fixed PR112/5684f17;167app57shared1skip/build/Solclean; integrated. Active correctiondraft survivesserverrefresh. |
+| [#102 / 4115651412](https://github.com/LucaKaufmann/Ghostwriter/pull/102#discussion_r4115651412) | Retry partial syncs caused by transport failures | Fixed PR112/5684f17;167app57shared1skip/build/Solclean; integrated. Active correctiondraft survivesserverrefresh. |
+| [#102 / 4115651416](https://github.com/LucaKaufmann/Ghostwriter/pull/102#discussion_r4115651416) | Expose only each URL's head proposal for resolution | Fixed PR112/5684f17;167app57shared1skip/build/Solclean; integrated. Active correctiondraft survivesserverrefresh. |
+| [#103 / 4115732057](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732057) | Restore the proposed row when resolving locally | Fixed PR115/1913d9c; focused37/App75 and rejected-delete UI fixture passed; final Sol clean; integrated67027ac (current V3 fixture retained). |
+| [#103 / 4115732063](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732063) | Persist the successful feed-sync timestamp | Fixed PR115/1913d9c; focused37/App75 and rejected-delete UI fixture passed; final Sol clean; integrated67027ac (current V3 fixture retained). |
+| [#103 / 4115732067](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732067) | Avoid title correction for rejected deletes | Fixed PR115/1913d9c; focused37/App75 and rejected-delete UI fixture passed; final Sol clean; integrated67027ac (current V3 fixture retained). |
+| [#104 / 4115849413](https://github.com/LucaKaufmann/Ghostwriter/pull/104#discussion_r4115849413) | Allow regeneration when Ghostwriter is unconfigured | Fixed8271020/450336a, publisheda070a39; Android159/shared46/build pass, local dialog inspected, final Sol clean; integrated. |
+| [#104 / 4115849415](https://github.com/LucaKaufmann/Ghostwriter/pull/104#discussion_r4115849415) | Fall back from blank RSS content to the description | Fixed8271020/450336a, publisheda070a39; Android159/shared46/build pass, local dialog inspected, final Sol clean; integrated. |
+| [#104 / 4115849419](https://github.com/LucaKaufmann/Ghostwriter/pull/104#discussion_r4115849419) | Clear delivery claims when resetting all data | Fixed8271020/450336a, publisheda070a39; Android159/shared46/build pass, local dialog inspected, final Sol clean; integrated. |
+| [#105 / 4115849990](https://github.com/LucaKaufmann/Ghostwriter/pull/105#discussion_r4115849990) | Run retention cleanup before reporting partial failure | Fixed PR115/1913d9c; focused37/App75 and rejected-delete UI fixture passed; final Sol clean; integrated67027ac (current V3 fixture retained). |
+
+## Upstream verification for PR87
+
+Comment4115074401 claims KOReader SHA256 is one-shot only. The actual [pinned upstream implementation](https://github.com/koreader/koreader-base/blob/fe41d7698ad8a6a7caf794d9b601229009a34053/ffi/sha2.lua#L4402) returns an incremental updater when called without a message. Using that exact public file with the locally built LuaJIT, `sha256()` followed by `a`, `bc`, and finalization matched the standard SHA256 abc vector and the one-shot result. No product change is needed; this probe does not establish hardware compatibility.
+
+## Remote lifecycle
+
+PR74–81 were externally merged. Main fb8279409a92a21b1df83cc6fa6298abe3271403 contains74/75/78/79/80;76/77/81 were merged into their prerequisite branches. The orchestrator did not merge or deploy. Subsequent continuity changes require a new PR.
+
+## Refresh after initial sweep
+
+Current extra findings and disposition (2026-09-27):
+
+- PR82/4115924723 fresh clock: existing locked `_clock` get-or-create and fresh migration test already cover it; contract d11c766 now explicit.
+- PR82/4115924729 export: worker already commits history/claims before optional SAF export; d11c766 documents it. No duplicate product change.
+- PR82/4115924725 integer range: PR113/ffd859b validates0..Int32max; focused25/full428, Sol clean, published/integrated. No schema/data rewrite.
+- PR82/4115924727 and PR104/4115953288/3290/3293: Sol ios_sync_closeout owns REVIEW-ANDROID-DELIVERY; Room11 onlyowner, scheduled coverage/parallelfeed/prefilter/partialcopy.
+- PR107/4115950617/624: Fixed PR116/c315662; truthful BGfailure and offactor EPUB generation, Data59/Scheduler9 after corrections, priorworkspace151; accepted/integratedd455f05.
+- PR109/4115975755: validlegacy/noUser podcastfallback included in REVIEW-ONEOFF-OWNERSHIP a763f49; PR114 published/integrated; final Sol clean and combined444 passed.
+- PR106/4115922080/086/091 and4115974545/550/557: continuity573d2fd corrects digestcadence, settleddecisions, corrected99/104heads andincludescontract.104initialCI failure was fixed; additionalcurrentreviewwork remains explicitly active.
+- PR108 snapshot contains no inline findings. Refresh later PR110–112 and all changed heads before closeout.
+
+Refresh through PR114: PR110/113/114 have no inline findings. PR111 comments4116017451/457/460/465 fixed7fe3504:36browser/check/build, finalSolclean, screenshotsinspected, pushed/integrated389560b. PR112 comments4116020636/638 fixed9f1d393 after successor-snapshot review correction:173App/shared59with1skip/build, finalSolclean, pushed/integratedb5f406d. Frozen iOSsync34e7136, recovery21e3db8 and Androidcoveragefc26a890 passed affected tests and await independent review. One-off ownership is accepted in PR114; combined backend444 and live browser1 passed at5aa43f3.
+
+## Final native review dispositions
+
+- PR115 resolves103/105. Independent finding that repeated Keep removed loses a third create successor was rejected after a pre-fix disk-reopen test passed. Old-scope promotion was reproduced and fixed3e4cddd; final Sol clean.
+- PR116 resolves107 and IOS-RECOVERY. Final context-staleness finding did not reproduce using the exact preloaded repository/reconciliation/coverage path on iOS18.6. Missing-EPUB automatic retry produces empty while retaining prior delivery claims; this is intentional under the confirmed deliver-once policy, verified with actual generator and explicit regeneration. Both dispositions and tests are in IOS-RECOVERY.md; no clean-review claim for those two findings.
+- PR110 currentcd2f83e and PR1129f1d393 include the verified liveV3 coordinator fixture; old iOS CI failures were on previous heads.
+- Android scheduled-coverage migration remains under correction: pending legacy WorkManager work must be updated without cancellation or dropped occurrences. Room11 owns the only new Android schema change.
+
+## Closeout refresh through PR117
+
+- PR86 issue comment5857583055 is fixed by PR117/304f964. Known episode downloads use the configured API origin and canonical validated UUID; arbitrary advertised origins never receive bearer credentials. Twenty transport tests passed on Python3.11 and integrated Python3.14; independent Sol review clean.
+- PR115 comment4116111625 exposed delete-then-re-add visibility. The first correction0cfba92 passed38 focused/79 App tests but independent review found unchanged re-add payloads were empty and rejected by the shared serializer. The owner is fixing and verifying the complete acknowledgement/serialization path before acceptance.
+- Android64ccb06 review: accept the finding that repeat registration re-anchors delayed periodic work incorrectly. A durable request marker will retain the original occurrence anchor. Reject migration from the transient `daily_digest_anchored_*` name: that intermediate implementation was never published or installed and no persisted requests exist; compatibility code would manufacture unsupported state. Final correction/review remains pending.
+
+## Newly refreshed comments after PR118
+
+The paginated74–117 sweep covered inline comments, review bodies and issue comments. Its current-head CI snapshot had149 successful checks,24 skipped,0 failed/pending; absent rollups were not counted as passing coverage.
+
+- PR112/4116133533: correction-dialog defaults can become stale after a concurrent server refresh. Android owner is reproducing/fixing preservation of edited fields and refresh of untouched fields.
+- PR111/4116133843: restore shares the Add form mutation pending state. Web owner is separating those operations and adding a delayed-response browser regression.
+- PR116/4116125704: production scheduler captures Calendar.current. iOS owner will use an updating production calendar with deterministic injected-calendar tests.
+- PR106/4116156533 and6535: contract now requires the Room singleton transaction boundary and includes typed ServerChanged; existing implementation already does both.
+- PR106/4116088623 and8626: corrected the contract to allocate ArticleDelivery to V3 and preserve retryable attempt markers after cancellation. These were documentation contradictions, not new schema changes.
+- PR106/4116156530: removed “optional” from required native read-only compatibility preview and made the layer boundary explicit. Android FeedViewModel.previewOlderServerFeeds fetches legacy changes; iOS GhostwriterSyncCoordinator.previewOlderServerFeeds fetches the legacy list, each exposed by the upgrade UI. Shared v2 deliberately returns ServerUpgradeRequired without importing unversioned rows. Source inspection verifies those routes; this is not a new automatic legacy synchronization feature or a new end-to-end fallback test claim.
+
+- PR118/4116201244,1252,1254: hosted review identified boot receiver lifetime before asynchronous persistence, occurrence-date collisions after time-zone changes, and non-neutral cap-only partial wording. Android owner is correcting these after the PR112 pre-submit-sync issue.
+- PR1126b6f147 and web11168d3d6 first corrections are not accepted: independent review found respectively a pre-submit sync race and lost Add-origin cleanup. iOS11626b3983 likewise needs actual background-request resubmission beyond the updated calendar calculation. Owners are testing those full paths.
+- PR115c526cb6 now passed independent Sol review, was pushed and integrated157f309; the real KMP serialized re-add has complete fields and acknowledges after the delete across disk reopen.
+- PR106699ee13 contract corrections received independent Sol source review: no actionable contradiction; native compatibility previews are read-only UI state, Room binding is transactional, V3 owns delivery, and cancellation retains retryable attempt markers.
+- Remote refresh:82/86/87 also merged externally; main86d3efd integrated64222b8. Only conflict was the contract add/add; current reviewed wording was retained. Product source was unchanged by this merge.
+
+## Refresh through PR118 (later heads)
+
+- PR111/4116241870: newer typing during an in-flight edit must survive a delayed409; web owner assigned.
+- PR116/4116254668: valid explicit regeneration must survive recovery even when delivery claims retain the original firstDigestId; iOS owner assigned. Preserve original delivery claims and negative artifact checks.
+- PR106/4116229219: current next-action wording no longer says the unfinished118follow-up is accepted. PR106/4116216185 requested acceptance on an older snapshot; it is superseded and must not override active findings.
+- PR106/4116216180: PR-INDEX now links45 verified result/design/checkpoint paths at immutable published commit SHAs. Each target was checked with git cat-file; the docs-only continuity branch need not duplicate implementation evidence or screenshots to provide portable recovery.
+- Sweep74–118 covered all paginated inline/review/issue bodies.149 current-head successful checks,24 skipped,2 pending (112/116iOS),0 failed. Exact snapshots remain in temporary pr-feedback; record final refreshed outcomes before acceptance.
+
+## Latest closeout corrections
+
+- PR111/4116241870 fixed40ac892: retain newer draft after delayed409/200. Sol review clean; combined11f75e6 check0/0, production build,40browser and livejourney1 passed. New4116343985 subsequent Save must use the acknowledged successful response version; correction active.
+- PR112/4116133533 fixed6b6f147+25e2b1d, preserving nullable edited fields through pre-submit sync and resolving untouched fields from the latest durable snapshot; independent Sol clean and combined200 App/58shared plus1intentional skip/debugAPK passed.
+- PR115/4116111625 fixed0cfba92+c526cb6; complete re-add payload survives delete acknowledgement, actual shared serialization and reopen; Sol clean and combined171workspace tests passed.
+- PR116/4116125704 fixed26b3983+0c5db0b; actual BG request resubmission uses current time zone,10scheduler tests/Solclean/combined171 passed. New4116254668 regeneration recovery corrected9e31ae9+567061d with explicit mode in diagnosticsJSON; Data63/Appbuild passed, independent review found unknown-mode decoding could drop other diagnostics. Bounded decoder correction active; unaccepted/unpublished.
+- PR118905bc855 boot persistence/selection/zone corrections passed independent review and combined200App/58shared plus1intentional skip/debugAPK. New4116327421 asynchronous cancel/re-enable and4116327425 retry borrowing previous periodic execution require further corrections. Isolated pinned WorkManager2.9 read-only periodCount adapter accepted as implementation direction; both crash boundaries must be tested.
+- Full paginated74–118 refresh includes inline, review body and issue comments; latest snapshot150successful,24skipped,1iOS118pending,0failed. These counts are an observed checkpoint, not final acceptance of later heads.
+
+## Accepted final corrections
+
+- PR111/4116343985 fixedacf7abc: a retained newer draft uses the acknowledged response version on its next Save. Focused4/full40browser/check/build; Sol clean, published/integrated06ec2e7. Final live journey1passed with backendf371a84.
+- PR116/4116254668 fixed9e31ae9+567061d+879f237: explicit regeneration mode persists through all outcomes; unknown modes retain feed diagnostics and remain conservative. Data64; independent final Sol clean; published116/integrated9464a65; combined176workspace tests and Appbuild passed.
+- PR106/4116319539 fixed PR1137871e7a: legacy stored article caps project into native range on reads/conflicts and both replay paths; rows/versions/receiptJSON unchanged. Seven API cases,32focused435branchbackend; Sol clean/published/integratedf371a84. Combined451backend and real Kotlin/FastAPI legacy-cap fixture1 passed.
+- PR118/4116327421/425 fixedc763ae9: await pending cancellation receipts and distinguish periodic executions by UUID+WorkManager2.9 periodCount. Sol clean;194App/58shared passed+1skip/debugAPK. Test43581ef uses actual WorkerWrapper retry→success lifecycle; root inspected/passed. Both published118/integratedd34e89a; final combined204App/58shared passed+1intentional skip/debugAPK. Internal API coupling is explicit and must be checked on dependency upgrades.
+- PR106/4116319541/542/546: current checkpoint now distinguishes historical CI snapshots, names the active recovery gate correctly, and links accepted compatibility/persistence contract. Root-owned updates are included in the final continuity checkpoint.
+
+Final scoped refresh74–118: no new inline/review-body/issue feedback;149current-head checks succeeded,24skipped,4running,0failed. PR83/84/85/88 also merged externally into prerequisite branches, bringing external merges to15; main stays86d3efd. Root has not merged remotely. Final aggregate and changed-head CI still need inspection.
+
+## Aggregate review closeout
+
+- PR119/4116430726 identified a temporary iOS URL edit/revert leaving the original binding suspended. Initial045cf734 preserved binding but independent Sol review found local resolution could consume old-server proposals while a different URL was configured. A configured-destination/generation guard and atomic URL/generation update are in progress; neither initial correction nor follow-up is accepted yet.
+- Root reproduced Android failed-cancellation receipt poisoning after the previous accepted118 revision. Correction16d63a6 removes settled failed/successful receipts, retains later pending operations and avoids enqueue on the failing attempt; a subsequent registration retries from durable WorkManager state. Focused12 passed; independent Sol review clean; published118/integrateddfb233c. Combined205 App/58shared passed+1intentional live skip/debugAPK, zero failures/errors (`final-android-pr118-cancel-acceptance.log`).
+- Aggregate119 source baseline d87115f has10 successful hosted checks and1 intentionally skipped image publication. This precedes the final Android/iOS corrections and is not acceptance of their hosted checks.
+
+- Final paginated74–119 sweep found PR106/4116431240: native handoff incorrectly described configured Android workers as local-only. Corrected against actual DailyDigestWorker skip and SettingsViewModel backend/manual routing; no behavior change.
+- PR118/4116469560: empty selected-period boot registration cancels asynchronously without awaiting persistence. Assigned the Android owner for cancellation-only success/failure/pending receipt regression and bounded correction; current205-test baseline does not verify the new fix.
+
+- PR119/4116430726 correction045cf734+8766275 accepted after independent Sol guard review returned no actionable findings. Configured URL/generation checks preserve proposals while B is saved; reverting unsynced B to A resumes valid actions without clearing integrity suspensions. Atomic MainActor preference/generation update closes the observation gap. Focused41/App87/Data68 passed; integratedc721b25/0de22a0. Combined workspace acceptance is running.
+
+- Final combined iOS App build and183/183 workspace unit tests passed0de22a0 (UI excluded; V3sim3B168BD4), logs `final-ios-url-{app-build,workspace-test}.log`. No later iOS source changes.
+- PR118/4116469560 reproduced at16d63a6 and fixed661cbae: boot awaits unselected cancellations with zero registrations, drains later pending receipts after a failure, and preserves ordinary registration's conservative failure handling. Scheduler15/15 passed; independent Sol review clean; integratedf53d7d4. Final combined Android gate is running.
+
+- Final Android acceptance:661cbae published118 and integratedf53d7d4; combined208/208 App tests and58 shared tests passed,1intentional live skip, zero failures/errors, debugAPK. Log `final-android-boot-closeout.log`. All currently identified actionable review findings are corrected; final publication/hosted refresh remains.
+
+## Later aggregate review findings after green CI
+
+PR1198085482 passed10 hosted checks with1intentional image-publish skip; PR118661cbae passedboth native checks. The subsequent changed-PR review refresh identified106/4116536892 and119/4116541274. The first is corrected in the KMP handoff: `current:null` is limited to never-seen deletes only for applied results, while rejected responses require null current plus a nonblank code; conflicts require valid current. Root verified the shared validator. The Android temporary URL edit/revert suspension finding is assigned for bounded correction preserving integrity suspensions, outbox and stale-token guards; it remains unaccepted/unpublished.
+
+- PR119/4116541274 fixed by66eee8a,32befea,cdcd44f, integrated99dea2a/24f6f5e/ff94b7c. Transient Android URL edits advance generation without erasing suspension reasons; actual B selection retains explicit Review. Configured-URL guards cover token writes and local resolutions. Two independent-review outcome races were corrected before acceptance: status now uses a coroutine-local ticket from actual token acquisition, or the actual disabled observation for NotConfigured. All production callers use this path. Final Sol4957 clean;39 focused checks/full218 App and58 shared passed+1intentional live skip/debugAPK. Whole integrated tracked tree equals testedcdcd44f. Logs `android-url-revert-token-{focused,full}.log`; result `AGGREGATE-ANDROID-URL-REVERT.md`. Original returned outcomes/bounded worker retry remain intentional; stale outcomes cannot overwrite persisted binding status.
+- PR106/4116536892 null-current handoff wording corrected against the actual shared validator. All currently known actionable comments are addressed; refresh final published head for later arrivals/checks.
+
+## Post-CI iOS initial reconciliation finding
+
+Aggregate1190591f1f finished 10 successful hosted checks with one intentional image-publication skip. Paginated changed-head comment refresh at 2026-09-27T20:04:43Z found119/4116721613: initial reconciliation deletes an absent trailing delete while leaving an earlier same-URL upsert eligible. Source validation confirms create→delete before first sync can recreate the feed. Final acceptance is held for an isolated iOS correction and regression proof; no green-CI completion inference. PR106c71523e had no new substantive finding at20:04:40Z.
+
+- PR119/4116721613 accepted fix7491cf8/f3ac5fb/cfb270c, integratedfc70077/6414dcd/c8f5008. Initial local create/delete cancellation coalesces only provably unsent eligible prefixes; all uncertain intents retain ordered delete barriers. Independent reviews50753/66064 found blocked-successor ACK and subsequent-pull visibility defects; both reproduced red and corrected through a consistent same-scope live-row projection rule. Exported KMP POST→ACK→newer incremental pull→disk reopen, conflict/re-add/tombstone/explicit-resolution controls pass. Final53 focused/195workspace/Appbuild, cumulative Sol73050 clean; integration6cb80af whole tree matches verified worker d4834bf. Pending publication while Android parity correction is verified.
+
+- Android parity investigation reproduced a newer live pull exposing a queued-deleted feed in visible/enabled/local-generation DAO queries. This was a local fixture, not a provider run; configured DailyDigestWorker skips local generation. Correctionc1a5386, integrated3c5eb75, derives visibility from the latest retained active-scope intent in `(queueOrder, sequence)` order across reconciliation/conflict/pull/ACK/resolution/correction. Existing cached value handling, payloads, statuses and tombstones remain as specified. Full actual shared-usecase and disk-reopen controls passed;35 focused/225App/58shared plus one intentional skip/APK. Sol24159 clean; result62a3555 integratedc7c8595.
+- Root compared integrated iOS/shared source to verified d4834bf and Android/shared/other product source to verified62a3555; only the accepted disjoint platform changes differ between worker trees. Aggregate whitespace check passes with the documented historical SQL fixture exclusion. All currently identified actionable findings are fixed; final published feedback/CI refresh remains.
+
+## Post-CI comments at2026-09-27T21:07Z
+
+Aggregate1190987f80 passed 10 hosted checks plus one intentional publication skip; iOS completed21:06:37Z. Changed-head paginated refresh at10621:07:07Z/11921:07:09Z found four actionable comments.106/4116901770 corrected locally: only unbound first reconciliation omits both parameters; bound full pulls keep instance ID, matching actual Ktor implementation.119/4116909634 immutable-URL web PUT DNS gate and4116909636 legacy negative cap consumption assigned backend owner.119/4116909638 hostless malformed authority admitted by shared validation assigned for bounded contract/admission design. Final closeout remains held; earlier green tests do not verify upcoming source corrections.
+
+### All-PR refresh during final feed-input follow-up
+
+Paginated PR74–119 refresh at 2026-09-27T21:16:13Z: 31 open, 15 externally merged, 109 inline comments, 57 review bodies, and 47 issue comments. No additional or changed comments beyond the four already tracked at21:07Z. Backend `21f7df5` passed independent Sol commit review (`backend-feed-compat-review.log/json`, exit0); full verification and native admission corrections remain active.
+
+### Final feed-input corrections accepted locally
+
+- #106/4116901770: corrected bound full-pull handoff documentation; actual Ktor client already sends the observed instance ID while omitting only `since_version`.
+- #119/4116909634 and4116909636: backend source `ec8ed10`, result `b0c9e5f`, integrated through `df4382b`. Immutable-URL PUT preserves CAS without DNS admission; bindery projects legacy raw limits before the strict parser. New-only malformed-port validation covers web/v2 creation while preserving known rows/replay.462backend tests passed; final cumulative Sol review49023 clean. The accepted review fixture-signature finding was corrected and retested.
+- #119/4116909638: common/Android `c63ded1` integrated8a4f27c and iOS `470e834` integrated37d43a0. New admission checks actual hostname/port through the shared parser as a boolean; exact identity, legacy snapshots, durable wire replay and known-row edits remain compatible.229Android/59shared plus one intentional live skip,197iOS/55focused,59shared-native, both app builds and XCFramework passed. Android Sol88214 and integrated iOS Sol5148 clean. Isolated iOS review97406 reported dependencies absent from its old-base checkout; rejected after confirming the already accepted helper/Android source and rerunning in the combined checkout.
+- Combined source37d43a0: real Ktor→FastAPI1passed with no skips; synthetic browser reading/listening1passed. Exact component source comparisons matched the verified worker trees. No paid providers or production content. Logs `final-feed-admission-{live-contract,journey}.log`.
+
+All four latest comments are addressed locally; final source publication and hosted feedback remain to be inspected. No external review replies or thread-resolution claim.
+
+### Final documentation review — 2026-09-27T21:41Z
+
+- #106/4117040754, alleged44broken immutable evidence links: rejected after checking the exact reviewed index. All 46local SHA/path targets exist; all 46pinned GitHub Contents API requests succeeded,0missing. The comment's local-object result does not show missing remote tree paths. Evidence: `pr-feedback/pr106-immutable-link-remote-check.json`. Index clarifies this distinction for shallow/unrelated checkouts.
+- #106/4117040757, missing navigation to final acceptance records: accepted. Project state now directly links the backend, shared/Android and iOS records at published aggregate2918931. Continuity106 intentionally uses immutable links rather than copying every worker result.
+- #106/4117040759, negative article limit: accepted as a handoff clarification; rejected as a demonstrated production ingress bug. Current `FeedSnapshotV2.isValidV2` rejects negative limits; shared use-case full/incremental/result validation runs before native store writes. Handoff now names the explicit0..2147483647range and that boundary. A test-only wire/application-boundary proof now covers full pulls, incremental pulls and push receipts, with zero-cap controls. Sourceb247ebb integrated8a55776 passed shared JVM/native gates and clean Sol review. No production code change was required.
+
+PR119's available mid-build feedback had no new substantive finding. Current code CI remains tied to2918931; later verification/document changes must be distinguished from product changes.
+
+### Completed review closeout
+
+2026-09-27T21:50:43Z final paginated74–119 sweep:31open/15externally merged,112inline comments,58review bodies,47issue comments; no new/edited feedback. Every actionable finding is integrated; rejected findings have evidence above. Hosted product source2918931994a05c3fb2d0e1f9e812556361fef479 finished10SUCCESS+1intentional SKIP at21:48:49Z, no failed/pending jobs. The final test/documentation checkpoint preserves that product tree; publication reruns are not mislabeled as completed. No remote merge, release, deployment, external reply or automatic thread-resolution action.

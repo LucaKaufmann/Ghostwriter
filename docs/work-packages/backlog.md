@@ -20,7 +20,7 @@ All packages inherit the [worker prompt](worker-prompt.md). The orchestrator own
 
 User model preference: **Sol (`gpt-6-sol`) for every subagent**, including research, implementation, and independent review. Select it explicitly at launch; use a self-contained brief when full-history forks cannot accept model overrides. Do not silently substitute another model.
 
-Current environment supports the root plus three concurrent subagents. Recheck capacity on launch; reserve root for integration. Do not create separate user-facing chats unless requested. Three preparation workers are read-only and do not count as implementation started.
+Current environment supports the root plus three concurrent subagents. Recheck capacity on launch; reserve root for integration. Do not create separate user-facing chats unless requested. Preparation used three read-only workers and did not start implementation.
 
 First recommended dispatch: **ENV-01, AUTH-01, HELPER-01**. ENV-01 owns global Python test/configuration files, so AUTH-01 uses task-specific test modules and waits for ENV-01's verified environment before final full-suite acceptance. As slots free, launch **KO-01**, **INGEST-01**, and **WEB-01** where ownership permits. Build preparation and contract packages can then run alongside backend fixes. The package ledger records dependencies, not a promise to run every row at once.
 
@@ -40,7 +40,7 @@ All PRs: `git diff --check`, focused behavior/failure tests, inspected final dif
 
 ## Package ledger
 
-Execution is active. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`. PRs74–94 cover accepted foundation, backend and integration fixes; server sync and journey verification are active. Remaining native sync/delivery and recovery implementation stay dependency-gated. Result path convention: `docs/work-packages/results/ID.md` in the package branch.
+The approved reliability backlog is complete. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`; the [PR index](results/PR-INDEX.md) lists the published work. The table below is the original scope/dependency map, not live completion status. All 29 original package outcomes and known actionable review corrections are integrated and locally verified. Final product-source CI passed and all available PR feedback was inspected; see project state for exact revisions and cutoffs. Result path convention: `docs/work-packages/results/ID.md` on the relevant branch.
 
 | ID | Priority/type | Outcome | Start condition |
 |---|---|---|---|
@@ -117,8 +117,8 @@ Root can then dispatch without further permission for ordinary edits/tests/branc
 - Normal native editions deliver an article once; delivery identity survives history deletion; explicit regeneration is separate.
 - Episode-referenced digests are retained: block manual deletion and skip automatic deletion while referenced. Unknown historical orphan files remain untouched.
 
-CONTRACT-01 and RETENTION-01 must still define exact compatibility, persistence and recovery contracts from these decisions before dependent implementation. Full-backlog execution is authorized; merging/deployment remain excluded.
+The contract packages subsequently defined compatibility, persistence and recovery behavior before dependent implementation; their current contract and result documents record the accepted details. Full-backlog execution is authorized; merging/deployment remain excluded.
 
-### Execution checkpoint — 2026-09-27
+### Historical first-wave checkpoint — 2026-09-27
 
-ENV#75, AUTH#76, HELPER#74 and INGEST#77 are published with clean independent Sol reviews and relevant passing checks. INGEST stacks on ENV. WEB#78 is draft pending reviewed Linux visual baselines and final Sol review. KO ownership corrections and BUILD-NATIVE hosted checks remain active. CONTRACT-01 exact design at `codex/contract-01-sync-delivery:d07b4d4` is under review; dependent implementation is not yet dispatched. Root `docs/project-state.md` is the live ledger.
+At this historical checkpoint, ENV#75, AUTH#76, HELPER#74 and INGEST#77 were published with clean independent Sol reviews and relevant passing checks. INGEST stacks on ENV. WEB#78 is draft pending reviewed Linux visual baselines and final Sol review. KO ownership corrections and BUILD-NATIVE hosted checks remain active. CONTRACT-01 exact design at `codex/contract-01-sync-delivery:d07b4d4` is under review; dependent implementation is not yet dispatched. Root `docs/project-state.md` is the live ledger.
