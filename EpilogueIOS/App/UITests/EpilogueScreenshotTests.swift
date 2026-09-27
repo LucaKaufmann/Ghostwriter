@@ -64,6 +64,16 @@ final class EpilogueScreenshotTests: XCTestCase {
         capture(name: "feed-v2-rejected")
         app.buttons["Close"].tap()
 
+        app.staticTexts["Invalid URL feed"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Discard proposal"]))
+        XCTAssertTrue(waitForExists(app.staticTexts[
+            "This proposal cannot change its URL. Discard it, then add the feed again with a corrected URL."
+        ]))
+        XCTAssertFalse(app.textFields["Corrected title"].exists)
+        XCTAssertFalse(app.buttons["Correct and retry"].exists)
+        capture(name: "feed-v2-rejected-invalid-url")
+        app.buttons["Close"].tap()
+
         app.staticTexts["Missing feed"].tap()
         XCTAssertTrue(waitForExists(app.buttons["Add to server"]))
         capture(name: "feed-v2-absent")
@@ -79,6 +89,29 @@ final class EpilogueScreenshotTests: XCTestCase {
         XCTAssertFalse(app.textFields["Corrected title"].exists)
         XCTAssertFalse(app.buttons["Correct and retry"].exists)
         capture(name: "feed-v2-rejected-delete")
+    }
+
+    func testInvalidURLProposalDiscardsBeforeCorrectedAdd() throws {
+        app.terminate()
+        app.launchArguments += ["-feed-v2-ui-fixture"]
+        app.launch()
+        let rejected = app.staticTexts["Invalid URL feed"]
+        XCTAssertTrue(waitForExists(rejected))
+        rejected.tap()
+        XCTAssertTrue(waitForExists(app.navigationBars["Resolve feed"]))
+        XCTAssertFalse(app.buttons["Correct and retry"].exists)
+        app.buttons["Discard proposal"].tap()
+        XCTAssertTrue(waitForExists(app.navigationBars["Feed Manager"]))
+        XCTAssertFalse(rejected.exists)
+
+        app.buttons["Add feed"].tap()
+        XCTAssertTrue(waitForExists(app.navigationBars["Add Feed"]))
+        app.textFields["Feed URL"].tap()
+        app.textFields["Feed URL"].typeText("https://example.test/corrected.xml")
+        app.textFields["Nickname"].tap()
+        app.textFields["Nickname"].typeText("Corrected URL feed")
+        app.navigationBars["Add Feed"].buttons["Add"].tap()
+        XCTAssertTrue(waitForExists(app.staticTexts["Corrected URL feed"]))
     }
 
     func testRemoteDigestArtifactAvailabilityFixture() throws {
