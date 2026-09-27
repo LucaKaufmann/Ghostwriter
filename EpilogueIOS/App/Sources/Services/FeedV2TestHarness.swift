@@ -37,7 +37,9 @@ final class FeedV2TestHarness {
             for (index, example) in examples.enumerated() {
                 let url = "https://example.test/\(example.0).xml"
                 let serverPresent = example.0 != "absent" && !example.0.hasPrefix("invalid-url")
-                context.insert(Domain.Feed(url: url, name: example.1, mode: .fidelity,
+                context.insert(Domain.Feed(url: url,
+                                           name: example.0 == "invalid-url-chain" ? "Later URL edit" : example.1,
+                                           mode: .fidelity,
                                            serverId: serverPresent ? UUID().uuidString.lowercased() : nil,
                                            serverVersion: serverPresent ? 8 : nil,
                                            isLocallyDeleted: example.4))
