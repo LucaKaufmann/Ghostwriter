@@ -486,8 +486,10 @@ public final class DigestSyncService {
         tracker: SyncPerformanceTracker?
     ) async throws {
         let localURL = try expectedEPUBURL(filename: digest.filename)
+        // A completed digest with no articles has no generated EPUB on the server.
+        let requiresEPUB = shouldDownloadEpubs && digest.articleCount > 0
         if let existing = try await digestRepository.getDigestByRemoteId(digest.id),
-           !shouldDownloadEpubs || FileManager.default.fileExists(atPath: existing.epubFilePath) {
+           !requiresEPUB || FileManager.default.fileExists(atPath: existing.epubFilePath) {
             // The repository uses remote identity for idempotence. Retrying a mixed batch
             // must not duplicate siblings that were already committed.
             return
@@ -509,7 +511,7 @@ public final class DigestSyncService {
         }
         try Task.checkCancellation()
 
-        if shouldDownloadEpubs {
+        if requiresEPUB {
             let epubState = tracker?.beginInterval("EPUB Download [\(digest.id.prefix(8))]")
             let data: Data
             if let downloadOverride {

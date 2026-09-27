@@ -48,12 +48,15 @@ final class DigestSyncOutcomeTests: XCTestCase {
     }
 
     private func combined(_ id: String) -> SharedDigestSyncPlan.CombinedDigest {
-        .init(id: id, filename: "\(id).epub", period: "morning", articleCount: 0,
-              createdAt: "2026-09-27T00:00:00Z", completedAt: nil, articles: [])
+        .init(id: id, filename: "\(id).epub", period: "morning", articleCount: 1,
+              createdAt: "2026-09-27T00:00:00Z", completedAt: nil,
+              articles: [.init(id: "article-\(id)", title: "Title", url: "https://example.invalid/\(id)",
+                               mode: "fidelity", wordCount: 4, content: "Body", contentHTML: nil,
+                               author: nil, feedTitle: "Feed", sortOrder: 0)])
     }
 
-    private func legacy(_ id: String) -> SharedDigestSyncPlan.LegacyDigest {
-        .init(id: id, filename: "\(id).epub", period: "morning", articleCount: 1,
+    private func legacy(_ id: String, articleCount: Int = 1) -> SharedDigestSyncPlan.LegacyDigest {
+        .init(id: id, filename: "\(id).epub", period: "morning", articleCount: articleCount,
               createdAt: "2026-09-27T00:00:00Z", completedAt: nil)
     }
 
@@ -100,6 +103,40 @@ final class DigestSyncOutcomeTests: XCTestCase {
         XCTAssertEqual(downloads.filter { $0 == "ok.epub" }.count, 1)
         let observed100 = try await fixture.settings.getLastDigestSyncTime()
         XCTAssertNotEqual(observed100, prior)
+    }
+
+    func testZeroArticleCombinedDigestIsIndexedWithoutEpubDownload() async throws {
+        let fixture = try await Fixture(download: true)
+        let prior = Date(timeIntervalSince1970: 1_700_000_000)
+        try await fixture.settings.setLastDigestSyncTime(prior)
+        let service = try fixture.service(
+            download: { _ in XCTFail("Zero-article digest has no EPUB"); throw FixtureError.download }
+        )
+        try await service.processDigestsFromSync([synced("empty")])
+        try await service.processDigestsFromSync([synced("empty")])
+        let ids = try await fixture.repository.getAllRemoteIds()
+        let count = try await fixture.repository.getDigestCount()
+        let lastSync = try await fixture.settings.getLastDigestSyncTime()
+        XCTAssertEqual(ids, ["empty"])
+        XCTAssertEqual(count, 1)
+        XCTAssertNotEqual(lastSync, prior)
+    }
+
+    func testZeroArticleLegacyDigestIsIndexedAfterEmptyArticleFetch() async throws {
+        let fixture = try await Fixture(download: true)
+        var articleCalls = 0
+        let service = try fixture.service(
+            plan: { [self] in .legacy(digests: [legacy("empty-legacy", articleCount: 0)],
+                                       shouldDownloadEpubs: true) },
+            download: { _ in XCTFail("Zero-article digest has no EPUB"); throw FixtureError.download },
+            articles: { _ in articleCalls += 1; return [] }
+        )
+        try await service.sync()
+        let ids = try await fixture.repository.getAllRemoteIds()
+        let lastSync = try await fixture.settings.getLastDigestSyncTime()
+        XCTAssertEqual(ids, ["empty-legacy"])
+        XCTAssertEqual(articleCalls, 1)
+        XCTAssertNotNil(lastSync)
     }
 
     func testDirectCombinedAllFailuresAndEmptySuccess() async throws {

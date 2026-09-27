@@ -252,12 +252,41 @@ final class GhostwriterSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(issues(fixture.coordinator).map(\.component), [.settings])
         XCTAssertEqual(configCalls, 1)
         fixture.coordinator.operations.lastDigestSync = { nil }
-        fixture.coordinator.operations.feedSince = { throw FixtureError.read }
+        fixture.coordinator.operations.knownDigestIDs = { throw FixtureError.read }
+        fixture.coordinator.operations.fetchCombined = { since, ids in
+            XCTAssertNil(since)
+            XCTAssertEqual(ids, [])
+            return try Fixture.response()
+        }
         fixture.coordinator.operations.syncConfig = { XCTFail("Read error must not trigger fallback"); return false }
         await fixture.coordinator.performFullSyncIncludingDigests()
-        XCTAssertEqual(issues(fixture.coordinator).map(\.component), [.settings])
-        XCTAssertEqual(configCalls, 1)
+        XCTAssertEqual(issues(fixture.coordinator).map(\.component), [.digest])
+        XCTAssertEqual(configCalls, 2)
         XCTAssertNil(fixture.coordinator.lastSyncTime)
+    }
+
+    func testRecentEmptyCombinedThenNewPayloadStillIngests() async throws {
+        let fixture = try await Fixture(now: fixedNow)
+        try await fixture.settings.setLastDigestSyncTime(fixedNow)
+        var responseDigests = "[]"
+        var ingestCalls = 0
+        fixture.coordinator.operations.fetchCombined = { _, _ in
+            try Fixture.response(digests: responseDigests)
+        }
+        fixture.coordinator.operations.applyDigests = { values, _ in
+            ingestCalls += 1
+            XCTAssertEqual(values.count, 1)
+        }
+        await fixture.coordinator.performFullSync()
+        XCTAssertEqual(ingestCalls, 0)
+        XCTAssertNil(fixture.coordinator.lastSyncError)
+        responseDigests = """
+        [{"id":"new","filename":"new.epub","period":"morning","status":"completed",
+          "article_count":0,"created_at":"2026-09-27T00:00:00Z","articles":[]}]
+        """
+        await fixture.coordinator.performFullSync()
+        XCTAssertEqual(ingestCalls, 1)
+        XCTAssertNil(fixture.coordinator.lastSyncError)
     }
 
     func testScheduleFetchFailureAndAllDigestFailureRetainPriorSuccessTime() async throws {
@@ -365,9 +394,15 @@ final class GhostwriterSyncCoordinatorTests: XCTestCase {
             }, articles: { _ in [] })
         let digests = """
         [{"id":"ok","filename":"ok.epub","period":"morning","status":"completed",
-          "article_count":0,"created_at":"2026-09-27T00:00:00Z","articles":[]},
+          "article_count":1,"created_at":"2026-09-27T00:00:00Z",
+          "articles":[{"id":"article-ok","title":"Title","url":"https://example.invalid/ok",
+                       "mode":"fidelity","word_count":4,"content":"Body","feed_title":"Feed",
+                       "sort_order":0,"ai_failed":false}]},
          {"id":"retry","filename":"retry.epub","period":"morning","status":"completed",
-          "article_count":0,"created_at":"2026-09-27T00:00:00Z","articles":[]}]
+          "article_count":1,"created_at":"2026-09-27T00:00:00Z",
+          "articles":[{"id":"article-retry","title":"Title","url":"https://example.invalid/retry",
+                       "mode":"fidelity","word_count":4,"content":"Body","feed_title":"Feed",
+                       "sort_order":0,"ai_failed":false}]}]
         """
         fixture.coordinator.operations.fetchCombined = { _, _ in try Fixture.response(digests: digests) }
         fixture.coordinator.operations.applyDigests = { values, tracker in

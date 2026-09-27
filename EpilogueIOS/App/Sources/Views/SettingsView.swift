@@ -417,7 +417,7 @@ struct SettingsView: View {
     }
 
     private func syncNow() async {
-        await ghostwriterCoordinator.performFullSync()
+        await ghostwriterCoordinator.performFullSyncIncludingDigests()
     }
 
     private func generateDigestNow() async {
