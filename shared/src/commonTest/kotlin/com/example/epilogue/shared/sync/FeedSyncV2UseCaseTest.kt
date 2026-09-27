@@ -7,7 +7,14 @@ import com.example.epilogue.shared.ghostwriter.FeedMutationBatchV2
 import com.example.epilogue.shared.ghostwriter.FeedMutationResultV2
 import com.example.epilogue.shared.ghostwriter.FeedMutationV2
 import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
+import com.example.epilogue.shared.ghostwriter.GhostwriterApiClient
 import com.example.epilogue.shared.ghostwriter.toWireJson
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -43,6 +50,104 @@ class FeedSyncV2UseCaseTest {
         val broken = FakeRemote().apply { fullResponse = full(feed(4).copy(title = null)) }
         assertIs<FeedSyncV2Outcome.Failed>(useCase(brokenStore, broken).sync())
         assertEquals(null, brokenStore.binding)
+    }
+
+    @Test
+    fun negativeCapInWireFullPullCannotBindOrReconcileButZeroCan() = runTest {
+        for (cap in listOf(-1, 0)) {
+            val store = FakeStore().apply { claims += sent() }
+            val (http, remote) = wireRemote(
+                fullBody = changesWire(4, cap),
+                pushBody = resultWire(0),
+                pullBody = changesWire(4, null))
+            try {
+                val outcome = useCase(store, remote).sync()
+                if (cap < 0) {
+                    assertEquals("full_pull", assertIs<FeedSyncV2Outcome.Failed>(outcome).phase)
+                    assertEquals(null, store.binding)
+                    assertEquals(0, store.reconciliations)
+                    assertEquals(0, store.loadCalls)
+                    assertEquals(1, store.claims.size)
+                } else {
+                    assertIs<FeedSyncV2Outcome.Complete>(outcome)
+                    assertEquals(4L, store.binding?.cursorVersion)
+                    assertEquals(1, store.reconciliations)
+                    assertEquals(listOf(op to 1L), store.acks)
+                }
+            } finally { http.close() }
+        }
+    }
+
+    @Test
+    fun negativeCapInWireIncrementalPullCannotApplyOrAdvanceCursor() = runTest {
+        for (cap in listOf(-1, 0)) {
+            val store = FakeStore(bound = true).apply { claims += sent() }
+            val (http, remote) = wireRemote(
+                fullBody = changesWire(4, null),
+                pushBody = """{"detail":{"code":"temporary"}}""",
+                pullBody = changesWire(5, cap),
+                pushStatus = HttpStatusCode.InternalServerError)
+            try {
+                val outcome = useCase(store, remote).sync()
+                if (cap < 0) {
+                    assertEquals("pull", assertIs<FeedSyncV2Outcome.Failed>(outcome).phase)
+                    assertEquals(4L, store.binding?.cursorVersion)
+                    assertEquals(0, store.pullApplies)
+                } else {
+                    assertEquals("push", assertIs<FeedSyncV2Outcome.Partial>(outcome).phase)
+                    assertEquals(5L, store.binding?.cursorVersion)
+                    assertEquals(1, store.pullApplies)
+                }
+                assertTrue(store.acks.isEmpty())
+                assertEquals(1, store.claims.size)
+            } finally { http.close() }
+        }
+    }
+
+    @Test
+    fun negativeCapInWirePushReceiptCannotAcknowledgeQueuedProposal() = runTest {
+        for (cap in listOf(-1, 0)) {
+            val store = FakeStore(bound = true).apply { claims += sent() }
+            val (http, remote) = wireRemote(
+                fullBody = changesWire(4, null),
+                pushBody = resultWire(cap),
+                pullBody = changesWire(4, null))
+            try {
+                val outcome = useCase(store, remote).sync()
+                if (cap < 0) {
+                    assertEquals("invalid_response", assertIs<FeedSyncV2Outcome.Partial>(outcome).phase)
+                    assertTrue(store.acks.isEmpty())
+                    assertEquals(1, store.claims.size)
+                } else {
+                    assertIs<FeedSyncV2Outcome.Complete>(outcome)
+                    assertEquals(listOf(op to 1L), store.acks)
+                    assertTrue(store.claims.isEmpty())
+                }
+                assertEquals(4L, store.binding?.cursorVersion)
+            } finally { http.close() }
+        }
+    }
+
+    private fun changesWire(version: Int, cap: Int?): String {
+        val rows = if (cap == null) "[]" else
+            """[{"kind":"feed","id":"$id","url":"$url","version":$version,"title":"Web","is_active":true,"mode":"raw","max_articles":$cap}]"""
+        return """{"server_instance_id":"$instance","server_version":$version,"changes":$rows}"""
+    }
+
+    private fun resultWire(cap: Int): String =
+        """{"server_instance_id":"$instance","results":[{"op_id":"$op","status":"applied","current":{"kind":"feed","id":"$id","url":"$url","version":5,"title":"Web","is_active":true,"mode":"raw","max_articles":$cap}}]}"""
+
+    private fun wireRemote(fullBody: String, pushBody: String, pullBody: String,
+        pushStatus: HttpStatusCode = HttpStatusCode.OK): Pair<HttpClient, GhostwriterApiClient> {
+        val http = HttpClient(MockEngine { request ->
+            val (body, status) = when {
+                request.url.encodedPath.endsWith("/mutations-v2") -> pushBody to pushStatus
+                request.url.parameters.contains("since_version") -> pullBody to HttpStatusCode.OK
+                else -> fullBody to HttpStatusCode.OK
+            }
+            respond(body, status, headersOf(HttpHeaders.ContentType, "application/json"))
+        })
+        return http to GhostwriterApiClient(http, destination.normalizedBaseUrl, "test-token")
     }
 
     @Test
@@ -404,7 +509,7 @@ class FeedSyncV2UseCaseTest {
         }
     }
 
-    private fun useCase(store: FakeStore, remote: FakeRemote,
+    private fun useCase(store: FakeStore, remote: FeedV2RemotePort,
         configured: FeedV2Destination? = destination) = FeedSyncV2UseCase(
         object : FeedV2ConfigurationPort {
             override suspend fun currentDestination() = configured
