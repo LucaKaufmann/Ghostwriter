@@ -5,13 +5,16 @@ import hashlib
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from io import BytesIO
+from urllib.parse import urljoin
 
 import feedparser
 import trafilatura
+from feedparser.http import ACCEPT_HEADER as FEED_ACCEPT_HEADER
 from trafilatura.settings import use_config
 
 from app.core.config import Settings, get_settings
-from app.core.net import validate_public_url
+from app.services.outbound_fetch import fetch_resource
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +86,24 @@ class ContentProcessor:
             List of ParsedArticle objects.
         """
         try:
-            validate_public_url(feed_url, self.settings)
+            fetched = await fetch_resource(
+                feed_url,
+                settings=self.settings,
+                kind="feed",
+                headers={
+                    "User-Agent": "Ghostwriter/1.0",
+                    "Accept": FEED_ACCEPT_HEADER,
+                },
+            )
             loop = asyncio.get_event_loop()
             feed = await loop.run_in_executor(
                 self._executor,
                 lambda: feedparser.parse(
-                    feed_url,
-                    request_headers={"User-Agent": "Ghostwriter/1.0"},
+                    BytesIO(fetched.data),
+                    response_headers={
+                        "content-location": fetched.content_location or fetched.final_url,
+                        "content-type": fetched.content_type or "application/xml",
+                    },
                 ),
             )
 
@@ -135,7 +149,7 @@ class ContentProcessor:
                         continue
                     url_value = item.get("url") or item.get("href")
                     if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
-                        return url_value
+                        return urljoin(fetched.content_location or fetched.final_url, url_value)
 
                 enclosures = entry.get("enclosures") or []
                 for item in enclosures:
@@ -143,7 +157,7 @@ class ContentProcessor:
                         continue
                     url_value = item.get("url") or item.get("href")
                     if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
-                        return url_value
+                        return urljoin(fetched.content_location or fetched.final_url, url_value)
 
                 links = entry.get("links") or []
                 for item in links:
@@ -153,7 +167,7 @@ class ContentProcessor:
                         continue
                     url_value = item.get("href") or item.get("url")
                     if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
-                        return url_value
+                        return urljoin(fetched.content_location or fetched.final_url, url_value)
 
                 for collection in (media_content, enclosures, links):
                     for item in collection:
@@ -161,7 +175,7 @@ class ContentProcessor:
                             continue
                         url_value = item.get("url") or item.get("href")
                         if url_value:
-                            return url_value
+                            return urljoin(fetched.content_location or fetched.final_url, url_value)
 
                 return None
 
@@ -232,10 +246,10 @@ class ContentProcessor:
             return articles
 
         except ValueError as e:
-            logger.warning(f"Blocked feed URL (unsafe): {feed_url} - {e}")
+            logger.warning("Blocked feed URL (unsafe): %s", e)
             return []
         except Exception as e:
-            logger.error(f"Error parsing feed {feed_url}: {e}")
+            logger.error("Error parsing feed: %s", e)
             return []
 
     async def extract_content(self, url: str) -> str | None:
@@ -249,17 +263,19 @@ class ContentProcessor:
             Extracted text content or None if extraction failed.
         """
         try:
-            validate_public_url(url, self.settings)
+            fetched = await fetch_resource(
+                url,
+                settings=self.settings,
+                kind="html",
+                headers={"User-Agent": "Ghostwriter/1.0"},
+            )
             loop = asyncio.get_event_loop()
 
             # Fetch and extract in executor to avoid blocking
             def _extract() -> str | None:
-                downloaded = trafilatura.fetch_url(url)
-                if not downloaded:
-                    return None
-
                 return trafilatura.extract(
-                    downloaded,
+                    fetched.data,
+                    url=fetched.final_url,
                     config=trafilatura_config,
                     include_comments=False,
                     include_tables=True,
@@ -280,13 +296,13 @@ class ContentProcessor:
             return content
 
         except ValueError as e:
-            logger.warning(f"Blocked URL fetch (unsafe): {url} - {e}")
+            logger.warning("Blocked URL fetch (unsafe): %s", e)
             return None
         except TimeoutError:
             logger.error(f"Timeout extracting content from {url}")
             return None
         except Exception as e:
-            logger.error(f"Error extracting content from {url}: {e}")
+            logger.error("Error extracting content: %s", e)
             return None
 
     @staticmethod
