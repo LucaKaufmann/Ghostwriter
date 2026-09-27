@@ -1,6 +1,8 @@
 """Installation manifest and test isolation regression checks."""
 
 import socket
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -57,3 +59,47 @@ def test_network_requires_explicit_fixtures():
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
         with pytest.raises(AssertionError, match="mock outbound IP"):
             connection.sendto(b"test", ("93.184.215.14", 53))
+        if hasattr(connection, "sendmsg"):
+            with pytest.raises(AssertionError, match="mock outbound IP"):
+                connection.sendmsg([b"test"], [], 0, ("93.184.215.14", 53))
+
+
+def test_embedded_pytest_restores_host_process(tmp_path):
+    """Running pytest.main must not leave its host's env or sockets patched."""
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=sentinel-dotenv\n")
+    code = f"""
+import os
+import socket
+import pytest
+from app.core.config import Settings, get_settings
+
+os.environ["OPENAI_API_KEY"] = "sentinel-host-key"
+os.environ["SCHEDULE_ENABLED"] = "true"
+original_env = dict(os.environ)
+original_model_config = Settings.model_config
+original_socket = {{name: getattr(socket, name) for name in (
+    "getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr", "getnameinfo"
+)}}
+original_methods = {{name: getattr(socket.socket, name, None) for name in (
+    "connect", "connect_ex", "sendto", "sendmsg"
+)}}
+assert pytest.main(["-q", "-c", {str(ROOT / 'pyproject.toml')!r},
+                    {str(ROOT / 'tests/test_dependency_metadata.py')!r} +
+                    "::test_network_requires_explicit_fixtures"]) == 0
+assert os.environ == original_env
+assert Settings.model_config is original_model_config
+for name, function in original_socket.items():
+    assert getattr(socket, name) is function
+for name, function in original_methods.items():
+    assert getattr(socket.socket, name, None) is function
+assert get_settings().openai_api_key == "sentinel-host-key"
+assert get_settings().schedule_enabled
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
