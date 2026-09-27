@@ -21,8 +21,9 @@ Epilogue iOS fetches articles from your favorite RSS feeds, processes them using
 ## Requirements
 
 - iOS 18.0+
-- Xcode 17+
-- Tuist 4.x
+- Xcode 26.5 (locally verified) and an iOS 18.6 simulator
+- Tuist 4.152.0
+- JDK 17, Android SDK platform 35, and Android SDK build tools 34.0.0 for the Kotlin shared framework
 - OpenAI API key (for Briefing mode)
 
 ## Project Structure
@@ -43,24 +44,37 @@ EpilogueIOS/
 
 ## Setup
 
-### 1. Install Tuist
+### 1. Install build tools
+
+Install JDK 17 and the Android SDK, then set `JAVA_HOME` and `ANDROID_HOME` (`ANDROID_SDK_ROOT` may point to the same directory). Install [Tuist 4.152.0](https://github.com/tuist/tuist/releases/tag/4.152.0) from its official release or a version manager; CI verifies the release archive's SHA-256 before using it. The Gradle wrapper supplies Gradle 8.5. Swift packages resolve to exact versions in `Tuist/Package.swift`. First setup needs network access for Gradle, Kotlin/Native, Tuist, and Swift packages.
+
+For a direct Tuist install on macOS:
 
 ```bash
-curl -Ls https://install.tuist.io | bash
+curl -fL https://github.com/tuist/tuist/releases/download/4.152.0/tuist.zip -o /tmp/tuist-4.152.0.zip
+echo 'bb5b8474d73ca97e2ffc2f6437bd93d75fe839be282fe8360b5568c50333799d  /tmp/tuist-4.152.0.zip' | shasum -a 256 -c -
+mkdir -p /tmp/tuist-4.152.0
+unzip -q /tmp/tuist-4.152.0.zip -d /tmp/tuist-4.152.0
+export PATH="/tmp/tuist-4.152.0:$PATH"
 ```
 
-### 2. Install Dependencies
+### 2. Build the shared framework and generate the workspace
 
 ```bash
 cd EpilogueIOS
-tuist install
+make setup
 ```
 
-### 3. Generate Xcode Project
+`make setup` builds both debug and release `EpilogueShared.xcframework` variants, then runs `tuist install` and `tuist generate --no-open`. Run it after changing Kotlin code or Tuist manifests. The generated workspace and projects are build artifacts.
+
+### 3. Build and test on a simulator
 
 ```bash
-tuist generate
+make build
+make test
 ```
+
+`make test` uses the `Epilogue-Workspace` scheme on iPhone 16 Pro Max with iOS 18.6 and excludes UI screenshot tests. Set `SIMULATOR_DESTINATION='platform=iOS Simulator,name=...,OS=...'` to use another installed simulator. Neither local unit tests nor CI need an OpenAI key or a Ghostwriter server.
 
 ### 4. Open in Xcode
 
@@ -150,14 +164,7 @@ xed .
 
 ## Testing
 
-```bash
-# Run all tests
-tuist test
-
-# Run specific module tests
-xcodebuild test -workspace Epilogue.xcworkspace -scheme Domain
-xcodebuild test -workspace Epilogue.xcworkspace -scheme Data
-```
+Run `make test` after `make setup`. The workspace scheme includes the app and module unit test targets. To run one target, pass `-only-testing:DataTests` to the underlying `xcodebuild test` command.
 
 ## App Store Screenshot Automation
 
@@ -186,11 +193,8 @@ Fixture format is JSON with `feeds` and `digests` arrays, following `App/Resourc
 ## Build
 
 ```bash
-# Debug build
-tuist build
-
-# Release build
-tuist build --configuration Release
+# Signing-free simulator build
+make build
 ```
 
 ## Technical Details
