@@ -238,6 +238,85 @@ final class FeedV2StoreTests: XCTestCase {
         XCTAssertEqual(replacement.maxArticles, 9)
     }
 
+    func testThreeCreateQueueRetainsCompleteHeadAfterDiscardOrKeepRemovedAndReopen() throws {
+        for firstAction in [IOSFeedV2StoreEngine.Resolution.discard, .keepRemoved] {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("feed-v2-three-create-\(UUID().uuidString)")
+                .appendingPathComponent("Epilogue.sqlite")
+            do {
+                let (container, engine, headId) = try rejectedCreateFixture(storeURL: url)
+                try engine.edit(url: feedURL, title: "Rejected title", mode: .fidelity,
+                                isEnabled: true, maxArticles: 9)
+                try engine.edit(url: feedURL, title: "Newest title", mode: .fidelity,
+                                isEnabled: true, maxArticles: 9)
+                let before = try orderedMutations(container)
+                XCTAssertEqual(before.count, 3)
+                XCTAssertNil(before[1].title)
+                XCTAssertEqual(before[1].maxArticles, 9)
+                XCTAssertEqual(before[2].title, "Newest title")
+                XCTAssertNil(before[2].maxArticles)
+                try engine.resolve(opId: headId, action: firstAction)
+            }
+            let reopened = try model(at: url)
+            let engine = IOSFeedV2StoreEngine(container: reopened)
+            let middle = try XCTUnwrap(orderedMutations(reopened).first)
+            XCTAssertEqual(middle.title, "Rejected title")
+            XCTAssertEqual(middle.maxArticles, 9)
+            try engine.resolve(opId: middle.opId, action: .keepRemoved)
+            let final = try XCTUnwrap(orderedMutations(reopened).first)
+            XCTAssertEqual(final.title, "Newest title")
+            XCTAssertEqual(final.isActive, true)
+            XCTAssertEqual(final.mode, "raw")
+            XCTAssertEqual(final.maxArticles, 9)
+            try engine.resolve(opId: final.opId, action: .addToServer)
+            let queued = try XCTUnwrap(orderedMutations(reopened).first)
+            XCTAssertEqual(queued.title, "Newest title")
+            XCTAssertEqual(queued.maxArticles, 9)
+            XCTAssertNil(queued.baseVersion)
+        }
+    }
+
+    func testOldScopePromotionRetainsCompleteCreateAfterTransferOrDiscard() throws {
+        for firstAction in [IOSFeedV2StoreEngine.PreviousProposalAction.transfer, .discard] {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("feed-v2-old-scope-create-\(UUID().uuidString)")
+                .appendingPathComponent("Epilogue.sqlite")
+            do {
+                let (container, engine, headId) = try rejectedCreateFixture(storeURL: url)
+                try engine.edit(url: feedURL, title: "Rejected title", mode: .fidelity,
+                                isEnabled: true, maxArticles: 9)
+                let sparse = try XCTUnwrap(orderedMutations(container).last)
+                XCTAssertNil(sparse.title)
+                XCTAssertEqual(sparse.maxArticles, 9)
+                _ = try engine.destination(for: "https://replacement.test")
+                try engine.startNewBinding()
+                let context = ModelContext(container)
+                let state = try XCTUnwrap(context.fetch(FetchDescriptor<FeedSyncState>()).first)
+                state.firstReconciliationComplete = true
+                try context.save()
+                try engine.resolvePrevious(opId: headId, action: firstAction)
+            }
+            let reopened = try model(at: url)
+            let engine = IOSFeedV2StoreEngine(container: reopened)
+            let state = try XCTUnwrap(ModelContext(reopened)
+                .fetch(FetchDescriptor<FeedSyncState>()).first)
+            let currentScope = try XCTUnwrap(state.destinationURL) + "\n" +
+                (try XCTUnwrap(state.configurationId))
+            let successor = try XCTUnwrap(orderedMutations(reopened)
+                .first(where: { $0.scopeKey != currentScope }))
+            XCTAssertEqual(successor.title, "Rejected title")
+            XCTAssertEqual(successor.isActive, true)
+            XCTAssertEqual(successor.mode, "raw")
+            XCTAssertEqual(successor.maxArticles, 9)
+            try engine.resolvePrevious(opId: successor.opId, action: .transfer)
+            let transferred = try XCTUnwrap(orderedMutations(reopened)
+                .filter { $0.scopeKey == currentScope }.last)
+            XCTAssertNil(transferred.baseVersion)
+            XCTAssertEqual(transferred.title, "Rejected title")
+            XCTAssertEqual(transferred.maxArticles, 9)
+        }
+    }
+
     func testClaimedCreatePayloadSurvivesTimeoutAndReopenWithSparseSuccessor() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("feed-v2-claimed-create-\(UUID().uuidString)")
