@@ -101,7 +101,7 @@ class ContentProcessor:
                 lambda: feedparser.parse(
                     BytesIO(fetched.data),
                     response_headers={
-                        "content-location": fetched.final_url,
+                        "content-location": fetched.content_location or fetched.final_url,
                         "content-type": fetched.content_type or "application/xml",
                     },
                 ),
@@ -149,7 +149,7 @@ class ContentProcessor:
                         continue
                     url_value = item.get("url") or item.get("href")
                     if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
-                        return urljoin(fetched.final_url, url_value)
+                        return urljoin(fetched.content_location or fetched.final_url, url_value)
 
                 enclosures = entry.get("enclosures") or []
                 for item in enclosures:
@@ -157,7 +157,7 @@ class ContentProcessor:
                         continue
                     url_value = item.get("url") or item.get("href")
                     if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
-                        return urljoin(fetched.final_url, url_value)
+                        return urljoin(fetched.content_location or fetched.final_url, url_value)
 
                 links = entry.get("links") or []
                 for item in links:
@@ -167,7 +167,7 @@ class ContentProcessor:
                         continue
                     url_value = item.get("href") or item.get("url")
                     if url_value and (_is_media_type(item.get("type")) or _looks_like_media_url(url_value)):
-                        return urljoin(fetched.final_url, url_value)
+                        return urljoin(fetched.content_location or fetched.final_url, url_value)
 
                 for collection in (media_content, enclosures, links):
                     for item in collection:
@@ -175,7 +175,7 @@ class ContentProcessor:
                             continue
                         url_value = item.get("url") or item.get("href")
                         if url_value:
-                            return urljoin(fetched.final_url, url_value)
+                            return urljoin(fetched.content_location or fetched.final_url, url_value)
 
                 return None
 

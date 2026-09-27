@@ -175,6 +175,31 @@ async def test_parse_feed_uses_final_url_as_relative_base(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_parse_feed_honors_upstream_content_location(monkeypatch):
+    xml = b"""<rss version="2.0"><channel><title>News</title>
+    <link>https://example.com/</link><description>News</description><item>
+    <title>Story</title><link>story</link><guid>story-2</guid>
+    <enclosure url="audio/episode.mp3" type="audio/mpeg" />
+    </item></channel></rss>"""
+
+    async def _fetch(_url, **_kwargs):
+        return FetchedResource(
+            "https://example.com/feeds/today.xml",
+            "application/rss+xml",
+            "utf-8",
+            xml,
+            content_location="https://example.com/archive/feed.xml",
+        )
+
+    monkeypatch.setattr("app.services.content_processor.fetch_resource", _fetch)
+    articles = await ContentProcessor(Settings(allow_private_hosts=True)).parse_feed(
+        "https://example.com/latest"
+    )
+    assert articles[0].url == "https://example.com/archive/story"
+    assert articles[0].content_url == "https://example.com/archive/audio/episode.mp3"
+
+
+@pytest.mark.asyncio
 async def test_extract_content_uses_fetched_bytes_and_final_url(monkeypatch):
     async def _fetch(_url, **kwargs):
         assert kwargs["kind"] == "html"

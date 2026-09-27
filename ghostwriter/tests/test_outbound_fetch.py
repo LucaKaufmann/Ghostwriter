@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import os
 import socket
 import threading
 
@@ -272,7 +273,7 @@ async def test_small_gzip_document_decodes_and_unsupported_encoding_rejects(publ
             headers={"content-type": "text/html", "content-encoding": "br"},
         )
     )
-    with pytest.raises(ValueError, match="Unsupported content encoding"):
+    with pytest.raises(httpx.DecodingError, match="Unsupported content encoding"):
         await fetch_resource(
             "https://example.com/article",
             settings=_settings(),
@@ -280,6 +281,128 @@ async def test_small_gzip_document_decodes_and_unsupported_encoding_rejects(publ
             headers={},
             transport=unsupported,
         )
+
+
+@pytest.mark.asyncio
+async def test_relative_content_location_is_resolved_against_final_url(public_dns):
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            stream=OneChunk(b"<rss/>"),
+            headers={
+                "content-type": "application/rss+xml",
+                "content-location": "../archive/feed.xml",
+            },
+        )
+    )
+    fetched = await fetch_resource(
+        "https://example.com/feeds/today.xml",
+        settings=_settings(),
+        kind="feed",
+        headers={},
+        transport=transport,
+    )
+    assert fetched.content_location == "https://example.com/archive/feed.xml"
+
+
+@pytest.mark.asyncio
+async def test_httpx_environment_configuration_is_preserved(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    monkeypatch.setenv("SSL_CERT_FILE", "/synthetic/test-ca.pem")
+    original_client = httpx.AsyncClient
+    seen = []
+
+    def client_with_mock_transport(*args, **kwargs):
+        seen.append((kwargs["trust_env"], os.environ["HTTPS_PROXY"], os.environ["SSL_CERT_FILE"]))
+        # The test uses a mock transport; do not configure a real proxy or CA.
+        kwargs["trust_env"] = False
+        return original_client(*args, **kwargs)
+
+    monkeypatch.setattr("app.services.outbound_fetch.httpx.AsyncClient", client_with_mock_transport)
+    await fetch_resource(
+        "https://example.com/article",
+        settings=Settings(allow_private_hosts=True),
+        kind="html",
+        headers={},
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200, stream=OneChunk(b"<html/>"), headers={"content-type": "text/html"}
+            )
+        ),
+    )
+    assert seen == [(True, "http://proxy.example:3128", "/synthetic/test-ca.pem")]
+
+
+@pytest.mark.asyncio
+async def test_expired_dns_jobs_remain_bounded_until_workers_finish(monkeypatch):
+    from app.services import outbound_fetch
+
+    release = threading.Event()
+    started = threading.Event()
+    lock = threading.Lock()
+    active = 0
+
+    def stalled_resolver(_hostname):
+        nonlocal active
+        with lock:
+            active += 1
+            if active == outbound_fetch.MAX_DNS_VALIDATIONS:
+                started.set()
+        release.wait(4)
+        with lock:
+            active -= 1
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr("app.core.net._resolve_host", stalled_resolver)
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(200, stream=OneChunk(b"<html/>"))
+    )
+    tasks = [
+        asyncio.create_task(
+            fetch_resource(
+                "https://example.com/article",
+                settings=_settings(fetch_timeout_seconds=1),
+                kind="html",
+                headers={},
+                transport=transport,
+            )
+        )
+        for _ in range(outbound_fetch.MAX_DNS_VALIDATIONS)
+    ]
+    try:
+        assert await asyncio.to_thread(started.wait, 0.5)
+        for task in tasks:
+            with pytest.raises(httpx.ReadTimeout):
+                await task
+        for _ in range(3):
+            with pytest.raises(httpx.PoolTimeout, match="DNS validation capacity"):
+                await fetch_resource(
+                    "https://example.com/extra",
+                    settings=_settings(fetch_timeout_seconds=1),
+                    kind="html",
+                    headers={},
+                    transport=transport,
+                )
+        with lock:
+            assert active == outbound_fetch.MAX_DNS_VALIDATIONS
+    finally:
+        release.set()
+    # Once OS calls finish, admission recovers without creating extra workers.
+    for _ in range(100):
+        try:
+            recovered = await fetch_resource(
+                "https://example.com/recovered",
+                settings=_settings(),
+                kind="html",
+                headers={},
+                transport=transport,
+            )
+            break
+        except httpx.PoolTimeout:
+            await asyncio.sleep(0.01)
+    else:
+        pytest.fail("DNS validation admission did not recover")
+    assert recovered.data == b"<html/>"
 
 
 @pytest.mark.asyncio

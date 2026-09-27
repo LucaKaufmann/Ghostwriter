@@ -124,3 +124,49 @@ async def test_total_fetch_deadline_maps_to_reader_504(monkeypatch):
             settings=Settings(allow_private_hosts=True, fetch_timeout_seconds=1),
         )
     assert error.value.status_code == 504
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding", ["gzip", "br"])
+async def test_upstream_decoding_failure_uses_stored_reader_fallback(monkeypatch, encoding):
+    class BytesStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"invalid compressed data"
+
+    original_client = httpx.AsyncClient
+
+    def client_with_mock_transport(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                stream=BytesStream(),
+                headers={"content-type": "text/html", "content-encoding": encoding},
+            )
+        )
+        return original_client(*args, **kwargs)
+
+    async def allow_access(**_kwargs):
+        return None
+
+    class FakeSession:
+        def exec(self, _statement):
+            return SimpleNamespace(
+                first=lambda: SimpleNamespace(
+                    url="https://example.com/story",
+                    content_type="article",
+                    content="Saved article content",
+                )
+            )
+
+    monkeypatch.setattr("app.services.outbound_fetch.httpx.AsyncClient", client_with_mock_transport)
+    monkeypatch.setattr("app.api.digests._ensure_digest_access", allow_access)
+    result = await get_digest_article_source(
+        digest_id=uuid4(),
+        article_id=uuid4(),
+        request=Request({"type": "http", "method": "GET", "path": "/"}),
+        credentials=None,
+        session=FakeSession(),
+        settings=Settings(allow_private_hosts=True),
+    )
+    assert result.content_type == "text/html; ghostwriter-fallback"
+    assert "Saved article content" in result.html
