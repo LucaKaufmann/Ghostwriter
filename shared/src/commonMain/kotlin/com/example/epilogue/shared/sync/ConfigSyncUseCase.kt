@@ -2,46 +2,33 @@ package com.example.epilogue.shared.sync
 
 import com.example.epilogue.shared.ghostwriter.ClientConfigResponse
 import com.example.epilogue.shared.ghostwriter.ClientConfigUpdateRequest
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 class ConfigSyncUseCase(
     private val settings: SettingsPort,
     private val ghostwriter: GhostwriterSyncPort
 ) {
     suspend fun syncConfig(): Boolean {
-        if (!settings.isGhostwriterConfigured()) return false
+        val configured = settings.isGhostwriterConfigured()
+        currentCoroutineContext().ensureActive()
+        if (!configured) return false
 
-        return when (val serverResult = ghostwriter.getConfig()) {
-            is SyncPortResult.Success -> {
-                val serverConfig = serverResult.data
-                val localUpdatedAt = settings.getConfigUpdatedAt()
-
-                if (localUpdatedAt == null) {
-                    applyServerConfig(serverConfig)
-                    return true
-                }
-
-                val serverUpdatedAt = serverConfig.updatedAt
-                if (serverUpdatedAt == null) {
-                    applyServerConfig(serverConfig)
-                    return true
-                }
-
-                val serverTime = parseIso8601ToEpochMillis(serverUpdatedAt) ?: 0L
-                val localTime = parseIso8601ToEpochMillis(localUpdatedAt) ?: 0L
-
-                when {
-                    serverTime > localTime -> applyServerConfig(serverConfig)
-                    localTime > serverTime -> pushLocalConfig(localUpdatedAt)
-                }
-
-                true
-            }
+        val serverResult = ghostwriter.getConfig()
+        currentCoroutineContext().ensureActive()
+        return when (serverResult) {
+            is SyncPortResult.Success -> reconcile(serverResult.data, applyWhenEqual = false)
             is SyncPortResult.Error,
             is SyncPortResult.NotConfigured -> false
         }
     }
 
     suspend fun applyPreFetchedConfig(config: ClientConfigResponse): Boolean {
+        return reconcile(config, applyWhenEqual = true)
+    }
+
+    private suspend fun reconcile(config: ClientConfigResponse, applyWhenEqual: Boolean): Boolean {
+        currentCoroutineContext().ensureActive()
         val localUpdatedAt = settings.getConfigUpdatedAt()
 
         if (localUpdatedAt == null) {
@@ -58,15 +45,20 @@ class ConfigSyncUseCase(
         val serverTime = parseIso8601ToEpochMillis(serverUpdatedAt) ?: 0L
         val localTime = parseIso8601ToEpochMillis(localUpdatedAt) ?: 0L
 
-        if (serverTime >= localTime) {
-            applyServerConfig(config)
+        return when {
+            serverTime > localTime || (applyWhenEqual && serverTime == localTime) -> {
+                applyServerConfig(config)
+                true
+            }
+            localTime > serverTime -> pushLocalConfig(localUpdatedAt)
+            else -> true
         }
-
-        return true
     }
 
     suspend fun pushMinWordCount(count: Int): Boolean {
-        if (!settings.isGhostwriterConfigured()) return false
+        val configured = settings.isGhostwriterConfigured()
+        currentCoroutineContext().ensureActive()
+        if (!configured) return false
 
         val localUpdatedAt = settings.getConfigUpdatedAt()
         val result = ghostwriter.updateConfig(
@@ -75,6 +67,7 @@ class ConfigSyncUseCase(
                 clientUpdatedAt = localUpdatedAt
             )
         )
+        currentCoroutineContext().ensureActive()
 
         return when (result) {
             is SyncPortResult.Success -> {
@@ -83,7 +76,9 @@ class ConfigSyncUseCase(
             }
             is SyncPortResult.Error -> {
                 if (result.code == 409) {
-                    when (val refetch = ghostwriter.getConfig()) {
+                    val refetch = ghostwriter.getConfig()
+                    currentCoroutineContext().ensureActive()
+                    when (refetch) {
                         is SyncPortResult.Success -> applyServerConfig(refetch.data)
                         else -> Unit
                     }
@@ -95,6 +90,7 @@ class ConfigSyncUseCase(
     }
 
     private suspend fun applyServerConfig(config: ClientConfigResponse) {
+        currentCoroutineContext().ensureActive()
         val morning = resolveTime(
             hour = config.morningHour,
             minute = config.morningMinute,
@@ -133,7 +129,7 @@ class ConfigSyncUseCase(
         settings.setConfigUpdatedAt(config.updatedAt)
     }
 
-    private suspend fun pushLocalConfig(localUpdatedAt: String) {
+    private suspend fun pushLocalConfig(localUpdatedAt: String): Boolean {
         val schedule = settings.getGhostwriterSchedule()
         val minWordCount = settings.getMinWordCount()
 
@@ -154,17 +150,26 @@ class ConfigSyncUseCase(
             )
         )
 
-        when (result) {
-            is SyncPortResult.Success -> settings.setConfigUpdatedAt(result.data.updatedAt)
+        currentCoroutineContext().ensureActive()
+        return when (result) {
+            is SyncPortResult.Success -> {
+                settings.setConfigUpdatedAt(result.data.updatedAt)
+                true
+            }
             is SyncPortResult.Error -> {
                 if (result.code == 409) {
-                    when (val refetch = ghostwriter.getConfig()) {
-                        is SyncPortResult.Success -> applyServerConfig(refetch.data)
-                        else -> Unit
+                    val refetch = ghostwriter.getConfig()
+                    currentCoroutineContext().ensureActive()
+                    when (refetch) {
+                        is SyncPortResult.Success -> {
+                            applyServerConfig(refetch.data)
+                            true
+                        }
+                        else -> false
                     }
-                }
+                } else false
             }
-            is SyncPortResult.NotConfigured -> Unit
+            is SyncPortResult.NotConfigured -> false
         }
     }
 

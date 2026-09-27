@@ -79,7 +79,10 @@ public final class ConfigSyncManager {
         if success {
             logger.info("Pushed min_word_count to server: \(count)")
         } else {
-            logger.warning("Shared min_word_count push failed; keeping local value for retry")
+            throw GhostwriterError.httpError(
+                statusCode: 500,
+                message: "Minimum word count was not uploaded"
+            )
         }
     }
 
