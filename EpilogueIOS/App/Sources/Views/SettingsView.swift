@@ -236,7 +236,7 @@ struct SettingsView: View {
                             }
                         }
                         .disabled(ghostwriterCoordinator.isSyncing)
-                        if case .some(.serverChanged) = ghostwriterCoordinator.lastSyncError as? FeedSyncV2Error {
+                        if ghostwriterCoordinator.requiresNewFeedBinding {
                             Button("Connect to this server as a new feed source") {
                                 do {
                                     try ghostwriterCoordinator.startNewFeedBinding()
