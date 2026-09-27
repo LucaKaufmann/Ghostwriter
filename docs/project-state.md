@@ -6,7 +6,7 @@ Updated 2026-09-27. Audit baseline: `cdb776d1d544bc6db0dd18a98cba1b9e86273f62`. 
 
 Complete the [reliability backlog](work-packages/backlog.md), integrate and verify its output, inspect every PR's review comments, fix actionable findings, and list all PRs. Every worker/reviewer uses **Sol (`gpt-6-sol`)**. Pushes and scoped/aggregate PRs are authorized. Remote merges, releases, deployments, production-content inspection and paid provider calls are not authorized. No recurring automation exists.
 
-**All 29 original package outcomes are published**, across 45 PRs (#74–118) including review follow-ups. All combined local acceptance gates passed. Final closeout awaits aggregate publication and the final review/comment/CI sweep. The audit is historical; [PR index](work-packages/results/PR-INDEX.md) and [review dispositions](work-packages/results/PR-REVIEW-FOLLOWUP.md) link immutable evidence. Fifteen PRs74–88 were externally merged;76/77/81/83/84/85/88 landed in prerequisite branches. Main contains74/75/78/79/80/82/86/87. Root has not remotely merged anything.
+**All 29 original package outcomes are published**, in45 scoped PRs (#74–118), plus [aggregate PR119](https://github.com/LucaKaufmann/Ghostwriter/pull/119) against main. All combined local acceptance gates passed. Final closeout awaits the aggregate review/comment/CI sweep; every local combined acceptance gate passed. The audit is historical; [PR index](work-packages/results/PR-INDEX.md) and [review dispositions](work-packages/results/PR-REVIEW-FOLLOWUP.md) link immutable evidence. Fifteen PRs74–88 were externally merged;76/77/81/83/84/85/88 landed in prerequisite branches. Main contains74/75/78/79/80/82/86/87. Root has not remotely merged anything.
 
 ## Confirmed product decisions
 
@@ -23,14 +23,14 @@ Worktrees: `/private/tmp/epilogue-backlog-20260927/`. Root alone owns shared pla
 
 | Task | Owner / state | Exact next action and location |
 |---|---|---|
-| Combined integration | Root; final verification | `integration`, branch `codex/backlog-integration`, current d34e89a. All accepted original outcomes and follow-ups through web111acf7abc/iOS116879f237/backend1137871e7a integrated. Android11843581ef is integrated and the final combined gate passed. |
+| Combined integration | Root; final verification | `integration`, branch `codex/backlog-integration`, code d34e89a, published checkpointcfa81a3, aggregate PR119. All accepted original outcomes and follow-ups through web111acf7abc/iOS116879f237/backend1137871e7a integrated. Android11843581ef is integrated and the final combined gate passed. |
 | Android scheduling/retry | Accepted/published/combined verified | `review-android-delivery`, PR11843581ef; c763ae9 product fix independently reviewed, actual WorkerWrapper lifecycle test43581ef passed. Integrated d34e89a; combined204 App/58shared passed+1intentional skip/debugAPK. |
 | iOS recovery | Accepted/published/combined verified | `ios-recovery`, PR116879f237. Explicit optional mode in existing diagnosticsJSON distinguishes regeneration from normal/legacy recovery; unknown mode preserves other diagnostics. Data64 branch; combined176workspace tests/Appbuild passed at9464a65. No schema change. |
 | Web conflict recovery | Accepted/published/combined verified | `review-web-conflicts`, PR111acf7abc. Newer typing survives late409/200; successful response advances only retained draft baseline. Combined40browser/productionbuild/check0/0 passed06ec2e7; final live journey1passed with backendf371a84. |
 | Backend legacy caps | Accepted/published/combined verified | `review-feed-limits`, PR1137871e7a. Legacy read projection preserves raw rows/receipts. Sol clean; integratedf371a84; combined451backend and real Ktor/FastAPI fixture1passed, no skips. |
 | Earlier accepted fixes | Integrated and published | PR11225e2b1d Android correction defaults survive pre-submit sync; PR115c526cb6 iOS delete/re-add serializes full successor; PR108/109/114 backend publication/DNS/ownership; PR117304f964 helper API-origin download. See immutable results/dispositions for individual evidence. |
 | Review and CI sweep | Root; final pass pending | Full paginated74–118 inline/review-body/issue sweep found the above corrections plus PR106 documentation updates. Latest full45-PR sweep found no new feedback; exact-head CI149success/24skipped/4running/0failed. Running jobs are113iOS,116iOS,118Android+iOS; absent rollups are not passes. Refresh changed heads and aggregate. No external replies posted. |
-| Continuity | Root; latest changes local | `project-continuity`, PR106 currente2d063d. Publish this checkpoint, current contract and index/dispositions; copy root-owned documents into integration. Do not overwrite implementation result files. |
+| Continuity | Root; latest changes local | `project-continuity`, PR106 checkpoint7c426bf published. This checkpoint records aggregate119; refresh final review/CI dispositions before closeout. Do not overwrite implementation result files. |
 
 ## Verification baseline
 
@@ -61,9 +61,8 @@ Frozen comparison branches: `codex/review-fixes-verified-base`6f9a328; `codex/re
 
 ## Exact next action
 
-1. Publish the current root checkpoint/index/dispositions through PR106 and copy them into integration.
-2. Publish the final aggregate PR against current main and attach it. All local combined gates have passed; do not repeat them without relevant source changes.
-3. Inspect every scoped and aggregate PR's latest review bodies, inline/issue comments and current-head CI; fix real findings and record dispositions. No remote merges/deployments.
-4. Report every PR and the explicit remaining product/platform limits. Keep the goal active until closeout is complete.
+1. Inspect aggregate119 and changed106/113/116/118 review bodies, inline/issue comments and current-head CI. Final full scoped sweep found no new feedback; address any new real findings.
+2. Record final review/CI dispositions and report all46 PRs. All local combined gates passed; repeat only for relevant source changes. No remote merges/deployments.
+3. After closeout, the next owner action is reviewing aggregate119 for a separately authorized merge/release decision.
 
 Protected work: original `/Users/luca/git/Epilogue` stays maincdb776d with local audit/planning files. `/Users/luca/git/Epilogue-secondary` has staged CLAUDE.md, Android SettingsScreen.kt and deployment-example changes on gitbutler/workspace14a753e. Do not absorb/reset/publish them. Inspect other historical worktrees before reuse.

@@ -1,6 +1,6 @@
 # Pull request index
 
-Checkpoint: 2026-09-27. All29 original package outcomes are published. Review follow-ups and aggregate verification remain active; see [project state](../../project-state.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md). Fifteen PRs were merged externally, including seven into prerequisite branches. The orchestrator has not merged or deployed.
+Checkpoint: 2026-09-27. All29 original package outcomes are published. All local combined gates passed; aggregate119 hosted review/checks remain active; see [project state](../../project-state.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md). Fifteen PRs were merged externally, including seven into prerequisite branches. The orchestrator has not merged or deployed.
 
 | PR | Outcome | State / base | Immutable evidence |
 |---|---|---|---|
@@ -49,9 +49,10 @@ Checkpoint: 2026-09-27. All29 original package outcomes are published. Review fo
 | [#116](https://github.com/LucaKaufmann/Ghostwriter/pull/116) | fix: recover interrupted local iOS generation | Open; `codex/review-followup-base` | [879f237](https://github.com/LucaKaufmann/Ghostwriter/blob/879f23774d558de9a592c0943e82e5039781ba67/docs/work-packages/results/IOS-RECOVERY.md) |
 | [#117](https://github.com/LucaKaufmann/Ghostwriter/pull/117) | fix: download one-off podcast audio from configured API | Open; `codex/review-followup-base` | [304f964](https://github.com/LucaKaufmann/Ghostwriter/blob/304f9648511e7999168a40886efd3a04e69aed01/docs/work-packages/results/REVIEW-HELPER-DOWNLOAD.md) |
 | [#118](https://github.com/LucaKaufmann/Ghostwriter/pull/118) | fix: cover Android scheduled delivery outcomes | Open; `codex/review-followup-base` | [43581ef](https://github.com/LucaKaufmann/Ghostwriter/blob/43581efcfb1494b035ade69cff0a353a722b9813/docs/work-packages/results/REVIEW-ANDROID-DELIVERY.md) |
+| [#119](https://github.com/LucaKaufmann/Ghostwriter/pull/119) | fix: integrate audited reliability improvements across Ghostwriter and Epilogue | Open; `main` | [cfa81a3](https://github.com/LucaKaufmann/Ghostwriter/blob/cfa81a3746d39048713a0a875bd2a9119240580e/docs/project-state.md) |
 
 Evidence links pin a recorded published PR head and its result document (or design/checkpoint). The continuity PR intentionally does not copy every implementation result or screenshot; these immutable links recover that evidence from any checkout. A published result can precede a later review correction: current acceptance and superseding evidence are recorded in project state and the disposition ledger.
 
-Only the final aggregate PR remains to be created. All scoped corrections are accepted and combined local gates passed; aggregate publication and final hosted review/checks remain.
+Aggregate PR119 is published against main and combines the scoped stacks. All local gates passed; its hosted review/checks remain under inspection.
 
 Native podcast parity, positioning, multi-tenant hosting and DEPLOY-01 remain outside this scope. Provider calls were mocked; no release/production certification is implied.
