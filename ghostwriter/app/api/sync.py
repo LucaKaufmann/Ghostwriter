@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
@@ -27,6 +27,20 @@ from app.worker import scheduler as scheduler_module
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _parse_digest_ids(value: str | None) -> set[UUID]:
+    """Validate every supplied ID before the sync endpoint does any work."""
+    if not value:
+        return set()
+
+    try:
+        return {UUID(part.strip()) for part in value.split(",") if part.strip()}
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="digest_ids must be a comma-separated list of UUIDs",
+        ) from exc
 
 
 class SyncDigestArticle(BaseModel):
@@ -96,6 +110,7 @@ async def combined_sync(
     - feed_since: Timestamp for incremental feed sync (omit for initial sync)
     - digest_ids: Comma-separated list of digest IDs the client already has
     """
+    known_ids = _parse_digest_ids(digest_ids)
     t0 = time.perf_counter()
 
     # 1. Config
@@ -145,16 +160,12 @@ async def combined_sync(
     config = session.exec(select(ClientConfig)).first()
     pdf_enabled = bool(config.pdf_enabled) if config else False
     available_formats = ["epub", "pdf"] if pdf_enabled else ["epub"]
-    known_ids: set[str] = set()
-    if digest_ids:
-        known_ids = {id_str.strip() for id_str in digest_ids.split(",") if id_str.strip()}
-
     digests_statement = podcast_service.exclude_one_off_digests(
         select(Digest).where(Digest.status == "completed")
     )
     if known_ids:
         digests_statement = digests_statement.where(
-            col(Digest.id).notin_([UUID(id_str) for id_str in known_ids])
+            col(Digest.id).notin_(known_ids)
         )
     new_completed = list(session.exec(digests_statement).all())
     t_digests_query = time.perf_counter()

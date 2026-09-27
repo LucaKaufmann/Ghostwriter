@@ -13,8 +13,8 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.core.database import get_session
-from app.core.net import validate_public_url
 from app.core.logging import digest_logger
+from app.core.net import validate_public_url
 from app.core.security import verify_api_key
 from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync, FeedUpdate
 from app.models.seen_article import SeenArticle
@@ -32,6 +32,16 @@ _AUDIO_EXTENSIONS = frozenset({
 })
 
 router = APIRouter()
+
+
+def _validate_feed_url(url: str) -> None:
+    try:
+        validate_public_url(url)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Invalid feed URL '{url}': {exc}",
+        ) from exc
 
 
 class SyncResponse(BaseModel):
@@ -142,10 +152,6 @@ async def sync_feeds(
     """
     t0 = time.perf_counter()
 
-    # Record feed sync activity
-    from app.services import activity_tracker
-    activity_tracker.record_feed_sync()
-
     created = 0
     updated = 0
     unchanged = 0
@@ -156,13 +162,11 @@ async def sync_feeds(
 
     # Validate URLs before applying changes
     for feed_data in feeds:
-        try:
-            validate_public_url(feed_data.url)
-        except ValueError as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid feed URL '{feed_data.url}': {e}",
-            )
+        _validate_feed_url(feed_data.url)
+
+    # Invalid batches must not record activity or write any of their feeds.
+    from app.services import activity_tracker
+    activity_tracker.record_feed_sync()
 
     # Update or create feeds from the sync list
     for feed_data in feeds:
@@ -285,6 +289,8 @@ async def create_feed(
     If a soft-deleted feed with the same URL exists, it is restored with
     the new settings. Returns 409 Conflict if an active feed already exists.
     """
+    _validate_feed_url(feed_data.url)
+
     # Check for existing
     statement = select(Feed).where(Feed.url == feed_data.url)
     existing = session.exec(statement).first()
@@ -354,6 +360,8 @@ async def update_feed(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Feed not found",
         )
+
+    _validate_feed_url(feed.url)
 
     # Update only provided fields
     update_data = feed_data.model_dump(exclude_unset=True)
