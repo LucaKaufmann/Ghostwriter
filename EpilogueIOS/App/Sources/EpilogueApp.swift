@@ -135,7 +135,13 @@ struct EpilogueApp: App {
                     guard !launchOptions.isEnabled else { return }
 
                     if newPhase == .active {
-                        Task { await runForegroundDigestMaintenance() }
+                        Task {
+                            // A pending BG request holds an absolute date from
+                            // its last submission. Recompute it after a device
+                            // time-zone change before foreground catch-up.
+                            await localDigestScheduler?.scheduleOvernightDigest()
+                            await runForegroundDigestMaintenance()
+                        }
                     } else if newPhase == .background {
                         scheduleAllBackgroundWork()
                     }
