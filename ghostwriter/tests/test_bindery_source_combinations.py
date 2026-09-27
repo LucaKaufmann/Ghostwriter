@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from ebooklib import epub
+from ebooklib import ITEM_DOCUMENT, epub
+from lxml import html
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.models.client_config import ClientConfig
@@ -161,7 +162,21 @@ def inspect_edition(engine, output_dir, digest_id, expected_count):
             path = output_dir / digest.filename
             assert path.stat().st_size > 0
             book = epub.read_epub(str(path))
-            assert len(list(book.get_items())) > 0
+            chapters = [
+                " ".join(
+                    " ".join(html.fromstring(item.get_content()).itertext()).split()
+                )
+                for item in book.get_items_of_type(ITEM_DOCUMENT)
+            ]
+            for row in rows:
+                content_text = " ".join(
+                    " ".join(html.fromstring(row.content).itertext()).split()
+                )
+                assert content_text
+                assert any(
+                    row.title in chapter and content_text in chapter
+                    for chapter in chapters
+                )
         else:
             assert not (output_dir / digest.filename).exists()
         return rows
@@ -267,14 +282,35 @@ async def test_seen_filtered_and_consumed_sources_remain_empty(scene):
     ],
 )
 async def test_wallabag_database_mode_overrides_environment(
-    scene, db_mode, env_mode, expected
+    scene, monkeypatch, db_mode, env_mode, expected
 ):
     engine, output_dir, make = scene
     pipeline, _, _ = make(
-        wallabag=WallabagStub([wallabag_entry()], mode=db_mode),
-        wallabag_config=WallabagConfig(enabled=True, mode=db_mode),
+        wallabag_config=WallabagConfig(
+            enabled=True,
+            mode=db_mode,
+            url="https://example.com",
+            client_id="fixture",
+            client_secret="fixture",
+            username="fixture",
+            password="fixture",
+        ),
     )
     pipeline.settings = pipeline.settings.model_copy(update={"wallabag_mode": env_mode})
+
+    monkeypatch.setattr(
+        WallabagService, "from_db_or_settings", classmethod(REAL_WALLABAG_FACTORY)
+    )
+
+    async def fetch(service):
+        assert service.settings.wallabag_mode == db_mode
+        return [wallabag_entry()]
+
+    async def mark(_service, _entry_id):
+        return None
+
+    monkeypatch.setattr(WallabagService, "fetch_unread_articles", fetch)
+    monkeypatch.setattr(WallabagService, "mark_processed", mark)
 
     async def summarize(*args, **kwargs):
         return "A concise summary of the saved analysis.", False
