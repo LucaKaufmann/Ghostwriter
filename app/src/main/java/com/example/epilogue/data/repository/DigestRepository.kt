@@ -252,12 +252,14 @@ class DigestRepository @Inject constructor(
      * Delete all digests and their EPUB files.
      * Used for development/testing purposes.
      */
-    suspend fun deleteAllDigests() {
+    suspend fun deleteAllDigests(): Boolean {
+        var allDeleted = true
         // Delete each row through the same reference-aware path. An unlink
         // failure retains that row so the caller can retry it later.
         digestDao.getAllDigestsList().forEach { digest ->
-            digestDao.deleteWithArtifact(digest.id, ::removeArtifact)
+            if (!digestDao.deleteWithArtifact(digest.id, ::removeArtifact)) allDeleted = false
         }
+        return allDeleted
     }
 
     /**

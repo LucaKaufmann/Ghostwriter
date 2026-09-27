@@ -6,6 +6,7 @@ import android.os.Environment
 import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.domain.model.ProcessedArticle
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -65,12 +66,16 @@ class EpubGenerator @Inject constructor(
     ): EpubGenerationResult? = withContext(Dispatchers.IO) {
         if (articles.isEmpty()) return@withContext null
 
+        var outputFile: File? = null
         try {
             val book = createBook(articles, date, period)
-            val outputFile = writeEpub(book, date, period)
-            scanFile(outputFile)
-            EpubGenerationResult(outputFile, articles)
+            val file = writeEpub(book, date, period)
+            outputFile = file
+            scanFile(file)
+            EpubGenerationResult(file, articles)
         } catch (e: Exception) {
+            outputFile?.delete()
+            if (e is CancellationException) throw e
             null
         }
     }

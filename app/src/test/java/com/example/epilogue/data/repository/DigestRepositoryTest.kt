@@ -69,6 +69,8 @@ class DigestRepositoryTest {
         assertFalse(repository.deleteDigest(failed.toDomain()))
         assertNotNull(repository.getDigestById(failed.id))
         assertTrue(directory.resolve("child").exists())
+        assertFalse(repository.deleteAllDigests())
+        assertNotNull(repository.getDigestById(failed.id))
         val missing = record(File(files.root, "missing.epub"))
         assertTrue(repository.deleteDigest(missing.toDomain()))
         assertTrue(repository.deleteDigest(missing.toDomain()))
@@ -86,7 +88,7 @@ class DigestRepositoryTest {
         assertNull(repository.getDigestById(oldest.id))
         assertNotNull(repository.getDigestById(retained.id))
         assertEquals("retained", shared.readText())
-        repository.deleteAllDigests()
+        assertTrue(repository.deleteAllDigests())
         assertFalse(shared.exists())
         assertEquals(0, database.digestDao().getDigestCount())
     }

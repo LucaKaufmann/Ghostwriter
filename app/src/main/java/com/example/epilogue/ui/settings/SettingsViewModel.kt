@@ -357,10 +357,22 @@ class SettingsViewModel @Inject constructor(
 
     fun resetAllData() {
         viewModelScope.launch {
-            digestRepository.deleteAllDigests()
-            feedRepository.resetAllLastFetched()
-            _uiState.update { it.copy(dataReset = true) }
+            try {
+                if (digestRepository.deleteAllDigests()) {
+                    feedRepository.resetAllLastFetched()
+                    _uiState.update { it.copy(dataReset = true, dataResetError = null) }
+                } else {
+                    _uiState.update { it.copy(dataReset = false, dataResetError = "Some digest files could not be removed. Please retry.") }
+                }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _uiState.update { it.copy(dataReset = false, dataResetError = "Digest data could not be reset. Please retry.") }
+            }
         }
+    }
+
+    fun clearDataResetError() {
+        _uiState.update { it.copy(dataResetError = null) }
     }
 
     fun clearDataResetFlag() {
@@ -1605,6 +1617,7 @@ data class SettingsUiState(
     val digestCompleted: Boolean = false,
     val digestFailed: Boolean = false,
     val dataReset: Boolean = false,
+    val dataResetError: String? = null,
     val customExportUri: String? = null,
     val customExportEnabled: Boolean = false,
     val customExportDisplayPath: String? = null,
