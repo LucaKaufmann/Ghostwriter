@@ -7,6 +7,7 @@ import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.Operation
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -19,20 +20,28 @@ import com.example.epilogue.domain.model.DigestPeriod
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executor
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Manages scheduling of the daily digest generation using WorkManager.
@@ -54,7 +63,8 @@ class DigestScheduler @Inject constructor(
     companion object {
         private const val TAG = "DigestScheduler"
         private const val WORK_NAME_PREFIX = "daily_digest_"
-        internal const val ANCHOR_TAG = "daily_digest_anchor_v1"
+        // A v1-tagged request is updated in place once to persist its schedule zone.
+        internal const val ANCHOR_TAG = "daily_digest_anchor_v2"
         private const val CATCH_UP_WORK_NAME_PREFIX = "daily_digest_catchup_"
         private const val CATCH_UP_TAG = "catch_up"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
@@ -137,6 +147,28 @@ class DigestScheduler @Inject constructor(
         Log.i(TAG, "Scheduled periods: ${selectedPeriods.joinToString { it.name }}")
     }
 
+    /** Boot keeps its broadcast open until selected requests are durable. */
+    suspend fun scheduleAllPeriodsAwaitPersistence() {
+        val selectedPeriods = settingsRepository.getSchedulePeriods()
+        coroutineScope {
+            selectedPeriods.map { period ->
+                async {
+                    val generation = synchronized(registrationLock) {
+                        registrationJobs.remove(period)?.cancel()
+                        ((registrationGenerations[period] ?: 0L) + 1).also {
+                            registrationGenerations[period] = it
+                        }
+                    }
+                    registerPeriod(period, generation, awaitPersistence = true,
+                        waitForRunning = false)
+                }
+            }.awaitAll()
+        }
+        for (period in DigestPeriod.entries) {
+            if (period !in selectedPeriods) cancelPeriod(period)
+        }
+    }
+
     /**
      * Schedules a digest for a specific period.
      */
@@ -151,7 +183,8 @@ class DigestScheduler @Inject constructor(
         }
     }
 
-    private suspend fun registerPeriod(period: DigestPeriod, generation: Long) {
+    private suspend fun registerPeriod(period: DigestPeriod, generation: Long,
+        awaitPersistence: Boolean = false, waitForRunning: Boolean = true) {
         val manager = workManager
         val workName = getWorkName(period)
         val existing = try {
@@ -161,6 +194,7 @@ class DigestScheduler @Inject constructor(
                 val active = rows.firstOrNull { it.state !in setOf(
                     WorkInfo.State.SUCCEEDED, WorkInfo.State.FAILED, WorkInfo.State.CANCELLED) }
                 active == null || ANCHOR_TAG in active.tags ||
+                    (!waitForRunning && active.state == WorkInfo.State.RUNNING) ||
                     (active.state == WorkInfo.State.ENQUEUED &&
                         active.nextScheduleTimeMillis in 1L until Long.MAX_VALUE)
             }.firstOrNull { it.state !in setOf(
@@ -170,6 +204,11 @@ class DigestScheduler @Inject constructor(
         } catch (error: Exception) {
             Log.w(TAG, "Could not inspect ${period.name} periodic schedule", error)
             null // KEEP preserves any existing work if the read failed.
+        }
+        if (!waitForRunning && existing?.state == WorkInfo.State.RUNNING && ANCHOR_TAG !in existing.tags) {
+            // Already persisted. Keep the ordinary callback for its next ENQUEUED iteration.
+            schedulePeriod(period)
+            return
         }
         // Its input already carries the original 24-hour reference. Replacing
         // it with a post-run nextScheduleTime would shift late occurrences.
@@ -182,6 +221,7 @@ class DigestScheduler @Inject constructor(
             .setInputData(Data.Builder()
                 .putString(DailyDigestWorker.KEY_PERIOD, period.name)
                 .putLong(DailyDigestWorker.KEY_PERIODIC_ANCHOR, anchor)
+                .putString(DailyDigestWorker.KEY_PERIODIC_ZONE, ZoneId.systemDefault().id)
                 .build())
             .addTag(DailyDigestWorker.TAG)
             .addTag(period.name)
@@ -192,13 +232,26 @@ class DigestScheduler @Inject constructor(
             builder.setNextScheduleTimeOverride(anchor)
         }
         val request = builder.build()
-        synchronized(registrationLock) {
+        val operation = synchronized(registrationLock) {
             if (registrationGenerations[period] != generation) return
             manager.enqueueUniquePeriodicWork(workName,
                 if (existing == null) ExistingPeriodicWorkPolicy.KEEP else ExistingPeriodicWorkPolicy.UPDATE,
                 request)
         }
+        if (awaitPersistence) operation.awaitPersistence()
         Log.i(TAG, "Registered ${period.name} digest occurrence at $anchor")
+    }
+
+    private suspend fun Operation.awaitPersistence() = suspendCancellableCoroutine<Unit> { continuation ->
+        val receipt = result
+        receipt.addListener({
+            try {
+                receipt.get()
+                continuation.resume(Unit)
+            } catch (error: Exception) {
+                continuation.resumeWithException(error)
+            }
+        }, Executor { command -> command.run() })
     }
 
     /**

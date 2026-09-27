@@ -4,7 +4,10 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.Operation
 import com.example.epilogue.domain.model.DigestPeriod
+import com.example.epilogue.data.repository.SettingsRepository
+import com.google.common.util.concurrent.SettableFuture
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -24,6 +27,10 @@ import java.time.ZonedDateTime
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
@@ -67,10 +74,14 @@ class DigestSchedulerRegistrationTest {
             assertTrue(first.workSpec.input.getLong(DailyDigestWorker.KEY_PERIODIC_ANCHOR, 0) > before)
             assertEquals(TimeUnit.HOURS.toMillis(24), first.workSpec.intervalDuration)
             assertTrue(DigestScheduler.ANCHOR_TAG in first.tags)
+            assertEquals(ZoneId.systemDefault().id,
+                first.workSpec.input.getString(DailyDigestWorker.KEY_PERIODIC_ZONE))
 
             val nextDue = before + TimeUnit.HOURS.toMillis(10)
             val oldId = UUID.randomUUID()
-            rows.value = listOf(info(WorkInfo.State.ENQUEUED, nextDue, oldId))
+            // The published PR118 v1 marker has no zone; preserve due time and ID.
+            rows.value = listOf(info(WorkInfo.State.ENQUEUED, nextDue, oldId,
+                tags = setOf("daily_digest_anchor_v1")))
             scheduler.schedulePeriod(DigestPeriod.MORNING)
             verify(timeout = 3000, exactly = 1) { manager.enqueueUniquePeriodicWork(
                 workName, ExistingPeriodicWorkPolicy.UPDATE, any()) }
@@ -80,9 +91,75 @@ class DigestSchedulerRegistrationTest {
             assertEquals(nextDue, updated.workSpec.nextScheduleTimeOverride)
             assertEquals(oldId, updated.id)
             assertTrue(DigestScheduler.ANCHOR_TAG in updated.tags)
+            assertEquals(ZoneId.systemDefault().id,
+                updated.workSpec.input.getString(DailyDigestWorker.KEY_PERIODIC_ZONE))
             verify(exactly = 0) { manager.cancelUniqueWork(workName) }
             scheduler.cancelPeriod(DigestPeriod.MORNING)
             verify(exactly = 1) { manager.cancelUniqueWork(workName) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
+    @Test fun `boot registration waits for WorkManager persistence receipt`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        every { settings.getSchedulePeriods() } returns setOf(DigestPeriod.MORNING)
+        val receipt = SettableFuture.create<Operation.State.SUCCESS>()
+        val operation = mockk<Operation>()
+        every { operation.result } returns receipt
+        val submitted = CountDownLatch(1)
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.getWorkInfosForUniqueWorkFlow(workName) } returns
+                MutableStateFlow(emptyList())
+            every { manager.enqueueUniquePeriodicWork(workName, any(), any()) } answers {
+                submitted.countDown()
+                operation
+            }
+            val scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            val registration = async(Dispatchers.IO) { scheduler.scheduleAllPeriodsAwaitPersistence() }
+            assertTrue(submitted.await(3, TimeUnit.SECONDS))
+            assertFalse(registration.isCompleted)
+            receipt.set(Operation.SUCCESS)
+            registration.await()
+            verify(exactly = 1) { manager.enqueueUniquePeriodicWork(
+                workName, ExistingPeriodicWorkPolicy.KEEP, any()) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
+    @Test fun `westbound zone change does not duplicate an anchored occurrence date`() {
+        val originalZone = ZoneId.of("Pacific/Kiritimati")
+        val westboundZone = ZoneId.of("Pacific/Honolulu")
+        val first = ZonedDateTime.of(2026, 9, 27, 7, 0, 0, 0, originalZone)
+        val second = first.plusHours(24).toInstant().atZone(westboundZone)
+        val anchor = first.toInstant().toEpochMilli()
+        assertEquals(LocalDate.of(2026, 9, 27),
+            DailyDigestWorker.periodicOccurrenceDate(first, anchor, originalZone))
+        assertEquals(LocalDate.of(2026, 9, 28),
+            DailyDigestWorker.periodicOccurrenceDate(second, anchor, originalZone))
+        assertEquals(LocalDate.of(2026, 9, 27),
+            DailyDigestWorker.periodicOccurrenceDate(second, anchor, westboundZone))
+    }
+
+    @Test fun `boot does not wait indefinitely for an already running legacy request`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        every { settings.getSchedulePeriods() } returns setOf(DigestPeriod.MORNING)
+        val rows = MutableStateFlow(listOf(info(WorkInfo.State.RUNNING)))
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.getWorkInfosForUniqueWorkFlow(workName) } returns rows
+            val scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            withTimeout(1_000) { scheduler.scheduleAllPeriodsAwaitPersistence() }
+            verify(exactly = 0) { manager.enqueueUniquePeriodicWork(workName, any(), any()) }
+            scheduler.cancelPeriod(DigestPeriod.MORNING)
         } finally {
             unmockkStatic(WorkManager::class)
         }
