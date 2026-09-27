@@ -134,12 +134,13 @@ Requirements:
 
 - Android 13+ (API 33+)
 - JDK 17
+- Android SDK platform 35 and build tools 34.0.0; set `ANDROID_HOME` to the SDK directory
 
 Build and test:
 
 ```bash
 ./gradlew assembleDebug
-./gradlew test
+./gradlew :app:testDebugUnitTest :shared:testDebugUnitTest --no-daemon
 ```
 
 ### iOS
@@ -147,24 +148,24 @@ Build and test:
 Requirements:
 
 - iOS 18.0+
-- Xcode 17+
-- Tuist
+- Xcode 26.5 (verified locally) with an iOS simulator runtime
+- Tuist 4.152.0, JDK 17, Android SDK platform 35 and build tools 34.0.0
 
 Build:
 
 ```bash
 cd EpilogueIOS
-tuist install
-tuist generate
-xcodebuild -workspace Epilogue.xcworkspace -scheme Epilogue build
+make setup  # builds debug/release EpilogueShared XCFrameworks, then installs and generates Tuist
+make build  # simulator build with signing disabled
+make test   # unit tests on iPhone 16 Pro Max, iOS 18.6
 ```
 
 ## Development Commands
 
 - Android release build: `./gradlew assembleRelease`
 - Android Google Play upload (local script): `scripts/upload_play_release.sh --version-code 42 --version-name 1.0.0 --track internal`
-- Android tests: `./gradlew test`
-- iOS workspace generation: `cd EpilogueIOS && tuist install && tuist generate`
+- Android tests: `./gradlew :app:testDebugUnitTest :shared:testDebugUnitTest --no-daemon`
+- iOS workspace generation: `cd EpilogueIOS && make setup`
 - Ghostwriter backend tests: `cd ghostwriter && pytest`
 - Ghostwriter frontend type checks: `cd ghostwriter/frontend && npm run check`
 - Ghostwriter frontend production build: `cd ghostwriter/frontend && npm run build`

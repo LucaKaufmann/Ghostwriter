@@ -151,7 +151,10 @@ public actor GhostwriterClient {
         return false
         #endif
     }(), useSharedClient: Bool = GhostwriterClient.defaultUseSharedClient) throws {
-        guard let url = URL(string: baseURLString) else {
+        guard let url = URL(string: baseURLString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else {
             throw GhostwriterError.invalidURL(baseURLString)
         }
         self.init(baseURL: url, apiKey: apiKey, enableMetrics: enableMetrics, useSharedClient: useSharedClient)
