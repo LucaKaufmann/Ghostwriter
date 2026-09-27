@@ -15,7 +15,7 @@ import GhostwriterClient
 @main
 struct EpilogueApp: App {
     private let launchOptions: ScreenshotLaunchOptions
-    let persistenceController = PersistenceController.shared
+    let persistenceController: PersistenceController
 
     // Repositories
     @State private var settingsRepository: SettingsRepository
@@ -34,13 +34,36 @@ struct EpilogueApp: App {
         let launchOptions = ScreenshotLaunchOptions.current
         self.launchOptions = launchOptions
 
+        #if DEBUG
+        let fixtureRequested = launchOptions.isEnabled &&
+            ProcessInfo.processInfo.arguments.contains("-ui-testing") &&
+            ProcessInfo.processInfo.arguments.contains("-feed-v2-ui-fixture")
+        let deliveryFixtureOutcome = ["complete", "partial", "empty", "deferred", "failed"]
+            .first { ProcessInfo.processInfo.arguments.contains("-delivery-ui-\($0)") }
+            .flatMap(LocalGenerationOutcome.init(rawValue:))
+        let deliveryFixtureRequested = launchOptions.isEnabled &&
+            ProcessInfo.processInfo.arguments.contains("-ui-testing") &&
+            deliveryFixtureOutcome != nil
+        let persistence = (fixtureRequested || deliveryFixtureRequested) ?
+            PersistenceController.preview : PersistenceController.shared
+        #else
         let persistence = PersistenceController.shared
+        #endif
+        self.persistenceController = persistence
         let context = persistence.container.mainContext
 
         ScreenshotDataSeeder.seedIfNeeded(context: context, options: launchOptions)
+        #if DEBUG
+        if fixtureRequested {
+            FeedV2TestHarness.seedUIFixture(context: context)
+        }
+        if deliveryFixtureRequested, let deliveryFixtureOutcome {
+            DeliveryUIFixture.seed(context: context, outcome: deliveryFixtureOutcome)
+        }
+        #endif
 
         // Initialize repositories
-        let settings = SettingsRepository()
+        let settings = SettingsRepository(modelContainer: persistence.container)
         let feeds = FeedRepository(modelContext: context)
         let digests = DigestRepository(modelContext: context)
 
@@ -52,7 +75,8 @@ struct EpilogueApp: App {
         let coordinator = GhostwriterSyncCoordinator(
             settingsRepository: settings,
             feedRepository: feeds,
-            digestRepository: digests
+            digestRepository: digests,
+            modelContainer: persistence.container
         )
         _ghostwriterCoordinator = StateObject(wrappedValue: coordinator)
 
@@ -60,7 +84,8 @@ struct EpilogueApp: App {
         let localDigest = LocalDigestService(
             feedRepository: feeds,
             digestRepository: digests,
-            settingsRepository: settings
+            settingsRepository: settings,
+            modelContainer: persistence.container
         )
         _localDigestService = StateObject(wrappedValue: localDigest)
 
@@ -76,7 +101,8 @@ struct EpilogueApp: App {
             let scheduler = LocalDigestScheduler(
                 feedRepository: feeds,
                 digestRepository: digests,
-                settingsRepository: settings
+                settingsRepository: settings,
+                modelContainer: persistence.container
             )
             scheduler.registerBackgroundTasks()
             _localDigestScheduler = State(initialValue: scheduler)

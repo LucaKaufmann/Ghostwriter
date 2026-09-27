@@ -15,6 +15,11 @@ enum ScreenshotDataSeeder {
         guard options.isEnabled else { return }
 
         do {
+            if ProcessInfo.processInfo.arguments.contains("-digest-artifact-ui-fixture") {
+                if options.resetData { try clearExistingData(context: context) }
+                try seedDigestArtifactFixture(context: context)
+                return
+            }
             let fixture = try loadFixture(options: options)
             if options.resetData {
                 try clearExistingData(context: context)
@@ -23,6 +28,17 @@ enum ScreenshotDataSeeder {
         } catch {
             print("[ScreenshotDataSeeder] Failed to seed screenshot data: \(error)")
         }
+    }
+
+    private static func seedDigestArtifactFixture(context: ModelContext) throws {
+        for (id, count) in [("empty-remote", 0), ("indexed-remote", 1)] {
+            context.insert(Digest(
+                generatedAt: Date(timeIntervalSince1970: 1_800_000_000 + Double(count)),
+                epubFilePath: "", articleCount: count, triggerType: .ghostwriter,
+                isComplete: true, remoteId: id, period: "morning"
+            ))
+        }
+        try context.save()
     }
 
     private static func clearExistingData(context: ModelContext) throws {
