@@ -21,6 +21,130 @@ final class FeedV2StoreTests: XCTestCase {
                                   configurations: [configuration])
     }
 
+    private func resolutionFixture(kind: String = "upsert", status: String = "conflict",
+                                   serverSnapshot: Bool = true,
+                                   locallyDeleted: Bool = false) throws ->
+        (ModelContainer, IOSFeedV2StoreEngine, String) {
+        let container = try model()
+        let context = ModelContext(container)
+        let scope = "https://server.test\nconfiguration"
+        context.insert(FeedSyncState(destinationURL: "https://server.test",
+                                     configurationId: "configuration",
+                                     firstReconciliationComplete: true))
+        context.insert(Domain.Feed(url: feedURL, name: "Server title", mode: .fidelity,
+                                   maxArticles: 2, isEnabled: false,
+                                   serverId: serverSnapshot ? "server-id" : nil,
+                                   serverVersion: serverSnapshot ? 8 : nil,
+                                   isLocallyDeleted: locallyDeleted))
+        let proposal = FeedMutation(url: feedURL, scopeKey: scope, kind: kind,
+                                    baseVersion: serverSnapshot ? 7 : nil,
+                                    title: kind == "delete" ? nil : "My title",
+                                    isActive: true, mode: "summarize", maxArticles: 5,
+                                    sequence: 1, localRevision: 1, status: status, sent: true)
+        if serverSnapshot {
+            proposal.serverKind = "feed"
+            proposal.serverId = "server-id"
+            proposal.serverVersion = 8
+            proposal.serverTitle = "Server title"
+            proposal.serverIsActive = false
+            proposal.serverMode = "raw"
+            proposal.serverMaxArticles = 2
+        }
+        context.insert(proposal)
+        try context.save()
+        return (container, IOSFeedV2StoreEngine(container: container), proposal.opId)
+    }
+
+    private func resolvedRow(_ container: ModelContainer) throws -> Domain.Feed {
+        try XCTUnwrap(ModelContext(container).fetch(FetchDescriptor<Domain.Feed>()).first)
+    }
+
+    func testApplyMineRestoresVisibleProposalWithReplacementAndReopen() throws {
+        let (container, engine, opId) = try resolutionFixture()
+        try engine.resolve(opId: opId, action: .applyMine)
+        let visible = try resolvedRow(container)
+        XCTAssertEqual(visible.name, "My title")
+        XCTAssertEqual(visible.mode, .briefing)
+        XCTAssertTrue(visible.isEnabled)
+        XCTAssertEqual(visible.maxArticles, 5)
+        XCTAssertFalse(visible.isLocallyDeleted ?? true)
+        XCTAssertEqual(visible.mutationRevision, 2)
+        let replacement = try XCTUnwrap(ModelContext(container).fetch(FetchDescriptor<FeedMutation>()).first)
+        XCTAssertNotEqual(replacement.opId, opId)
+        XCTAssertEqual(replacement.sequence, 1)
+        XCTAssertEqual(replacement.baseVersion, 8)
+        XCTAssertEqual(replacement.title, visible.name)
+    }
+
+    func testAddToServerUnhidesAbsentFeedWithProposal() throws {
+        let (container, engine, opId) = try resolutionFixture(status: "needs_resolution",
+                                                                serverSnapshot: false,
+                                                                locallyDeleted: true)
+        try engine.resolve(opId: opId, action: .addToServer)
+        let visible = try resolvedRow(container)
+        XCTAssertEqual(visible.name, "My title")
+        XCTAssertFalse(visible.isLocallyDeleted ?? true)
+        XCTAssertEqual(visible.mode, .briefing)
+        XCTAssertEqual(visible.maxArticles, 5)
+        let replacement = try XCTUnwrap(ModelContext(container).fetch(FetchDescriptor<FeedMutation>()).first)
+        XCTAssertNil(replacement.baseVersion)
+        XCTAssertEqual(replacement.title, "My title")
+    }
+
+    func testCorrectRejectedEditUpdatesVisibleTitleAndRollsBackTogether() throws {
+        let (container, engine, opId) = try resolutionFixture(status: "rejected")
+        engine.failNextSaveForTesting = true
+        XCTAssertThrowsError(try engine.resolve(opId: opId, action: .correct,
+                                                correctedTitle: "Corrected title"))
+        XCTAssertEqual(try resolvedRow(container).name, "Server title")
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<FeedMutation>()).first?.opId,
+                       opId)
+        try engine.resolve(opId: opId, action: .correct, correctedTitle: "Corrected title")
+        XCTAssertEqual(try resolvedRow(container).name, "Corrected title")
+        XCTAssertFalse(try resolvedRow(container).isLocallyDeleted ?? true)
+        let replacement = try XCTUnwrap(ModelContext(container).fetch(FetchDescriptor<FeedMutation>()).first)
+        XCTAssertEqual(replacement.title, "Corrected title")
+        XCTAssertEqual(replacement.baseVersion, 8)
+    }
+
+    func testRejectedDeleteCannotEnterTitleCorrection() throws {
+        let (_, engine, opId) = try resolutionFixture(kind: "delete", status: "rejected")
+        XCTAssertThrowsError(try engine.resolve(opId: opId, action: .correct,
+                                                correctedTitle: "Ignored title"))
+    }
+
+    func testOnlyCompleteFeedOutcomePersistsSuccessfulTimestamp() async throws {
+        let defaults = UserDefaults(suiteName: "feed-outcome-\(UUID().uuidString)")!
+        let settings = SettingsRepository(userDefaults: defaults)
+        let prior = Date(timeIntervalSince1970: 1_700_000_000)
+        try await settings.setLastFeedSyncTime(prior)
+        let service = FeedSyncService(settingsRepository: settings, modelContainer: try model())
+        do {
+            try await service.apply(.partial(pending: 1, conflicts: 0,
+                                             rejected: 0, phase: "pull"))
+            XCTFail("Partial feed sync must not count as success")
+        } catch is FeedSyncV2Error {}
+        do {
+            try await service.apply(.failed(phase: "pull", message: "offline"))
+            XCTFail("Failed feed sync must not count as success")
+        } catch is FeedSyncV2Error {}
+        try await service.apply(.notConfigured)
+        let unchanged = try await settings.getLastFeedSyncTime()
+        XCTAssertEqual(unchanged, prior)
+        let cancelled = Task { try await service.apply(.complete(applied: 1, pulled: 1)) }
+        cancelled.cancel()
+        do {
+            try await cancelled.value
+            XCTFail("Cancelled feed sync must not persist success")
+        } catch is CancellationError {}
+        let afterCancellation = try await settings.getLastFeedSyncTime()
+        XCTAssertEqual(afterCancellation, prior)
+        try await service.apply(.complete(applied: 1, pulled: 2))
+        let reopened = SettingsRepository(userDefaults: defaults)
+        let successful = try await reopened.getLastFeedSyncTime()
+        XCTAssertGreaterThan(try XCTUnwrap(successful), prior)
+    }
+
     func testEditAndSaveFailureRollback() throws {
         let container = try model()
         let engine = IOSFeedV2StoreEngine(container: container)

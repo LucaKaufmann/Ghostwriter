@@ -1,0 +1,12 @@
+# REVIEW-IOS-SYNC result
+
+Branch: `codex/review-ios-sync`, based on accepted combined iOS sync commit `6e232cdae4dc8c32f43fdb9550e982649bf5f918` (PRs 103 and 105). This follow-up addresses their four inline review findings without changing shared wire behavior or SwiftData schemas.
+
+- PR103 `4115732057`: Apply mine, Add to server, and Correct and retry now restore the selected visible proposal in the same SwiftData save as the replacement mutation. An upsert unhides an absent feed; a delete stays hidden. The replacement keeps its queue position and revised payload. A failed save rolls both visible row and outbox back.
+- PR103 `4115732063`: only a Complete feed v2 outcome persists the successful feed-sync time. Partial, failed, unconfigured, and cancelled outcomes leave the prior time intact.
+- PR103 `4115732067`: a rejected delete shows its rejection and Discard proposal, without a title field or ineffective Correct and retry action. The engine also rejects a direct title correction on a delete.
+- PR105 `4115849990`: each noncancelled remote digest batch runs stale EPUB cleanup before reporting aggregate partial failure. A partial batch still does not advance the successful digest-sync time.
+
+Verification: shared XCFramework assembly and Tuist install/generate passed (`/private/tmp/review-ios-sync-kmp.log`, `/private/tmp/review-ios-sync-tuist-install.log`, `/private/tmp/review-ios-sync-tuist-generate.log`). A clean review-only iPhone 16 Pro Max simulator (`3EF8B57D-8D49-4373-9A9E-302E4EAE8742`, iOS 18.6) passed the focused feed-store suite **29/29** (`/private/tmp/review-ios-sync-focused-clean.log`) and full App unit suite **67/67** (`/private/tmp/review-ios-sync-app.log`). Those include real SQLite reopen/rollback, timestamp persistence and cancellation, and stale remote-file cleanup after a partial batch. The feed-resolution UI fixture passed **1/1** (`/private/tmp/review-ios-sync-ui.log`); a saved-result rerun also passed **1/1** (`/private/tmp/review-ios-sync-ui-saved.log`). It checks that rejected-delete title correction is absent. The screenshot is `/private/tmp/review-ios-sync-ui-attachments/9D9AFB2D-DB9E-465E-A973-D664EC7BEEE3.png` in `/private/tmp/review-ios-sync-ui-saved.xcresult`.
+
+The initial attempt on the shared simulator could not launch because that device contains a V3 delivery store, while this follow-up intentionally remains on V2. No app data on that device was reset. The clean simulator passed. The review branch does not include delivery V3; root will integrate the separate accepted packages.

@@ -9,10 +9,12 @@ import OSLog
 @MainActor
 public final class FeedSyncService {
     private let bridge: SharedFeedV2Bridge
+    private let settingsRepository: SettingsRepositoryProtocol
     private let logger = Logger(subsystem: "com.epilogue", category: "FeedSync")
 
     public init(settingsRepository: SettingsRepositoryProtocol,
                 modelContainer: ModelContainer) {
+        self.settingsRepository = settingsRepository
         self.bridge = SharedFeedV2Bridge(settings: settingsRepository,
                                          container: modelContainer)
     }
@@ -21,8 +23,14 @@ public final class FeedSyncService {
         let interval = tracker?.beginInterval("Feed Sync v2")
         let outcome = try await bridge.sync()
         if let interval { tracker?.endInterval("Feed Sync v2", state: interval) }
+        try await apply(outcome)
+    }
+
+    func apply(_ outcome: SharedFeedV2Bridge.Outcome) async throws {
         switch outcome {
         case let .complete(applied, pulled):
+            try Task.checkCancellation()
+            try await settingsRepository.setLastFeedSyncTime(Date())
             logger.info("Feed sync v2 complete: applied=\(applied), pulled=\(pulled)")
         case .notConfigured:
             break

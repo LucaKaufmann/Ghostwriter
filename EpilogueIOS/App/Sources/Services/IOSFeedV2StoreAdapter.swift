@@ -715,9 +715,11 @@ final class IOSFeedV2StoreEngine {
                 context.delete(selected)
             case .applyMine, .addToServer, .correct:
                 if action == .applyMine && snapshot == nil { throw StoreError.invalidSnapshot }
-                if action == .addToServer && snapshot != nil { throw StoreError.invalidEdit }
+                if action == .addToServer && (snapshot != nil || selected.kind != "upsert") {
+                    throw StoreError.invalidEdit
+                }
                 if action == .correct {
-                    guard selected.status == "rejected",
+                    guard selected.kind == "upsert", selected.status == "rejected",
                           let correctedTitle,
                           !correctedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     else { throw StoreError.invalidTitle }
@@ -743,7 +745,38 @@ final class IOSFeedV2StoreEngine {
                 copySnapshot(selected, to: replacement)
                 context.delete(selected)
                 context.insert(replacement)
-                target?.mutationRevision = max(target?.mutationRevision ?? 0, replacement.localRevision)
+                if selected.kind == "delete" {
+                    target?.isLocallyDeleted = true
+                    target?.locallyModified = true
+                    target?.mutationRevision = max(target?.mutationRevision ?? 0,
+                                                   replacement.localRevision)
+                } else {
+                    let visible: Domain.Feed
+                    if let target {
+                        visible = target
+                    } else {
+                        guard let title, let mode = selected.mode,
+                              let active = selected.isActive,
+                              let max = selected.maxArticles else { throw StoreError.invalidEdit }
+                        visible = Domain.Feed(url: selected.url, name: title,
+                                              mode: mode == "summarize" ? .briefing : .fidelity,
+                                              maxArticles: max, isEnabled: active,
+                                              locallyModified: true,
+                                              serverId: snapshot?.id,
+                                              serverVersion: snapshot?.version)
+                        context.insert(visible)
+                    }
+                    if let title { visible.name = title }
+                    if let active = selected.isActive { visible.isEnabled = active }
+                    if let mode = selected.mode {
+                        visible.mode = mode == "summarize" ? .briefing : .fidelity
+                    }
+                    if let max = selected.maxArticles { visible.maxArticles = max }
+                    visible.isLocallyDeleted = false
+                    visible.locallyModified = true
+                    visible.mutationRevision = max(visible.mutationRevision ?? 0,
+                                                   replacement.localRevision)
+                }
             }
         }
     }
