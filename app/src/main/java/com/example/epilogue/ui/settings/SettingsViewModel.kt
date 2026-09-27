@@ -2,6 +2,8 @@ package com.example.epilogue.ui.settings
 
 import android.net.Uri
 import android.util.Log
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -26,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
@@ -46,6 +49,9 @@ class SettingsViewModel @Inject constructor(
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     private var digestPollingJob: Job? = null
+    private var immediateWorkId: UUID? = null
+    private var immediateWorkInfo: LiveData<WorkInfo>? = null
+    private var immediateWorkObserver: Observer<WorkInfo>? = null
 
     init {
         loadSettings()
@@ -140,6 +146,18 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun runDigestNow() {
+        clearImmediateWorkObserver()
+        digestPollingJob?.cancel()
+        _uiState.update {
+            it.copy(
+                isGenerating = true,
+                digestTriggered = true,
+                digestCompleted = false,
+                digestFailed = false,
+                ghostwriterProgress = null,
+                ghostwriterError = null
+            )
+        }
         if (_uiState.value.ghostwriterEnabled && _uiState.value.ghostwriterUrl.isNotBlank()) {
             // Use Ghostwriter backend
             runDigestViaGhostwriter()
@@ -150,25 +168,39 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun runDigestLocally() {
-        _uiState.update { it.copy(isGenerating = true, digestTriggered = true) }
-        digestScheduler.runNow(fetchAll = false)
-
-        // Observe work completion
-        digestScheduler.getImmediateWorkInfo().observeForever { workInfos ->
-            val workInfo = workInfos?.firstOrNull() ?: return@observeForever
+        val id = digestScheduler.runNow(fetchAll = false)
+        immediateWorkId = id
+        val workInfoLiveData = digestScheduler.getImmediateWorkInfo(id)
+        val observer = Observer<WorkInfo> { workInfo ->
+            if (immediateWorkId != id || workInfo.id != id) return@Observer
             when (workInfo.state) {
                 WorkInfo.State.SUCCEEDED -> {
                     _uiState.update { it.copy(isGenerating = false, digestCompleted = true) }
+                    clearImmediateWorkObserver()
                 }
                 WorkInfo.State.FAILED -> {
                     _uiState.update { it.copy(isGenerating = false, digestFailed = true) }
+                    clearImmediateWorkObserver()
                 }
                 WorkInfo.State.CANCELLED -> {
                     _uiState.update { it.copy(isGenerating = false) }
+                    clearImmediateWorkObserver()
                 }
                 else -> { /* Still running */ }
             }
         }
+        immediateWorkInfo = workInfoLiveData
+        immediateWorkObserver = observer
+        workInfoLiveData.observeForever(observer)
+    }
+
+    private fun clearImmediateWorkObserver() {
+        immediateWorkId = null
+        immediateWorkObserver?.let { observer ->
+            immediateWorkInfo?.removeObserver(observer)
+        }
+        immediateWorkObserver = null
+        immediateWorkInfo = null
     }
 
     private fun runDigestViaGhostwriter() {
@@ -1601,6 +1633,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        clearImmediateWorkObserver()
         super.onCleared()
         digestPollingJob?.cancel()
     }
