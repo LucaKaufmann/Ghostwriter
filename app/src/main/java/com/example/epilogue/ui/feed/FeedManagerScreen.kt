@@ -242,7 +242,7 @@ internal fun correctionDraft(proposal: FeedMutationEntity): FeedCorrectionDraft?
         server?.has("max_articles") == true -> server.optInt("max_articles")
         else -> return null
     }
-    if (title.isBlank() || modeValue !in setOf("raw", "summarize") || cap < 0) return null
+    if (modeValue !in setOf("raw", "summarize")) return null
     return FeedCorrectionDraft(title, if (modeValue == "summarize") ProcessingMode.BRIEFING else ProcessingMode.FIDELITY,
         enabled, cap)
 }

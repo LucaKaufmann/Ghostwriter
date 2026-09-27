@@ -377,6 +377,7 @@ class AndroidFeedV2Store @Inject constructor(
                 if (older || first.sent) mutations.update(first.copy(state = "needs_resolution",
                     serverSnapshotJson = if (older) feed?.serverSnapshotJson else current?.let(::snapshot)))
                 else mutations.update(first.copy(baseVersion = current?.version,
+                    serverSnapshotJson = current?.let(::snapshot) ?: first.serverSnapshotJson,
                     state = if (first.state == "queued") "queued" else "needs_resolution"))
             }
             FeedV2StoreResult.Success(Unit)
@@ -407,8 +408,11 @@ class AndroidFeedV2Store @Inject constructor(
             val row = mutations.byId(opId) ?: return@withTransaction FeedV2StoreResult.StaleSentRevision
             if (row.serverKey != state.serverKey || !row.sent || row.localRevision != sentRevision)
                 return@withTransaction FeedV2StoreResult.StaleSentRevision
-            val originalBase = row.serverSnapshotJson ?: feeds.getFeedByUrl(row.url)?.serverSnapshotJson
-            mutations.update(row.copy(state = "rejected", serverSnapshotJson = originalBase,
+            val proposalServer = parseSnapshot(row.serverSnapshotJson)
+            val feedServer = parseSnapshot(feeds.getFeedByUrl(row.url)?.serverSnapshotJson)
+            val current = if (feedServer != null &&
+                (proposalServer == null || feedServer.version > proposalServer.version)) feedServer else proposalServer
+            mutations.update(row.copy(state = "rejected", serverSnapshotJson = current?.let(::snapshot),
                 rejectionCode = code, rejectionMessage = message))
             FeedV2StoreResult.Success(Unit)
         }
