@@ -17,6 +17,8 @@ Branch: `codex/sync-edits-ios`, based on `99fcda5d554e313fa7b4faf713d50731c55fe9
 - [Absent server row](assets/SYNC-EDITS-IOS/absent.png)
 - [Pending delete conflict](assets/SYNC-EDITS-IOS/delete.png)
 
+Independent Sol review found reconciliation/resolution defects; corrective commits `574375c` and `ef2145f` address them. The final narrow review returned no actionable findings (`/private/tmp/epilogue-backlog-20260927/ios-delete-correction-review.log`).
+
 ## Integration notes
 
 - The app test harness and UI fixture are compiled only in DEBUG. The UI fixture requires `-ui-testing`, `-feed-v2-ui-fixture`, and screenshot mode, and seeds the same in-memory container injected into repositories and SwiftUI. A fixture launch cannot clear the disk-backed app store.
