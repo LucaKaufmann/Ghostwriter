@@ -81,6 +81,56 @@ struct DeliveryGenerationTests {
         #expect(try ModelContext(container).fetchCount(FetchDescriptor<ArticleDelivery>()) == 5)
     }
 
+    @Test("Missing EPUB retains deliver-once claim; automatic retry is empty until explicit regeneration")
+    func testMissingArtifactDoesNotAutomaticallyRepeatDeliveredArticle() async throws {
+        let link = "https://example.test/article"
+        let (generator, articles, container, _) = try setup(maxArticles: 0, links: [link])
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = try await generator.generateDigest(triggerType: .scheduled,
+                                                       period: "MORNING", now: start)
+        let firstDigest = try #require(first.digest)
+        #expect(first.outcome == .complete)
+        let firstID = firstDigest.id
+        let firstPath = firstDigest.epubFilePath
+        try FileManager.default.removeItem(atPath: firstPath)
+        let context = ModelContext(container)
+        let original = try #require(context.fetch(FetchDescriptor<GenerationRun>()).first)
+        original.outcome = "running"
+        original.finishedAt = nil
+        try context.save()
+
+        let store = DeliveryStore(container: container)
+        try store.reconcileInterruptedLocalRuns(now: start.addingTimeInterval(30))
+        let end = start.addingTimeInterval(86_400)
+        #expect(try store.mayStartScheduled(period: "MORNING", occurrenceStart: start,
+                                            occurrenceEnd: end, legacyCovered: false))
+        let retry = try #require(try await generator.generateScheduledIfEligible(
+            period: "MORNING", occurrenceStart: start, occurrenceEnd: end,
+            now: start.addingTimeInterval(60)) { false })
+        #expect(retry.outcome == .empty)
+        #expect(retry.digest == nil)
+        #expect(await articles.calls == [link])
+        #expect(try !store.mayStartScheduled(period: "MORNING", occurrenceStart: start,
+                                             occurrenceEnd: end, legacyCovered: false))
+        let afterRetry = ModelContext(container)
+        let claim = try #require(afterRetry.fetch(FetchDescriptor<ArticleDelivery>()).first)
+        let missingDigest = try #require(afterRetry.fetch(FetchDescriptor<Digest>())
+            .first(where: { $0.id == firstID }))
+        #expect(claim.state == "delivered")
+        #expect(claim.firstDigestId == firstID)
+        #expect(!missingDigest.isComplete)
+        #expect(!FileManager.default.fileExists(atPath: firstPath))
+
+        let explicit = try await generator.generateDigest(triggerType: .manual,
+                                                           mode: .regenerate,
+                                                           now: start.addingTimeInterval(120))
+        #expect(explicit.outcome == .complete)
+        #expect(explicit.digest?.articleCount == 1)
+        #expect(await articles.calls == [link, link])
+        #expect(try ModelContext(container).fetch(FetchDescriptor<ArticleDelivery>())
+            .first?.firstDigestId == firstID)
+    }
+
     @Test("Capped regeneration advances attempt order without replacing first claims")
     func testRegenerationFairness() async throws {
         let source = links(5)
