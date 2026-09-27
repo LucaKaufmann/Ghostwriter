@@ -232,25 +232,28 @@ async def sync_feeds(
     updated = 0
     unchanged = 0
 
-    # Get existing feeds by URL
-    existing_statement = select(Feed)
-    existing_feeds = {f.url: f for f in session.exec(existing_statement).all()}
-
     # Validate URLs before applying changes
     for feed_data in feeds:
         await _validate_feed_url(feed_data.url)
 
-    # The v1 bulk writer is read-safe: reject the entire batch on any change.
-    for feed_data in feeds:
-        feed = existing_feeds.get(feed_data.url)
-        if (feed is None or feed.deleted_at is not None or
-            feed_data.url.startswith("synthetic://") or
-            any(getattr(feed, key) != getattr(feed_data, key)
-                for key in feed_sync.SYNC_FIELDS)):
-            raise HTTPException(409, detail={"code": "legacy_write_requires_upgrade"})
-        unchanged += 1
+    # Compare against current rows after the await, under the short writer gate.
+    # No DNS work runs while that gate is held.
+    feed_sync._begin_write(session)
+    try:
+        existing_feeds = {f.url: f for f in session.exec(select(Feed)).all()}
+        for feed_data in feeds:
+            feed = existing_feeds.get(feed_data.url)
+            if (feed is None or feed.deleted_at is not None or
+                feed_data.url.startswith("synthetic://") or
+                any(getattr(feed, key) != getattr(feed_data, key)
+                    for key in feed_sync.SYNC_FIELDS)):
+                raise HTTPException(409, detail={"code": "legacy_write_requires_upgrade"})
+            unchanged += 1
+        session.commit()
+    except BaseException:
+        session.rollback()
+        raise
 
-    from app.services import activity_tracker
     activity_tracker.record_feed_sync()
 
     duration_ms = (time.perf_counter() - t0) * 1000
@@ -347,10 +350,20 @@ async def create_feed(
     if active_snapshot is not None:
         raise HTTPException(409, detail={"code": "feed_conflict", "current": active_snapshot})
     await _validate_feed_url(feed_data.url)
-    return feed_sync.write_web(
-        session, url=feed_data.url, kind="upsert",
-        fields=feed_data.model_dump(exclude={"url"}), expected=_if_match(if_match),
-    )
+    try:
+        return feed_sync.write_web(
+            session, url=feed_data.url, kind="upsert",
+            fields=feed_data.model_dump(exclude={"url"}), expected=_if_match(if_match),
+        )
+    except HTTPException as exc:
+        detail = exc.detail
+        if (exc.status_code == 428 and isinstance(detail, dict) and
+            detail.get("code") == "feed_version_required" and
+            isinstance(detail.get("current"), dict) and
+            detail["current"].get("kind") == "feed"):
+            raise HTTPException(409, detail={"code": "feed_conflict",
+                                              "current": detail["current"]}) from exc
+        raise
 
 
 @router.get("/{feed_id}", response_model=FeedRead, dependencies=[Depends(verify_api_key)])
