@@ -210,6 +210,51 @@ class DigestSchedulerRegistrationTest {
         }
     }
 
+    @Test fun `failed cancellation does not poison later registration or erase pending receipt`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        every { settings.getSchedulePeriods() } returns setOf(DigestPeriod.MORNING)
+        val failed = SettableFuture.create<Operation.State.SUCCESS>().apply {
+            setException(IllegalStateException("synthetic cancellation failure"))
+        }
+        val pending = SettableFuture.create<Operation.State.SUCCESS>()
+        val failedOperation = mockk<Operation> { every { result } returns failed }
+        val pendingOperation = mockk<Operation> { every { result } returns pending }
+        val completedOperation = mockk<Operation> {
+            every { result } returns com.google.common.util.concurrent.Futures.immediateFuture(Operation.SUCCESS)
+        }
+        var morningCancels = 0
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(any()) } answers {
+                if (firstArg<String>() != workName) completedOperation
+                else if (morningCancels++ == 0) failedOperation else pendingOperation
+            }
+            every { manager.getWorkInfosForUniqueWorkFlow(workName) } returns
+                MutableStateFlow(emptyList())
+            every { manager.enqueueUniquePeriodicWork(workName, any(), any()) } returns
+                completedOperation
+            val scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            scheduler.cancelPeriod(DigestPeriod.MORNING)
+            scheduler.cancelPeriod(DigestPeriod.MORNING)
+            scheduler.scheduleAllPeriodsAwaitPersistence()
+            verify(exactly = 1) { failedOperation.result }
+            verify(exactly = 0) { pendingOperation.result }
+            verify(exactly = 0) { manager.getWorkInfosForUniqueWorkFlow(workName) }
+            verify(exactly = 0) { manager.enqueueUniquePeriodicWork(workName, any(), any()) }
+            scheduler.schedulePeriod(DigestPeriod.MORNING)
+            verify(timeout = 3000, exactly = 1) { pendingOperation.result }
+            verify(exactly = 0) { manager.getWorkInfosForUniqueWorkFlow(workName) }
+            pending.set(Operation.SUCCESS)
+            verify(timeout = 3000, exactly = 1) { manager.enqueueUniquePeriodicWork(
+                workName, ExistingPeriodicWorkPolicy.KEEP, any()) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
     @Test fun `period disabled after boot selection is not re-enqueued by child`() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val manager = mockk<WorkManager>(relaxed = true)
