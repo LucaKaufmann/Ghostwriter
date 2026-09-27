@@ -55,6 +55,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.data.local.FeedMutationEntity
+import com.example.epilogue.data.repository.FeedCorrectionEdits
 import com.example.epilogue.ui.LocalEinkMode
 import com.example.epilogue.ui.components.SyncStatusIndicator
 import com.example.epilogue.service.DigestSyncWorker
@@ -173,8 +174,8 @@ fun FeedManagerScreen(
                 items(unresolved, key = { "proposal-${it.opId}" }) { proposal ->
                     FeedResolutionCard(proposal,
                         onResolve = { action -> viewModel.resolve(proposal.opId, action) },
-                        onCorrect = { title, mode, enabled, cap ->
-                            viewModel.correctRejected(proposal.opId, title, mode, enabled, cap)
+                        onCorrect = { edits ->
+                            viewModel.correctRejected(proposal.opId, edits)
                         })
                 }
                 items(feeds, key = { it.url }) { feed ->
@@ -267,7 +268,7 @@ internal fun correctionDraft(proposal: FeedMutationEntity): FeedCorrectionDraft?
 private fun FeedResolutionCard(
     proposal: FeedMutationEntity,
     onResolve: (String) -> Unit,
-    onCorrect: (String, ProcessingMode, Boolean, Int) -> Unit
+    onCorrect: (FeedCorrectionEdits) -> Unit
 ) {
     val draft = remember(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
         correctionDraft(proposal)
@@ -359,7 +360,9 @@ private fun FeedResolutionCard(
                 TextButton(onClick = {
                     val number = form.cap.toIntOrNull()
                     if (form.title.isNotBlank() && number != null && number >= 0) {
-                        onCorrect(form.title, form.mode, form.enabled, number)
+                        onCorrect(FeedCorrectionEdits(titleEdit, briefingEdit?.let {
+                            if (it) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY
+                        }, enabledEdit, capEdit?.toIntOrNull()))
                         correcting = false
                     }
                 }) { Text("Save correction") }

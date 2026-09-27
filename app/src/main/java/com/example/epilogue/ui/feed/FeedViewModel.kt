@@ -6,6 +6,7 @@ import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.remote.ghostwriter.FeedResponse
 import com.example.epilogue.data.repository.AndroidFeedV2Store
+import com.example.epilogue.data.repository.FeedCorrectionEdits
 import com.example.epilogue.data.local.FeedMutationEntity
 import com.example.epilogue.data.local.FeedSyncStateEntity
 import com.example.epilogue.domain.model.Feed
@@ -114,8 +115,7 @@ class FeedViewModel @Inject constructor(
         }
     }
 
-    fun correctRejected(opId: String, title: String, mode: ProcessingMode,
-        enabled: Boolean, maxArticles: Int) {
+    fun correctRejected(opId: String, edits: FeedCorrectionEdits) {
         viewModelScope.launch {
             val refreshed = feedSyncV2UseCase.sync().also { feedV2Store.recordOutcome(it) }
             if (refreshed is FeedSyncV2Outcome.Failed || refreshed is FeedSyncV2Outcome.ServerChanged ||
@@ -123,7 +123,7 @@ class FeedViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(error = "Refresh server state before correcting this feed")
                 return@launch
             }
-            if (!feedV2Store.correctRejected(opId, title.trim(), mode, enabled, maxArticles)) {
+            if (!feedV2Store.correctRejected(opId, edits.copy(title = edits.title?.trim()))) {
                 _uiState.value = _uiState.value.copy(error = "Could not correct this proposal")
                 return@launch
             }
