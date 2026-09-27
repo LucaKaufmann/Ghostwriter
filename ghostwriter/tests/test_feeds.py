@@ -64,7 +64,7 @@ def test_sync_feeds(client, public_feed_dns):
 
 
 def test_dns_failure_returns_validation_error_and_retry_succeeds(client, monkeypatch):
-    """Create, update, and sync report failed DNS without writing feed changes."""
+    """New URLs require DNS; metadata edits of stored URLs do not."""
     resolved = set()
 
     def resolve(host, port, *args, **kwargs):
@@ -87,12 +87,10 @@ def test_dns_failure_returns_validation_error_and_retry_succeeds(client, monkeyp
     feed_id = created.json()["id"]
 
     resolved.remove("input-create.example")
-    failed_update = client.put(f"/api/feeds/{feed_id}", json={"title": "Changed"})
-    assert failed_update.status_code == 422
-    assert "Hostname could not be resolved" in failed_update.json()["detail"]
+    missing_version = client.put(f"/api/feeds/{feed_id}", json={"title": "Changed"})
+    assert missing_version.status_code == 428
     assert client.get(f"/api/feeds/{feed_id}").json()["title"] == "Initial"
 
-    resolved.add("input-create.example")
     updated = client.put(f"/api/feeds/{feed_id}", json={"title": "Changed"},
                          headers={"If-Match": f'"{created.json()["version"]}"'})
     assert updated.status_code == 200
