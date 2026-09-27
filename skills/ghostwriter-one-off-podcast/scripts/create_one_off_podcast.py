@@ -18,6 +18,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit
+from uuid import UUID
 
 READY_STATUSES = {"ready", "failed"}
 MIN_TEXT_CHARS = 80
@@ -40,6 +41,10 @@ WIKILINK_RE = re.compile(r"(!?)\[\[([^\]#|]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]")
 BLOCK_ID_RE = re.compile(r"\s+\^[A-Za-z0-9_-]+(?=\s|$)")
 TAG_RE = re.compile(r"(?<!\w)#([A-Za-z][A-Za-z0-9_/-]*)")
 FRONTMATTER_VALUE_RE = re.compile(r"^([A-Za-z0-9_-]+):\s*(.*?)\s*$")
+EPISODE_ID_RE = re.compile(
+    r"(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z"
+)
 
 VOICE_PRESETS: dict[str, dict[str, Any]] = {
     "openai-balanced": {
@@ -1182,6 +1187,7 @@ def poll_episode(
     timeout_seconds: float,
     allow_insecure_http: bool = False,
 ) -> dict[str, Any]:
+    episode_id = canonical_episode_id(episode_id, code=EXIT_API)
     deadline = time.monotonic() + timeout_seconds
     last_status = ""
     while time.monotonic() < deadline:
@@ -1202,6 +1208,12 @@ def poll_episode(
     fail(f"Timed out waiting for episode {episode_id}", EXIT_TIMEOUT)
 
 
+def canonical_episode_id(value: Any, *, code: int) -> str:
+    if not isinstance(value, str) or not EPISODE_ID_RE.fullmatch(value):
+        fail("Invalid episode id", code)
+    return str(UUID(value))
+
+
 def output_path_for_episode(path: str | None, episode_id: str) -> Path:
     if path:
         candidate = Path(path).expanduser()
@@ -1219,21 +1231,22 @@ def download_episode(
     output: str | None,
     allow_insecure_http: bool,
 ) -> Path:
-    episode_id = str(detail.get("id") or detail.get("episode_id") or "")
-    if not episode_id:
+    raw_episode_id = detail.get("id") or detail.get("episode_id")
+    if not raw_episode_id:
         fail("Cannot download audio: episode detail did not include an id", EXIT_DOWNLOAD)
+    episode_id = canonical_episode_id(raw_episode_id, code=EXIT_DOWNLOAD)
 
     raw_url = detail.get("download_url") or detail.get("stream_url")
-    if not raw_url:
+    if not isinstance(raw_url, str) or not raw_url:
         fail("Cannot download audio: episode detail did not include a download URL", EXIT_DOWNLOAD)
     root = api_base.removesuffix("/api") + "/"
     try:
-        url = urljoin(root, str(raw_url))
+        transport_origin(urljoin(root, raw_url))
     except ValueError:
         fail("Unsafe audio download URL", EXIT_DOWNLOAD)
 
     data, content_type = request_bytes(
-        url=url,
+        url=f"{api_base}/podcast/episodes/{episode_id}/download",
         api_base=api_base,
         token=token,
         allow_insecure_http=allow_insecure_http,
