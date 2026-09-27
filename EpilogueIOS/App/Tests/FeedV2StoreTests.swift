@@ -180,6 +180,50 @@ final class FeedV2StoreTests: XCTestCase {
         XCTAssertTrue(try resolvedRow(reopened).isLocallyDeleted ?? false)
     }
 
+    func testResolvingDeleteReplaysLaterReaddAndDeleteAcrossReopen() throws {
+        for (changedTitle, trailingDelete) in [(false, false), (true, false), (true, true)] {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("feed-v2-delete-successor-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent("Epilogue.sqlite")
+            do {
+                let (container, engine, opId) = try resolutionFixture(
+                    kind: "delete", locallyDeleted: true, storeURL: url)
+                let expectedTitle = changedTitle ? "Re-added title" : "Server title"
+                try engine.edit(url: feedURL, title: expectedTitle, mode: .fidelity,
+                                isEnabled: false, maxArticles: 2)
+                let before = try orderedMutations(container)
+                XCTAssertEqual(before.map(\.kind), ["delete", "upsert"])
+                XCTAssertEqual(before[1].title, changedTitle ? expectedTitle : nil)
+                let successorId = before[1].opId
+                if trailingDelete { try engine.delete(url: feedURL) }
+                let originalIds = try orderedMutations(container).map(\.opId)
+
+                engine.failNextSaveForTesting = true
+                XCTAssertThrowsError(try engine.resolve(opId: opId, action: .applyMine))
+                XCTAssertEqual(try resolvedRow(container).isLocallyDeleted ?? false, trailingDelete)
+                XCTAssertEqual(try orderedMutations(container).map(\.opId), originalIds)
+
+                try engine.resolve(opId: opId, action: .applyMine)
+                let visible = try resolvedRow(container)
+                XCTAssertEqual(visible.isLocallyDeleted ?? false, trailingDelete)
+                XCTAssertEqual(visible.name, expectedTitle)
+                let queued = try orderedMutations(container)
+                XCTAssertEqual(queued.map(\.kind), trailingDelete
+                               ? ["delete", "upsert", "delete"] : ["delete", "upsert"])
+                XCTAssertNotEqual(queued[0].opId, opId)
+                XCTAssertEqual(queued[0].baseVersion, 8)
+                XCTAssertEqual(queued[1].opId, successorId)
+                XCTAssertEqual(queued[1].title, changedTitle ? expectedTitle : nil)
+            }
+            let reopened = try model(at: url)
+            XCTAssertEqual(try resolvedRow(reopened).isLocallyDeleted ?? false, trailingDelete)
+            XCTAssertEqual(try resolvedRow(reopened).name,
+                           changedTitle ? "Re-added title" : "Server title")
+            XCTAssertEqual(try orderedMutations(reopened).map(\.kind), trailingDelete
+                           ? ["delete", "upsert", "delete"] : ["delete", "upsert"])
+        }
+    }
+
     func testRejectedCreateCorrectionKeepsCapOnlySuccessorSparseAcrossReopen() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("feed-v2-create-successor-\(UUID().uuidString)")

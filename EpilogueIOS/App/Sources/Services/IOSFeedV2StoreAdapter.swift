@@ -793,39 +793,43 @@ final class IOSFeedV2StoreEngine {
                 copySnapshot(selected, to: replacement)
                 context.delete(selected)
                 context.insert(replacement)
+                var visible = target
                 if selected.kind == "delete" {
-                    target?.isLocallyDeleted = true
-                    target?.locallyModified = true
-                    target?.mutationRevision = max(target?.mutationRevision ?? 0,
+                    visible?.isLocallyDeleted = true
+                    visible?.locallyModified = true
+                    visible?.mutationRevision = max(visible?.mutationRevision ?? 0,
                                                    replacement.localRevision)
                 } else {
-                    let visible: Domain.Feed
-                    if let target {
-                        visible = target
-                    } else {
+                    if visible == nil {
                         guard let title, let mode = selected.mode,
                               let active = selected.isActive,
                               let max = selected.maxArticles else { throw StoreError.invalidEdit }
-                        visible = Domain.Feed(url: selected.url, name: title,
+                        let created = Domain.Feed(url: selected.url, name: title,
                                               mode: mode == "summarize" ? .briefing : .fidelity,
                                               maxArticles: max, isEnabled: active,
                                               locallyModified: true,
                                               serverId: snapshot?.id,
                                               serverVersion: snapshot?.version)
-                        context.insert(visible)
+                        context.insert(created)
+                        visible = created
                     }
-                    if let title { visible.name = title }
-                    if let active = selected.isActive { visible.isEnabled = active }
-                    if let mode = selected.mode {
-                        visible.mode = mode == "summarize" ? .briefing : .fidelity
+                    if let visible {
+                        if let title { visible.name = title }
+                        if let active = selected.isActive { visible.isEnabled = active }
+                        if let mode = selected.mode {
+                            visible.mode = mode == "summarize" ? .briefing : .fidelity
+                        }
+                        if let max = selected.maxArticles { visible.maxArticles = max }
+                        visible.isLocallyDeleted = false
+                        visible.locallyModified = true
+                        visible.mutationRevision = max(visible.mutationRevision ?? 0,
+                                                       replacement.localRevision)
                     }
-                    if let max = selected.maxArticles { visible.maxArticles = max }
-                    visible.isLocallyDeleted = false
-                    visible.locallyModified = true
-                    visible.mutationRevision = max(visible.mutationRevision ?? 0,
-                                                   replacement.localRevision)
-                    // The resolved head is older than any queued local edits. Rebuild
-                    // their visible state in order without changing their payloads.
+                }
+                // The resolved head is older than any queued local edits, even
+                // when that head is a delete. Rebuild their visible state in
+                // order without changing the queued payloads.
+                if let visible {
                     for successor in successors {
                         if successor.kind == "delete" {
                             visible.isLocallyDeleted = true
