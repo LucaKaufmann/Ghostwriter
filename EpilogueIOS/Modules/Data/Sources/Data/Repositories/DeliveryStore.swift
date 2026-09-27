@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Domain
+import GhostwriterClient
 
 public struct DeliveryRunHandle: Sendable {
     public let id: UUID
@@ -214,16 +215,29 @@ public final class DeliveryStore {
                 let runs = try context.fetch(FetchDescriptor<GenerationRun>())
                 let digests = try context.fetch(FetchDescriptor<Digest>())
                 let deliveries = try context.fetch(FetchDescriptor<ArticleDelivery>())
+                let claims = Dictionary(uniqueKeysWithValues: deliveries.map { ($0.identity, $0) })
                 let referenced = Set(runs.compactMap(\.digestId))
                 for run in runs where run.outcome == "running" &&
                     [TriggerType.scheduled.rawValue, TriggerType.manual.rawValue,
                      TriggerType.test.rawValue].contains(run.trigger) {
                     let digest = digests.first { $0.id == run.digestId }
                     let usable = digest.map { value in
-                        value.remoteId == nil && value.isComplete && value.articleCount > 0 &&
-                        value.articles.count == value.articleCount &&
-                        FileManager.default.fileExists(atPath: value.epubFilePath) &&
-                        deliveries.contains { $0.firstDigestId == value.id && $0.state == "delivered" }
+                        let artifactSize = (try? FileManager.default.attributesOfItem(
+                            atPath: value.epubFilePath)[.size]) as? Int64 ?? 0
+                        return value.remoteId == nil && value.isComplete && value.articleCount > 0 &&
+                            value.articles.count == value.articleCount && artifactSize > 0 &&
+                            value.articles.allSatisfy { article in
+                                guard let identity = ArticleDeliveryIdentityBridge.identify(article.originalUrl) else {
+                                    return false
+                                }
+                                let key = ArticleDelivery(feedUrl: article.feedUrl,
+                                                          articleKey: identity.articleKey).identity
+                                guard let claim = claims[key], claim.state == "delivered",
+                                      let firstDigestId = claim.firstDigestId else { return false }
+                                // Regeneration keeps the first normal claim. Only manual
+                                // generation can reuse it; scheduled runs must own theirs.
+                                return firstDigestId == value.id || run.trigger == TriggerType.manual.rawValue
+                            }
                     } ?? false
                     let old = (try? JSONDecoder().decode(
                         GenerationDiagnostics.self, from: Data(run.diagnosticsJSON.utf8))) ??

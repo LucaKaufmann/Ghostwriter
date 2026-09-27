@@ -2,13 +2,14 @@ import Foundation
 import SwiftData
 import Testing
 import Domain
+import GhostwriterClient
 @testable import Data
 
 @Suite("Interrupted local artifact recovery")
 @MainActor
 struct DeliveryRecoveryTests {
     private enum BrokenArtifact: CaseIterable {
-        case missingEPUB, missingAssociation, missingClaim
+        case missingEPUB, missingAssociation, missingClaim, wrongClaimOwner
     }
 
     private func container(at directory: URL) throws -> ModelContainer {
@@ -43,9 +44,13 @@ struct DeliveryRecoveryTests {
                 contentType: .deepDive))
         }
         if broken != .missingClaim {
+            let key = try #require(ArticleDeliveryIdentityBridge.identify(
+                "https://example.test/article"))
             context.insert(ArticleDelivery(
-                feedUrl: "https://feed.test/rss", articleKey: "article-key",
-                state: "delivered", firstDigestId: digest.id, committedAt: start))
+                feedUrl: "https://feed.test/rss", articleKey: key.articleKey,
+                state: "delivered",
+                firstDigestId: broken == .wrongClaimOwner ? UUID() : digest.id,
+                committedAt: start))
         }
         try context.save()
         return (directory, digest.id, run.runId, path, start)
@@ -77,7 +82,7 @@ struct DeliveryRecoveryTests {
             if broken != .missingClaim {
                 let claim = try #require(context.fetch(FetchDescriptor<ArticleDelivery>()).first)
                 #expect(claim.state == "delivered")
-                #expect(claim.firstDigestId == digest.id)
+                #expect((claim.firstDigestId == digest.id) == (broken != .wrongClaimOwner))
             }
 
             let repository = DigestRepository(modelContext: ModelContext(reopened))

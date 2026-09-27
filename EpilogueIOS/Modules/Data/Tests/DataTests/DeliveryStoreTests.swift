@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import Testing
 import Domain
+import GhostwriterClient
 @testable import Data
 
 @Suite("Durable local delivery store")
@@ -19,7 +20,9 @@ struct DeliveryStoreTests {
     }
 
     private let feed = "https://feed.test/rss"
-    private let key = "article-key"
+    private var key: String {
+        ArticleDeliveryIdentityBridge.identify("https://example.test/article")!.articleKey
+    }
     private let diagnostics = GenerationDiagnostics(feeds: [FeedIngestionResult(feedUrl: "https://feed.test/rss")])
 
     private func reopened(_ directory: URL) throws -> ModelContainer {
