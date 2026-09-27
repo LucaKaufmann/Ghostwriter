@@ -59,13 +59,13 @@ Initial snapshot: 2026-09-27, PR74–105. This is active work, not a completed r
 | [#102 / 4115651405](https://github.com/LucaKaufmann/Ghostwriter/pull/102#discussion_r4115651405) | Seed rejected-edit corrections from the complete feed state | Fixed PR112/5684f17;167app57shared1skip/build/Solclean; integrated. Active correctiondraft survivesserverrefresh. |
 | [#102 / 4115651412](https://github.com/LucaKaufmann/Ghostwriter/pull/102#discussion_r4115651412) | Retry partial syncs caused by transport failures | Fixed PR112/5684f17;167app57shared1skip/build/Solclean; integrated. Active correctiondraft survivesserverrefresh. |
 | [#102 / 4115651416](https://github.com/LucaKaufmann/Ghostwriter/pull/102#discussion_r4115651416) | Expose only each URL's head proposal for resolution | Fixed PR112/5684f17;167app57shared1skip/build/Solclean; integrated. Active correctiondraft survivesserverrefresh. |
-| [#103 / 4115732057](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732057) | Restore the proposed row when resolving locally | Pending source validation / owning correction batch |
-| [#103 / 4115732063](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732063) | Persist the successful feed-sync timestamp | Pending source validation / owning correction batch |
-| [#103 / 4115732067](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732067) | Avoid title correction for rejected deletes | Pending source validation / owning correction batch |
+| [#103 / 4115732057](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732057) | Restore the proposed row when resolving locally | Fixed PR115/1913d9c; focused37/App75 and rejected-delete UI fixture passed; final Sol clean; integrated67027ac (current V3 fixture retained). |
+| [#103 / 4115732063](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732063) | Persist the successful feed-sync timestamp | Fixed PR115/1913d9c; focused37/App75 and rejected-delete UI fixture passed; final Sol clean; integrated67027ac (current V3 fixture retained). |
+| [#103 / 4115732067](https://github.com/LucaKaufmann/Ghostwriter/pull/103#discussion_r4115732067) | Avoid title correction for rejected deletes | Fixed PR115/1913d9c; focused37/App75 and rejected-delete UI fixture passed; final Sol clean; integrated67027ac (current V3 fixture retained). |
 | [#104 / 4115849413](https://github.com/LucaKaufmann/Ghostwriter/pull/104#discussion_r4115849413) | Allow regeneration when Ghostwriter is unconfigured | Fixed8271020/450336a, publisheda070a39; Android159/shared46/build pass, local dialog inspected, final Sol clean; integrated. |
 | [#104 / 4115849415](https://github.com/LucaKaufmann/Ghostwriter/pull/104#discussion_r4115849415) | Fall back from blank RSS content to the description | Fixed8271020/450336a, publisheda070a39; Android159/shared46/build pass, local dialog inspected, final Sol clean; integrated. |
 | [#104 / 4115849419](https://github.com/LucaKaufmann/Ghostwriter/pull/104#discussion_r4115849419) | Clear delivery claims when resetting all data | Fixed8271020/450336a, publisheda070a39; Android159/shared46/build pass, local dialog inspected, final Sol clean; integrated. |
-| [#105 / 4115849990](https://github.com/LucaKaufmann/Ghostwriter/pull/105#discussion_r4115849990) | Run retention cleanup before reporting partial failure | Pending source validation / owning correction batch |
+| [#105 / 4115849990](https://github.com/LucaKaufmann/Ghostwriter/pull/105#discussion_r4115849990) | Run retention cleanup before reporting partial failure | Fixed PR115/1913d9c; focused37/App75 and rejected-delete UI fixture passed; final Sol clean; integrated67027ac (current V3 fixture retained). |
 
 ## Upstream verification for PR87
 
@@ -83,9 +83,16 @@ Current extra findings and disposition (2026-09-27):
 - PR82/4115924729 export: worker already commits history/claims before optional SAF export; d11c766 documents it. No duplicate product change.
 - PR82/4115924725 integer range: PR113/ffd859b validates0..Int32max; focused25/full428, Sol clean, published/integrated. No schema/data rewrite.
 - PR82/4115924727 and PR104/4115953288/3290/3293: Sol ios_sync_closeout owns REVIEW-ANDROID-DELIVERY; Room11 onlyowner, scheduled coverage/parallelfeed/prefilter/partialcopy.
-- PR107/4115950617/624: Sol android_sync_closeout implements with IOS-RECOVERY; truthful BGfailure and offactor EPUB value snapshot.
+- PR107/4115950617/624: Fixed PR116/c315662; truthful BGfailure and offactor EPUB generation, Data59/Scheduler9 after corrections, priorworkspace151; accepted/integratedd455f05.
 - PR109/4115975755: validlegacy/noUser podcastfallback included in REVIEW-ONEOFF-OWNERSHIP a763f49; PR114 published/integrated; final Sol clean and combined444 passed.
 - PR106/4115922080/086/091 and4115974545/550/557: continuity573d2fd corrects digestcadence, settleddecisions, corrected99/104heads andincludescontract.104initialCI failure was fixed; additionalcurrentreviewwork remains explicitly active.
 - PR108 snapshot contains no inline findings. Refresh later PR110–112 and all changed heads before closeout.
 
-Refresh through PR114: PR110/113/114 have no inline findings. PR111 new comments4116017451/457/460/465 are source-validated web snapshot/proposal/dialog isolation fixes assigned to Sol ios_sync_closeout. PR112 new comments4116020636/638 are correction-order/local-upsert fixes assigned to Sol android_sync_closeout. Frozen iOSsync34e7136, recovery21e3db8 and Androidcoveragefc26a890 passed affected tests and await independent review. One-off ownership is accepted in PR114; combined backend444 and live browser1 passed at5aa43f3.
+Refresh through PR114: PR110/113/114 have no inline findings. PR111 comments4116017451/457/460/465 fixed7fe3504:36browser/check/build, finalSolclean, screenshotsinspected, pushed/integrated389560b. PR112 comments4116020636/638 fixed9f1d393 after successor-snapshot review correction:173App/shared59with1skip/build, finalSolclean, pushed/integratedb5f406d. Frozen iOSsync34e7136, recovery21e3db8 and Androidcoveragefc26a890 passed affected tests and await independent review. One-off ownership is accepted in PR114; combined backend444 and live browser1 passed at5aa43f3.
+
+## Final native review dispositions
+
+- PR115 resolves103/105. Independent finding that repeated Keep removed loses a third create successor was rejected after a pre-fix disk-reopen test passed. Old-scope promotion was reproduced and fixed3e4cddd; final Sol clean.
+- PR116 resolves107 and IOS-RECOVERY. Final context-staleness finding did not reproduce using the exact preloaded repository/reconciliation/coverage path on iOS18.6. Missing-EPUB automatic retry produces empty while retaining prior delivery claims; this is intentional under the confirmed deliver-once policy, verified with actual generator and explicit regeneration. Both dispositions and tests are in IOS-RECOVERY.md; no clean-review claim for those two findings.
+- PR110 currentcd2f83e and PR1129f1d393 include the verified liveV3 coordinator fixture; old iOS CI failures were on previous heads.
+- Android scheduled-coverage migration remains under correction: pending legacy WorkManager work must be updated without cancellation or dropped occurrences. Room11 owns the only new Android schema change.

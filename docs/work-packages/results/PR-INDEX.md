@@ -1,6 +1,6 @@
 # Pull request index
 
-Checkpoint: 2026-09-27. These are the reliability backlog PRs and review follow-ups. Publication is not final acceptance; see [project state](../../project-state.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md). Eight original PRs were merged externally; some landed in prerequisite branches. Remaining PRs are open. The orchestrator has not merged or deployed.
+Checkpoint: 2026-09-27. All29 original package outcomes are published. Review follow-ups and aggregate verification remain active; see [project state](../../project-state.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md). Eight PRs were merged externally, including three into prerequisite branches. The orchestrator has not merged or deployed.
 
 | PR | Outcome | State / base |
 |---|---|---|
@@ -45,7 +45,9 @@ Checkpoint: 2026-09-27. These are the reliability backlog PRs and review follow-
 | [#112](https://github.com/LucaKaufmann/Ghostwriter/pull/112) | fix: preserve Android feed proposals and reset integrity | Open; `codex/review-fixes-verified-base` |
 | [#113](https://github.com/LucaKaufmann/Ghostwriter/pull/113) | fix: keep feed article caps within native integer bounds | Open; `codex/review-followup-base` |
 | [#114](https://github.com/LucaKaufmann/Ghostwriter/pull/114) | fix: retain private digest ownership after episode deletion | Open; `codex/review-followup-base` |
+| [#115](https://github.com/LucaKaufmann/Ghostwriter/pull/115) | fix: address reviewed iOS sync follow-ups | Open; `codex/ios-sync-review-verified-base` |
+| [#116](https://github.com/LucaKaufmann/Ghostwriter/pull/116) | fix: recover interrupted local iOS generation | Open; `codex/review-followup-base` |
 
-Final iOS recovery, iOS sync review corrections, Android scheduled coverage, and the aggregate integration PR remain to be published. Refresh this index when those PRs exist.
+Android scheduled coverage, the podcast helper download follow-up, and the final aggregate PR remain to be published. PR115 has a new queued-re-add correction under development. Refresh the index after those changes.
 
-Native podcast parity, product positioning, multi-tenant hosting and the held personal deployment helper are outside this reliability completion claim. Provider calls were mocked; no release or production verification is implied.
+Native podcast parity, positioning, multi-tenant hosting and DEPLOY-01 remain outside this scope. Provider calls were mocked; no release/production certification is implied.
