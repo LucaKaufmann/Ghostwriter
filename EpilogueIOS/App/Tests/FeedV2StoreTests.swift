@@ -8,29 +8,32 @@ import Data
 final class FeedV2StoreTests: XCTestCase {
     private let feedURL = "https://example.test/feed.xml"
 
-    private func model() throws -> ModelContainer {
-        let directory = FileManager.default.temporaryDirectory
+    private func model(at storeURL: URL? = nil) throws -> ModelContainer {
+        let url = storeURL ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("feed-v2-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("Epilogue.sqlite")
+        let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // SwiftData may retain the SQLite handle past XCTest teardown. Removing
         // the live file triggered SQLite's vnode-unlinked integrity warning.
         let schema = Schema(versionedSchema: EpilogueSchemaV2.self)
-        let configuration = ModelConfiguration(schema: schema,
-                                                url: directory.appendingPathComponent("Epilogue.sqlite"))
+        let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(for: schema, migrationPlan: EpilogueMigrationPlan.self,
                                   configurations: [configuration])
     }
 
     private func resolutionFixture(kind: String = "upsert", status: String = "conflict",
                                    serverSnapshot: Bool = true,
-                                   locallyDeleted: Bool = false) throws ->
+                                   locallyDeleted: Bool = false,
+                                   storeURL: URL? = nil) throws ->
         (ModelContainer, IOSFeedV2StoreEngine, String) {
-        let container = try model()
+        let container = try model(at: storeURL)
         let context = ModelContext(container)
         let scope = "https://server.test\nconfiguration"
         context.insert(FeedSyncState(destinationURL: "https://server.test",
                                      configurationId: "configuration",
-                                     firstReconciliationComplete: true))
+                                     firstReconciliationComplete: true,
+                                     nextSequence: 2))
         context.insert(Domain.Feed(url: feedURL, name: "Server title", mode: .fidelity,
                                    maxArticles: 2, isEnabled: false,
                                    serverId: serverSnapshot ? "server-id" : nil,
@@ -111,6 +114,44 @@ final class FeedV2StoreTests: XCTestCase {
         let (_, engine, opId) = try resolutionFixture(kind: "delete", status: "rejected")
         XCTAssertThrowsError(try engine.resolve(opId: opId, action: .correct,
                                                 correctedTitle: "Ignored title"))
+    }
+
+    func testCorrectRejectedHeadPreservesOverlappingAndDisjointSuccessorEdits() throws {
+        let (container, engine, opId) = try resolutionFixture(status: "rejected")
+        try engine.edit(url: feedURL, title: "Later title", mode: .fidelity,
+                        isEnabled: false, maxArticles: 9)
+        try engine.resolve(opId: opId, action: .correct, correctedTitle: "Corrected head")
+        let visible = try resolvedRow(container)
+        XCTAssertEqual(visible.name, "Later title")
+        XCTAssertEqual(visible.mode, .briefing)
+        XCTAssertTrue(visible.isEnabled)
+        XCTAssertEqual(visible.maxArticles, 9)
+        XCTAssertFalse(visible.isLocallyDeleted ?? true)
+        XCTAssertEqual(visible.mutationRevision, 2)
+        let queued = try ModelContext(container).fetch(FetchDescriptor<FeedMutation>())
+            .sorted { $0.sequence < $1.sequence }
+        XCTAssertEqual(queued.count, 2)
+        XCTAssertEqual(queued[0].title, "Corrected head")
+        XCTAssertEqual(queued[1].title, "Later title")
+        XCTAssertEqual(try resolvedRow(container).name, "Later title")
+    }
+
+    func testResolvingOlderUpsertKeepsLaterDeleteHiddenAcrossReopen() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("feed-v2-reopen-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("Epilogue.sqlite")
+        do {
+            let (container, engine, opId) = try resolutionFixture(status: "rejected",
+                                                                    storeURL: url)
+            try engine.delete(url: feedURL)
+            try engine.resolve(opId: opId, action: .correct, correctedTitle: "Corrected head")
+            XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+        }
+        let reopened = try model(at: url)
+        let queued = try ModelContext(reopened).fetch(FetchDescriptor<FeedMutation>())
+            .sorted { $0.sequence < $1.sequence }
+        XCTAssertEqual(queued.map(\.kind), ["upsert", "delete"])
+        XCTAssertTrue(try resolvedRow(reopened).isLocallyDeleted ?? false)
     }
 
     func testOnlyCompleteFeedOutcomePersistsSuccessfulTimestamp() async throws {

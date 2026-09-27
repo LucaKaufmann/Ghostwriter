@@ -776,6 +776,25 @@ final class IOSFeedV2StoreEngine {
                     visible.locallyModified = true
                     visible.mutationRevision = max(visible.mutationRevision ?? 0,
                                                    replacement.localRevision)
+                    // The resolved head is older than any queued local edits. Rebuild
+                    // their visible state in order without changing their payloads.
+                    for successor in successors {
+                        if successor.kind == "delete" {
+                            visible.isLocallyDeleted = true
+                        } else {
+                            if let title = successor.title { visible.name = title }
+                            if let active = successor.isActive { visible.isEnabled = active }
+                            if let mode = successor.mode {
+                                visible.mode = mode == "summarize" ? .briefing : .fidelity
+                            }
+                            if let maximum = successor.maxArticles {
+                                visible.maxArticles = maximum
+                            }
+                            visible.isLocallyDeleted = false
+                        }
+                        visible.mutationRevision = max(visible.mutationRevision ?? 0,
+                                                       successor.localRevision)
+                    }
                 }
             }
         }
