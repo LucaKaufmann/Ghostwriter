@@ -2,6 +2,7 @@
 
 import logging
 import time
+from dataclasses import dataclass, fields
 
 import httpx
 from sqlmodel import Session, select
@@ -11,28 +12,18 @@ from app.core.config import Settings, get_settings
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, repr=False)
 class _WallabagSettings:
-    """Lightweight settings-like object for DB-backed Wallabag config."""
+    """An operation keeps the same destination and credentials across awaits."""
 
-    def __init__(
-        self,
-        wallabag_url: str,
-        wallabag_client_id: str,
-        wallabag_client_secret: str,
-        wallabag_username: str,
-        wallabag_password: str,
-        wallabag_mode: str,
-        wallabag_max_articles: int,
-        wallabag_tag_on_process: str,
-    ):
-        self.wallabag_url = wallabag_url
-        self.wallabag_client_id = wallabag_client_id
-        self.wallabag_client_secret = wallabag_client_secret
-        self.wallabag_username = wallabag_username
-        self.wallabag_password = wallabag_password
-        self.wallabag_mode = wallabag_mode
-        self.wallabag_max_articles = wallabag_max_articles
-        self.wallabag_tag_on_process = wallabag_tag_on_process
+    wallabag_url: str
+    wallabag_client_id: str
+    wallabag_client_secret: str
+    wallabag_username: str
+    wallabag_password: str
+    wallabag_mode: str
+    wallabag_max_articles: int
+    wallabag_tag_on_process: str
 
 
 class WallabagService:
@@ -42,14 +33,23 @@ class WallabagService:
     Uses OAuth2 password grant for authentication.
     """
 
-    _cached_token: str | None = None
-    _cached_token_expires_at: float = 0
-
-    def __init__(self, settings: Settings | None = None) -> None:
-        self.settings = settings or get_settings()
+    def __init__(self, settings: Settings | _WallabagSettings | None = None) -> None:
+        source = settings or get_settings()
+        self.settings = _WallabagSettings(
+            **{
+                field.name: getattr(source, field.name)
+                for field in fields(_WallabagSettings)
+            }
+        )
+        # Cache only within this configuration snapshot. New DB/env configurations
+        # authenticate independently; no prior account token can escape to them.
+        self._cached_token: str | None = None
+        self._cached_token_expires_at: float = 0
 
     @classmethod
-    def from_db_or_settings(cls, session: Session, settings: Settings | None = None) -> "WallabagService":
+    def from_db_or_settings(
+        cls, session: Session, settings: Settings | None = None
+    ) -> "WallabagService":
         """Create a WallabagService preferring DB config, falling back to env vars."""
         from app.models.wallabag_config import WallabagConfig
 
@@ -67,9 +67,7 @@ class WallabagService:
                 wallabag_max_articles=db_config.max_articles,
                 wallabag_tag_on_process=db_config.tag_on_process,
             )
-            svc = cls.__new__(cls)
-            svc.settings = wrapper
-            return svc
+            return cls(wrapper)
 
         return cls(settings)
 
@@ -87,8 +85,8 @@ class WallabagService:
 
     async def _ensure_token(self) -> str:
         """Obtain or refresh the OAuth2 access token."""
-        if WallabagService._cached_token and time.time() < WallabagService._cached_token_expires_at - 60:
-            return WallabagService._cached_token
+        if self._cached_token and time.time() < self._cached_token_expires_at - 60:
+            return self._cached_token
 
         s = self.settings
         url = f"{s.wallabag_url.rstrip('/')}/oauth/v2/token"
@@ -111,26 +109,28 @@ class WallabagService:
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
                 if resp.status_code != 200:
-                    body = resp.text[:500]
                     logger.error(
-                        f"Wallabag OAuth token request failed: "
-                        f"HTTP {resp.status_code} - {body}"
+                        "Wallabag OAuth token request failed: HTTP %s", resp.status_code
                     )
                     resp.raise_for_status()
                 data = resp.json()
         except httpx.ConnectError as e:
-            logger.error(f"Wallabag connection failed (is the URL correct?): {url} - {e!r}")
+            logger.error(
+                f"Wallabag connection failed (is the URL correct?): {url} - {e!r}"
+            )
             raise
         except httpx.TimeoutException as e:
             logger.error(f"Wallabag OAuth request timed out: {url} - {e!r}")
             raise
 
-        WallabagService._cached_token = data["access_token"]
-        WallabagService._cached_token_expires_at = time.time() + data.get("expires_in", 3600)
+        self._cached_token = data["access_token"]
+        self._cached_token_expires_at = time.time() + data.get("expires_in", 3600)
         logger.info("Wallabag OAuth token acquired successfully")
-        return WallabagService._cached_token
+        return self._cached_token
 
-    async def fetch_unread_articles(self, max_articles: int | None = None) -> list[dict]:
+    async def fetch_unread_articles(
+        self, max_articles: int | None = None
+    ) -> list[dict]:
         """
         Fetch unread (unarchived) articles from Wallabag.
 
@@ -147,7 +147,9 @@ class WallabagService:
         page = 1
         per_page = min(max_articles, 30)
 
-        logger.info(f"Fetching up to {max_articles} unread Wallabag articles from {base}")
+        logger.info(
+            f"Fetching up to {max_articles} unread Wallabag articles from {base}"
+        )
 
         async with httpx.AsyncClient(timeout=30) as client:
             while len(articles) < max_articles:
@@ -178,13 +180,15 @@ class WallabagService:
                 for item in items:
                     if len(articles) >= max_articles:
                         break
-                    articles.append({
-                        "id": item["id"],
-                        "title": item.get("title", "Untitled"),
-                        "url": item.get("url", ""),
-                        "content": item.get("content", ""),
-                        "domain_name": item.get("domain_name"),
-                    })
+                    articles.append(
+                        {
+                            "id": item["id"],
+                            "title": item.get("title", "Untitled"),
+                            "url": item.get("url", ""),
+                            "content": item.get("content", ""),
+                            "domain_name": item.get("domain_name"),
+                        }
+                    )
 
                 total_pages = data.get("pages", 1)
                 if page >= total_pages:
