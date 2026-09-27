@@ -66,7 +66,10 @@ interface FeedV2RemotePort {
  * persisted destination generation. The process-local gate spans network I/O; it is released
  * on cancellation. All local edits/deletes and conflict resolution are native semantic
  * transactions too, never direct row edits. Legacy rows become proposals regardless of the
- * old dirty flag. Synthetic URLs are excluded from every operation.
+ * old dirty flag. Synthetic URLs are excluded from every operation. Native creation should
+ * persist canonical lowercase UUIDs. Previously frozen uppercase op IDs remain byte-for-byte
+ * immutable on replay; compare UUIDs semantically for receipts and binding identity, then
+ * acknowledge by the original stored op ID and sent revision.
  */
 interface FeedV2StorePort {
     suspend fun beginSyncRun(destination: FeedV2Destination): FeedV2StoreResult<FeedV2RunToken>

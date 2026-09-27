@@ -74,7 +74,7 @@ val feedV2Json = Json { ignoreUnknownKeys = true }
 
 fun FeedMutationBatchV2.toWireJson(): String {
     require(isUuidV2(serverInstanceId) && mutations.size <= 100)
-    require(mutations.map { it.opId }.distinct().size == mutations.size)
+    require(mutations.map { canonicalUuidV2(it.opId) }.distinct().size == mutations.size)
     mutations.forEach { mutation ->
         require(isUuidV2(mutation.opId) && isFeedUrlV2(mutation.url))
         require(mutation.baseVersion == null || validVersionV2(mutation.baseVersion))
@@ -100,6 +100,9 @@ fun isUuidV2(value: String): Boolean = value.length == 36 && value.indices.all {
         else -> value[index] in '0'..'9' || value[index] in 'a'..'f' || value[index] in 'A'..'F'
     }
 }
+
+/** Compare UUID identity canonically; never rewrite an already-sent payload or receipt key. */
+fun canonicalUuidV2(value: String): String? = if (isUuidV2(value)) value.lowercase() else null
 
 fun FeedSnapshotV2.isValidV2(): Boolean = isUuidV2(id) && isFeedUrlV2(url) &&
     validVersionV2(version) && when (kind) {
