@@ -281,6 +281,16 @@ struct SettingsView: View {
                     }
                     .disabled(isGenerating || localDigestService.isGenerating || ghostwriterCoordinator.isSyncing)
 
+                    if !ghostwriterEnabled {
+                        Button {
+                            Task { await localDigestService.generateDigest(mode: .regenerate) }
+                        } label: {
+                            Label("Regenerate including delivered articles", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(isGenerating || localDigestService.isGenerating || ghostwriterCoordinator.isSyncing)
+                        LocalGenerationDiagnosticsView(service: localDigestService)
+                    }
+
                     if ghostwriterEnabled {
                         if let status = ghostwriterStatus {
                             VStack(alignment: .leading, spacing: 6) {
@@ -310,10 +320,8 @@ struct SettingsView: View {
                     } else if let error = localDigestService.generationError {
                         Text("Last error: \(error.localizedDescription)")
                             .foregroundColor(.red)
-                    } else if let digest = localDigestService.lastGeneratedDigest {
-                        Text("Last digest: \(digest.articleCount) articles")
                     } else {
-                        Text("Will generate a digest locally on this device")
+                        Text("Normal editions include new articles once. Regeneration may include previously delivered articles again.")
                     }
                 }
             }
