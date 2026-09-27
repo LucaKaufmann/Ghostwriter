@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
-from app.core.database import get_session
+from app.core.database import engine, get_session
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +67,23 @@ async def verify_api_key(
     If no API_KEY is configured and no users exist, authentication is disabled
     (LAN-only mode for initial setup).
     """
+    # Authentication finishes before the response body is sent. A request-scoped
+    # yield dependency would retain its checked-out connection during downloads.
+    with Session(engine) as session:
+        await verify_api_key_with_session(request, credentials, settings, session)
+
+
+async def verify_api_key_with_session(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+    settings: Settings,
+    session: Session,
+) -> None:
+    """Verify credentials using a session owned by the caller."""
     # Import here to avoid circular imports
     from app.core.auth import decode_access_token, get_token_prefix, verify_api_token
     from app.models.api_token import APIToken
     from app.models.user import User
-
-    session = next(get_session())
 
     # Check if any users exist
     has_users = session.exec(select(User)).first() is not None

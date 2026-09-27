@@ -42,6 +42,7 @@ def test_concurrent_first_registration_creates_only_one_admin(
         return f"hashed:{password}"
 
     monkeypatch.setattr(auth_api, "hash_password", slow_first_hash)
+    monkeypatch.setattr(auth_api, "check_auth_rate_limit", lambda request: None)
 
     def register_user(username: str) -> tuple[int, str] | tuple[str, bool]:
         if username == "second-admin":
