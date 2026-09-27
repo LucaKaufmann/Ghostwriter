@@ -1,6 +1,6 @@
 # RUNTIME-01 result
 
-Status: implemented; container build and architecture smoke unverified locally.
+Status: accepted for the verified amd64 runtime; arm64 remains unverified.
 Base: `de68d540ea67383a3843b8085659d29dcf19baaa` (ENV-01). Branch:
 `codex/runtime-01-controlled-build`. The exact final commit is reported in
 the PR/orchestrator handoff after this file is committed.
@@ -29,14 +29,17 @@ behavior changes.
 | Node 24.21.0: `npm ci --offline`, `npm run check`, `npm run build` | Passed; Svelte check reported zero errors/warnings. |
 | `docker version`, `docker buildx ls`, `docker buildx build --platform linux/arm64 --load -t ghostwriter-runtime-check:arm64 .` | Blocked: Docker daemon unavailable. No image was built. `linux/amd64` was not attempted for the same reason. |
 
-Local architecture build, image startup/migration, shared library resolution,
-and runtime yt-dlp execution remain unverified until a Docker builder is
-available. The Dockerfile's runtime commands will fail the image build if the
-binary or wheel check fails. A draft PR with hosted image smoke can supply the
-missing evidence after scope review. No registry push, release, deployment,
+Local Docker remains unavailable. Hosted CI at implementation commit `48cb611`
+built the amd64 image and passed its actual startup/migration health smoke
+([run36313233006](https://github.com/LucaKaufmann/Ghostwriter/actions/runs/36313233006));
+the Dockerfile binary/yt-dlp checks passed as part of that build. Hosted backend
+and frontend checks passed in run36313232980. Arm64 has not been built or run. The Dockerfile's runtime commands will fail the image build if the
+binary or wheel check fails. PR83 carries this evidence and the architecture limitation. No registry push, release, deployment,
 production mount, model download, or paid transcription was performed.
 
 ## Review
+
+Final independent Sol branch review against ENV-01 returned no actionable findings.
 
 Scoped review found and fixed the prior `cmake ... && strip ... || true` chain,
 which could hide any CMake failure. The new `set -eu` chain fails the build on
