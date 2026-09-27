@@ -570,8 +570,10 @@ final class IOSFeedV2StoreEngine {
                             target.mode = mode == "summarize" ? .briefing : .fidelity
                         }
                         if let maximum = next.maxArticles { target.maxArticles = maximum }
-                        target.isLocallyDeleted = successors.allSatisfy { $0.status == "pending" }
-                            ? successors.last?.kind == "delete" : next.kind == "delete"
+                        // Queue order still defines the user's latest local
+                        // hide/re-add choice when later intents need review.
+                        // Their field values remain governed by server-wins.
+                        target.isLocallyDeleted = successors.last?.kind == "delete"
                     }
                 }
             }

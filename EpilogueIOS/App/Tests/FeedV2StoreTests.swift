@@ -855,6 +855,17 @@ final class FeedV2StoreTests: XCTestCase {
         try await FeedV2TestHarness(model()).initialDeleteUseCaseAssertion()
     }
 
+    func testExistingServerResolvedCreateKeepsBlockedLaterDeleteHiddenAcrossReopen() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("feed-v2-blocked-delete-\(UUID().uuidString)")
+            .appendingPathComponent("Epilogue.sqlite")
+        try FeedV2TestHarness(model(at: url))
+            .existingServerResolvedCreateKeepsLaterDeleteAssertion()
+        let reopened = try model(at: url)
+        XCTAssertTrue(try resolvedRow(reopened).isLocallyDeleted ?? false)
+        XCTAssertEqual(try orderedMutations(reopened).map(\.kind), ["upsert", "delete"])
+    }
+
     func testSwiftCancellationDoesNotReportComplete() async throws {
         try await FeedV2TestHarness(model()).cancellationAssertion()
     }

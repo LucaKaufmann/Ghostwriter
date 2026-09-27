@@ -515,6 +515,32 @@ final class FeedV2TestHarness {
                   "A deleted initial create reached the exported KMP transport or reappeared")
     }
 
+    func existingServerResolvedCreateKeepsLaterDeleteAssertion() throws {
+        try adapter.engine.edit(url: feedURL, title: "Created", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        try adapter.engine.edit(url: feedURL, title: "Later", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        try adapter.engine.delete(url: feedURL)
+        let (_, token, binding) = try bind()
+        let before = try ModelContext(model).fetch(FetchDescriptor<FeedMutation>())
+            .sorted { $0.sequence < $1.sequence }
+        try check(before.map(\.status) == Array(repeating: "needs_resolution", count: 3),
+                  "Existing server row did not block all initial proposals")
+        try adapter.engine.resolve(opId: before[0].opId, action: .applyMine)
+        let head = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.acknowledge(token, binding, opId: head.opId,
+                                       revision: head.sentRevision, current: row(5, "Created"))
+        let reopened = ModelContext(model)
+        let feed = try require(reopened.fetch(FetchDescriptor<Domain.Feed>()).first)
+        let remaining = try reopened.fetch(FetchDescriptor<FeedMutation>())
+            .sorted { $0.sequence < $1.sequence }
+        try check(feed.isLocallyDeleted == true && remaining.map(\.kind) == ["upsert", "delete"] &&
+                  remaining[0].status == "needs_resolution" &&
+                  remaining[1].status == "needs_resolution",
+                  "Acknowledging a resolved head exposed a later blocked deletion")
+        adapter.engine.end(token)
+    }
+
     func cancellationAssertion() async throws {
         let destination = try adapter.engine.destination(for: "https://server.test")
         let remote = FakeRemote(instance: instance, feedURL: feedURL, result: .applied)
