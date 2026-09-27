@@ -14,6 +14,8 @@ from app.core.config import Settings, get_settings
 
 # Configure tests before importing the app, which caches settings at import time.
 # Do not read a developer's or deployment's .env, even when pytest starts there.
+_original_environment = dict(os.environ)
+_original_model_config = Settings.model_config
 Settings.model_config = {**Settings.model_config, "env_file": None}
 for field in Settings.model_fields:
     os.environ.pop(field.upper(), None)
@@ -50,6 +52,14 @@ get_settings.cache_clear()
 _original_connect = socket.socket.connect
 _original_connect_ex = socket.socket.connect_ex
 _original_sendto = socket.socket.sendto
+_original_sendmsg = getattr(socket.socket, "sendmsg", None)
+_original_dns = {
+    "getaddrinfo": socket.getaddrinfo,
+    "gethostbyname": socket.gethostbyname,
+    "gethostbyname_ex": socket.gethostbyname_ex,
+    "gethostbyaddr": socket.gethostbyaddr,
+    "getnameinfo": socket.getnameinfo,
+}
 
 
 def _blocked_dns(host, port=None, *_args, **_kwargs):
@@ -88,6 +98,12 @@ def _blocked_sendto(sock, *args):
     return _original_sendto(sock, *args)
 
 
+def _blocked_sendmsg(sock, *args):
+    if sock.family in (socket.AF_INET, socket.AF_INET6):
+        raise AssertionError("Tests must mock outbound IP connections")
+    return _original_sendmsg(sock, *args)
+
+
 socket.getaddrinfo = _blocked_dns
 socket.gethostbyname = _deny_dns
 socket.gethostbyname_ex = _deny_dns
@@ -96,8 +112,34 @@ socket.getnameinfo = _deny_dns
 socket.socket.connect = _blocked_connect
 socket.socket.connect_ex = _blocked_connect_ex
 socket.socket.sendto = _blocked_sendto
+if _original_sendmsg is not None:
+    socket.socket.sendmsg = _blocked_sendmsg
 
-from app.main import app  # noqa: E402  # environment must be set before import
+
+def _restore_host_state():
+    os.environ.clear()
+    os.environ.update(_original_environment)
+    Settings.model_config = _original_model_config
+    get_settings.cache_clear()
+    for name, function in _original_dns.items():
+        setattr(socket, name, function)
+    socket.socket.connect = _original_connect
+    socket.socket.connect_ex = _original_connect_ex
+    socket.socket.sendto = _original_sendto
+    if _original_sendmsg is not None:
+        socket.socket.sendmsg = _original_sendmsg
+
+
+try:
+    from app.main import app  # noqa: E402  # environment must be set before import
+except BaseException:
+    _restore_host_state()
+    raise
+
+
+def pytest_unconfigure(config):
+    """Leave an embedding process as it was before pytest loaded conftest."""
+    _restore_host_state()
 
 
 @pytest.fixture(autouse=True)
@@ -111,6 +153,8 @@ def block_real_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _blocked_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _blocked_connect_ex)
     monkeypatch.setattr(socket.socket, "sendto", _blocked_sendto)
+    if _original_sendmsg is not None:
+        monkeypatch.setattr(socket.socket, "sendmsg", _blocked_sendmsg)
 
 
 @pytest.fixture
