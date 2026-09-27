@@ -75,10 +75,16 @@
 
 	// Mutations
 	const createFeedMutation = createMutation(() => ({
-		mutationFn: ({ data, version }: { data: FeedCreate; version?: number; conflict?: number }) => api.createFeed(data, version),
+		mutationFn: ({ data, version, existingId }: { data: FeedCreate; version?: number; conflict?: number; existingId?: string }) => {
+			if (existingId && version !== undefined) {
+				const { url: _url, ...fields } = data;
+				return api.updateFeed(existingId, fields, version);
+			}
+			return api.createFeed(data, version);
+		},
 		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
-			toast.success('Feed created successfully');
+			toast.success('Feed saved successfully');
 			addDialogOpen = false;
 			resetForm();
 			finishConflict(variables.conflict);
@@ -86,8 +92,14 @@
 		onError: (err: Error, variables) => {
 			const detail = err instanceof ApiError && typeof err.error.detail !== 'string' ? err.error.detail : null;
 			if (detail?.current?.kind === 'tombstone' &&
-				offerConflict(err, 'restoring it', (version, conflict) => createFeedMutation.mutate({ ...variables, version, conflict }),
-					(version, conflict) => createFeedMutation.mutate({ ...variables, version, conflict }))) return;
+				offerConflict(err, 'restoring it', (version, conflict) => createFeedMutation.mutate({ ...variables, existingId: undefined, version, conflict }),
+					(version, conflict) => createFeedMutation.mutate({ ...variables, existingId: undefined, version, conflict }))) return;
+			if (variables.conflict !== undefined && detail?.current?.kind === 'feed' &&
+				typeof detail.current.id === 'string') {
+				const existingId = detail.current.id;
+				if (offerConflict(err, 'saving your proposed settings', (version, conflict) =>
+					createFeedMutation.mutate({ ...variables, existingId, version, conflict }))) return;
+			}
 			toast.error('Failed to create feed', {
 				description: err.message ?? 'Unknown error'
 			});

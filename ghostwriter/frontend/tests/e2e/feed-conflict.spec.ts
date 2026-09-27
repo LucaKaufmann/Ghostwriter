@@ -159,3 +159,32 @@ test('a restore proposal survives unrelated success and a transient POST failure
 	expect(restores[1]).toMatchObject({ title: 'Keep my proposal' });
 	await expect(restore).toHaveCount(0);
 });
+
+test('a concurrently restored feed switches the captured proposal to guarded update', async ({ page }) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	const writes: { method: string; version?: string; data: unknown }[] = [];
+	await page.route(/\/api\/feeds(?:\/feed-1)?$/, async (route) => {
+		if (route.request().method() === 'GET') return route.fallback();
+		writes.push({ method: route.request().method(), version: route.request().headers()['if-match'], data: route.request().postDataJSON() });
+		const current = writes.length === 1 ? { kind: 'tombstone', version: 4 } : {
+			kind: 'feed', id: 'feed-1', version: 5, title: 'Other restoration', mode: 'raw', is_active: true, max_articles: 3
+		};
+		await route.fulfill({ status: writes.length < 3 ? 409 : 200, contentType: 'application/json',
+			body: JSON.stringify(writes.length < 3 ? { detail: { code: 'feed_conflict', current } } : { id: 'feed-1', version: 6 }) });
+	});
+	await page.goto('/sources/feeds');
+	await page.getByRole('row').filter({ hasText: 'Example Feed' }).getByRole('button').last().click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.locator('#edit-title').fill('Captured title');
+	await page.getByRole('button', { name: 'Save Changes' }).click();
+	await page.getByRole('button', { name: 'Restore feed with my changes' }).click();
+	await expect(page.getByRole('alert')).toContainText('Other restoration');
+	await expect(page.getByRole('button', { name: 'Restore feed with my changes' })).toHaveCount(0);
+	expect(writes).toHaveLength(2);
+	await page.getByRole('button', { name: 'Retry with current server version' }).click();
+	await expect.poll(() => writes.length).toBe(3);
+	expect(writes.map((x) => x.method)).toEqual(['PUT', 'POST', 'PUT']);
+	expect(writes[2].version).toBe('"5"');
+	expect(writes[2].data).toEqual(writes[0].data);
+});
