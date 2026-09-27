@@ -113,3 +113,36 @@ The paginated74–117 sweep covered inline comments, review bodies and issue com
 - PR106/4116156533 and6535: contract now requires the Room singleton transaction boundary and includes typed ServerChanged; existing implementation already does both.
 - PR106/4116088623 and8626: corrected the contract to allocate ArticleDelivery to V3 and preserve retryable attempt markers after cancellation. These were documentation contradictions, not new schema changes.
 - PR106/4116156530: removed “optional” from required native read-only compatibility preview and made the layer boundary explicit. Android FeedViewModel.previewOlderServerFeeds fetches legacy changes; iOS GhostwriterSyncCoordinator.previewOlderServerFeeds fetches the legacy list, each exposed by the upgrade UI. Shared v2 deliberately returns ServerUpgradeRequired without importing unversioned rows. Source inspection verifies those routes; this is not a new automatic legacy synchronization feature or a new end-to-end fallback test claim.
+
+- PR118/4116201244,1252,1254: hosted review identified boot receiver lifetime before asynchronous persistence, occurrence-date collisions after time-zone changes, and non-neutral cap-only partial wording. Android owner is correcting these after the PR112 pre-submit-sync issue.
+- PR1126b6f147 and web11168d3d6 first corrections are not accepted: independent review found respectively a pre-submit sync race and lost Add-origin cleanup. iOS11626b3983 likewise needs actual background-request resubmission beyond the updated calendar calculation. Owners are testing those full paths.
+- PR115c526cb6 now passed independent Sol review, was pushed and integrated157f309; the real KMP serialized re-add has complete fields and acknowledges after the delete across disk reopen.
+- PR106699ee13 contract corrections received independent Sol source review: no actionable contradiction; native compatibility previews are read-only UI state, Room binding is transactional, V3 owns delivery, and cancellation retains retryable attempt markers.
+- Remote refresh:82/86/87 also merged externally; main86d3efd integrated64222b8. Only conflict was the contract add/add; current reviewed wording was retained. Product source was unchanged by this merge.
+
+## Refresh through PR118 (later heads)
+
+- PR111/4116241870: newer typing during an in-flight edit must survive a delayed409; web owner assigned.
+- PR116/4116254668: valid explicit regeneration must survive recovery even when delivery claims retain the original firstDigestId; iOS owner assigned. Preserve original delivery claims and negative artifact checks.
+- PR106/4116229219: current next-action wording no longer says the unfinished118follow-up is accepted. PR106/4116216185 requested acceptance on an older snapshot; it is superseded and must not override active findings.
+- PR106/4116216180: PR-INDEX now links45 verified result/design/checkpoint paths at immutable published commit SHAs. Each target was checked with git cat-file; the docs-only continuity branch need not duplicate implementation evidence or screenshots to provide portable recovery.
+- Sweep74–118 covered all paginated inline/review/issue bodies.149 current-head successful checks,24 skipped,2 pending (112/116iOS),0 failed. Exact snapshots remain in temporary pr-feedback; record final refreshed outcomes before acceptance.
+
+## Latest closeout corrections
+
+- PR111/4116241870 fixed40ac892: retain newer draft after delayed409/200. Sol review clean; combined11f75e6 check0/0, production build,40browser and livejourney1 passed. New4116343985 subsequent Save must use the acknowledged successful response version; correction active.
+- PR112/4116133533 fixed6b6f147+25e2b1d, preserving nullable edited fields through pre-submit sync and resolving untouched fields from the latest durable snapshot; independent Sol clean and combined200 App/58shared plus1intentional skip/debugAPK passed.
+- PR115/4116111625 fixed0cfba92+c526cb6; complete re-add payload survives delete acknowledgement, actual shared serialization and reopen; Sol clean and combined171workspace tests passed.
+- PR116/4116125704 fixed26b3983+0c5db0b; actual BG request resubmission uses current time zone,10scheduler tests/Solclean/combined171 passed. New4116254668 regeneration recovery corrected9e31ae9+567061d with explicit mode in diagnosticsJSON; Data63/Appbuild passed, independent review found unknown-mode decoding could drop other diagnostics. Bounded decoder correction active; unaccepted/unpublished.
+- PR118905bc855 boot persistence/selection/zone corrections passed independent review and combined200App/58shared plus1intentional skip/debugAPK. New4116327421 asynchronous cancel/re-enable and4116327425 retry borrowing previous periodic execution require further corrections. Isolated pinned WorkManager2.9 read-only periodCount adapter accepted as implementation direction; both crash boundaries must be tested.
+- Full paginated74–118 refresh includes inline, review body and issue comments; latest snapshot150successful,24skipped,1iOS118pending,0failed. These counts are an observed checkpoint, not final acceptance of later heads.
+
+## Accepted final corrections
+
+- PR111/4116343985 fixedacf7abc: a retained newer draft uses the acknowledged response version on its next Save. Focused4/full40browser/check/build; Sol clean, published/integrated06ec2e7. Final live journey1passed with backendf371a84.
+- PR116/4116254668 fixed9e31ae9+567061d+879f237: explicit regeneration mode persists through all outcomes; unknown modes retain feed diagnostics and remain conservative. Data64; independent final Sol clean; published116/integrated9464a65; combined176workspace tests and Appbuild passed.
+- PR106/4116319539 fixed PR1137871e7a: legacy stored article caps project into native range on reads/conflicts and both replay paths; rows/versions/receiptJSON unchanged. Seven API cases,32focused435branchbackend; Sol clean/published/integratedf371a84. Combined451backend and real Kotlin/FastAPI legacy-cap fixture1 passed.
+- PR118/4116327421/425 fixedc763ae9: await pending cancellation receipts and distinguish periodic executions by UUID+WorkManager2.9 periodCount. Sol clean;194App/58shared passed+1skip/debugAPK. Test43581ef uses actual WorkerWrapper retry→success lifecycle; root inspected/passed. Both published118/integratedd34e89a; final combined204App/58shared passed+1intentional skip/debugAPK. Internal API coupling is explicit and must be checked on dependency upgrades.
+- PR106/4116319541/542/546: current checkpoint now distinguishes historical CI snapshots, names the active recovery gate correctly, and links accepted compatibility/persistence contract. Root-owned updates are included in the final continuity checkpoint.
+
+Final scoped refresh74–118: no new inline/review-body/issue feedback;149current-head checks succeeded,24skipped,4running,0failed. PR83/84/85/88 also merged externally into prerequisite branches, bringing external merges to15; main stays86d3efd. Root has not merged remotely. Final aggregate and changed-head CI still need inspection.
