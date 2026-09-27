@@ -268,7 +268,8 @@ final class IOSFeedV2StoreEngine {
     }
 
     private func setVisible(_ row: FeedSnapshotV2, context: ModelContext,
-                            preserveLocalDelete: Bool) throws {
+                            preserveLocalDelete: Bool,
+                            latestLocalIntent: FeedMutation? = nil) throws {
         let existing = try feed(row.url, context)
         if let existing, let oldVersion = existing.serverVersion, row.version < oldVersion { return }
         if row.kind == "tombstone" {
@@ -292,7 +293,13 @@ final class IOSFeedV2StoreEngine {
         target.maxArticles = Int(max.intValue)
         target.serverId = row.id
         target.serverVersion = row.version
-        if !preserveLocalDelete { target.isLocallyDeleted = false }
+        if let latestLocalIntent {
+            // A live server row supplies the displayed fields, while the
+            // latest retained local action controls only hide/re-add state.
+            target.isLocallyDeleted = latestLocalIntent.kind == "delete"
+        } else if !preserveLocalDelete {
+            target.isLocallyDeleted = false
+        }
     }
 
     private func matches(_ row: FeedSnapshotV2, _ proposal: FeedMutation) -> Bool {
@@ -345,8 +352,8 @@ final class IOSFeedV2StoreEngine {
                     context.delete(mutation)
                 }
             }
-            var unresolvedDeletes = Set<String>()
             var retainedURLs = Set<String>()
+            var latestRetainedByURL: [String: FeedMutation] = [:]
             for mutation in oldMutations where mutation.scopeKey == "__unbound__" ||
                 mutation.scopeKey == scopeKey {
                 guard !coalesced.contains(mutation.opId) else { continue }
@@ -357,6 +364,7 @@ final class IOSFeedV2StoreEngine {
                     if let row, matches(row, mutation) {
                         try setVisible(row, context: context, preserveLocalDelete: false)
                         context.delete(mutation)
+                        continue
                     } else {
                         mutation.status = "needs_resolution"
                         if let row {
@@ -380,14 +388,12 @@ final class IOSFeedV2StoreEngine {
                     continue
                 }
                 retainedURLs.insert(mutation.url)
-                if mutation.kind == "delete", row != nil,
-                   mutation.status == "needs_resolution" {
-                    unresolvedDeletes.insert(mutation.url)
-                }
+                latestRetainedByURL[mutation.url] = mutation
             }
             for row in snapshot.changes where !row.url.hasPrefix("synthetic://") {
                 try setVisible(row, context: context,
-                               preserveLocalDelete: unresolvedDeletes.contains(row.url))
+                               preserveLocalDelete: false,
+                               latestLocalIntent: latestRetainedByURL[row.url])
             }
             value.serverInstanceId = snapshot.serverInstanceId.lowercased()
             value.cursorVersion = snapshot.serverVersion
@@ -592,8 +598,11 @@ final class IOSFeedV2StoreEngine {
                                     try feed(mutation.url, context)?.serverVersion ?? -1)
             if current.version >= latestVersion {
                 setSnapshot(current, on: mutation)
+                let latest = try mutations(context).last {
+                    $0.url == mutation.url && $0.scopeKey == mutation.scopeKey
+                }
                 try setVisible(current, context: context,
-                               preserveLocalDelete: mutation.kind == "delete")
+                               preserveLocalDelete: false, latestLocalIntent: latest)
             }
         }
     }
@@ -626,7 +635,7 @@ final class IOSFeedV2StoreEngine {
                     }
                 }
                 try setVisible(row, context: context,
-                               preserveLocalDelete: related.first?.kind == "delete")
+                               preserveLocalDelete: false, latestLocalIntent: related.last)
             }
             value.cursorVersion = changes.serverVersion
         }
@@ -825,7 +834,8 @@ final class IOSFeedV2StoreEngine {
             switch action {
             case .keepServer:
                 guard let snapshot else { throw StoreError.invalidSnapshot }
-                try setVisible(snapshot, context: context, preserveLocalDelete: false)
+                try setVisible(snapshot, context: context, preserveLocalDelete: false,
+                               latestLocalIntent: successors.last)
                 context.delete(selected)
                 if successors.isEmpty { target?.locallyModified = false }
                 if let first = successors.first {
@@ -843,7 +853,8 @@ final class IOSFeedV2StoreEngine {
                         // Never consume the intent using a stale baseline.
                         throw StoreError.invalidSnapshot
                     }
-                    try setVisible(snapshot, context: context, preserveLocalDelete: false)
+                    try setVisible(snapshot, context: context, preserveLocalDelete: false,
+                                   latestLocalIntent: successors.last)
                 } else if action == .discard && selected.baseVersion != nil {
                     // A rejected edit must have its prior server values; never
                     // drop the only proposal while retaining rejected fields.

@@ -541,6 +541,70 @@ final class FeedV2TestHarness {
         adapter.engine.end(token)
     }
 
+    func existingServerResolvedDeleteSurvivesExportedPullAssertion() async throws {
+        let destination = try adapter.engine.destination(for: "https://server.test")
+        try adapter.engine.edit(url: feedURL, title: "Created", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        try adapter.engine.edit(url: feedURL, title: "Later", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        try adapter.engine.delete(url: feedURL)
+        let remote = FakeRemote(instance: instance, feedURL: feedURL, result: .applied)
+        remote.fullRow = row(4, "Server")
+        remote.receiptRow = row(5, "Created")
+        remote.afterPostRow = row(6, "Newer server")
+        let useCase = FeedSyncV2UseCase(configuration: FixedConfiguration(destination),
+                                       store: adapter, remote: remote)
+        _ = try await useCase.sync()
+        let initial = try ModelContext(model).fetch(FetchDescriptor<FeedMutation>())
+            .sorted { $0.sequence < $1.sequence }
+        try check(initial.map(\.status) == Array(repeating: "needs_resolution", count: 3),
+                  "Existing server did not block initial proposals")
+        try adapter.engine.resolve(opId: initial[0].opId, action: .applyMine)
+        _ = try await useCase.sync()
+        let context = ModelContext(model)
+        let feed = try require(context.fetch(FetchDescriptor<Domain.Feed>()).first)
+        let remaining = try context.fetch(FetchDescriptor<FeedMutation>())
+            .sorted { $0.sequence < $1.sequence }
+        try check(remote.postCount == 1 && feed.serverVersion == 6 &&
+                  feed.name == "Newer server" && feed.isLocallyDeleted == true &&
+                  remaining.map(\.kind) == ["upsert", "delete"],
+                  "Exported ACK then incremental pull exposed a retained local delete")
+    }
+
+    func conflictProjectionKeepsLaterDeleteAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.edit(url: feedURL, title: "Mine", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.delete(url: feedURL)
+        try adapter.engine.conflict(token, binding, opId: sent.opId,
+                                    revision: sent.sentRevision, current: row(5, "Web"))
+        let feed = try require(ModelContext(model).fetch(FetchDescriptor<Domain.Feed>()).first)
+        try check(feed.name == "Web" && feed.serverVersion == 5 &&
+                  feed.isLocallyDeleted == true,
+                  "Conflict server projection exposed a later local delete")
+        adapter.engine.end(token)
+    }
+
+    func readdAndTombstoneProjectionAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.delete(url: feedURL)
+        try adapter.engine.edit(url: feedURL, title: "Re-added", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        try adapter.engine.apply(token, binding, changes: changes(5, [row(5, "Web")]))
+        var feed = try require(ModelContext(model).fetch(FetchDescriptor<Domain.Feed>()).first)
+        try check(feed.isLocallyDeleted != true && feed.name == "Web" && feed.serverVersion == 5,
+                  "Latest local re-add did not remain visible with server-wins fields")
+        let tombstone = FeedSnapshotV2(kind: "tombstone", id: instance, url: feedURL,
+                                       version: 6, title: nil, isActive: nil,
+                                       mode: nil, maxArticles: nil)
+        try adapter.engine.apply(token, binding, changes: changes(6, [tombstone]))
+        feed = try require(ModelContext(model).fetch(FetchDescriptor<Domain.Feed>()).first)
+        try check(feed.isLocallyDeleted == true && feed.serverVersion == 6,
+                  "Server tombstone was exposed by an unresolved local re-add")
+        adapter.engine.end(token)
+    }
+
     func cancellationAssertion() async throws {
         let destination = try adapter.engine.destination(for: "https://server.test")
         let remote = FakeRemote(instance: instance, feedURL: feedURL, result: .applied)
@@ -585,6 +649,9 @@ private final class FakeRemote: NSObject, FeedV2RemotePort {
     var suspendFull = false
     var fullStarted = false
     var postCount = 0
+    var fullRow: FeedSnapshotV2?
+    var receiptRow: FeedSnapshotV2?
+    var afterPostRow: FeedSnapshotV2?
     private var pendingFull: (() -> Void)?
     init(instance: String, feedURL: String, result: Result) {
         self.instance = instance
@@ -594,9 +661,13 @@ private final class FakeRemote: NSObject, FeedV2RemotePort {
     func getFeedChangesV2(destination: FeedV2Destination, sinceVersion: KotlinLong?,
                           serverInstanceId: String?,
                           completionHandler: @escaping (FeedV2RemoteResult<FeedChangesV2Response>?, Error?) -> Void) {
-        let response = FeedChangesV2Response(serverInstanceId: instance,
-                                              serverVersion: sinceVersion == nil ? 0 : 1,
-                                              changes: [])
+        let selected: FeedSnapshotV2? = sinceVersion == nil ? fullRow :
+            (postCount > 0 ? afterPostRow : nil)
+        let response = FeedChangesV2Response(
+            serverInstanceId: instance,
+            serverVersion: selected?.version ?? (sinceVersion == nil ? 0 :
+                (fullRow == nil ? 1 : sinceVersion!.int64Value)),
+            changes: selected.map { [$0] } ?? [])
         let complete = { completionHandler(FeedV2RemoteResultSuccess(value: response), nil) }
         if sinceVersion == nil && suspendFull {
             pendingFull = complete
@@ -607,7 +678,7 @@ private final class FakeRemote: NSObject, FeedV2RemotePort {
     func postFeedMutationsV2(destination: FeedV2Destination, batch: FeedMutationBatchV2,
                              completionHandler: @escaping (FeedV2RemoteResult<FeedMutationBatchResultV2>?, Error?) -> Void) {
         postCount += 1
-        let row = FeedSnapshotV2(kind: "feed", id: instance, url: feedURL, version: 1,
+        let row = receiptRow ?? FeedSnapshotV2(kind: "feed", id: instance, url: feedURL, version: 1,
                                  title: result == .applied ? "Local" : "Server",
                                  isActive: KotlinBoolean(bool: true), mode: "raw",
                                  maxArticles: KotlinInt(int: 5))

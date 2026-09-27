@@ -866,6 +866,41 @@ final class FeedV2StoreTests: XCTestCase {
         XCTAssertEqual(try orderedMutations(reopened).map(\.kind), ["upsert", "delete"])
     }
 
+    func testExportedUseCaseKeepsDeleteHiddenAfterResolvedAckAndPullAcrossReopen() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("feed-v2-pull-delete-\(UUID().uuidString)")
+            .appendingPathComponent("Epilogue.sqlite")
+        try await FeedV2TestHarness(model(at: url))
+            .existingServerResolvedDeleteSurvivesExportedPullAssertion()
+        let reopened = try model(at: url)
+        XCTAssertTrue(try resolvedRow(reopened).isLocallyDeleted ?? false)
+        XCTAssertEqual(try resolvedRow(reopened).serverVersion, 6)
+        XCTAssertEqual(try resolvedRow(reopened).name, "Newer server")
+    }
+
+    func testConflictProjectionKeepsLaterDeleteHidden() throws {
+        try FeedV2TestHarness(model()).conflictProjectionKeepsLaterDeleteAssertion()
+    }
+
+    func testReaddProjectionUsesServerFieldsAndTombstoneRemainsHidden() throws {
+        try FeedV2TestHarness(model()).readdAndTombstoneProjectionAssertion()
+    }
+
+    func testResolvingOlderHeadKeepsLaterDeleteHiddenWithServerValues() throws {
+        let cases: [(IOSFeedV2StoreEngine.Resolution, String)] = [
+            (.keepServer, "conflict"), (.discard, "rejected")]
+        for (action, status) in cases {
+            let (container, engine, opId) = try resolutionFixture(status: status)
+            try engine.delete(url: feedURL)
+            try engine.resolve(opId: opId, action: action)
+            let feed = try resolvedRow(container)
+            XCTAssertTrue(feed.isLocallyDeleted ?? false)
+            XCTAssertEqual(feed.name, "Server title")
+            XCTAssertEqual(feed.serverVersion, 8)
+            XCTAssertEqual(try orderedMutations(container).map(\.kind), ["delete"])
+        }
+    }
+
     func testSwiftCancellationDoesNotReportComplete() async throws {
         try await FeedV2TestHarness(model()).cancellationAssertion()
     }
