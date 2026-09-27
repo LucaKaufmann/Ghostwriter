@@ -66,9 +66,10 @@ final class EpilogueScreenshotTests: XCTestCase {
 
         app.staticTexts["Invalid URL feed"].tap()
         XCTAssertTrue(waitForExists(app.buttons["Discard proposal"]))
-        XCTAssertTrue(waitForExists(app.staticTexts[
-            "This proposal cannot change its URL. Discard it, then add the feed again with a corrected URL."
-        ]))
+        let guidance = app.staticTexts["invalidURLResolutionGuidance"]
+        XCTAssertTrue(waitForExists(guidance))
+        XCTAssertEqual(guidance.label,
+                       "This proposal cannot change its URL. Discard this proposal and resolve any remaining changes for this URL before adding the corrected URL. For a feed absent from the server, choose Keep removed.")
         XCTAssertFalse(app.textFields["Corrected title"].exists)
         XCTAssertFalse(app.buttons["Correct and retry"].exists)
         capture(name: "feed-v2-rejected-invalid-url")
@@ -112,6 +113,36 @@ final class EpilogueScreenshotTests: XCTestCase {
         app.textFields["Nickname"].typeText("Corrected URL feed")
         app.navigationBars["Add Feed"].buttons["Add"].tap()
         XCTAssertTrue(waitForExists(app.staticTexts["Corrected URL feed"]))
+    }
+
+    func testInvalidURLSuccessorRequiresKeepRemovedBeforeCorrectedAdd() throws {
+        app.terminate()
+        app.launchArguments += ["-feed-v2-ui-fixture"]
+        app.launch()
+        let oldURL = app.staticTexts["Invalid URL chain"]
+        XCTAssertTrue(waitForExists(oldURL))
+        oldURL.tap()
+        XCTAssertTrue(waitForExists(app.buttons["Discard proposal"]))
+        XCTAssertFalse(app.buttons["Correct and retry"].exists)
+        app.buttons["Discard proposal"].tap()
+
+        XCTAssertTrue(waitForExists(app.navigationBars["Feed Manager"]))
+        XCTAssertTrue(waitForExists(oldURL), "The queued same-URL edit must remain visible for review")
+        oldURL.tap()
+        XCTAssertTrue(waitForExists(app.buttons["Keep removed"]))
+        capture(name: "feed-v2-invalid-url-successor")
+        app.buttons["Keep removed"].tap()
+        XCTAssertTrue(waitForExists(app.navigationBars["Feed Manager"]))
+        XCTAssertFalse(oldURL.exists)
+
+        app.buttons["Add feed"].tap()
+        XCTAssertTrue(waitForExists(app.navigationBars["Add Feed"]))
+        app.textFields["Feed URL"].tap()
+        app.textFields["Feed URL"].typeText("https://example.test/corrected-chain.xml")
+        app.textFields["Nickname"].tap()
+        app.textFields["Nickname"].typeText("Corrected chain feed")
+        app.navigationBars["Add Feed"].buttons["Add"].tap()
+        XCTAssertTrue(waitForExists(app.staticTexts["Corrected chain feed"]))
     }
 
     func testRemoteDigestArtifactAvailabilityFixture() throws {

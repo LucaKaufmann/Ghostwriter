@@ -29,20 +29,21 @@ final class FeedV2TestHarness {
                 ("conflict", "Web headline", "conflict", "My headline", false),
                 ("rejected", "Rejected feed", "rejected", "Bad request", false),
                 ("invalid-url", "Invalid URL feed", "rejected", "Invalid URL feed", false),
+                ("invalid-url-chain", "Invalid URL chain", "rejected", "Invalid URL chain", false),
                 ("absent", "Missing feed", "needs_resolution", "Missing feed", true),
                 ("delete", "Removed locally", "conflict", nil, true),
                 ("rejected-delete", "Rejected removal", "rejected", nil, true)
             ]
             for (index, example) in examples.enumerated() {
                 let url = "https://example.test/\(example.0).xml"
-                let serverPresent = !["absent", "invalid-url"].contains(example.0)
+                let serverPresent = example.0 != "absent" && !example.0.hasPrefix("invalid-url")
                 context.insert(Domain.Feed(url: url, name: example.1, mode: .fidelity,
                                            serverId: serverPresent ? UUID().uuidString.lowercased() : nil,
                                            serverVersion: serverPresent ? 8 : nil,
                                            isLocallyDeleted: example.4))
                 let mutation = FeedMutation(url: url, scopeKey: scope,
                                             kind: example.0.contains("delete") ? "delete" : "upsert",
-                                            baseVersion: example.0 == "invalid-url" ? nil : 7,
+                                            baseVersion: example.0.hasPrefix("invalid-url") ? nil : 7,
                                             title: example.3,
                                             isActive: true, mode: "raw", maxArticles: 5,
                                             sequence: Int64(index + 1), localRevision: 1,
@@ -58,7 +59,7 @@ final class FeedV2TestHarness {
                 if example.0 == "rejected" {
                     mutation.rejectionCode = "invalid_fields"
                     mutation.rejectionMessage = "The title needs correction."
-                } else if example.0 == "invalid-url" {
+                } else if example.0.hasPrefix("invalid-url") {
                     mutation.rejectionCode = "invalid_url"
                     mutation.rejectionMessage = "The server rejected this feed URL."
                 } else if example.0 == "rejected-delete" {
@@ -67,6 +68,11 @@ final class FeedV2TestHarness {
                 }
                 context.insert(mutation)
             }
+            context.insert(FeedMutation(url: "https://example.test/invalid-url-chain.xml",
+                                        scopeKey: scope, kind: "upsert", baseVersion: nil,
+                                        title: "Later URL edit", isActive: nil, mode: nil,
+                                        maxArticles: nil, sequence: Int64(examples.count + 1),
+                                        localRevision: 2, status: "pending", sent: false))
             try context.save()
         } catch {
             context.rollback()
