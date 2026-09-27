@@ -52,10 +52,14 @@ class AndroidFeedV2Store @Inject constructor(
 
     private fun normalizedUrl(url: String): String = url.trim().trimEnd('/').removeSuffix("/api")
 
+    private fun configuredUrlMatches(state: FeedSyncStateEntity): Boolean =
+        settings.getGhostwriterUrl()?.let(::normalizedUrl) == state.bindingUrl
+
     override suspend fun currentDestination(): FeedV2Destination? {
-        if (!settings.isGhostwriterConfigured()) return null
-        val url = settings.getGhostwriterUrl()?.let(::normalizedUrl)?.takeIf { it.isNotBlank() } ?: return null
         return database.withTransaction {
+            if (!settings.isGhostwriterConfigured()) return@withTransaction null
+            val url = settings.getGhostwriterUrl()?.let(::normalizedUrl)
+                ?.takeIf { it.isNotBlank() } ?: return@withTransaction null
             val active = states.active()
             if (active != null) {
                 if (active.bindingUrl != url && !active.suspended) {
@@ -79,7 +83,7 @@ class AndroidFeedV2Store @Inject constructor(
         }
     }
 
-    /** Settings calls this before writing a changed URL to preferences. */
+    /** Explicit replacement hook; changing the saved URL only invalidates run tokens. */
     suspend fun beforeDestinationChange(newUrl: String?) {
         val normalized = newUrl?.takeIf { it.isNotBlank() }?.let(::normalizedUrl)
         database.withTransaction {
@@ -210,7 +214,7 @@ class AndroidFeedV2Store @Inject constructor(
         database.withTransaction {
             val state = states.active() ?: return@withTransaction
             // A run invalidated by a destination or server-identity change cannot hide Review.
-            if (state.suspended) return@withTransaction
+            if (state.suspended || !configuredUrlMatches(state)) return@withTransaction
             val label = when (outcome) {
                 is FeedSyncV2Outcome.Complete -> "complete"
                 is FeedSyncV2Outcome.Partial -> "partial"
@@ -234,7 +238,8 @@ class AndroidFeedV2Store @Inject constructor(
     private suspend fun checked(token: FeedV2RunToken, binding: FeedV2Binding? = null): FeedSyncStateEntity? {
         val scope = runScope(token) ?: return null
         val state = states.active() ?: return null
-        if (state.suspended || state.generation != scope.second ||
+        if (state.suspended || !settings.isGhostwriterConfigured() ||
+            !configuredUrlMatches(state) || state.generation != scope.second ||
             FeedV2Destination(state.bindingUrl!!, state.configurationId!!) != scope.first ||
             binding?.generation?.let { it != state.generation } == true ||
             binding?.destination?.let { it != FeedV2Destination(state.bindingUrl!!, state.configurationId!!) } == true ||
@@ -254,25 +259,37 @@ class AndroidFeedV2Store @Inject constructor(
     }
 
     override suspend fun beginSyncRun(destination: FeedV2Destination): FeedV2StoreResult<FeedV2RunToken> {
-        val state = states.active() ?: return FeedV2StoreResult.StaleBinding
-        if (state.bindingUrl != destination.normalizedBaseUrl || state.configurationId != destination.configurationId)
-            return FeedV2StoreResult.StaleBinding
-        synchronized(gate) {
-            if (activeToken != null) return FeedV2StoreResult.Busy
-            activeToken = uuid()
-            activeRun = destination to state.generation
-            return FeedV2StoreResult.Success(FeedV2RunToken(activeToken!!))
+        val generation = database.withTransaction {
+            val state = states.active() ?: return@withTransaction null
+            if (state.bindingUrl != destination.normalizedBaseUrl ||
+                state.configurationId != destination.configurationId ||
+                (!state.suspended && (!settings.isGhostwriterConfigured() || !configuredUrlMatches(state))))
+                return@withTransaction null
+            state.generation
+        }
+        if (generation == null) return FeedV2StoreResult.StaleBinding
+        // No suspension point after assigning a token: cancellation cannot leak Busy.
+        return synchronized(gate) {
+            if (activeToken != null) FeedV2StoreResult.Busy
+            else {
+                activeToken = uuid()
+                activeRun = destination to generation
+                FeedV2StoreResult.Success(FeedV2RunToken(activeToken!!))
+            }
         }
     }
     override suspend fun endSyncRun(token: FeedV2RunToken) {
         synchronized(gate) { if (activeToken == token.value) { activeToken = null; activeRun = null } }
     }
     override suspend fun getServerIdentity(token: FeedV2RunToken): FeedV2StoreResult<FeedV2Binding?> = safely {
-        val scope = runScope(token) ?: return@safely FeedV2StoreResult.StaleBinding
-        val state = states.active() ?: return@safely FeedV2StoreResult.StaleBinding
-        if (state.generation != scope.second ||
-            FeedV2Destination(state.bindingUrl!!, state.configurationId!!) != scope.first)
-            FeedV2StoreResult.StaleBinding else FeedV2StoreResult.Success(bound(state))
+        database.withTransaction {
+            val scope = runScope(token) ?: return@withTransaction FeedV2StoreResult.StaleBinding
+            val state = states.active() ?: return@withTransaction FeedV2StoreResult.StaleBinding
+            if (state.generation != scope.second ||
+                FeedV2Destination(state.bindingUrl!!, state.configurationId!!) != scope.first ||
+                (!state.suspended && (!settings.isGhostwriterConfigured() || !configuredUrlMatches(state))))
+                FeedV2StoreResult.StaleBinding else FeedV2StoreResult.Success(bound(state))
+        }
     }
     override suspend fun suspendBinding(token: FeedV2RunToken, binding: FeedV2Binding, reason: String): FeedV2StoreResult<Unit> = safely {
         database.withTransaction {
@@ -466,7 +483,7 @@ class AndroidFeedV2Store @Inject constructor(
                 .minWithOrNull(compareBy<FeedMutationEntity> { it.queueOrder }.thenBy { it.sequence })?.opId != opId)
             return@withTransaction false
         val state = states.byKey(row.serverKey) ?: return@withTransaction false
-        if (!state.active || state.suspended) return@withTransaction false
+        if (!state.active || state.suspended || !configuredUrlMatches(state)) return@withTransaction false
         val feed = feeds.getFeedByUrl(row.url)
         val proposalServer = parseSnapshot(row.serverSnapshotJson)
         val feedServer = parseSnapshot(feed?.serverSnapshotJson)
@@ -517,7 +534,7 @@ class AndroidFeedV2Store @Inject constructor(
                 .minWithOrNull(compareBy<FeedMutationEntity> { it.queueOrder }.thenBy { it.sequence })?.opId != opId)
             return@withTransaction false
         val state = states.byKey(row.serverKey) ?: return@withTransaction false
-        if (!state.active || state.suspended) return@withTransaction false
+        if (!state.active || state.suspended || !configuredUrlMatches(state)) return@withTransaction false
         val feed = feeds.getFeedByUrl(row.url) ?: return@withTransaction false
         val proposalServer = parseSnapshot(row.serverSnapshotJson)
         val feedServer = parseSnapshot(feed.serverSnapshotJson)
