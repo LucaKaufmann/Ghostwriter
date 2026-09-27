@@ -362,6 +362,36 @@ final class IOSFeedV2StoreEngine {
         }
     }
 
+    #if DEBUG
+    struct ClaimedPayloadForTesting: Equatable {
+        let opId: String
+        let sentRevision: Int64
+        let title: String?
+        let isActive: Bool?
+        let mode: String?
+        let maxArticles: Int?
+    }
+
+    /// Keep Kotlin payload objects inside the app image: the hosted XCTest
+    /// bundle cannot link the static shared framework a second time.
+    func claimOneForTesting() throws -> ClaimedPayloadForTesting? {
+        let destination = try transaction { context -> FeedV2Destination in
+            guard let value = binding(try state(context)) else { throw StoreError.staleBinding }
+            return value.destination
+        }
+        let token = try begin(destination)
+        defer { end(token) }
+        guard let expected = try identity(token) else { throw StoreError.staleBinding }
+        guard let operation = try claim(token, expected, maxItems: 10).first else { return nil }
+        return ClaimedPayloadForTesting(
+            opId: operation.opId, sentRevision: operation.sentRevision,
+            title: operation.payload.fields?.title,
+            isActive: operation.payload.fields?.isActive?.boolValue,
+            mode: operation.payload.fields?.mode,
+            maxArticles: operation.payload.fields?.maxArticles.map { Int($0.intValue) })
+    }
+    #endif
+
     func summary(_ token: FeedV2RunToken, _ expected: FeedV2Binding) throws -> FeedV2WorkSummary {
         try transaction { context in
             _ = try checked(token, context, binding: expected)
@@ -515,7 +545,13 @@ final class IOSFeedV2StoreEngine {
             let scopeKey = value.destinationURL.flatMap { url in
                 value.configurationId.map { url + "\n" + $0 }
             } ?? "__unbound__"
-            let full = existing == nil || originalVersion == nil
+            // A first null-base create needs all fields. Later upserts for
+            // the same queued create carry only what the user changed; copied
+            // fields would otherwise replay an obsolete rejected value over a
+            // corrected head. A successor after a delete starts a new create.
+            let full = existing == nil ||
+                (originalVersion == nil &&
+                 !(prior?.scopeKey == scopeKey && prior?.kind == "upsert"))
             let revision = (existing?.mutationRevision ?? 0) + (existing == nil ? 0 : 1)
             let mutation = FeedMutation(
                 url: url, scopeKey: scopeKey, kind: "upsert",

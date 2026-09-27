@@ -62,6 +62,32 @@ final class FeedV2StoreTests: XCTestCase {
         try XCTUnwrap(ModelContext(container).fetch(FetchDescriptor<Domain.Feed>()).first)
     }
 
+    private func rejectedCreateFixture(storeURL: URL? = nil) throws ->
+        (ModelContainer, IOSFeedV2StoreEngine, String) {
+        let container = try model(at: storeURL)
+        let context = ModelContext(container)
+        context.insert(FeedSyncState(destinationURL: "https://server.test",
+                                     configurationId: "configuration",
+                                     firstReconciliationComplete: true,
+                                     nextSequence: 1))
+        try context.save()
+        let engine = IOSFeedV2StoreEngine(container: container)
+        try engine.edit(url: feedURL, title: "Rejected title", mode: .fidelity,
+                        isEnabled: true, maxArticles: 2)
+        let head = try XCTUnwrap(ModelContext(container).fetch(FetchDescriptor<FeedMutation>()).first)
+        let update = ModelContext(container)
+        let persisted = try XCTUnwrap(update.fetch(FetchDescriptor<FeedMutation>()).first)
+        persisted.status = "rejected"
+        persisted.sent = true
+        try update.save()
+        return (container, engine, head.opId)
+    }
+
+    private func orderedMutations(_ container: ModelContainer) throws -> [FeedMutation] {
+        try ModelContext(container).fetch(FetchDescriptor<FeedMutation>())
+            .sorted { $0.sequence < $1.sequence }
+    }
+
     func testApplyMineRestoresVisibleProposalWithReplacementAndReopen() throws {
         let (container, engine, opId) = try resolutionFixture()
         try engine.resolve(opId: opId, action: .applyMine)
@@ -152,6 +178,108 @@ final class FeedV2StoreTests: XCTestCase {
             .sorted { $0.sequence < $1.sequence }
         XCTAssertEqual(queued.map(\.kind), ["upsert", "delete"])
         XCTAssertTrue(try resolvedRow(reopened).isLocallyDeleted ?? false)
+    }
+
+    func testRejectedCreateCorrectionKeepsCapOnlySuccessorSparseAcrossReopen() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("feed-v2-create-successor-\(UUID().uuidString)")
+            .appendingPathComponent("Epilogue.sqlite")
+        do {
+            let (container, engine, opId) = try rejectedCreateFixture(storeURL: url)
+            try engine.edit(url: feedURL, title: "Rejected title", mode: .fidelity,
+                            isEnabled: true, maxArticles: 9)
+            let before = try orderedMutations(container)
+            XCTAssertEqual(before.count, 2)
+            XCTAssertEqual(before[0].title, "Rejected title")
+            XCTAssertNil(before[1].title)
+            XCTAssertNil(before[1].isActive)
+            XCTAssertNil(before[1].mode)
+            XCTAssertEqual(before[1].maxArticles, 9)
+            try engine.resolve(opId: opId, action: .correct, correctedTitle: "Corrected title")
+            XCTAssertEqual(try resolvedRow(container).name, "Corrected title")
+            XCTAssertEqual(try resolvedRow(container).maxArticles, 9)
+            let after = try orderedMutations(container)
+            XCTAssertEqual(after[0].title, "Corrected title")
+            XCTAssertNil(after[1].title)
+        }
+        let reopened = try model(at: url)
+        XCTAssertEqual(try resolvedRow(reopened).name, "Corrected title")
+        XCTAssertEqual(try resolvedRow(reopened).maxArticles, 9)
+        XCTAssertNil(try orderedMutations(reopened)[1].title)
+    }
+
+    func testRejectedCreateCorrectionPreservesIntentionalNewerTitleAndDelete() throws {
+        let (container, engine, opId) = try rejectedCreateFixture()
+        try engine.edit(url: feedURL, title: "Intentional later title", mode: .fidelity,
+                        isEnabled: true, maxArticles: 2)
+        try engine.resolve(opId: opId, action: .correct, correctedTitle: "Corrected head")
+        XCTAssertEqual(try resolvedRow(container).name, "Intentional later title")
+        XCTAssertEqual(try orderedMutations(container)[1].title, "Intentional later title")
+        try engine.delete(url: feedURL)
+        XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+        XCTAssertEqual(try orderedMutations(container).map(\.kind), ["upsert", "upsert", "delete"])
+    }
+
+    func testRejectedCreateDiscardMakesSparseSuccessorExplicitCompleteCreate() throws {
+        let (container, engine, opId) = try rejectedCreateFixture()
+        try engine.edit(url: feedURL, title: "Rejected title", mode: .fidelity,
+                        isEnabled: true, maxArticles: 9)
+        try engine.resolve(opId: opId, action: .discard)
+        let successor = try XCTUnwrap(orderedMutations(container).first)
+        XCTAssertEqual(successor.status, "needs_resolution")
+        XCTAssertEqual(successor.title, "Rejected title")
+        XCTAssertEqual(successor.isActive, true)
+        XCTAssertEqual(successor.mode, "raw")
+        XCTAssertEqual(successor.maxArticles, 9)
+        try engine.resolve(opId: successor.opId, action: .addToServer)
+        let replacement = try XCTUnwrap(orderedMutations(container).first)
+        XCTAssertNil(replacement.baseVersion)
+        XCTAssertEqual(replacement.title, "Rejected title")
+        XCTAssertEqual(replacement.maxArticles, 9)
+    }
+
+    func testClaimedCreatePayloadSurvivesTimeoutAndReopenWithSparseSuccessor() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("feed-v2-claimed-create-\(UUID().uuidString)")
+            .appendingPathComponent("Epilogue.sqlite")
+        var firstOpId = ""
+        var firstRevision: Int64 = -1
+        do {
+            let container = try model(at: url)
+            let context = ModelContext(container)
+            context.insert(FeedSyncState(destinationURL: "https://server.test",
+                                         configurationId: "configuration",
+                                         firstReconciliationComplete: true,
+                                         nextSequence: 1))
+            try context.save()
+            let engine = IOSFeedV2StoreEngine(container: container)
+            try engine.edit(url: feedURL, title: "Original create", mode: .fidelity,
+                            isEnabled: true, maxArticles: 2)
+            let claimed = try XCTUnwrap(engine.claimOneForTesting())
+            firstOpId = claimed.opId
+            firstRevision = claimed.sentRevision
+            XCTAssertEqual(claimed.title, "Original create")
+            XCTAssertEqual(claimed.isActive, true)
+            XCTAssertEqual(claimed.mode, "raw")
+            XCTAssertEqual(claimed.maxArticles, 2)
+            try engine.edit(url: feedURL, title: "Original create", mode: .fidelity,
+                            isEnabled: true, maxArticles: 9)
+            // The claim has no acknowledgement, as after a request timeout.
+            let rows = try orderedMutations(container)
+            XCTAssertEqual(rows[0].opId, firstOpId)
+            XCTAssertTrue(rows[0].sent)
+            XCTAssertNil(rows[1].title)
+        }
+        let reopened = try model(at: url)
+        let engine = IOSFeedV2StoreEngine(container: reopened)
+        let retried = try XCTUnwrap(engine.claimOneForTesting())
+        XCTAssertEqual(retried.opId, firstOpId)
+        XCTAssertEqual(retried.sentRevision, firstRevision)
+        XCTAssertEqual(retried.title, "Original create")
+        XCTAssertEqual(retried.isActive, true)
+        XCTAssertEqual(retried.mode, "raw")
+        XCTAssertEqual(retried.maxArticles, 2)
+        XCTAssertNil(try orderedMutations(reopened)[1].title)
     }
 
     func testOnlyCompleteFeedOutcomePersistsSuccessfulTimestamp() async throws {
