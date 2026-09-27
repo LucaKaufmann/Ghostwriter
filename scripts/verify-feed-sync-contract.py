@@ -98,7 +98,7 @@ def main() -> int:
             fixture_env = os.environ.copy()
             fixture_env["PYTHONPATH"] = str(ROOT / "ghostwriter")
             process = subprocess.Popen(
-                [str(python), str(fixture), "--port", str(port)],
+                [str(python), str(fixture), "--port", str(port), "--legacy-feed-caps"],
                 cwd=ROOT / "ghostwriter",
                 stdout=output,
                 stderr=subprocess.STDOUT,
