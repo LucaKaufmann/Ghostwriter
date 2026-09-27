@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import gc
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Annotated
 
 import pytest
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
@@ -48,6 +52,7 @@ def auth_harness(tmp_path, monkeypatch):
     app.dependency_overrides[get_settings] = lambda: settings
     monkeypatch.setattr(auth_core, "get_settings", lambda: settings)
     monkeypatch.setattr(security, "get_settings", lambda: settings)
+    monkeypatch.setattr(security, "engine", engine)
     monkeypatch.setattr(podcast, "get_settings", lambda: settings)
 
     @app.get("/guarded", dependencies=[Depends(verify_api_key)])
@@ -60,6 +65,15 @@ def auth_harness(tmp_path, monkeypatch):
     ):
         await podcast._authorize_standard_or_feed_token(request, session, None)
         return {"ok": True}
+
+    @app.get("/slow-stream", dependencies=[Depends(verify_api_key)])
+    async def slow_stream():
+        async def body():
+            app.state.stream_started.set()
+            await asyncio.to_thread(app.state.release_stream.wait, 5)
+            yield b"done"
+
+        return StreamingResponse(body())
 
     gc_was_enabled = gc.isenabled()
     gc.disable()
@@ -160,3 +174,18 @@ def test_query_exception_releases_pool(auth_harness):
         assert engine.pool.checkedout() == 0
     finally:
         event.remove(engine, "before_cursor_execute", fail_user_query)
+
+
+def test_auth_connection_is_released_before_stream_finishes(auth_harness):
+    client, engine, _ = auth_harness
+    client.app.state.stream_started = threading.Event()
+    client.app.state.release_stream = threading.Event()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(client.get, "/slow-stream")
+        try:
+            assert client.app.state.stream_started.wait(timeout=5)
+            assert not future.done()
+            assert engine.pool.checkedout() == 0
+        finally:
+            client.app.state.release_stream.set()
+        assert future.result(timeout=5).status_code == 200

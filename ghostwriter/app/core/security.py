@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
-from app.core.database import get_session
+from app.core.database import engine, get_session
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,6 @@ def _is_api_token(token: str) -> bool:
 
 async def verify_api_key(
     request: Request,
-    session: Annotated[Session, Depends(get_session)],
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
 ) -> None:
@@ -68,6 +67,19 @@ async def verify_api_key(
     If no API_KEY is configured and no users exist, authentication is disabled
     (LAN-only mode for initial setup).
     """
+    # Authentication finishes before the response body is sent. A request-scoped
+    # yield dependency would retain its checked-out connection during downloads.
+    with Session(engine) as session:
+        await verify_api_key_with_session(request, credentials, settings, session)
+
+
+async def verify_api_key_with_session(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+    settings: Settings,
+    session: Session,
+) -> None:
+    """Verify credentials using a session owned by the caller."""
     # Import here to avoid circular imports
     from app.core.auth import decode_access_token, get_token_prefix, verify_api_token
     from app.models.api_token import APIToken
