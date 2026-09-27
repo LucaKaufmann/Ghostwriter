@@ -92,6 +92,67 @@ async def test_transcribe_local_timeout(service):
     assert "timed out" in result.error
 
 
+class BlockingProcess:
+    """Fake child that only exits after cancellation cleanup reaps it."""
+
+    def __init__(self):
+        self.returncode = None
+        self.entered = asyncio.Event()
+        self.calls = 0
+        self.killed = False
+        self.reaped = False
+
+    async def communicate(self):
+        self.calls += 1
+        if self.calls == 1:
+            self.entered.set()
+            await asyncio.Event().wait()
+        self.reaped = True
+        return b"", b""
+
+    def kill(self):
+        self.killed = True
+
+
+@pytest.mark.asyncio
+async def test_cancel_local_transcription_reaps_whisper(service):
+    process = BlockingProcess()
+    with (
+        patch.object(service, "_resolve_whisper_binary", return_value=MagicMock()),
+        patch(
+            "app.services.transcription_service.resolve_whisper_model_path",
+            return_value=MagicMock(),
+        ),
+        patch("asyncio.create_subprocess_exec", return_value=process),
+    ):
+        task = asyncio.create_task(service._transcribe_local("audio.wav", "base.en"))
+        await process.entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert process.killed
+    assert process.reaped
+    assert process.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_cancel_chunk_segmentation_reaps_ffmpeg(service):
+    process = BlockingProcess()
+    with patch("asyncio.create_subprocess_exec", return_value=process):
+        task = asyncio.create_task(
+            service._openai_transcribe_chunked("audio.wav", "test-key")
+        )
+        await process.entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert process.killed
+    assert process.reaped
+    assert process.calls == 2
+
+
 @pytest.mark.asyncio
 async def test_transcribe_openai_no_key(service):
     """OpenAI transcription returns error if no API key."""

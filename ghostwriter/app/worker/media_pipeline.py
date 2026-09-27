@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlmodel import Session, select
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Stale "processing" timeout — if an item has been "processing" longer than this,
 # consider it abandoned and allow the pipeline to re-process it.
 _STALE_PROCESSING_TIMEOUT = timedelta(minutes=90)
+_pipeline_lock = asyncio.Lock()
 
 
 async def run_media_pipeline() -> None:
@@ -36,6 +37,17 @@ async def run_media_pipeline() -> None:
     3. Create — insert new pending items
     4. Process — transcribe/summarize each pending item sequentially
     """
+    # The item-status check alone cannot exclude a second run during awaited
+    # feed discovery. Manual and scheduled triggers share this process-local lock.
+    if _pipeline_lock.locked():
+        logger.info("Media pipeline: run already active, skipping this run")
+        return
+    async with _pipeline_lock:
+        await _run_media_pipeline_locked()
+
+
+async def _run_media_pipeline_locked() -> None:
+    """Run discovery and processing while holding the process-local exclusion."""
     settings = get_settings()
 
     # Check for stuck "processing" items (stale lock)
@@ -75,7 +87,7 @@ async def run_media_pipeline() -> None:
         _update_run(run_id, items_discovered=new_items_count)
 
         # Stage 3: Process pending items sequentially
-        processed_count, failed_count = await _process_pending_items(settings)
+        processed_count, failed_count = await _process_pending_items(settings, run_id)
 
         duration_ms = int((time.time() - run_start) * 1000)
 
@@ -98,6 +110,16 @@ async def run_media_pipeline() -> None:
             event="completed",
             context={"new_items": new_items_count, "processed": processed_count},
         )
+    except asyncio.CancelledError:
+        _update_run(
+            run_id,
+            status="failed",
+            completed_at=datetime.now(UTC),
+            duration_ms=int((time.time() - run_start) * 1000),
+            error_message="Media pipeline cancelled",
+        )
+        logger.warning("Media pipeline cancelled")
+        raise
     except Exception as e:
         duration_ms = int((time.time() - run_start) * 1000)
         _update_run(
@@ -213,12 +235,17 @@ async def _fetch_and_create_items(settings) -> int:
     return new_count
 
 
-async def _process_pending_items(settings) -> tuple[int, int]:
+async def _process_pending_items(settings, run_id: UUID) -> tuple[int, int]:
     """Process all pending media items sequentially. Returns (processed, failed) counts."""
     media_processor = MediaProcessor(settings)
     llm_service = LLMService(settings)
     processed_count = 0
     failed_count = 0
+
+    def record_counts() -> None:
+        _update_run(
+            run_id, items_processed=processed_count, items_failed=failed_count
+        )
 
     # Load whisper config
     with Session(engine) as session:
@@ -336,11 +363,17 @@ async def _process_pending_items(settings) -> tuple[int, int]:
                 },
             )
 
+        except asyncio.CancelledError:
+            _update_item_failed(item_id, "Media processing cancelled", start_time)
+            failed_count += 1
+            raise
         except Exception as e:
             error_msg = _enrich_timeout_error(str(e)[:500], whisper_timeout_minutes)
             logger.exception(f"Failed to process media item: {item_title}")
             _update_item_failed(item_id, error_msg, start_time)
             failed_count += 1
+        finally:
+            record_counts()
 
     return processed_count, failed_count
 

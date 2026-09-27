@@ -240,7 +240,15 @@ class MediaProcessor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await process.communicate()
+            try:
+                _, stderr = await process.communicate()
+            except asyncio.CancelledError:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.communicate()
+                raise
             if process.returncode != 0:
                 return MediaResult(
                     text="",
