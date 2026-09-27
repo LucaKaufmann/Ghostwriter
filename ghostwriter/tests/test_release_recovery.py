@@ -59,6 +59,7 @@ def rows(root):
             "seen": db.execute("SELECT feed_id,guid,url,seen_at FROM seen_articles").fetchall(),
             "episode": db.execute("SELECT id,digest_ids,article_ids,status,audio_path FROM podcast_episodes").fetchall(),
             "config": db.execute("SELECT id,min_word_count,timezone FROM client_config").fetchall(),
+            "preferences": db.execute("SELECT id,enabled,style,preferred_length_minutes FROM podcast_preferences").fetchall(),
         }
 
 
@@ -77,6 +78,10 @@ def assert_current(root):
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (head,)
         columns = {row[1] for row in db.execute("PRAGMA table_info(podcast_episodes)")}
         assert {"generation_preferences", "title", "chapters"} <= columns
+        preference_columns = {row[1] for row in db.execute("PRAGMA table_info(podcast_preferences)")}
+        assert "elevenlabs_expressiveness" in preference_columns
+        for row in db.execute("SELECT elevenlabs_expressiveness FROM podcast_preferences"):
+            assert row == ("natural",)
 
 
 def startup_check(root, *, has_edition=False):
@@ -86,15 +91,19 @@ import socket
 import sys
 from app.core.config import Settings
 Settings.model_config = {**Settings.model_config, "env_file": None}
-original_connect = socket.socket.connect
-def no_connect(sock, address):
-    if sock.family in (socket.AF_INET, socket.AF_INET6):
-        raise AssertionError("Readiness must not access external sources")
-    return original_connect(sock, address)
+def block_ip(function):
+    def guarded(sock, *args, **kwargs):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            raise AssertionError("Readiness must not access external sources")
+        return function(sock, *args, **kwargs)
+    return guarded
 def no_dns(*args, **kwargs):
     raise AssertionError("Readiness must not resolve external sources")
-socket.socket.connect = no_connect
-socket.getaddrinfo = no_dns
+for name in ("connect", "connect_ex", "sendto", "sendmsg"):
+    if hasattr(socket.socket, name):
+        setattr(socket.socket, name, block_ip(getattr(socket.socket, name)))
+for name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr", "getnameinfo"):
+    setattr(socket, name, no_dns)
 from fastapi.testclient import TestClient
 from app.main import app
 with TestClient(app) as client:
