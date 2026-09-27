@@ -351,8 +351,8 @@ class DigestRepository @Inject constructor(
      * Used for development/testing purposes.
      */
     suspend fun deleteAllDigests(): Boolean {
-        // A later writer can create a new digest after this reset completes,
-        // but none can enter between its snapshot and deletion.
+        // The action clears a snapshot of current history. Concurrently created
+        // editions remain, and completed per-row deletions cannot be rolled back as a batch.
         return digestDao.deleteAllWithArtifacts(::removeArtifact)
     }
 

@@ -55,7 +55,7 @@ class DigestRepositoryTest {
         return entity.copy(id = database.digestDao().insertDigest(entity))
     }
 
-    @Test fun `reset snapshot holds writer transaction until reference aware deletions finish`() = runBlocking {
+    @Test fun `reset clears captured history and preserves a later edition`() = runBlocking {
         val oldFile = files.newFile("reset-old.epub")
         val old = record(oldFile)
         database.articleDeliveryDao().put(ArticleDeliveryEntity("https://example.test/feed",
@@ -87,6 +87,50 @@ class DigestRepositoryTest {
         assertEquals("delivered", database.articleDeliveryDao()
             .get("https://example.test/feed", "article-1")?.state)
         assertFalse(oldFile.exists())
+    }
+
+    @Test fun `later reset failure cannot restore rows for already deleted files`() = runBlocking {
+        val firstFile = files.newFile("first-reset.epub")
+        val secondFile = files.newFile("second-reset.epub")
+        val first = record(firstFile)
+        val second = record(secondFile)
+        var calls = 0
+        val failure = runCatching {
+            database.digestDao().deleteAllWithArtifacts { path ->
+                if (++calls == 2) throw IOException("later unlink failure")
+                File(path).delete()
+            }
+        }.exceptionOrNull()
+        assertTrue(failure is IOException)
+        assertNull(repository.getDigestById(first.id))
+        assertFalse(firstFile.exists())
+        assertNotNull(repository.getDigestById(second.id))
+        assertTrue(secondFile.exists())
+    }
+
+    @Test fun `cancel during reset commits its finished deletion before stopping`() = runBlocking {
+        val firstFile = files.newFile("first-cancel.epub")
+        val secondFile = files.newFile("second-cancel.epub")
+        val first = record(firstFile)
+        val second = record(secondFile)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val deleting = async(Dispatchers.IO) {
+            database.digestDao().deleteAllWithArtifacts { path ->
+                File(path).delete().also {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+            }
+        }
+        assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+        deleting.cancel()
+        release.countDown()
+        deleting.join()
+        assertNull(repository.getDigestById(first.id))
+        assertFalse(firstFile.exists())
+        assertNotNull(repository.getDigestById(second.id))
+        assertTrue(secondFile.exists())
     }
 
     @Test fun `legacy shared path remains until final reference is deleted`() = runBlocking {
