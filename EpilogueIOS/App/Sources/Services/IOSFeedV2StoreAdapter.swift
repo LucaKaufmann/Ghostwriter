@@ -57,6 +57,17 @@ final class IOSFeedV2StoreEngine {
         destination.normalizedBaseUrl + "\n" + destination.configurationId
     }
 
+    private func validFeedURL(_ url: String) -> Bool {
+        guard url == url.trimmingCharacters(in: .whitespacesAndNewlines),
+              let separator = url.range(of: "://"),
+              ["http", "https"].contains(url[..<separator.lowerBound].lowercased())
+        else { return false }
+        let remainder = url[separator.upperBound...]
+        let authority = remainder.prefix { !"/?#".contains($0) }
+        return !authority.isEmpty && !authority.contains("@") &&
+            !authority.contains(where: \.isWhitespace)
+    }
+
     func destination(for rawURL: String) throws -> FeedV2Destination {
         let normalized = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -197,6 +208,40 @@ final class IOSFeedV2StoreEngine {
         mutation.serverMaxArticles = row.maxArticles.map { Int($0.intValue) }
     }
 
+    private func copySnapshot(_ source: FeedMutation, to target: FeedMutation) {
+        target.serverKind = source.serverKind
+        target.serverId = source.serverId
+        target.serverVersion = source.serverVersion
+        target.serverTitle = source.serverTitle
+        target.serverIsActive = source.serverIsActive
+        target.serverMode = source.serverMode
+        target.serverMaxArticles = source.serverMaxArticles
+    }
+
+    private func storedSnapshot(_ mutation: FeedMutation) -> FeedSnapshotV2? {
+        guard let kind = mutation.serverKind, let id = mutation.serverId,
+              let version = mutation.serverVersion else { return nil }
+        return FeedSnapshotV2(
+            kind: kind, id: id, url: mutation.url, version: version,
+            title: mutation.serverTitle,
+            isActive: mutation.serverIsActive.map { KotlinBoolean(bool: $0) },
+            mode: mutation.serverMode,
+            maxArticles: mutation.serverMaxArticles.map { KotlinInt(int: Int32($0)) })
+    }
+
+    private func captureVisibleServerSnapshot(_ feed: Domain.Feed, on mutation: FeedMutation) {
+        guard let id = feed.serverId, let version = feed.serverVersion else { return }
+        mutation.serverKind = feed.isLocallyDeleted == true ? "tombstone" : "feed"
+        mutation.serverId = id
+        mutation.serverVersion = version
+        if mutation.serverKind == "feed" {
+            mutation.serverTitle = feed.name
+            mutation.serverIsActive = feed.isEnabled
+            mutation.serverMode = feed.mode == .briefing ? "summarize" : "raw"
+            mutation.serverMaxArticles = feed.maxArticles
+        }
+    }
+
     private func setVisible(_ row: FeedSnapshotV2, context: ModelContext,
                             preserveLocalDelete: Bool) throws {
         let existing = try feed(row.url, context)
@@ -242,7 +287,9 @@ final class IOSFeedV2StoreEngine {
             let rows = Dictionary(uniqueKeysWithValues: snapshot.changes.map { ($0.url, $0) })
             let scopeKey = scope(destination)
             let oldMutations = try mutations(context)
-            for mutation in oldMutations where mutation.scopeKey == "__unbound__" {
+            var unresolvedDeletes = Set<String>()
+            for mutation in oldMutations where mutation.scopeKey == "__unbound__" ||
+                mutation.scopeKey == scopeKey {
                 guard !mutation.url.hasPrefix("synthetic://") else { continue }
                 let row = rows[mutation.url]
                 mutation.scopeKey = scopeKey
@@ -267,9 +314,14 @@ final class IOSFeedV2StoreEngine {
                     // A never-seen delete can be acknowledged locally after binding.
                     context.delete(mutation)
                 }
+                if mutation.kind == "delete", row != nil,
+                   mutation.status == "needs_resolution" {
+                    unresolvedDeletes.insert(mutation.url)
+                }
             }
             for row in snapshot.changes where !row.url.hasPrefix("synthetic://") {
-                try setVisible(row, context: context, preserveLocalDelete: false)
+                try setVisible(row, context: context,
+                               preserveLocalDelete: unresolvedDeletes.contains(row.url))
             }
             value.serverInstanceId = snapshot.serverInstanceId.lowercased()
             value.cursorVersion = snapshot.serverVersion
@@ -364,8 +416,12 @@ final class IOSFeedV2StoreEngine {
             if let next = successors.first {
                 if older {
                     next.status = "needs_resolution"
+                    if (mutation.serverVersion ?? -1) >= (next.serverVersion ?? -1) {
+                        copySnapshot(mutation, to: next)
+                    }
                 } else if let current, !next.sent {
                     next.baseVersion = current.version
+                    setSnapshot(current, on: next)
                     // The accepted head is now the server baseline. Restore
                     // only the successor's dirty fields to the local display;
                     // its immutable predecessor receipt must not hide a newer
@@ -420,12 +476,14 @@ final class IOSFeedV2StoreEngine {
             let scoped = try mutations(context).filter { $0.scopeKey == scope(expected.destination) }
             for row in changes.changes where !row.url.hasPrefix("synthetic://") {
                 let related = scoped.filter { $0.url == row.url }
-                if let head = related.first, head.status == "pending", !head.sent,
-                   row.version > (head.baseVersion ?? -1) {
-                    head.status = "needs_resolution"
-                    setSnapshot(row, on: head)
-                } else if let head = related.first, head.status != "pending" {
-                    setSnapshot(row, on: head)
+                if let head = related.first {
+                    if head.status == "pending", !head.sent,
+                       row.version > (head.baseVersion ?? -1) {
+                        head.status = "needs_resolution"
+                    }
+                    if row.version >= (head.serverVersion ?? -1) {
+                        setSnapshot(row, on: head)
+                    }
                 }
                 try setVisible(row, context: context,
                                preserveLocalDelete: related.first?.kind == "delete")
@@ -436,7 +494,11 @@ final class IOSFeedV2StoreEngine {
 
     func edit(url: String, title: String, mode: Domain.ProcessingMode,
               isEnabled: Bool, maxArticles: Int) throws {
-        guard !url.isEmpty, !url.hasPrefix("synthetic://"), maxArticles >= 0 else {
+        guard validFeedURL(url) else { throw StoreError.invalidURL }
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw StoreError.invalidTitle
+        }
+        guard maxArticles >= 0, maxArticles <= Int32.max else {
             throw StoreError.invalidEdit
         }
         try transaction { context in
@@ -450,6 +512,22 @@ final class IOSFeedV2StoreEngine {
             let originalVersion = existing?.serverVersion
             guard existing == nil || changedTitle || changedMode || changedEnabled ||
                     changedCap || existing?.isLocallyDeleted == true else { return }
+            let scopeKey = value.destinationURL.flatMap { url in
+                value.configurationId.map { url + "\n" + $0 }
+            } ?? "__unbound__"
+            let full = existing == nil || originalVersion == nil
+            let revision = (existing?.mutationRevision ?? 0) + (existing == nil ? 0 : 1)
+            let mutation = FeedMutation(
+                url: url, scopeKey: scopeKey, kind: "upsert",
+                baseVersion: originalVersion,
+                title: full || changedTitle ? title : nil,
+                isActive: full || changedEnabled ? isEnabled : nil,
+                mode: full || changedMode ? (mode == .briefing ? "summarize" : "raw") : nil,
+                maxArticles: full || changedCap ? maxArticles : nil,
+                sequence: value.nextSequence, localRevision: revision)
+            if let existing, prior?.scopeKey != scopeKey {
+                captureVisibleServerSnapshot(existing, on: mutation)
+            }
             if existing == nil && prior == nil {
                 let created = Domain.Feed(url: url, name: title, mode: mode,
                                    maxArticles: maxArticles, isEnabled: isEnabled)
@@ -461,21 +539,9 @@ final class IOSFeedV2StoreEngine {
                 existing.maxArticles = maxArticles
                 existing.isLocallyDeleted = false
                 existing.locallyModified = true
-                existing.mutationRevision = (existing.mutationRevision ?? 0) + 1
+                existing.mutationRevision = revision
             }
-            let revision = existing?.mutationRevision ?? 0
-            let scopeKey = value.destinationURL.flatMap { url in
-                value.configurationId.map { url + "\n" + $0 }
-            } ?? "__unbound__"
-            let full = existing == nil || originalVersion == nil
-            context.insert(FeedMutation(
-                url: url, scopeKey: scopeKey, kind: "upsert",
-                baseVersion: originalVersion,
-                title: full || changedTitle ? title : nil,
-                isActive: full || changedEnabled ? isEnabled : nil,
-                mode: full || changedMode ? (mode == .briefing ? "summarize" : "raw") : nil,
-                maxArticles: full || changedCap ? maxArticles : nil,
-                sequence: value.nextSequence, localRevision: revision))
+            context.insert(mutation)
             value.nextSequence += 1
         }
     }
@@ -541,6 +607,7 @@ final class IOSFeedV2StoreEngine {
                 sequence: value.nextSequence,
                 localRevision: (target?.mutationRevision ?? 0) + 1,
                 origin: "explicit_transfer")
+            if let target { captureVisibleServerSnapshot(target, on: replacement) }
             value.nextSequence += 1
             if selected.kind == "delete" {
                 target?.isLocallyDeleted = true
@@ -569,45 +636,115 @@ final class IOSFeedV2StoreEngine {
     func resolve(opId: String, action: Resolution, correctedTitle: String? = nil) throws {
         try transaction { context in
             let value = try state(context)
-            guard let selected = try mutations(context).first(where: { $0.opId == opId }),
-                  ["needs_resolution", "conflict", "rejected"].contains(selected.status)
-            else { throw StoreError.invalidEdit }
-            let target = try feed(selected.url, context)
-            let successors = try mutations(context).filter {
-                $0.url == selected.url && $0.sequence > selected.sequence
+            guard let destinationURL = value.destinationURL,
+                  let configurationId = value.configurationId,
+                  value.firstReconciliationComplete, !value.suspended else {
+                throw StoreError.staleBinding
             }
+            let activeScope = destinationURL + "\n" + configurationId
+            guard let selected = try mutations(context).first(where: { $0.opId == opId }),
+                  selected.scopeKey == activeScope,
+                  ["needs_resolution", "conflict", "rejected"].contains(selected.status)
+            else { throw StoreError.staleBinding }
+            let scoped = try mutations(context).filter {
+                $0.url == selected.url && $0.scopeKey == activeScope
+            }
+            guard scoped.first?.opId == selected.opId else { throw StoreError.invalidEdit }
+            let target = try feed(selected.url, context)
+            let successors = scoped.filter { $0.sequence > selected.sequence }
+            let snapshot = storedSnapshot(selected)
             switch action {
-            case .keepServer, .keepRemoved, .discard:
+            case .keepServer:
+                guard let snapshot else { throw StoreError.invalidSnapshot }
+                try setVisible(snapshot, context: context, preserveLocalDelete: false)
                 context.delete(selected)
                 if successors.isEmpty { target?.locallyModified = false }
-                if action == .keepRemoved {
-                    target?.isLocallyDeleted = true
-                } else if selected.kind == "delete" {
-                    target?.isLocallyDeleted = false
+                if let first = successors.first {
+                    first.status = "needs_resolution"
+                    setSnapshot(snapshot, on: first)
                 }
-                if let first = successors.first { first.status = "needs_resolution" }
+            case .keepRemoved, .discard:
+                guard action != .discard || selected.status == "rejected" else {
+                    throw StoreError.invalidEdit
+                }
+                if action == .keepRemoved && snapshot != nil { throw StoreError.invalidEdit }
+                if let snapshot {
+                    try setVisible(snapshot, context: context, preserveLocalDelete: false)
+                } else if action == .discard && selected.baseVersion != nil {
+                    // A rejected edit must have its prior server values; never
+                    // drop the only proposal while retaining rejected fields.
+                    throw StoreError.invalidSnapshot
+                } else if successors.isEmpty, action == .discard, let target {
+                    context.delete(target)
+                } else {
+                    target?.isLocallyDeleted = true
+                }
+                if action == .keepRemoved { target?.isLocallyDeleted = true }
+                if let first = successors.first {
+                    first.status = "needs_resolution"
+                    if let snapshot {
+                        setSnapshot(snapshot, on: first)
+                    } else if selected.kind == "upsert" {
+                        // A rejected/absent create had a complete null-base
+                        // payload. Retain its unchanged fields for an explicit
+                        // later Add to server decision on the successor.
+                        first.title = first.title ?? selected.title
+                        first.isActive = first.isActive ?? selected.isActive
+                        first.mode = first.mode ?? selected.mode
+                        first.maxArticles = first.maxArticles ?? selected.maxArticles
+                    }
+                } else {
+                    target?.locallyModified = false
+                }
+                context.delete(selected)
             case .applyMine, .addToServer, .correct:
-                let mode = selected.mode
+                if action == .applyMine && snapshot == nil { throw StoreError.invalidSnapshot }
+                if action == .addToServer && snapshot != nil { throw StoreError.invalidEdit }
+                if action == .correct {
+                    guard selected.status == "rejected",
+                          let correctedTitle,
+                          !correctedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    else { throw StoreError.invalidTitle }
+                }
+                let baseVersion: Int64? = action == .addToServer ? nil :
+                    (selected.serverVersion ?? selected.baseVersion)
+                let title = correctedTitle ?? selected.title
+                if selected.kind == "upsert", baseVersion == nil,
+                   (title == nil || selected.isActive == nil ||
+                    selected.mode == nil || selected.maxArticles == nil) {
+                    throw StoreError.invalidEdit
+                }
                 let replacement = FeedMutation(
                     url: selected.url, scopeKey: selected.scopeKey,
                     kind: selected.kind,
-                    baseVersion: action == .addToServer ? nil : selected.serverVersion,
-                    title: correctedTitle ?? selected.title,
-                    isActive: selected.isActive, mode: mode,
+                    baseVersion: baseVersion,
+                    title: title,
+                    isActive: selected.isActive, mode: selected.mode,
                     maxArticles: selected.maxArticles,
                     sequence: selected.sequence,
                     localRevision: selected.localRevision + 1,
                     origin: "resolved")
+                copySnapshot(selected, to: replacement)
                 context.delete(selected)
                 context.insert(replacement)
                 target?.mutationRevision = max(target?.mutationRevision ?? 0, replacement.localRevision)
             }
-            _ = value
         }
     }
 
-    enum StoreError: Error {
-        case busy, staleBinding, staleSentRevision, invalidSnapshot, invalidEdit, injectedSaveFailure
+    enum StoreError: LocalizedError {
+        case busy, staleBinding, staleSentRevision, invalidSnapshot, invalidEdit
+        case invalidURL, invalidTitle, injectedSaveFailure
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidURL: return "Enter an http or https feed URL."
+            case .invalidTitle: return "Enter a feed title."
+            case .invalidEdit: return "This feed change needs a complete valid proposal."
+            case .staleBinding: return "This feed belongs to a previous server. Review its saved proposal."
+            default: return "The feed change could not be saved."
+            }
+        }
     }
 }
 

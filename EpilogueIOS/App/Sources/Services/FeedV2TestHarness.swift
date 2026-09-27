@@ -186,6 +186,156 @@ final class FeedV2TestHarness {
         adapter.engine.end(token)
     }
 
+    func prebindingDeleteStaysHiddenAssertion() async throws {
+        let context = ModelContext(model)
+        context.insert(Domain.Feed(url: feedURL, name: "Local", mode: .fidelity,
+                                   isLocallyDeleted: true))
+        context.insert(FeedMutation(url: feedURL, scopeKey: "__unbound__", kind: "delete",
+                                    sequence: 1, localRevision: 1))
+        try context.save()
+        let (_, token, _) = try bind()
+        let reopened = ModelContext(model)
+        let feed = try reopened.fetch(FetchDescriptor<Domain.Feed>()).first
+        let mutation = try reopened.fetch(FetchDescriptor<FeedMutation>()).first
+        let enabled = try await FeedRepository(modelContext: reopened).getEnabledFeeds()
+        try check(feed?.isLocallyDeleted == true && enabled.isEmpty &&
+                  mutation?.status == "needs_resolution" && mutation?.serverVersion == 4,
+                  "First reconciliation exposed a pending local delete")
+        adapter.engine.end(token)
+    }
+
+    func rejectedCreateDiscardAssertion() throws {
+        let (_, token, binding) = try bind(false)
+        try adapter.engine.edit(url: feedURL, title: "Invalid create", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.reject(token, binding, opId: sent.opId,
+                                  revision: sent.sentRevision, code: "invalid_fields", message: nil)
+        try adapter.engine.resolve(opId: sent.opId, action: .discard)
+        let reopened = ModelContext(model)
+        let feeds = try reopened.fetch(FetchDescriptor<Domain.Feed>())
+        let mutations = try reopened.fetch(FetchDescriptor<FeedMutation>())
+        try check(feeds.isEmpty && mutations.isEmpty,
+                  "Discarding a rejected create left an active unsynced feed")
+        adapter.engine.end(token)
+    }
+
+    func rejectedEditDiscardAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.edit(url: feedURL, title: "Rejected local", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.reject(token, binding, opId: sent.opId,
+                                  revision: sent.sentRevision, code: "invalid_fields", message: nil)
+        try adapter.engine.resolve(opId: sent.opId, action: .discard)
+        let reopened = ModelContext(model)
+        let feed = try reopened.fetch(FetchDescriptor<Domain.Feed>()).first
+        let mutations = try reopened.fetch(FetchDescriptor<FeedMutation>())
+        try check(feed?.name == "Server" && feed?.serverVersion == 4 &&
+                  mutations.isEmpty,
+                  "Discarding rejected edit kept local values or outbox state")
+        adapter.engine.end(token)
+    }
+
+    func keepServerSuccessorSnapshotAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.edit(url: feedURL, title: "First", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.edit(url: feedURL, title: "Later", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        try adapter.engine.conflict(token, binding, opId: sent.opId,
+                                    revision: sent.sentRevision, current: row(5, "Web"))
+        try adapter.engine.resolve(opId: sent.opId, action: .keepServer)
+        let reopened = ModelContext(model)
+        let next = try require(reopened.fetch(FetchDescriptor<FeedMutation>()).first)
+        try check(next.status == "needs_resolution" && next.serverKind == "feed" &&
+                  next.serverVersion == 5 && next.serverTitle == "Web",
+                  "Blocked successor lost known server snapshot")
+        try adapter.engine.resolve(opId: next.opId, action: .applyMine)
+        let replacement = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try check(replacement.payload.baseVersion?.int64Value == 5 &&
+                  replacement.payload.fields?.title == "Later",
+                  "Explicit successor resolution produced an invalid null-base edit")
+        adapter.engine.end(token)
+    }
+
+    func correctedRejectedEditKeepsBaseAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.edit(url: feedURL, title: "Bad", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.reject(token, binding, opId: sent.opId,
+                                  revision: sent.sentRevision, code: "invalid_fields", message: nil)
+        try adapter.engine.resolve(opId: sent.opId, action: .correct,
+                                   correctedTitle: "Corrected")
+        let replacement = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try check(replacement.opId != sent.opId &&
+                  replacement.payload.baseVersion?.int64Value == 4 &&
+                  replacement.payload.fields?.title == "Corrected",
+                  "Corrected rejected edit lost its sendable server base")
+        adapter.engine.end(token)
+    }
+
+    func resolutionScopeAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.edit(url: feedURL, title: "Mine", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.conflict(token, binding, opId: sent.opId,
+                                    revision: sent.sentRevision, current: row(5, "Web"))
+        adapter.engine.end(token)
+        try adapter.engine.startNewBinding()
+        do {
+            try adapter.engine.resolve(opId: sent.opId, action: .keepServer)
+            throw Failure.assertion("Old scope resolved after server replacement")
+        } catch IOSFeedV2StoreEngine.StoreError.staleBinding {}
+        let reopened = ModelContext(model)
+        let old = try require(reopened.fetch(FetchDescriptor<FeedMutation>()).first)
+        try check(old.opId == sent.opId && old.status == "conflict",
+                  "Stale resolution changed old-scope proposal")
+    }
+
+    func resolutionIgnoresOtherScopeSuccessorsAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.edit(url: feedURL, title: "Mine", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.conflict(token, binding, opId: sent.opId,
+                                    revision: sent.sentRevision, current: row(5, "Web"))
+        let context = ModelContext(model)
+        let other = FeedMutation(url: feedURL, scopeKey: "https://old.test\nold-config",
+                                 kind: "upsert", title: "Previous server proposal",
+                                 sequence: 999, localRevision: 1)
+        context.insert(other)
+        try context.save()
+        try adapter.engine.resolve(opId: sent.opId, action: .keepServer)
+        let reopened = ModelContext(model)
+        let remaining = try require(reopened.fetch(FetchDescriptor<FeedMutation>()).first)
+        try check(remaining.opId == other.opId && remaining.status == "pending" &&
+                  remaining.serverVersion == nil,
+                  "Resolving this server changed a previous-scope proposal")
+        adapter.engine.end(token)
+    }
+
+    func invalidInputRollsBackAssertion() throws {
+        for (url, title) in [("example.test/feed.xml", "Name"),
+                             ("https://example.test/feed.xml", "   ")] {
+            do {
+                try adapter.engine.edit(url: url, title: title, mode: .fidelity,
+                                        isEnabled: true, maxArticles: 5)
+                throw Failure.assertion("Invalid feed input was accepted")
+            } catch IOSFeedV2StoreEngine.StoreError.invalidURL where !url.hasPrefix("https://") {
+            } catch IOSFeedV2StoreEngine.StoreError.invalidTitle where url.hasPrefix("https://") {
+            }
+        }
+        let reopened = ModelContext(model)
+        let feeds = try reopened.fetch(FetchDescriptor<Domain.Feed>())
+        let mutations = try reopened.fetch(FetchDescriptor<FeedMutation>())
+        try check(feeds.isEmpty && mutations.isEmpty,
+                  "Invalid edit persisted a feed or mutation")
+    }
+
     func cursorFailureAssertion() throws {
         let (_, token, binding) = try bind()
         adapter.engine.failNextSaveForTesting = true
