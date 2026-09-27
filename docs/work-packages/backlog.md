@@ -40,7 +40,7 @@ All PRs: `git diff --check`, focused behavior/failure tests, inspected final dif
 
 ## Package ledger
 
-Execution is active. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`. PRs74–94 cover accepted foundation, backend and integration fixes; server sync and journey verification are active. Remaining native sync/delivery and recovery implementation stay dependency-gated. Result path convention: `docs/work-packages/results/ID.md` in the package branch.
+Execution is in final review and integration. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`; the [PR index](results/PR-INDEX.md) lists the published work. The table below is the original scope/dependency map, not live completion status. Most implementation is published; the last original package and review corrections remain explicitly tracked until final combined verification. Result path convention: `docs/work-packages/results/ID.md` on the relevant branch.
 
 | ID | Priority/type | Outcome | Start condition |
 |---|---|---|---|
@@ -117,8 +117,8 @@ Root can then dispatch without further permission for ordinary edits/tests/branc
 - Normal native editions deliver an article once; delivery identity survives history deletion; explicit regeneration is separate.
 - Episode-referenced digests are retained: block manual deletion and skip automatic deletion while referenced. Unknown historical orphan files remain untouched.
 
-CONTRACT-01 and RETENTION-01 must still define exact compatibility, persistence and recovery contracts from these decisions before dependent implementation. Full-backlog execution is authorized; merging/deployment remain excluded.
+The contract packages subsequently defined compatibility, persistence and recovery behavior before dependent implementation; their current contract and result documents record the accepted details. Full-backlog execution is authorized; merging/deployment remain excluded.
 
-### Execution checkpoint — 2026-09-27
+### Historical first-wave checkpoint — 2026-09-27
 
-ENV#75, AUTH#76, HELPER#74 and INGEST#77 are published with clean independent Sol reviews and relevant passing checks. INGEST stacks on ENV. WEB#78 is draft pending reviewed Linux visual baselines and final Sol review. KO ownership corrections and BUILD-NATIVE hosted checks remain active. CONTRACT-01 exact design at `codex/contract-01-sync-delivery:d07b4d4` is under review; dependent implementation is not yet dispatched. Root `docs/project-state.md` is the live ledger.
+At this historical checkpoint, ENV#75, AUTH#76, HELPER#74 and INGEST#77 were published with clean independent Sol reviews and relevant passing checks. INGEST stacks on ENV. WEB#78 is draft pending reviewed Linux visual baselines and final Sol review. KO ownership corrections and BUILD-NATIVE hosted checks remain active. CONTRACT-01 exact design at `codex/contract-01-sync-delivery:d07b4d4` is under review; dependent implementation is not yet dispatched. Root `docs/project-state.md` is the live ledger.
