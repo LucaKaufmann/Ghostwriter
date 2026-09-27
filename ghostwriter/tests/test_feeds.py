@@ -40,7 +40,7 @@ def test_create_feed(client, public_feed_dns):
 
 
 def test_sync_feeds(client, public_feed_dns):
-    """Test syncing feeds."""
+    """Legacy clients can report exact no-ops but cannot create feeds."""
     feeds = [
         {
             "url": "https://example.com/feed1.xml",
@@ -53,10 +53,14 @@ def test_sync_feeds(client, public_feed_dns):
             "mode": "summarize",
         },
     ]
+    assert client.post("/api/feeds/sync", json=feeds).status_code == 409
+    for feed in feeds:
+        assert client.post("/api/feeds", json=feed).status_code == 200
     response = client.post("/api/feeds/sync", json=feeds)
     assert response.status_code == 200
     data = response.json()
     assert data["synced"] == 2
+    assert data["unchanged"] == 2
 
 
 def test_dns_failure_returns_validation_error_and_retry_succeeds(client, monkeypatch):
@@ -89,7 +93,8 @@ def test_dns_failure_returns_validation_error_and_retry_succeeds(client, monkeyp
     assert client.get(f"/api/feeds/{feed_id}").json()["title"] == "Initial"
 
     resolved.add("input-create.example")
-    updated = client.put(f"/api/feeds/{feed_id}", json={"title": "Changed"})
+    updated = client.put(f"/api/feeds/{feed_id}", json={"title": "Changed"},
+                         headers={"If-Match": f'"{created.json()["version"]}"'})
     assert updated.status_code == 200
     assert updated.json()["title"] == "Changed"
 
@@ -106,7 +111,6 @@ def test_dns_failure_returns_validation_error_and_retry_succeeds(client, monkeyp
 
     resolved.add("input-batch-two.example")
     synced = client.post("/api/feeds/sync", json=batch)
-    assert synced.status_code == 200
-    assert synced.json()["created"] == 2
+    assert synced.status_code == 409
     urls = {feed["url"] for feed in client.get("/api/feeds").json()}
-    assert {item["url"] for item in batch} <= urls
+    assert not {item["url"] for item in batch} & urls

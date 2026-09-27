@@ -46,7 +46,7 @@ def upgrade() -> None:
     if "feeds" in tables:
         high_water = max(high_water, conn.execute(sa.text("SELECT COALESCE(MAX(version),0) FROM feeds")).scalar_one())
         rows = conn.execute(sa.text(
-            "SELECT id FROM feeds WHERE url NOT LIKE 'synthetic://%' AND version=0 ORDER BY created_at, id"
+            "SELECT id FROM feeds WHERE substr(url,1,12) != 'synthetic://' AND version=0 ORDER BY created_at, id"
         )).all()
         for feed_id, in rows:
             high_water += 1

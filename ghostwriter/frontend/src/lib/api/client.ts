@@ -368,9 +368,10 @@ class ApiClient {
 		return this.request<Feed[]>('/feeds');
 	}
 
-	async createFeed(data: FeedCreate): Promise<Feed> {
+	async createFeed(data: FeedCreate, version?: number): Promise<Feed> {
 		return this.request<Feed>('/feeds', {
 			method: 'POST',
+			headers: version === undefined ? {} : { 'If-Match': `"${version}"` },
 			body: JSON.stringify(data)
 		});
 	}
@@ -379,16 +380,18 @@ class ApiClient {
 		return this.request<Feed>(`/feeds/${id}`);
 	}
 
-	async updateFeed(id: string, data: FeedUpdate): Promise<Feed> {
+	async updateFeed(id: string, data: FeedUpdate, version: number): Promise<Feed> {
 		return this.request<Feed>(`/feeds/${id}`, {
 			method: 'PUT',
+			headers: { 'If-Match': `"${version}"` },
 			body: JSON.stringify(data)
 		});
 	}
 
-	async deleteFeed(id: string): Promise<{ status: string; id: string }> {
+	async deleteFeed(id: string, version: number): Promise<{ status: string; id: string }> {
 		return this.request(`/feeds/${id}`, {
-			method: 'DELETE'
+			method: 'DELETE',
+			headers: { 'If-Match': `"${version}"` }
 		});
 	}
 

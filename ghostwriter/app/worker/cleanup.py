@@ -10,16 +10,11 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging import digest_logger
 from app.models.digest import Digest
-from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
 from app.models.seen_article import SeenArticle
 from app.services.digest_deletion import DeletionConflict, DigestMissing, delete_digest
 
 logger = logging.getLogger(__name__)
-
-# Tombstones are kept for 30 days before hard deletion
-TOMBSTONE_RETENTION_DAYS = 30
-
 
 async def check_client_inactivity() -> bool:
     """
@@ -137,32 +132,5 @@ async def cleanup_seen_articles() -> int:
 
 
 async def cleanup_old_tombstones() -> int:
-    """
-    Hard delete feed tombstones older than TOMBSTONE_RETENTION_DAYS.
-
-    Tombstones are kept for 30 days to allow clients to sync deletions.
-    After that, they are permanently removed from the database.
-
-    Returns:
-        Number of tombstones cleaned up.
-    """
-    cutoff = datetime.utcnow() - timedelta(days=TOMBSTONE_RETENTION_DAYS)
-    cleaned = 0
-
-    with Session(engine) as session:
-        statement = select(Feed).where(
-            Feed.deleted_at != None,  # noqa: E711
-            Feed.deleted_at < cutoff,
-        )
-
-        for feed in session.exec(statement).all():
-            logger.info(f"Hard deleting tombstoned feed: {feed.url}")
-            session.delete(feed)
-            cleaned += 1
-
-        session.commit()
-
-    if cleaned > 0:
-        logger.info(f"Cleaned up {cleaned} old feed tombstones")
-
-    return cleaned
+    """Retain feed tombstones for versioned clients; no automatic purge."""
+    return 0
