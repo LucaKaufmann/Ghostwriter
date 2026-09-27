@@ -63,8 +63,8 @@ class DigestScheduler @Inject constructor(
     companion object {
         private const val TAG = "DigestScheduler"
         private const val WORK_NAME_PREFIX = "daily_digest_"
-        // A v1-tagged request is updated in place once to persist its schedule zone.
-        internal const val ANCHOR_TAG = "daily_digest_anchor_v2"
+        // Existing anchored requests keep their original input and occurrence reference.
+        internal const val ANCHOR_TAG = "daily_digest_anchor_v1"
         private const val CATCH_UP_WORK_NAME_PREFIX = "daily_digest_catchup_"
         private const val CATCH_UP_TAG = "catch_up"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
@@ -150,6 +150,11 @@ class DigestScheduler @Inject constructor(
     /** Boot keeps its broadcast open until selected requests are durable. */
     suspend fun scheduleAllPeriodsAwaitPersistence() {
         val selectedPeriods = settingsRepository.getSchedulePeriods()
+        // Cancel from this snapshot before waiting. A later user enable may then
+        // register its own work without a stale boot callback cancelling it.
+        for (period in DigestPeriod.entries) {
+            if (period !in selectedPeriods) cancelPeriod(period)
+        }
         coroutineScope {
             selectedPeriods.map { period ->
                 async {
@@ -163,9 +168,6 @@ class DigestScheduler @Inject constructor(
                         waitForRunning = false)
                 }
             }.awaitAll()
-        }
-        for (period in DigestPeriod.entries) {
-            if (period !in selectedPeriods) cancelPeriod(period)
         }
     }
 
