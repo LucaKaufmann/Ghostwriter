@@ -15,6 +15,9 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
     private let userDefaults: UserDefaults
     private let keychainService: KeychainService
     private let modelContainer: ModelContainer?
+#if DEBUG
+    var beforeGhostwriterURLStateSaveForTesting: (() throws -> Void)?
+#endif
 
     // Keychain keys
     private enum KeychainKeys {
@@ -257,8 +260,13 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
                     do {
                         if let state = try context.fetch(FetchDescriptor<FeedSyncState>()).first,
                            state.destinationURL != nil {
-                            state.suspended = true
+                            // A settings edit only invalidates in-flight work. The feed
+                            // store suspends and changes scope if sync actually selects
+                            // a different destination; a transient edit can be reverted.
                             state.generation += 1
+#if DEBUG
+                            try beforeGhostwriterURLStateSaveForTesting?()
+#endif
                             try context.save()
                         }
                     } catch {
