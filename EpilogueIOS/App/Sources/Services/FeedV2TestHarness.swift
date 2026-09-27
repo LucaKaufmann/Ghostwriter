@@ -237,6 +237,64 @@ final class FeedV2TestHarness {
         adapter.engine.end(token)
     }
 
+    func rejectedDeleteDiscardAssertion() async throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.delete(url: feedURL)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.reject(token, binding, opId: sent.opId,
+                                  revision: sent.sentRevision, code: "invalid_fields", message: nil)
+        let stored = try require(ModelContext(model).fetch(FetchDescriptor<FeedMutation>()).first)
+        try check(stored.serverKind == "feed" && stored.serverVersion == 4 &&
+                  stored.serverTitle == "Server", "Delete did not retain server baseline")
+        try adapter.engine.resolve(opId: sent.opId, action: .discard)
+        let reopened = ModelContext(model)
+        let feed = try require(reopened.fetch(FetchDescriptor<Domain.Feed>()).first)
+        let enabled = try await FeedRepository(modelContext: reopened).getEnabledFeeds()
+        try check(feed.name == "Server" && feed.serverVersion == 4 &&
+                  feed.isLocallyDeleted != true && enabled.map(\.url) == [feedURL] &&
+                  reopened.fetch(FetchDescriptor<FeedMutation>()).isEmpty,
+                  "Discarding rejected delete failed to restore the server feed")
+        adapter.engine.end(token)
+    }
+
+    func rejectedDeleteDiscardKeepsNewerSnapshotAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.delete(url: feedURL)
+        let sent = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.reject(token, binding, opId: sent.opId,
+                                  revision: sent.sentRevision, code: "invalid_fields", message: nil)
+        try adapter.engine.apply(token, binding, changes: changes(5, [row(5, "Newer web")]))
+        try adapter.engine.resolve(opId: sent.opId, action: .discard)
+        let reopened = ModelContext(model)
+        let feed = try require(reopened.fetch(FetchDescriptor<Domain.Feed>()).first)
+        let pending = try reopened.fetch(FetchDescriptor<FeedMutation>())
+        try check(feed.name == "Newer web" && feed.serverVersion == 5 &&
+                  feed.isLocallyDeleted != true && pending.isEmpty,
+                  "Discarding rejected delete lost newer known server state")
+        adapter.engine.end(token)
+    }
+
+    func rejectedDeleteSuccessorDiscardAssertion() throws {
+        let (_, token, binding) = try bind()
+        try adapter.engine.edit(url: feedURL, title: "Accepted edit", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        let edit = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.delete(url: feedURL)
+        try adapter.engine.acknowledge(token, binding, opId: edit.opId,
+                                       revision: edit.sentRevision, current: row(5, "Accepted edit"))
+        let deletion = try require(adapter.engine.claim(token, binding, maxItems: 10).first)
+        try adapter.engine.reject(token, binding, opId: deletion.opId,
+                                  revision: deletion.sentRevision, code: "invalid_fields", message: nil)
+        try adapter.engine.resolve(opId: deletion.opId, action: .discard)
+        let reopened = ModelContext(model)
+        let feed = try require(reopened.fetch(FetchDescriptor<Domain.Feed>()).first)
+        let pending = try reopened.fetch(FetchDescriptor<FeedMutation>())
+        try check(feed.name == "Accepted edit" && feed.serverVersion == 5 &&
+                  feed.isLocallyDeleted != true && pending.isEmpty,
+                  "Discarding successor delete lost the acknowledged server baseline")
+        adapter.engine.end(token)
+    }
+
     func keepServerSuccessorSnapshotAssertion() throws {
         let (_, token, binding) = try bind()
         try adapter.engine.edit(url: feedURL, title: "First", mode: .fidelity,

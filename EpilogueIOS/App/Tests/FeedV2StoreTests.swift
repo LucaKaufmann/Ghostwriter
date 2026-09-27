@@ -67,6 +67,18 @@ final class FeedV2StoreTests: XCTestCase {
         try FeedV2TestHarness(model()).rejectedEditDiscardAssertion()
     }
 
+    func testRejectedDeleteDiscardRestoresServerAndReopens() async throws {
+        try await FeedV2TestHarness(model()).rejectedDeleteDiscardAssertion()
+    }
+
+    func testRejectedDeleteDiscardUsesNewerPull() throws {
+        try FeedV2TestHarness(model()).rejectedDeleteDiscardKeepsNewerSnapshotAssertion()
+    }
+
+    func testRejectedDeleteSuccessorDiscardRestoresAcknowledgedServer() throws {
+        try FeedV2TestHarness(model()).rejectedDeleteSuccessorDiscardAssertion()
+    }
+
     func testKeepServerCarriesSnapshotToSuccessor() throws {
         try FeedV2TestHarness(model()).keepServerSuccessorSnapshotAssertion()
     }
