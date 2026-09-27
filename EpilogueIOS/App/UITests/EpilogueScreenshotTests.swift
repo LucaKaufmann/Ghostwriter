@@ -74,6 +74,33 @@ final class EpilogueScreenshotTests: XCTestCase {
         capture(name: "feed-v2-delete")
     }
 
+    func testRemoteDigestArtifactAvailabilityFixture() throws {
+        app.terminate()
+        app.launchArguments += ["-feed-v2-ui-fixture", "-digest-artifact-ui-fixture"]
+        app.launch()
+        tapTab("History")
+
+        let empty = app.staticTexts["No EPUB for empty digest"]
+        let indexed = app.staticTexts["EPUB not downloaded"]
+        XCTAssertTrue(waitForExists(empty))
+        XCTAssertTrue(waitForExists(indexed))
+        capture(name: "sync-status-history")
+
+        empty.swipeRight()
+        XCTAssertFalse(app.buttons["EPUB"].exists)
+        XCTAssertFalse(app.buttons["PDF"].exists)
+        if !app.staticTexts["No articles in this digest"].exists {
+            empty.tap()
+        }
+        XCTAssertTrue(waitForExists(app.staticTexts["No articles in this digest"]))
+        XCTAssertFalse(app.buttons["Share"].exists)
+        capture(name: "sync-status-empty-detail")
+
+        app.navigationBars.buttons["Digest History"].tap()
+        indexed.swipeRight()
+        XCTAssertTrue(waitForExists(app.buttons["EPUB"]))
+    }
+
     private func tapTab(_ title: String) {
         let button = app.tabBars.buttons[title]
         XCTAssertTrue(waitForExists(button), "Tab \(title) not found")

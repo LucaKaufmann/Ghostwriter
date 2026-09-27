@@ -236,7 +236,7 @@ struct SettingsView: View {
                             }
                         }
                         .disabled(ghostwriterCoordinator.isSyncing)
-                        if case .some(.serverChanged) = ghostwriterCoordinator.lastSyncError as? FeedSyncV2Error {
+                        if ghostwriterCoordinator.requiresNewFeedBinding {
                             Button("Connect to this server as a new feed source") {
                                 do {
                                     try ghostwriterCoordinator.startNewFeedBinding()
@@ -417,7 +417,7 @@ struct SettingsView: View {
     }
 
     private func syncNow() async {
-        await ghostwriterCoordinator.performFullSync()
+        await ghostwriterCoordinator.performFullSyncIncludingDigests()
     }
 
     private func generateDigestNow() async {
