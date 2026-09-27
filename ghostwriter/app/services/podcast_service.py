@@ -34,6 +34,7 @@ from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
 from app.models.podcast_preferences import PodcastPreferences, PodcastPreferencesUpdate
 from app.models.user import User
+from app.services.digest_deletion import immediate_session
 from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -836,6 +837,22 @@ class PodcastDigestService:
         return f"gwpod_{secrets.token_urlsafe(32)}"
 
     def upsert_feedback(
+        self, session: Session, article: DigestArticle,
+        payload: ArticleFeedbackUpsert, user_id: UUID | None = None,
+    ) -> ArticleFeedback:
+        # Drop any earlier read snapshot, then check and write under one
+        # SQLite writer reservation shared with the deletion claim.
+        article_id, digest_id = article.id, article.digest_id
+        session.rollback()
+        with immediate_session() as writer:
+            current = writer.get(DigestArticle, article_id)
+            parent = writer.get(Digest, digest_id)
+            if current is None or parent is None or parent.status == "deleting":
+                from fastapi import HTTPException
+                raise HTTPException(status_code=409, detail="Digest article is unavailable")
+            return self._upsert_feedback_locked(writer, current, payload, user_id)
+
+    def _upsert_feedback_locked(
         self,
         session: Session,
         article: DigestArticle,
@@ -892,6 +909,25 @@ class PodcastDigestService:
         return True
 
     def queue_episode_generation(
+        self, session: Session, digest_id: UUID, *,
+        user_id: UUID | None = None, force: bool = False,
+        trigger: str = "manual",
+        generation_overrides: dict[str, Any] | None = None,
+        title: str | None = None,
+    ) -> PodcastEpisode:
+        session.rollback()
+        pending_tasks: list[UUID] = []
+        with immediate_session() as writer:
+            episode = self._queue_episode_generation_locked(
+                writer, digest_id, user_id=user_id, force=force,
+                trigger=trigger, generation_overrides=generation_overrides,
+                title=title, schedule_task=pending_tasks.append,
+            )
+        for episode_id in pending_tasks:
+            self._schedule_episode_task(episode_id)
+        return episode
+
+    def _queue_episode_generation_locked(
         self,
         session: Session,
         digest_id: UUID,
@@ -901,6 +937,7 @@ class PodcastDigestService:
         trigger: str = "manual",
         generation_overrides: dict[str, Any] | None = None,
         title: str | None = None,
+        schedule_task: Callable[[UUID], None] | None = None,
     ) -> PodcastEpisode:
         """Queue podcast generation for a single digest (manual trigger)."""
         digest = session.get(Digest, digest_id)
@@ -988,7 +1025,7 @@ class PodcastDigestService:
                         "Podcast failed episode re-queued",
                         extra={"digest_id": digest_id_str, "episode_id": str(episode.id)},
                     )
-                self._schedule_episode_task(episode.id)
+                (schedule_task or self._schedule_episode_task)(episode.id)
                 return episode
 
             if force:
@@ -1000,7 +1037,7 @@ class PodcastDigestService:
                     "Podcast episode reset for forced regeneration",
                     extra={"digest_id": digest_id_str, "episode_id": str(episode.id)},
                 )
-                self._schedule_episode_task(episode.id)
+                (schedule_task or self._schedule_episode_task)(episode.id)
                 return episode
 
             return episode
@@ -1028,7 +1065,7 @@ class PodcastDigestService:
             "Podcast episode queued",
             extra={"digest_id": digest_id_str, "episode_id": str(episode.id), "force": force},
         )
-        self._schedule_episode_task(episode.id)
+        (schedule_task or self._schedule_episode_task)(episode.id)
         return episode
 
     @staticmethod
@@ -1055,11 +1092,28 @@ class PodcastDigestService:
         return session.exec(statement).first() is not None
 
     def queue_multi_digest_episode(
+        self, session: Session, digest_ids: list[UUID], *,
+        user_id: UUID | None = None,
+    ) -> PodcastEpisode:
+        session.rollback()
+        with immediate_session() as writer:
+            for digest_id in digest_ids:
+                digest = writer.get(Digest, digest_id)
+                if digest is None or digest.status != "completed":
+                    raise ValueError("Digest must be completed before podcast generation")
+            episode = self._queue_multi_digest_episode_locked(
+                writer, digest_ids, user_id=user_id, schedule_task=lambda _id: None,
+            )
+        self._schedule_episode_task(episode.id)
+        return episode
+
+    def _queue_multi_digest_episode_locked(
         self,
         session: Session,
         digest_ids: list[UUID],
         *,
         user_id: UUID | None = None,
+        schedule_task: Callable[[UUID], None] | None = None,
     ) -> PodcastEpisode:
         """Create a scheduled podcast episode from multiple digests."""
         now = datetime.utcnow()
@@ -1082,7 +1136,7 @@ class PodcastDigestService:
                 "digest_ids": [str(d) for d in digest_ids],
             },
         )
-        self._schedule_episode_task(episode.id)
+        (schedule_task or self._schedule_episode_task)(episode.id)
         return episode
 
     @staticmethod

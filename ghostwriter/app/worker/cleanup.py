@@ -13,6 +13,7 @@ from app.models.digest import Digest
 from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
 from app.models.seen_article import SeenArticle
+from app.services.digest_deletion import DeletionConflict, DigestMissing, delete_digest
 
 logger = logging.getLogger(__name__)
 
@@ -56,29 +57,27 @@ async def cleanup_old_digests() -> int:
     cleaned = 0
 
     with Session(engine) as session:
-        # Find old completed digests
-        statement = select(Digest).where(
-            Digest.status == "completed",
-            Digest.created_at < cutoff,
-        )
+        candidates = session.exec(select(Digest.id).where(
+            (Digest.status == "deleting") |
+            ((Digest.status == "completed") & (Digest.created_at < cutoff))
+        )).all()
 
-        for digest in session.exec(statement).all():
-            # Delete EPUB file
-            epub_path = os.path.join(settings.output_dir, digest.filename)
-            if os.path.exists(epub_path):
-                try:
-                    os.remove(epub_path)
-                    logger.info(f"Deleted EPUB: {epub_path}")
-                except OSError as e:
-                    logger.error(f"Failed to delete {epub_path}: {e}")
-
-            # Delete digest record
-            session.delete(digest)
+    skipped = 0
+    failed = 0
+    for digest_id in candidates:
+        try:
+            delete_digest(digest_id, settings.output_dir)
             cleaned += 1
+        except (DeletionConflict, DigestMissing):
+            skipped += 1
+            logger.info("Skipped referenced or ineligible digest", extra={"digest_id": str(digest_id)})
+        except Exception as exc:
+            failed += 1
+            logger.error(
+                "Digest cleanup failed", extra={"digest_id": str(digest_id), "error_class": type(exc).__name__},
+            )
 
-        session.commit()
-
-    logger.info(f"Cleaned up {cleaned} old digests")
+    logger.info("Digest cleanup: deleted=%d skipped=%d failed=%d", cleaned, skipped, failed)
     return cleaned
 
 
