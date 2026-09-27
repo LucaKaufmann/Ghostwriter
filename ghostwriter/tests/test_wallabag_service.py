@@ -80,6 +80,35 @@ async def test_reuse_expiry_failed_refresh_and_recovery(oauth):
 
 
 @pytest.mark.asyncio
+async def test_tag_failure_remains_retryable_without_response_body_in_log(
+    monkeypatch, caplog,
+):
+    service = WallabagService(settings())
+
+    async def token():
+        return "synthetic-token"
+
+    service._ensure_token = token
+    calls = []
+    real_client = httpx.AsyncClient
+
+    async def respond(request):
+        calls.append(request.url.path)
+        if request.url.path.endswith("/tags.json"):
+            return httpx.Response(503, text="private response body")
+        return httpx.Response(200)
+
+    monkeypatch.setattr(
+        "app.services.wallabag_service.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        await service.mark_processed(7)
+    assert calls == ["/api/entries/7.json", "/api/entries/7/tags.json"]
+    assert "private response body" not in caplog.text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "field,new",
     [
