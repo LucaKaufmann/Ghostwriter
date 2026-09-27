@@ -3,9 +3,6 @@ package com.example.epilogue.data.local
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteConstraintException
 import androidx.room.Room
-import com.example.epilogue.domain.model.ProcessingMode
-import com.example.epilogue.domain.model.TriggerType
-import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
@@ -17,7 +14,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 
-/** An isolated feasibility probe. Production Room remains at version 8. */
+/** An isolated feasibility probe anchored to the deployed Room 8 schema. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
 class Room8UpgradeProbeTest {
@@ -28,30 +25,38 @@ class Room8UpgradeProbeTest {
     private val path get() = context.getDatabasePath(name)
     private lateinit var artifact: File
 
-    private fun room8(): EpilogueDatabase =
-        Room.databaseBuilder(context, EpilogueDatabase::class.java, name)
+    private fun room8(): LegacyRoom8Database =
+        Room.databaseBuilder(context, LegacyRoom8Database::class.java, name)
             .allowMainThreadQueries()
             .build()
 
-    private fun createFixture() = runBlocking {
+    private fun createFixture() {
         context.deleteDatabase(name)
         artifact = files.newFile("fixture.epub").apply { writeText("synthetic EPUB bytes") }
         val db = room8()
-        db.feedDao().insertFeed(FeedEntity("https://example.org/unchanged", "Local title", ProcessingMode.FIDELITY,
-            lastFetched = 1234L, maxArticles = 0, isEnabled = true, serverUpdatedAt = 77L, locallyModified = false))
-        db.feedDao().insertFeed(FeedEntity("https://example.org/dirty", "Edited title", ProcessingMode.BRIEFING,
-            lastFetched = 9876L, maxArticles = 4, isEnabled = false, serverUpdatedAt = 88L, locallyModified = true))
-        db.feedDao().insertFeed(FeedEntity("synthetic://wallabag", "Wallabag", ProcessingMode.FIDELITY,
-            lastFetched = 55L, locallyModified = true))
-        val digestId = db.digestDao().insertDigest(DigestEntity(
-            generatedAt = 100L, epubFilePath = artifact.absolutePath, articleCount = 1,
-            briefingCount = 0, fidelityCount = 1, triggerType = TriggerType.MANUAL,
-            feedNames = "Local title", remoteId = null, period = "manual", isComplete = true
-        ))
-        db.digestDao().insertArticles(listOf(DigestArticleEntity(
-            digestId = digestId, title = "Kept article", author = "Author", content = "Synthetic content",
-            originalUrl = "https://example.org/article", isSummary = false, feedName = "Local title", sortOrder = 0
-        )))
+        val sql = db.openHelper.writableDatabase
+        sql.execSQL("""INSERT INTO feeds
+            (url,name,mode,lastFetched,maxArticles,isEnabled,serverUpdatedAt,locallyModified)
+            VALUES (?,?,?,?,?,?,?,?)
+        """.trimIndent(), arrayOf("https://example.org/unchanged", "Local title", "FIDELITY", 1234L, 0, 1, 77L, 0))
+        sql.execSQL("""INSERT INTO feeds
+            (url,name,mode,lastFetched,maxArticles,isEnabled,serverUpdatedAt,locallyModified)
+            VALUES (?,?,?,?,?,?,?,?)
+        """.trimIndent(), arrayOf("https://example.org/dirty", "Edited title", "BRIEFING", 9876L, 4, 0, 88L, 1))
+        sql.execSQL("""INSERT INTO feeds
+            (url,name,mode,lastFetched,maxArticles,isEnabled,serverUpdatedAt,locallyModified)
+            VALUES (?,?,?,?,?,?,?,?)
+        """.trimIndent(), arrayOf("synthetic://wallabag", "Wallabag", "FIDELITY", 55L, 0, 1, null, 1))
+        sql.execSQL("""INSERT INTO digests
+            (id,generatedAt,epubFilePath,articleCount,briefingCount,fidelityCount,
+             triggerType,feedNames,remoteId,period,isComplete,errorMessage)
+            VALUES (1,100,?,1,0,1,'MANUAL','Local title',NULL,'manual',1,NULL)
+        """.trimIndent(), arrayOf(artifact.absolutePath))
+        sql.execSQL("""INSERT INTO digest_articles
+            (id,digestId,title,author,content,originalUrl,isSummary,feedName,sortOrder)
+            VALUES (1,1,'Kept article','Author','Synthetic content',
+                    'https://example.org/article',0,'Local title',0)
+        """.trimIndent())
         db.close()
     }
 
@@ -59,20 +64,22 @@ class Room8UpgradeProbeTest {
         if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null
     }
 
-    @Test fun `real Room 8 file reopens with feeds and history intact`() = runBlocking {
+    @Test fun `frozen Room 8 file matches deployed identity and reopens intact`() {
         createFixture()
         assertTrue(path.isFile)
         val reopened = room8()
         assertEquals(8, reopened.openHelper.readableDatabase.version)
-        assertEquals(3, reopened.feedDao().getAllFeedsList().size)
-        assertEquals(1234L, reopened.feedDao().getFeedByUrl("https://example.org/unchanged")!!.lastFetched)
-        assertFalse(reopened.feedDao().getFeedByUrl("https://example.org/unchanged")!!.locallyModified)
-        assertTrue(reopened.feedDao().getFeedByUrl("https://example.org/dirty")!!.locallyModified)
-        val digest = reopened.digestDao().getAllDigestsList().single()
-        assertEquals(artifact.absolutePath, digest.epubFilePath)
-        assertEquals("synthetic EPUB bytes", artifact.readText())
-        assertEquals("Kept article", reopened.digestDao().getArticlesForDigest(digest.id).single().title)
         reopened.close()
+        SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { sql ->
+            assertDeployedRoom8Shape(sql)
+            assertEquals("3", sql.scalar("SELECT COUNT(*) FROM feeds"))
+            assertEquals("1234", sql.scalar("SELECT lastFetched FROM feeds WHERE url='https://example.org/unchanged'"))
+            assertEquals("0", sql.scalar("SELECT locallyModified FROM feeds WHERE url='https://example.org/unchanged'"))
+            assertEquals("1", sql.scalar("SELECT locallyModified FROM feeds WHERE url='https://example.org/dirty'"))
+            assertEquals(artifact.absolutePath, sql.scalar("SELECT epubFilePath FROM digests WHERE id=1"))
+            assertEquals("Kept article", sql.scalar("SELECT title FROM digest_articles WHERE digestId=1"))
+        }
+        assertEquals("synthetic EPUB bytes", artifact.readText())
     }
 
     @Test fun `additive probe preserves every legacy proposal and existing rows`() {
@@ -135,7 +142,7 @@ class Room8UpgradeProbeTest {
         }
     }
 
-    @Test fun `failed probe rolls back DDL and original Room 8 file reopens`() = runBlocking {
+    @Test fun `failed probe rolls back DDL and original Room 8 file reopens`() {
         createFixture()
         SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             assertThrows(IllegalStateException::class.java) { probeMigration(db, failAfterAlter = true) }
@@ -144,11 +151,41 @@ class Room8UpgradeProbeTest {
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name='feed_mutations'"))
         }
         val reopened = room8()
-        assertEquals(3, reopened.feedDao().getAllFeedsList().size)
-        assertEquals("Edited title", reopened.feedDao().getFeedByUrl("https://example.org/dirty")!!.name)
-        assertEquals(1, reopened.digestDao().getAllDigestsList().size)
-        assertEquals("synthetic EPUB bytes", artifact.readText())
+        assertEquals(8, reopened.openHelper.readableDatabase.version)
         reopened.close()
+        SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { sql ->
+            assertDeployedRoom8Shape(sql)
+            assertEquals("Edited title", sql.scalar("SELECT name FROM feeds WHERE url='https://example.org/dirty'"))
+            assertEquals("1", sql.scalar("SELECT COUNT(*) FROM digests"))
+        }
+        assertEquals("synthetic EPUB bytes", artifact.readText())
+    }
+
+    private fun assertDeployedRoom8Shape(db: SQLiteDatabase) {
+        assertEquals("12f91675bc2dd3666434a820d81e3318",
+            db.scalar("SELECT identity_hash FROM room_master_table WHERE id=42"))
+        assertEquals(
+            "CREATE TABLE `feeds` (`url` TEXT NOT NULL, `name` TEXT NOT NULL, `mode` TEXT NOT NULL, `lastFetched` INTEGER NOT NULL, `maxArticles` INTEGER NOT NULL, `isEnabled` INTEGER NOT NULL, `serverUpdatedAt` INTEGER, `locallyModified` INTEGER NOT NULL, PRIMARY KEY(`url`))",
+            db.scalar("SELECT sql FROM sqlite_master WHERE type='table' AND name='feeds'")
+        )
+        assertEquals(
+            "CREATE TABLE `digests` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `generatedAt` INTEGER NOT NULL, `epubFilePath` TEXT NOT NULL, `articleCount` INTEGER NOT NULL, `briefingCount` INTEGER NOT NULL, `fidelityCount` INTEGER NOT NULL, `triggerType` TEXT NOT NULL, `feedNames` TEXT NOT NULL, `remoteId` TEXT, `period` TEXT, `isComplete` INTEGER NOT NULL, `errorMessage` TEXT)",
+            db.scalar("SELECT sql FROM sqlite_master WHERE type='table' AND name='digests'")
+        )
+        assertEquals(
+            "CREATE TABLE `digest_articles` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `digestId` INTEGER NOT NULL, `title` TEXT NOT NULL, `author` TEXT NOT NULL, `content` TEXT NOT NULL, `originalUrl` TEXT NOT NULL, `isSummary` INTEGER NOT NULL, `feedName` TEXT NOT NULL, `sortOrder` INTEGER NOT NULL, FOREIGN KEY(`digestId`) REFERENCES `digests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+            db.scalar("SELECT sql FROM sqlite_master WHERE type='table' AND name='digest_articles'")
+        )
+        assertEquals(
+            "CREATE INDEX `index_digest_articles_digestId` ON `digest_articles` (`digestId`)",
+            db.scalar("SELECT sql FROM sqlite_master WHERE type='index' AND name='index_digest_articles_digestId'")
+        )
+        assertEquals("3", db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('feeds','digests','digest_articles')"))
+        assertEquals("1", db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='index_digest_articles_digestId'"))
+        assertEquals("8", db.scalar("SELECT COUNT(*) FROM pragma_table_info('feeds')"))
+        assertEquals("12", db.scalar("SELECT COUNT(*) FROM pragma_table_info('digests')"))
+        assertEquals("9", db.scalar("SELECT COUNT(*) FROM pragma_table_info('digest_articles')"))
+        assertEquals("CASCADE", db.scalar("SELECT on_delete FROM pragma_foreign_key_list('digest_articles')"))
     }
 
     /** Test-only DDL and backfill shape for the later production Migration(8, 9). */
