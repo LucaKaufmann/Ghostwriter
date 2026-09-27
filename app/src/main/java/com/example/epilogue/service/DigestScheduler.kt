@@ -20,6 +20,7 @@ import java.time.LocalDate
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -232,7 +233,7 @@ class DigestScheduler @Inject constructor(
      *
      * @param fetchAll If true, fetches all articles regardless of lastFetched timestamp
      */
-    fun runNow(fetchAll: Boolean = false) {
+    fun runNow(fetchAll: Boolean = false): UUID {
         Log.i(TAG, "Triggering immediate digest generation (fetchAll=$fetchAll)")
 
         val inputData = Data.Builder()
@@ -252,6 +253,7 @@ class DigestScheduler @Inject constructor(
             ExistingWorkPolicy.REPLACE,
             oneTimeWorkRequest
         )
+        return oneTimeWorkRequest.id
     }
 
     /**
@@ -281,7 +283,7 @@ class DigestScheduler @Inject constructor(
     /**
      * Gets the work status for immediate digest generation.
      */
-    fun getImmediateWorkInfo() = workManager.getWorkInfosForUniqueWorkLiveData(IMMEDIATE_WORK_NAME)
+    fun getImmediateWorkInfo(id: UUID) = workManager.getWorkInfoByIdLiveData(id)
 
     /**
      * Checks if Ghostwriter backend should be used for digest generation.
