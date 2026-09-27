@@ -51,7 +51,7 @@ class SettingsViewModel @Inject constructor(
     private var digestPollingJob: Job? = null
     private var immediateWorkId: UUID? = null
     private var immediateWorkInfo: LiveData<WorkInfo>? = null
-    private var immediateWorkObserver: Observer<WorkInfo>? = null
+    private var immediateWorkObserver: Observer<WorkInfo?>? = null
 
     init {
         loadSettings()
@@ -171,8 +171,8 @@ class SettingsViewModel @Inject constructor(
         val id = digestScheduler.runNow(fetchAll = false)
         immediateWorkId = id
         val workInfoLiveData = digestScheduler.getImmediateWorkInfo(id)
-        val observer = Observer<WorkInfo> { workInfo ->
-            if (immediateWorkId != id || workInfo.id != id) return@Observer
+        val observer = Observer<WorkInfo?> { workInfo ->
+            if (workInfo == null || immediateWorkId != id || workInfo.id != id) return@Observer
             when (workInfo.state) {
                 WorkInfo.State.SUCCEEDED -> {
                     _uiState.update { it.copy(isGenerating = false, digestCompleted = true) }
