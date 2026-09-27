@@ -39,7 +39,7 @@ def _validate_feed_url(url: str) -> None:
         validate_public_url(url)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=422,
             detail=f"Invalid feed URL '{url}': {exc}",
         ) from exc
 
