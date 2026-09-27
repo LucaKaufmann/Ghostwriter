@@ -301,19 +301,19 @@ private fun FeedResolutionCard(
         }
     }
     if (correcting) {
-        val initial = remember(proposal.fieldsJson, proposal.serverSnapshotJson, current) {
+        val initial = remember(proposal.opId) {
             correctionDraft(proposal, current)
         }
-        var title by rememberSaveable(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+        var title by rememberSaveable(proposal.opId) {
             mutableStateOf(initial.title)
         }
-        var cap by rememberSaveable(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+        var cap by rememberSaveable(proposal.opId) {
             mutableStateOf(initial.maxArticles.toString())
         }
-        var mode by rememberSaveable(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+        var mode by rememberSaveable(proposal.opId) {
             mutableStateOf(initial.mode)
         }
-        var enabled by rememberSaveable(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+        var enabled by rememberSaveable(proposal.opId) {
             mutableStateOf(initial.enabled)
         }
         AlertDialog(
