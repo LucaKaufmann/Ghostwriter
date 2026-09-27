@@ -10,6 +10,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
@@ -17,6 +20,8 @@ import java.io.ByteArrayOutputStream
  * Unit tests for EPUB generation logic.
  * Tests the book creation without Android-specific file I/O.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
 class EpubGeneratorTest {
 
     @Test

@@ -80,17 +80,52 @@ This keeps the same runtime configuration and volumes as the published-image set
 
 ### Local Development
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+From `ghostwriter/`, use Python 3.11 or newer and a virtual environment:
 
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest -q
+```
+
+The standalone `requirements.txt` remains available for Docker and other
+environments that install dependencies before copying the project source. In
+a separate fresh virtual environment, run `python -m pip install -r requirements.txt`.
+The manifest test checks that its runtime requirements match `pyproject.toml`.
+
+The tests use temporary data directories, ignore `.env` files, disable
+integrations and schedules, and block real DNS and outbound IP connections.
+Tests that validate public URLs supply explicit DNS answers. Run them from
+`ghostwriter/`; no service credentials are needed.
+
+To start the development server after installing dependencies, configure a
+provider and run:
+
+```bash
 # Set environment
 export AI_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 
 # Run
-uvicorn app.main:app --reload --port 8080
+.venv/bin/python -m uvicorn app.main:app --reload --port 8080
 ```
+
+YouTube audio fallback also needs `yt-dlp` and `ffmpeg` executables on `PATH`.
+Docker installs them separately; for local development, install `ffmpeg`
+with your system package manager, then run these commands before starting
+the development server:
+
+```bash
+.venv/bin/python -m pip install yt-dlp
+export PATH="$PWD/.venv/bin:$PATH"
+yt-dlp --version
+ffmpeg -version
+```
+
+Local Whisper transcription additionally needs the configured `whisper-cli`
+binary and model files. Caption-only YouTube extraction does not need these
+audio tools.
 
 ### Supported Container Platforms
 
