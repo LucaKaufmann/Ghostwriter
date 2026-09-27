@@ -15,7 +15,7 @@ import GhostwriterClient
 @main
 struct EpilogueApp: App {
     private let launchOptions: ScreenshotLaunchOptions
-    let persistenceController = PersistenceController.shared
+    let persistenceController: PersistenceController
 
     // Repositories
     @State private var settingsRepository: SettingsRepository
@@ -34,12 +34,20 @@ struct EpilogueApp: App {
         let launchOptions = ScreenshotLaunchOptions.current
         self.launchOptions = launchOptions
 
+        #if DEBUG
+        let fixtureRequested = launchOptions.isEnabled &&
+            ProcessInfo.processInfo.arguments.contains("-ui-testing") &&
+            ProcessInfo.processInfo.arguments.contains("-feed-v2-ui-fixture")
+        let persistence = fixtureRequested ? PersistenceController.preview : PersistenceController.shared
+        #else
         let persistence = PersistenceController.shared
+        #endif
+        self.persistenceController = persistence
         let context = persistence.container.mainContext
 
         ScreenshotDataSeeder.seedIfNeeded(context: context, options: launchOptions)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-feed-v2-ui-fixture") {
+        if fixtureRequested {
             FeedV2TestHarness.seedUIFixture(context: context)
         }
         #endif
