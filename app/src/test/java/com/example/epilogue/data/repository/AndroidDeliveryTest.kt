@@ -347,6 +347,25 @@ class AndroidDeliveryTest {
         assertEquals("2026-09-28", db.generationRunDao().get(nextNormal)?.occurrenceDate)
     }
 
+    @Test fun `new periodic slot retry does not inherit a covered previous slot`() = runBlocking {
+        val previous = ledger.startScheduledRun("MORNING", "2026-09-27", "work:0", false)!!
+        ledger.finishWithoutDigest(previous, "empty", "{}")
+        // WorkManager advanced periodCount after acknowledging the previous slot.
+        // The next slot crashed before inserting a Room run, then retried.
+        val next = ledger.startScheduledRun("MORNING", "2026-09-28", "work:1", true)!!
+        assertEquals("2026-09-28", db.generationRunDao().get(next)?.occurrenceDate)
+        assertFalse(ledger.coversScheduled("MORNING", "2026-09-28"))
+    }
+
+    @Test fun `terminal commit before periodic acknowledgement remains covered on retry`() = runBlocking {
+        val run = ledger.startScheduledRun("EVENING", "2026-09-27", "work:7", false)!!
+        ledger.finishWithoutDigest(run, "deferred", "{}")
+        // The Room commit happened but WorkManager has not advanced periodCount.
+        assertNull(ledger.startScheduledRun("EVENING", "2026-09-28", "work:7", true))
+        assertTrue(ledger.coversScheduled("EVENING", "2026-09-27"))
+        assertFalse(ledger.coversScheduled("EVENING", "2026-09-28"))
+    }
+
     @Test fun `partial scheduled artifact and occurrence coverage commit together`() = runBlocking {
         val run = ledger.startScheduledRun("EVENING", "2026-09-27", "partial-work", false)!!
         val mixed = GenerationDiagnostics(listOf(FeedIngestionResult(feed, 1, 1,

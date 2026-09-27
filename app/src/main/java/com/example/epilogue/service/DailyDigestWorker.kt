@@ -139,7 +139,17 @@ class DailyDigestWorker @AssistedInject constructor(
                     periodicOccurrenceDate(now, anchor, scheduleZone ?: now.zone)
                     else if (now.hour < period.hour) now.toLocalDate().minusDays(1)
                     else now.toLocalDate()).toString()
-                deliveryStore.startScheduledRun(period.name, occurrence, this.id.toString(),
+                val executionKey = if (explicit != null) this.id.toString() else {
+                    try {
+                        PeriodicWorkExecution.key(applicationContext, this.id)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        Log.w(TAG, "Periodic execution identity unavailable")
+                        null
+                    }
+                } ?: return retryOrFailure()
+                deliveryStore.startScheduledRun(period.name, occurrence, executionKey,
                     retry = runAttemptCount > 0, regeneration = regeneration)
                     ?: return success("already_covered")
             } else deliveryStore.startRun(regeneration, if (isManual) "MANUAL" else null)
