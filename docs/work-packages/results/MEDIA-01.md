@@ -36,3 +36,5 @@ Follow-up verification with Python 3.11.16:
 - `git diff --check`: passed.
 
 All subprocesses, downloads, transcription, and feed discovery in new tests are fakes or synthetic fixtures. No provider or external network call was made. This follow-up remains single-process only and adds no schema changes.
+
+The targeted cancellation review was clean for ffmpeg/whisper but reported the reachable yt-dlp fallback outside its file bundle. Root accepted this as part of the same lifecycle guarantee and added equivalent kill/reap handling plus a cancellation fixture. This does not claim remote provider cancellation or termination of arbitrary process trees.
