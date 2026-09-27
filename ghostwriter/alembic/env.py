@@ -28,6 +28,7 @@ from app.models.podcast_episode import PodcastEpisode  # noqa: F401, E402
 from app.models.podcast_preferences import PodcastPreferences  # noqa: F401, E402
 from app.models.schedule import Schedule  # noqa: F401, E402
 from app.models.seen_article import SeenArticle  # noqa: F401, E402
+from app.models.source_acknowledgement import SourceAcknowledgement  # noqa: F401, E402
 from app.models.user import User  # noqa: F401, E402
 from app.models.wallabag_config import WallabagConfig  # noqa: F401, E402
 

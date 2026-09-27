@@ -44,6 +44,7 @@ class NewsletterService:
         self.article_filter = ArticleEligibilityFilter()
         self._token_path = os.path.join(self.settings.data_dir, "gmail_token.json")
         self._pending_oauth_path = os.path.join(self.settings.data_dir, "gmail_oauth_pending.json")
+        self.last_fetch_account_id: str | None = None
 
     @property
     def is_configured(self) -> bool:
@@ -192,9 +193,8 @@ class NewsletterService:
 
                 # Refresh failed — log details
                 logger.warning(
-                    "Gmail token refresh failed: %d %s",
+                    "Gmail token refresh failed: HTTP %d",
                     resp.status_code,
-                    resp.text,
                 )
 
                 if resp.status_code in (400, 401):
@@ -223,6 +223,7 @@ class NewsletterService:
         """
         token = await self._get_access_token()
         headers = {"Authorization": f"Bearer {token}"}
+        self.last_fetch_account_id = None
         label = self.settings.gmail_label
         max_results = self.settings.gmail_max_articles
 
@@ -233,6 +234,7 @@ class NewsletterService:
         messages: list[dict] = []
 
         async with httpx.AsyncClient(timeout=30) as client:
+            self.last_fetch_account_id = await self._profile_account_id(client, headers)
             # Find the label ID
             resp = await client.get(f"{GMAIL_API_BASE}/labels", headers=headers)
             resp.raise_for_status()
@@ -330,6 +332,10 @@ class NewsletterService:
         if not message_ids:
             return
         token = await self._get_access_token()
+        await self.mark_processed_with_token(message_ids, token)
+
+    async def mark_processed_with_token(self, message_ids: list[str], token: str) -> None:
+        """Mark messages using exactly the OAuth token whose account was verified."""
         headers = {"Authorization": f"Bearer {token}"}
 
         async with httpx.AsyncClient(timeout=30) as client:
@@ -344,6 +350,27 @@ class NewsletterService:
             )
             resp.raise_for_status()
         logger.info(f"Marked {len(message_ids)} newsletter emails as read")
+
+    async def get_account_id(self) -> str:
+        """Return the account bound to this service's current OAuth context."""
+        token = await self._get_access_token()
+        return await self.get_account_id_for_token(token)
+
+    async def get_account_id_for_token(self, token: str) -> str:
+        """Read profile with the token that will be used for a subsequent action."""
+        async with httpx.AsyncClient(timeout=30) as client:
+            return await self._profile_account_id(
+                client, {"Authorization": f"Bearer {token}"}
+            )
+
+    @staticmethod
+    async def _profile_account_id(client: httpx.AsyncClient, headers: dict[str, str]) -> str:
+        response = await client.get(f"{GMAIL_API_BASE}/profile", headers=headers)
+        response.raise_for_status()
+        account = response.json().get("emailAddress")
+        if not isinstance(account, str) or not account.strip():
+            raise ValueError("Gmail profile identity unavailable")
+        return account
 
     def _parse_email(self, msg: dict) -> ExtractedArticle | None:
         """Extract article data from a Gmail message."""
