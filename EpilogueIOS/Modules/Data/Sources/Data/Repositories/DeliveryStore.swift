@@ -58,14 +58,15 @@ public final class DeliveryStore {
         return value
     }
 
-    public func start(trigger: String, period: String?) throws -> DeliveryRunHandle {
+    public func start(trigger: String, period: String?, at startedAt: Date = Date()) throws -> DeliveryRunHandle {
         let context = context()
         var result: DeliveryRunHandle?
         do {
             try context.transaction {
                 let sequence = (try context.fetch(FetchDescriptor<GenerationRun>())
                     .map(\.attemptSequence).max() ?? 0) + 1
-                let run = GenerationRun(attemptSequence: sequence, trigger: trigger, period: period)
+                let run = GenerationRun(attemptSequence: sequence, startedAt: startedAt,
+                                        trigger: trigger, period: period)
                 context.insert(run)
                 try context.save()
                 result = DeliveryRunHandle(id: run.runId, attemptSequence: sequence)
@@ -202,6 +203,81 @@ public final class DeliveryStore {
         try context().fetch(FetchDescriptor<GenerationRun>()).max {
             $0.attemptSequence < $1.attemptSequence
         }
+    }
+
+    /// Called only while holding the process-wide local generation lease. A
+    /// running row cannot belong to an active generator at this point.
+    public func reconcileInterruptedLocalRuns(now: Date) throws {
+        let context = context()
+        do {
+            try context.transaction {
+                let runs = try context.fetch(FetchDescriptor<GenerationRun>())
+                let digests = try context.fetch(FetchDescriptor<Digest>())
+                let deliveries = try context.fetch(FetchDescriptor<ArticleDelivery>())
+                let referenced = Set(runs.compactMap(\.digestId))
+                for run in runs where run.outcome == "running" &&
+                    [TriggerType.scheduled.rawValue, TriggerType.manual.rawValue,
+                     TriggerType.test.rawValue].contains(run.trigger) {
+                    let digest = digests.first { $0.id == run.digestId }
+                    let usable = digest.map { value in
+                        value.remoteId == nil && value.isComplete && value.articleCount > 0 &&
+                        value.articles.count == value.articleCount &&
+                        FileManager.default.fileExists(atPath: value.epubFilePath) &&
+                        deliveries.contains { $0.firstDigestId == value.id && $0.state == "delivered" }
+                    } ?? false
+                    let old = (try? JSONDecoder().decode(
+                        GenerationDiagnostics.self, from: Data(run.diagnosticsJSON.utf8))) ??
+                        GenerationDiagnostics(feeds: [])
+                    if usable {
+                        run.outcome = old.failedCount > 0 || old.deferredCount > 0 ? "partial" : "complete"
+                    } else {
+                        run.outcome = "failed"
+                        run.diagnosticsJSON = String(data: try JSONEncoder().encode(
+                            GenerationDiagnostics(feeds: old.feeds, runError: "interrupted")),
+                            encoding: .utf8) ?? "{}"
+                        if let digest, digest.remoteId == nil, !digest.isComplete {
+                            digest.errorMessage = "Interrupted local generation"
+                        }
+                    }
+                    run.finishedAt = now
+                }
+                // V1/V2 local placeholders had no run row. They are never
+                // evidence of delivery or permanent period coverage.
+                for digest in digests where digest.remoteId == nil &&
+                    [.scheduled, .manual, .test].contains(digest.triggerType) && !digest.isComplete &&
+                    (digest.errorMessage?.isEmpty ?? true) && !referenced.contains(digest.id) {
+                    digest.errorMessage = "Interrupted local generation"
+                }
+                try context.save()
+            }
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    /// Admission and run creation are serialized by DigestGenerator's lease.
+    /// Dates are supplied by the caller so every callback agrees on one window.
+    public func mayStartScheduled(period: String, occurrenceStart: Date,
+                                  occurrenceEnd: Date, legacyCovered: Bool) throws -> Bool {
+        if legacyCovered { return false }
+        let context = context()
+        let runs = try context.fetch(FetchDescriptor<GenerationRun>()).filter {
+            $0.trigger == TriggerType.scheduled.rawValue &&
+            $0.period?.caseInsensitiveCompare(period) == .orderedSame &&
+            $0.startedAt >= occurrenceStart && $0.startedAt < occurrenceEnd
+        }
+        if runs.contains(where: { ["complete", "partial", "empty", "deferred"].contains($0.outcome) }) {
+            return false
+        }
+        let linked = Set(runs.compactMap(\.digestId))
+        let legacyAttempts = try context.fetch(FetchDescriptor<Digest>()).filter {
+            $0.remoteId == nil && $0.triggerType == .scheduled &&
+            $0.period?.caseInsensitiveCompare(period) == .orderedSame &&
+            $0.generatedAt >= occurrenceStart && $0.generatedAt < occurrenceEnd &&
+            !linked.contains($0.id) && !$0.isComplete && $0.errorMessage != nil
+        }.count
+        return runs.count + legacyAttempts < 2
     }
 
     public func committedArtifact(runId: UUID, path: String) throws -> Bool {

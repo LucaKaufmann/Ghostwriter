@@ -60,6 +60,8 @@ public final class LocalDigestScheduler: Sendable {
     private let digestRepository: DigestRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
     private let modelContainer: ModelContainer
+    private let now: @Sendable () -> Date
+    private let calendar: Calendar
     private let logger = Logger(subsystem: "com.epilogue", category: "LocalScheduler")
     private let catchUpGate = AsyncExecutionGate()
 
@@ -67,12 +69,16 @@ public final class LocalDigestScheduler: Sendable {
         feedRepository: FeedRepositoryProtocol,
         digestRepository: DigestRepositoryProtocol,
         settingsRepository: SettingsRepositoryProtocol,
-        modelContainer: ModelContainer
+        modelContainer: ModelContainer,
+        now: @escaping @Sendable () -> Date = { Date() },
+        calendar: Calendar = .current
     ) {
         self.feedRepository = feedRepository
         self.digestRepository = digestRepository
         self.settingsRepository = settingsRepository
         self.modelContainer = modelContainer
+        self.now = now
+        self.calendar = calendar
     }
 
     // MARK: - Registration
@@ -120,7 +126,7 @@ public final class LocalDigestScheduler: Sendable {
                 return
             }
 
-            let now = Date()
+            let now = now()
             guard let nextDigestTime = nextScheduledDigestTime(from: now, periods: enabledPeriods) else {
                 logger.warning("Could not compute next digest window — skipping overnight schedule")
                 return
@@ -165,11 +171,14 @@ public final class LocalDigestScheduler: Sendable {
     public func checkForMissedDigests() async {
         await catchUpGate.runIfIdle { [self] in
             do {
+                let now = now()
+                let recovered = try await DigestGenerator.recoverInterruptedRuns(
+                    store: await DeliveryStore(container: modelContainer), now: now)
+                guard recovered else { return }
                 let ghostwriterEnabled = try await settingsRepository.isGhostwriterEnabled()
                 if ghostwriterEnabled { return }
 
-                let now = Date()
-                let calendar = Calendar.current
+                let calendar = self.calendar
                 let enabledPeriods = try await settingsRepository.getEnabledPeriods()
                 guard let latestElapsedPeriod = Self.latestElapsedPeriod(
                     now: now,
@@ -177,25 +186,17 @@ public final class LocalDigestScheduler: Sendable {
                     calendar: calendar
                 ) else { return }
 
-                let todayStart = calendar.startOfDay(for: now)
-                let digestsToday = try await digestRepository.getDigests(from: todayStart, to: now)
-                let hasDigestForLatestPeriod = Self.hasDigestCoveringLatestPeriod(
-                    latestElapsedPeriod,
-                    digests: digestsToday,
-                    now: now,
-                    calendar: calendar
-                )
-                let hasTerminalRun = try await MainActor.run {
-                    try DeliveryStore(container: modelContainer).hasTerminalScheduledRun(
-                        period: latestElapsedPeriod.rawValue, since: todayStart)
-                }
-                guard !hasDigestForLatestPeriod && !hasTerminalRun else { return }
-
-                logger.info("Catch-up: generating missed digest for \(latestElapsedPeriod.rawValue)")
                 let generator = try await buildDigestGenerator()
-                let result = try await generator.generateDigest(
-                    triggerType: .scheduled, period: latestElapsedPeriod.rawValue)
-                if let digest = result.digest { await exportIfConfigured(digest: digest) }
+                let start = calendar.startOfDay(for: now)
+                let end = calendar.date(byAdding: .day, value: 1, to: start)!
+                let result = try await generator.generateScheduledIfEligible(
+                    period: latestElapsedPeriod.rawValue, occurrenceStart: start,
+                    occurrenceEnd: end, now: now) { [self] in
+                        let digests = try await self.digestRepository.getDigests(from: start, to: now)
+                        return Self.hasDigestCoveringLatestPeriod(
+                            latestElapsedPeriod, digests: digests, now: now, calendar: calendar)
+                    }
+                if let digest = result?.digest { await exportIfConfigured(digest: digest) }
             } catch {
                 logger.error("Catch-up digest generation failed: \(error.localizedDescription)")
             }
@@ -213,35 +214,43 @@ public final class LocalDigestScheduler: Sendable {
         // Schedule next overnight run immediately
         await scheduleOvernightDigest()
 
-        let generationTask = Task.detached(priority: .utility) { [self] () async throws -> Bool in
+        let generationTask = Task.detached(priority: .utility) { [self] () async throws -> LocalGenerationOutcome? in
             // Check Ghostwriter
             let ghostwriterEnabled = try await self.settingsRepository.isGhostwriterEnabled()
             if ghostwriterEnabled {
                 self.logger.info("Ghostwriter enabled — skipping overnight generation")
-                return false
+                return nil
             }
 
             let enabledPeriods = try await self.settingsRepository.getEnabledPeriods()
             guard !enabledPeriods.isEmpty else {
                 self.logger.info("No enabled periods — skipping overnight generation")
-                return false
+                return nil
             }
 
-            let now = Date()
-            let periodToGenerate = Self.latestElapsedPeriod(now: now, periods: enabledPeriods) ??
+            let now = self.now()
+            let periodToGenerate = Self.latestElapsedPeriod(now: now, periods: enabledPeriods,
+                                                             calendar: self.calendar) ??
                 enabledPeriods.min(by: {
                     ($0.hour, $0.minute) < ($1.hour, $1.minute)
                 })
-
+            guard let periodToGenerate else { return nil }
             let generator = try await self.buildDigestGenerator()
-            let result = try await generator.generateDigest(
-                triggerType: .scheduled, period: periodToGenerate?.rawValue)
-            if let digest = result.digest {
+            let start = self.calendar.startOfDay(for: now)
+            let end = self.calendar.date(byAdding: .day, value: 1, to: start)!
+            let result = try await generator.generateScheduledIfEligible(
+                period: periodToGenerate.rawValue, occurrenceStart: start,
+                occurrenceEnd: end, now: now) { [self] in
+                    let digests = try await self.digestRepository.getDigests(from: start, to: now)
+                    return Self.hasDigestCoveringLatestPeriod(
+                        periodToGenerate, digests: digests, now: now, calendar: self.calendar)
+                }
+            if let digest = result?.digest {
                 self.logger.info("Overnight digest complete: \(digest.articleCount) articles")
                 await self.exportIfConfigured(digest: digest)
                 await self.scheduleMorningNotification(for: digest)
             }
-            return result.outcome != .failed
+            return result?.outcome
         }
 
         task.expirationHandler = {
@@ -251,13 +260,8 @@ public final class LocalDigestScheduler: Sendable {
         }
 
         do {
-            let generatedDigest = try await generationTask.value
-            if generatedDigest {
-                await completionGuard.complete(task, success: true)
-            } else {
-                // Ghostwriter was enabled, no local generation needed
-                await completionGuard.complete(task, success: true)
-            }
+            let outcome = try await generationTask.value
+            await completionGuard.complete(task, success: Self.backgroundTaskSucceeded(outcome))
         } catch {
             logger.error("Overnight digest failed: \(error.localizedDescription)")
             await completionGuard.complete(task, success: false)
@@ -449,7 +453,7 @@ public final class LocalDigestScheduler: Sendable {
         return elapsedPeriods.max(by: { $0.1 < $1.1 })?.0
     }
 
-    /// Returns true if a complete digest (or an in-progress digest) already covers the latest period.
+    /// Returns true if a completed digest already covers the latest period.
     static func hasDigestCoveringLatestPeriod(
         _ latestPeriod: DigestPeriod,
         digests: [Digest],
@@ -457,9 +461,7 @@ public final class LocalDigestScheduler: Sendable {
         calendar: Calendar = .current
     ) -> Bool {
         let normalizedLatestPeriod = latestPeriod.rawValue.lowercased()
-        let digestsThatCount = digests.filter { digest in
-            digest.isComplete || (!digest.isComplete && digest.errorMessage == nil)
-        }
+        let digestsThatCount = digests.filter(\.isComplete)
 
         if digestsThatCount.contains(where: { digest in
             digest.period?.lowercased() == normalizedLatestPeriod
@@ -484,6 +486,11 @@ public final class LocalDigestScheduler: Sendable {
         })
     }
 
+    static func backgroundTaskSucceeded(_ outcome: LocalGenerationOutcome?) -> Bool {
+        guard let outcome else { return true } // disabled or already covered
+        return ![.failed, .cancelled, .conflict].contains(outcome)
+    }
+
     static func scheduledTime(
         for period: DigestPeriod,
         on date: Date,
@@ -501,7 +508,7 @@ public final class LocalDigestScheduler: Sendable {
     private func nextScheduledDigestTime(from now: Date, periods: Set<DigestPeriod>) -> Date? {
         guard !periods.isEmpty else { return nil }
 
-        let calendar = Calendar.current
+        let calendar = self.calendar
         let todayCandidates = periods.compactMap { period -> Date? in
             var components = calendar.dateComponents([.year, .month, .day], from: now)
             components.hour = period.hour

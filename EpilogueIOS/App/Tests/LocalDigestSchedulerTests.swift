@@ -88,6 +88,25 @@ final class LocalDigestSchedulerTests: XCTestCase {
         XCTAssertFalse(covered)
     }
 
+    func testLegacyPendingLocalDigestDoesNotCoverPeriod() {
+        let now = makeDate(hour: 8, minute: 0)
+        let pending = makeDigest(generatedAt: makeDate(hour: 6, minute: 0),
+                                 period: nil, isComplete: false)
+        XCTAssertFalse(LocalDigestScheduler.hasDigestCoveringLatestPeriod(
+            .morning, digests: [pending], now: now, calendar: calendar))
+    }
+
+    func testBackgroundCompletionDistinguishesFailureFromNoWork() {
+        XCTAssertFalse(LocalDigestScheduler.backgroundTaskSucceeded(.failed))
+        XCTAssertFalse(LocalDigestScheduler.backgroundTaskSucceeded(.cancelled))
+        XCTAssertFalse(LocalDigestScheduler.backgroundTaskSucceeded(.conflict))
+        XCTAssertTrue(LocalDigestScheduler.backgroundTaskSucceeded(nil))
+        XCTAssertTrue(LocalDigestScheduler.backgroundTaskSucceeded(.complete))
+        XCTAssertTrue(LocalDigestScheduler.backgroundTaskSucceeded(.partial))
+        XCTAssertTrue(LocalDigestScheduler.backgroundTaskSucceeded(.empty))
+        XCTAssertTrue(LocalDigestScheduler.backgroundTaskSucceeded(.deferred))
+    }
+
     func testHasDigestCoveringLatestPeriodIgnoresMismatchedPeriod() {
         let now = makeDate(hour: 19, minute: 0)
         let digest = makeDigest(
