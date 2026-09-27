@@ -10,4 +10,6 @@ The APK was installed on isolated `emulator-5580`. The [synthetic rejected-feed 
 
 Independent review corrected batch-reset rollback: the UI now says Clear current digest history and explains that concurrently generated editions remain. The captured snapshot is deleted one transaction at a time, protecting each unlink/commit from cancellation; later failure cannot restore earlier rows whose files are gone. Failed unlink keeps its row retryable. This deliberately uses snapshot semantics, not a batch transaction across irreversible file operations. Active correction form state is keyed by immutable proposal ID, preserving typed edits across server snapshot refreshes.
 
-Correction gate:165 Android tests/57 shared (one intentional live skip), debug build passed; actual cancel-during-unlink and later-throw fixtures preserve retained files and committed deletions.
+Correction gate:167 Android tests/57 shared (one intentional live skip), debug build passed; actual cancel-during-unlink and later-throw fixtures preserve retained files and committed deletions.
+
+Final independent Sol correction reviewe97f0ae returned no actionable findings.
