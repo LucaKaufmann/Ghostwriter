@@ -22,6 +22,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.IOException
 import java.util.Date
+import kotlinx.coroutines.CancellationException
 
 /**
  * WorkManager worker that generates the daily EPUB digest.
@@ -113,28 +114,29 @@ class DailyDigestWorker @AssistedInject constructor(
 
             if (result != null) {
                 Log.i(TAG, "Generated EPUB: ${result.file.absolutePath}")
+                digestRepository.withGeneratedArtifact(result.file) {
+                    // Export to custom directory if configured
+                    when (val exportResult = epubExporter.exportToCustomDirectory(result.file)) {
+                        is ExportResult.Success ->
+                            Log.i(TAG, "Exported to custom directory")
+                        is ExportResult.PermissionRevoked ->
+                            Log.w(TAG, "Custom export permission revoked")
+                        is ExportResult.Error ->
+                            Log.e(TAG, "Custom export failed: ${exportResult.message}")
+                        ExportResult.NotConfigured -> { /* No-op */ }
+                    }
 
-                // Export to custom directory if configured
-                when (val exportResult = epubExporter.exportToCustomDirectory(result.file)) {
-                    is ExportResult.Success ->
-                        Log.i(TAG, "Exported to custom directory")
-                    is ExportResult.PermissionRevoked ->
-                        Log.w(TAG, "Custom export permission revoked")
-                    is ExportResult.Error ->
-                        Log.e(TAG, "Custom export failed: ${exportResult.message}")
-                    ExportResult.NotConfigured -> { /* No-op */ }
+                    // Finalize digest history record
+                    digestRepository.completePendingDigest(
+                        digestId = pendingDigestId,
+                        articles = result.articles,
+                        feeds = feeds,
+                        epubFilePath = result.file.absolutePath
+                    )
+                    Log.i(TAG, "Saved digest to history (period: $periodString)")
+
+                    Result.success()
                 }
-
-                // Finalize digest history record
-                digestRepository.completePendingDigest(
-                    digestId = pendingDigestId,
-                    articles = result.articles,
-                    feeds = feeds,
-                    epubFilePath = result.file.absolutePath
-                )
-                Log.i(TAG, "Saved digest to history (period: $periodString)")
-
-                Result.success()
             } else {
                 Log.e(TAG, "Failed to generate EPUB")
                 handleFailure(
@@ -143,6 +145,8 @@ class DailyDigestWorker @AssistedInject constructor(
                     retriable = true
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: IOException) {
             // Network errors are retriable
             Log.e(TAG, "Network error generating digest", e)

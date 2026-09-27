@@ -88,8 +88,15 @@ class HistoryViewModel @Inject constructor(
     fun confirmDelete() {
         val digest = _uiState.value.digestToDelete ?: return
         viewModelScope.launch {
-            digestRepository.deleteDigest(digest)
-            _uiState.update { it.copy(digestToDelete = null) }
+            try {
+                val deleted = digestRepository.deleteDigest(digest)
+                _uiState.update {
+                    it.copy(digestToDelete = null, error = if (deleted) null else "Digest file could not be removed. Please retry.")
+                }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _uiState.update { it.copy(digestToDelete = null, error = "Digest could not be deleted. Please retry.") }
+            }
         }
     }
 
