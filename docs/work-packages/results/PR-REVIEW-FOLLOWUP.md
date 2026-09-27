@@ -181,7 +181,7 @@ Aggregate1190591f1f finished 10 successful hosted checks with one intentional im
 
 ## Post-CI comments at2026-09-27T21:07Z
 
-Aggregate1190987f80 passed10hosted checks plus one intentional publication skip; iOS completed21:06:37Z. Changed-head paginated refresh at10621:07:07Z/11921:07:09Z found four actionable comments.106/4116901770 corrected locally: only unbound first reconciliation omits both parameters; bound full pulls keep instance ID, matching actual Ktor implementation.119/4116909634 immutable-URL web PUT DNS gate and4116909636 legacy negative cap consumption assigned backend owner.119/4116909638 hostless malformed authority admitted by shared validation assigned for bounded contract/admission design. Final closeout remains held; earlier green tests do not verify upcoming source corrections.
+Aggregate1190987f80 passed 10 hosted checks plus one intentional publication skip; iOS completed21:06:37Z. Changed-head paginated refresh at10621:07:07Z/11921:07:09Z found four actionable comments.106/4116901770 corrected locally: only unbound first reconciliation omits both parameters; bound full pulls keep instance ID, matching actual Ktor implementation.119/4116909634 immutable-URL web PUT DNS gate and4116909636 legacy negative cap consumption assigned backend owner.119/4116909638 hostless malformed authority admitted by shared validation assigned for bounded contract/admission design. Final closeout remains held; earlier green tests do not verify upcoming source corrections.
 
 ### All-PR refresh during final feed-input follow-up
 
@@ -195,3 +195,15 @@ Paginated PR74–119 refresh at 2026-09-27T21:16:13Z: 31 open, 15 externally mer
 - Combined source37d43a0: real Ktor→FastAPI1passed with no skips; synthetic browser reading/listening1passed. Exact component source comparisons matched the verified worker trees. No paid providers or production content. Logs `final-feed-admission-{live-contract,journey}.log`.
 
 All four latest comments are addressed locally; final source publication and hosted feedback remain to be inspected. No external review replies or thread-resolution claim.
+
+### Final documentation review — 2026-09-27T21:41Z
+
+- #106/4117040754, alleged44broken immutable evidence links: rejected after checking the exact reviewed index. All 46local SHA/path targets exist; all 46pinned GitHub Contents API requests succeeded,0missing. The comment's local-object result does not show missing remote tree paths. Evidence: `pr-feedback/pr106-immutable-link-remote-check.json`. Index clarifies this distinction for shallow/unrelated checkouts.
+- #106/4117040757, missing navigation to final acceptance records: accepted. Project state now directly links the backend, shared/Android and iOS records at published aggregate2918931. Continuity106 intentionally uses immutable links rather than copying every worker result.
+- #106/4117040759, negative article limit: accepted as a handoff clarification; rejected as a demonstrated production ingress bug. Current `FeedSnapshotV2.isValidV2` rejects negative limits; shared use-case full/incremental/result validation runs before native store writes. Handoff now names the explicit0..2147483647range and that boundary. A test-only wire/application-boundary proof now covers full pulls, incremental pulls and push receipts, with zero-cap controls. Sourceb247ebb integrated8a55776 passed shared JVM/native gates and clean Sol review. No production code change was required.
+
+PR119's available mid-build feedback had no new substantive finding. Current code CI remains tied to2918931; later verification/document changes must be distinguished from product changes.
+
+### Completed review closeout
+
+2026-09-27T21:50:43Z final paginated74–119 sweep:31open/15externally merged,112inline comments,58review bodies,47issue comments; no new/edited feedback. Every actionable finding is integrated; rejected findings have evidence above. Hosted product source2918931994a05c3fb2d0e1f9e812556361fef479 finished10SUCCESS+1intentional SKIP at21:48:49Z, no failed/pending jobs. The final test/documentation checkpoint preserves that product tree; publication reruns are not mislabeled as completed. No remote merge, release, deployment, external reply or automatic thread-resolution action.
