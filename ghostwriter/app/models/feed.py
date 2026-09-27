@@ -38,6 +38,7 @@ class Feed(FeedBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    version: int = Field(default=0)
 
 
 class FeedCreate(SQLModel):
@@ -64,6 +65,7 @@ class FeedRead(SQLModel):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    version: int
 
 
 class FeedSync(SQLModel):

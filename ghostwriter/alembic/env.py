@@ -20,6 +20,7 @@ from app.models.client_config import ClientConfig  # noqa: F401, E402
 from app.models.client_settings import ClientSettings  # noqa: F401, E402
 from app.models.digest import Digest, DigestArticle  # noqa: F401, E402
 from app.models.feed import Feed  # noqa: F401, E402
+from app.models.feed_sync import FeedMutationReceipt, FeedSyncClock  # noqa: F401, E402
 from app.models.manual_cover import ManualCover  # noqa: F401, E402
 from app.models.media_feed import MediaFeed  # noqa: F401, E402
 from app.models.media_item import MediaItem  # noqa: F401, E402
