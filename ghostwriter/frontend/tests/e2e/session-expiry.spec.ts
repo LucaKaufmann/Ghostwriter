@@ -129,3 +129,57 @@ test('a denied download expires the session', async ({ page }) => {
   await expect(page.getByText('Welcome Back')).toBeVisible();
   expect(requests).toBe(1);
 });
+
+for (const nextToken of ['fresh-token', 'playwright-token']) {
+test(`a successful old-session plugin ZIP cannot download after another user signs in (${nextToken})`, async ({ page }) => {
+  await setAuthenticatedSession(page);
+  await mockGhostwriterApi(page);
+  let releasePlugin!: () => void;
+  const pluginHeld = new Promise<void>((resolve) => { releasePlugin = resolve; });
+  let pluginRequests = 0;
+  let downloads = 0;
+  page.on('download', () => { downloads++; });
+  await page.route('**/api/plugins/koreader/download', async (route) => {
+    pluginRequests++;
+    expect(route.request().headers().authorization).toBe('Bearer playwright-token');
+    await pluginHeld;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/zip',
+      headers: { 'content-disposition': 'attachment; filename="old-user-plugin.zip"' },
+      body: 'synthetic old-user API token'
+    });
+  });
+  await page.route('**/api/digests/trigger', async (route) =>
+    route.fulfill({ status: 401, json: expired })
+  );
+  await page.route('**/api/auth/login', async (route) => route.fulfill({ json: {
+    access_token: nextToken, token_type: 'bearer',
+    user: { id: 'user-2', username: 'new-user', email: 'new@example.com', is_admin: true, created_at: '2025-01-01T00:00:00Z', last_login_at: null }
+  } }));
+
+  await page.goto('/settings');
+  await page.getByRole('tab', { name: 'Security' }).click();
+  await page.getByRole('button', { name: 'Download KOReader Plugin' }).click();
+  await page.getByLabel('Token Name').fill('Old user token');
+  await page.getByRole('button', { name: 'Download Plugin' }).click();
+  await expect.poll(() => pluginRequests).toBe(1);
+
+  // The dialog overlays the shell, so activate its existing action through the DOM.
+  await page.locator('aside').getByRole('button', { name: 'Generate Digest' }).evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.getByText('Welcome Back')).toBeVisible();
+  await page.getByLabel('Username').fill('demo');
+  await page.getByLabel('Password').fill('password123');
+  await page.getByRole('button', { name: 'Sign In' }).click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('ghostwriter_token'))).toBe(nextToken);
+  await expect(page.getByText('Welcome Back')).toHaveCount(0);
+
+  const oldResponse = page.waitForResponse((response) => response.url().endsWith('/api/plugins/koreader/download'));
+  releasePlugin();
+  await oldResponse;
+  await page.waitForTimeout(300);
+  expect(downloads).toBe(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('ghostwriter_token'))).toBe(nextToken);
+  await expect(page.getByText('KOReader plugin downloaded')).toHaveCount(0);
+});
+}
