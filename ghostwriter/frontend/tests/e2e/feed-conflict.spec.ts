@@ -466,28 +466,34 @@ test('a delayed edit conflict preserves typing after submission and retries the 
 	]);
 });
 
-test('a delayed successful edit does not close a newer draft in the same session', async ({ page }) => {
+test('a delayed successful edit preserves a newer draft and advances its next save version', async ({ page }) => {
 	await mockGhostwriterApi(page);
 	await setAuthenticatedSession(page);
 	let release!: () => void;
 	const held = new Promise<void>((resolve) => { release = resolve; });
-	let received = false;
+	const writes: { title: string; version: string }[] = [];
 	await page.route('**/api/feeds/feed-1', async (route) => {
-		received = true;
-		await held;
-		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'feed-1', version: 2 }) });
+		writes.push({ title: route.request().postDataJSON().title, version: route.request().headers()['if-match'] });
+		if (writes.length === 1) await held;
+		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'feed-1', version: writes.length + 1 }) });
 	});
 	await page.goto('/sources/feeds');
 	await page.getByRole('row').filter({ hasText: 'Example Feed' }).getByRole('button').last().click();
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
 	await page.locator('#edit-title').fill('Submitted edit');
 	await page.getByRole('button', { name: 'Save Changes' }).click();
-	await expect.poll(() => received).toBe(true);
+	await expect.poll(() => writes.length).toBe(1);
 	await page.locator('#edit-title').fill('Later unsent edit');
 	release();
 	await expect(page.getByText('Feed updated successfully')).toBeVisible();
 	await expect(page.getByRole('dialog')).toBeVisible();
 	await expect(page.locator('#edit-title')).toHaveValue('Later unsent edit');
+	await page.getByRole('button', { name: 'Save Changes' }).click();
+	await expect.poll(() => writes.length).toBe(2);
+	expect(writes).toEqual([
+		{ title: 'Submitted edit', version: '"1"' },
+		{ title: 'Later unsent edit', version: '"2"' }
+	]);
 });
 
 test('a late completion for edit A leaves an unrelated edit B open', async ({ page }) => {
