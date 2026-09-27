@@ -9,12 +9,14 @@
 import Foundation
 import SwiftData
 import Domain
+import OSLog
 
 /// SwiftData implementation of DigestRepositoryProtocol with 30-digest retention policy
 @MainActor
 public final class DigestRepository: DigestRepositoryProtocol {
     private let modelContext: ModelContext
     private let maxDigests: Int
+    private let logger = Logger(subsystem: "com.epilogue", category: "DigestRetention")
 
     /// Initialize with model context and retention limit
     /// - Parameters:
@@ -44,7 +46,7 @@ public final class DigestRepository: DigestRepositoryProtocol {
         try modelContext.save()
 
         // Enforce retention policy after creating new digest
-        try await enforceRetentionPolicy(maxDigests: maxDigests)
+        try enforceRetentionPolicy(maxDigests: maxDigests, protectedDigestId: digest.id)
     }
 
     public func updateDigest(_ digest: Digest) async throws {
@@ -96,32 +98,51 @@ public final class DigestRepository: DigestRepositoryProtocol {
     }
 
     public func enforceRetentionPolicy(maxDigests: Int) async throws {
-        let count = try await getDigestCount()
+        try enforceRetentionPolicy(maxDigests: maxDigests, protectedDigestId: nil)
+    }
 
-        guard count > maxDigests else {
-            return // Within limit, no action needed
-        }
-
-        // Fetch all digests sorted by date (oldest last)
+    /// Commit history deletion before unlinking an unreferenced EPUB.
+    func enforceRetentionPolicy(maxDigests: Int, protectedDigestId: UUID?,
+                                failBeforeCommitForTesting: Bool = false) throws {
         let descriptor = FetchDescriptor<Digest>(
             sortBy: [SortDescriptor(\.generatedAt, order: .reverse)]
         )
         let allDigests = try modelContext.fetch(descriptor)
+        guard allDigests.count > maxDigests else { return }
 
-        // Calculate how many to delete
-        let deleteCount = count - maxDigests
-        let digestsToDelete = Array(allDigests.suffix(deleteCount))
-
-        // Delete oldest digests
-        for digest in digestsToDelete {
-            // Delete EPUB file from disk
-            try? deleteEPUBFile(at: digest.epubFilePath)
-
-            // Delete from database
-            modelContext.delete(digest)
+        var keptIDs = Set(allDigests.prefix(maxDigests).map(\.id))
+        if let protectedDigestId, !keptIDs.contains(protectedDigestId),
+           allDigests.contains(where: { $0.id == protectedDigestId }) {
+            if let displaced = allDigests.prefix(maxDigests).last {
+                keptIDs.remove(displaced.id)
+            }
+            keptIDs.insert(protectedDigestId)
+        }
+        let pruned = allDigests.filter { !keptIDs.contains($0.id) }
+        let paths = Set(pruned.map(\.epubFilePath))
+        do {
+            try modelContext.transaction {
+                for digest in pruned { modelContext.delete(digest) }
+                if failBeforeCommitForTesting {
+                    throw DeliveryStoreError.injectedRetentionFailure
+                }
+            }
+        } catch {
+            modelContext.rollback()
+            throw error
         }
 
-        try modelContext.save()
+        for path in paths {
+            do {
+                let stillReferenced = try modelContext.fetch(FetchDescriptor<Digest>())
+                    .contains { $0.epubFilePath == path }
+                if !stillReferenced { try deleteEPUBFile(at: path) }
+            } catch {
+                // A failed query or unlink leaves an orphan, never a retained
+                // history row pointing to a file removed by this cleanup.
+                logger.error("Could not clean up edition file: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Ghostwriter Sync
@@ -204,7 +225,7 @@ public final class DigestRepository: DigestRepositoryProtocol {
         try modelContext.save()
 
         // Enforce retention policy
-        try await enforceRetentionPolicy(maxDigests: maxDigests)
+        try enforceRetentionPolicy(maxDigests: maxDigests, protectedDigestId: digest.id)
 
         return digest
     }

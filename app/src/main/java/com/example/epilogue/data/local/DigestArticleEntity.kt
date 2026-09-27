@@ -31,7 +31,8 @@ data class DigestArticleEntity(
     val originalUrl: String,
     val isSummary: Boolean,
     val feedName: String,
-    val sortOrder: Int
+    val sortOrder: Int,
+    val feedUrl: String? = null
 ) {
     fun toDomain(): DigestArticle = DigestArticle(
         id = id,
@@ -57,7 +58,8 @@ data class DigestArticleEntity(
             originalUrl = article.originalUrl,
             isSummary = article.isSummary,
             feedName = feedName,
-            sortOrder = sortOrder
+            sortOrder = sortOrder,
+            feedUrl = article.feedUrl.takeIf { it.isNotBlank() }
         )
     }
 }

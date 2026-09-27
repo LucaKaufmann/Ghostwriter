@@ -63,11 +63,7 @@ public final class PersistenceController {
     /// Initialize the persistence controller
     /// - Parameter inMemory: If true, uses an in-memory store for testing
     private init(inMemory: Bool = false) {
-        let schema = Schema([
-            Feed.self,
-            Digest.self,
-            DigestArticle.self
-        ])
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
 
         let modelConfiguration: ModelConfiguration
         if inMemory {
@@ -85,6 +81,7 @@ public final class PersistenceController {
         do {
             container = try ModelContainer(
                 for: schema,
+                migrationPlan: EpilogueMigrationPlan.self,
                 configurations: [modelConfiguration]
             )
         } catch {

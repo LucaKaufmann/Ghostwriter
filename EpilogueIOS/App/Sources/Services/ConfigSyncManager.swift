@@ -12,6 +12,18 @@ import Data
 import GhostwriterClient
 import OSLog
 
+enum ConfigSyncIncomplete: LocalizedError {
+    case sync, prefetched, minimumWordCount
+
+    var errorDescription: String? {
+        switch self {
+        case .sync: "Config sync is incomplete; local changes remain pending."
+        case .prefetched: "Pre-fetched config could not be reconciled; local changes remain pending."
+        case .minimumWordCount: "Minimum word count was not uploaded; the local value remains pending."
+        }
+    }
+}
+
 /// Manages configuration sync between the app and Ghostwriter backend
 ///
 /// Sync strategy: Last-write-wins based on timestamps
@@ -41,7 +53,7 @@ public final class ConfigSyncManager {
         logger.info("Starting config sync with Ghostwriter")
         let success = try await sharedSyncBridge.syncConfig()
         if !success {
-            throw GhostwriterError.httpError(statusCode: 500, message: "Config sync failed")
+            throw ConfigSyncIncomplete.sync
         }
         return success
     }
@@ -51,7 +63,7 @@ public final class ConfigSyncManager {
     public func applyPreFetchedConfig(_ config: ClientConfigResponse) async throws {
         let success = try await sharedSyncBridge.applyPreFetchedConfig(config)
         if !success {
-            throw GhostwriterError.httpError(statusCode: 500, message: "Failed applying pre-fetched config")
+            throw ConfigSyncIncomplete.prefetched
         }
     }
 
@@ -79,7 +91,7 @@ public final class ConfigSyncManager {
         if success {
             logger.info("Pushed min_word_count to server: \(count)")
         } else {
-            logger.warning("Shared min_word_count push failed; keeping local value for retry")
+            throw ConfigSyncIncomplete.minimumWordCount
         }
     }
 

@@ -12,8 +12,6 @@ import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -156,16 +154,17 @@ class OpenAIServiceTest {
 
         val result = service.summarizeArticle(originalArticle)
 
-        assertNotNull(result)
-        assertEquals("Original Title", result!!.title)
-        assertEquals("Original Author", result.author)
-        assertEquals("https://example.com/article", result.originalUrl)
-        assertTrue(result.isSummary)
-        assertTrue(result.content.contains("<strong>Hook</strong>"))
+        assertTrue(result is OpenAIService.ArticleSummaryResult.Summarized)
+        val article = (result as OpenAIService.ArticleSummaryResult.Summarized).article
+        assertEquals("Original Title", article.title)
+        assertEquals("Original Author", article.author)
+        assertEquals("https://example.com/article", article.originalUrl)
+        assertTrue(article.isSummary)
+        assertTrue(article.content.contains("<strong>Hook</strong>"))
     }
 
     @Test
-    fun `summarizeArticle returns null when summarization fails`() = runTest {
+    fun `summarizeArticle returns Failed when summarization fails`() = runTest {
         val originalArticle = ProcessedArticle(
             title = "Original Title",
             author = "Original Author",
@@ -178,7 +177,7 @@ class OpenAIServiceTest {
 
         val result = service.summarizeArticle(originalArticle)
 
-        assertNull(result)
+        assertEquals(OpenAIService.ArticleSummaryResult.Failed, result)
     }
 
     @Test

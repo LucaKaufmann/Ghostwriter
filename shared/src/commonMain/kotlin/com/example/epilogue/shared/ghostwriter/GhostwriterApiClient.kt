@@ -15,13 +15,77 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.http.appendPathSegments
 import io.ktor.http.ContentType
+import io.ktor.client.statement.bodyAsText
+import com.example.epilogue.shared.sync.FeedV2Destination
+import com.example.epilogue.shared.sync.FeedV2RemotePort
+import com.example.epilogue.shared.sync.FeedV2RemoteResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class GhostwriterApiClient(
     private val client: HttpClient,
     baseUrl: String,
     private val apiKey: String?
-) {
+) : FeedV2RemotePort {
     private val apiBaseUrl = normalizeApiBaseUrl(baseUrl)
+
+    override suspend fun getFeedChangesV2(
+        destination: FeedV2Destination, sinceVersion: Long?, serverInstanceId: String?
+    ): FeedV2RemoteResult<FeedChangesV2Response> = v2Request(destination) {
+        require((sinceVersion == null) == (serverInstanceId == null))
+        require(sinceVersion == null || validVersionV2(sinceVersion))
+        val response = client.get(apiBaseUrl) {
+            url { appendPathSegments("feeds", "changes-v2") }
+            authorize()
+            sinceVersion?.let { parameter("since_version", it) }
+            serverInstanceId?.let { parameter("server_instance_id", it) }
+        }
+        v2Response(response) { feedV2Json.decodeFromString<FeedChangesV2Response>(it) }
+    }
+
+    override suspend fun postFeedMutationsV2(
+        destination: FeedV2Destination, batch: FeedMutationBatchV2
+    ): FeedV2RemoteResult<FeedMutationBatchResultV2> = v2Request(destination) {
+        val payload = batch.toWireJson()
+        val response = client.post(apiBaseUrl) {
+            url { appendPathSegments("feeds", "mutations-v2") }
+            authorize()
+            contentType(ContentType.Application.Json)
+            setBody(payload)
+        }
+        v2Response(response) { feedV2Json.decodeFromString<FeedMutationBatchResultV2>(it) }
+    }
+
+    private suspend fun <T> v2Request(
+        destination: FeedV2Destination, block: suspend () -> FeedV2RemoteResult<T>
+    ): FeedV2RemoteResult<T> {
+        if (normalizeApiBaseUrl(destination.normalizedBaseUrl) != apiBaseUrl) {
+            return FeedV2RemoteResult.TransportFailure("Destination changed")
+        }
+        return try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            FeedV2RemoteResult.TransportFailure(error.message ?: "Transport or response failure")
+        }
+    }
+
+    private suspend fun <T> v2Response(
+        response: io.ktor.client.statement.HttpResponse, decode: (String) -> T
+    ): FeedV2RemoteResult<T> {
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            val code = runCatching {
+                feedV2Json.parseToJsonElement(body).jsonObject["detail"]
+                    ?.jsonObject?.get("code")?.jsonPrimitive?.content
+            }.getOrNull()
+            return FeedV2RemoteResult.HttpFailure(response.status.value, code)
+        }
+        return FeedV2RemoteResult.Success(decode(body))
+    }
 
     suspend fun performSync(feedSince: String? = null, digestIds: String? = null): SyncResponse {
         val response = client.get(apiBaseUrl) {
