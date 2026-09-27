@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import BigInteger, Column, String
 from sqlmodel import Field, SQLModel
 
+MAX_FEED_ARTICLES = 2**31 - 1
+
 
 class FeedBase(SQLModel):
     """Base feed model with shared fields."""
@@ -50,7 +52,7 @@ class FeedCreate(SQLModel):
     mode: Literal["raw", "summarize"] = Field(
         default="raw", description="Processing mode"
     )
-    max_articles: int = Field(default=10, description="Max articles per run")
+    max_articles: int = Field(default=10, ge=0, le=MAX_FEED_ARTICLES, description="Max articles per run")
 
 
 class FeedRead(SQLModel):
@@ -77,7 +79,7 @@ class FeedSync(SQLModel):
     mode: Literal["raw", "summarize"] = Field(
         default="raw", description="Processing mode"
     )
-    max_articles: int = Field(default=10, description="Max articles per run")
+    max_articles: int = Field(default=10, ge=0, le=MAX_FEED_ARTICLES, description="Max articles per run")
 
 
 class FeedUpdate(SQLModel):
@@ -88,4 +90,4 @@ class FeedUpdate(SQLModel):
     mode: Literal["raw", "summarize"] | None = Field(
         default=None, description="Processing mode"
     )
-    max_articles: int | None = Field(default=None, description="Max articles per run")
+    max_articles: int | None = Field(default=None, ge=0, le=MAX_FEED_ARTICLES, description="Max articles per run")

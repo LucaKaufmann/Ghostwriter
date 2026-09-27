@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from app.models.feed import Feed
+from app.models.feed import MAX_FEED_ARTICLES, Feed
 from app.models.feed_sync import FeedMutationReceipt, FeedSyncClock
 from app.services.outbound_fetch import validate_public_url_bounded
 
@@ -67,7 +67,7 @@ def validate_fields(fields: object, *, creating: bool) -> bool:
         (key == "title" and isinstance(value, str))
         or (key == "is_active" and type(value) is bool)
         or (key == "mode" and value in ("raw", "summarize") and isinstance(value, str))
-        or (key == "max_articles" and type(value) is int and value >= 0)
+        or (key == "max_articles" and type(value) is int and 0 <= value <= MAX_FEED_ARTICLES)
         for key, value in fields.items()
     )
 
