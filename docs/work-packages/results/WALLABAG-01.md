@@ -13,4 +13,4 @@ Verification from `ghostwriter/` using the read-only ENV-01 Python3.11.16 virtua
 
 Passed: **32 tests**, including 9 new OAuth/API fixtures for all five credential/destination fields, mutable input settings, concurrent configurations, expiry/failure/retry, and persisted DB changes plus env fallback. The existing Starlette/httpx and Pydantic ReadOnly warnings remain. No external account or provider calls.
 
-Changed-file Ruff and `git diff --check` passed. Independent Sol review and hosted checks pending at this checkpoint.
+Changed-file Ruff and `git diff --check` passed. Independent Sol branch review against INGEST-01 returned no actionable findings. Hosted checks are recorded on the PR after publication.
