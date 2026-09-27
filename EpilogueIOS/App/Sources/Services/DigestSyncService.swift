@@ -128,7 +128,8 @@ public final class DigestSyncService {
         }
     }
 
-    /// Get all known remote digest IDs from local database
+    /// Indexed IDs remain known even when their EPUB was never downloaded or was
+    /// evicted by retention. History offers explicit downloads; sync must not undo eviction.
     public func getKnownRemoteIds() async throws -> [String] {
         return try await digestRepository.getAllRemoteIds()
     }
@@ -532,7 +533,8 @@ public final class DigestSyncService {
 
         try Task.checkCancellation()
         if let existing {
-            // An indexed nonempty digest may gain its EPUB on a later sync.
+            // A duplicate/replayed payload can supply an indexed digest again.
+            // Routine planning keeps indexed IDs known, even without a local EPUB.
             existing.epubFilePath = localURL.path
             try await digestRepository.updateDigest(existing)
             return

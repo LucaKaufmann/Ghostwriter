@@ -154,7 +154,7 @@ final class DigestSyncOutcomeTests: XCTestCase {
         XCTAssertFalse(DigestArtifactEligibility.hasLocalEPUB(indexed))
     }
 
-    func testIndexedNonemptyDigestRetriesDownloadAndUpdatesArtifactPath() async throws {
+    func testRepeatedPayloadForIndexedDigestRetriesDownloadAndUpdatesArtifactPath() async throws {
         let fixture = try await Fixture(download: false)
         let plan: @MainActor () async throws -> SharedDigestSyncPlan = { [self] in
             .combined(digests: [combined("indexed")], shouldDownloadEpubs: false)
