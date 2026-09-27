@@ -1,6 +1,6 @@
 -- Synthetic SQLite fixture from ghostwriter-v1.1.0 (43ac1e1b7f3fd23c54c4176e6a1b4a2ca6b1f2fa).
 -- Created from the tagged SQLModel metadata; no production rows or credentials.
--- Includes all tagged model tables and six deterministic synthetic records.
+-- Includes all tagged model tables and seven deterministic synthetic records.
 BEGIN TRANSACTION;
 CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL);
 INSERT INTO "alembic_version" VALUES('021');
@@ -254,6 +254,7 @@ CREATE TABLE podcast_preferences (
 	PRIMARY KEY (id), 
 	FOREIGN KEY(user_id) REFERENCES users (id)
 );
+INSERT INTO "podcast_preferences" VALUES(NULL,0,'manual','08:00','monday','{}','[]','[]','[]',20,NULL,60,'formal','openai','tts-1',NULL,'eleven_turbo_v2_5',NULL,'mp3_44100_128','alloy','echo',2,0,'My Ghostwriter Digest','AI-generated audio digest of your RSS feeds',NULL,NULL,'','00000000000000000000000000000007','2026-06-07 12:00:00.000000','2026-06-07 12:00:00.000000');
 CREATE TABLE podcast_schedules (
 	user_id CHAR(32), 
 	name VARCHAR(100) NOT NULL, 
