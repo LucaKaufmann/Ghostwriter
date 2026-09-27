@@ -232,7 +232,8 @@ function GhostwriterSync.run(settings, progress_cb)
               and ownership_scope(server_url, download_dir) == scope then
             -- A content check is available after stamping; use it when the
             -- failure followed a slow settings write.
-            if not stamp or same_file(target_path, current, stamp) then
+            if (not stamp or stamp.hash == (dl_info and dl_info.hash))
+                and (not stamp or same_file(target_path, current, stamp)) then
               os.remove(target_path)
             end
           end
@@ -241,6 +242,7 @@ function GhostwriterSync.run(settings, progress_cb)
         local created = dl_info and dl_info.created
         if dl_ok and stamp and created
             and stamp.dev == created.dev and stamp.ino == created.ino
+            and stamp.hash == dl_info.hash
             and safe_directory(download_dir) == download_dir
             and ownership_scope(server_url, download_dir) == scope then
           local next_records = copy_records(records)

@@ -7,6 +7,7 @@ local http = require("socket.http")
 local url = require("socket.url")
 local lfs = require("libs/libkoreader-lfs")
 local ffi = require("ffi")
+local sha256 = require("ffi/sha2").sha256
 
 ffi.cdef([[
   int open(const char *path, int flags, ...);
@@ -181,6 +182,7 @@ function API.download_digest(server_url, token, filename, target_path, expected_
   local safe_filename = url.escape(filename)
   local req_url = join_url(server_url, "/api/digests/" .. safe_filename)
   local write_failed = false
+  local content_hash = sha256()
   local function sink(chunk)
     if not chunk then return 1 end
     local offset = 0
@@ -192,6 +194,7 @@ function API.download_digest(server_url, token, filename, target_path, expected_
       end
       offset = offset + written
     end
+    content_hash(chunk)
     return 1
   end
   local headers = { ["Accept"] = "application/epub+zip" }
@@ -224,7 +227,7 @@ function API.download_digest(server_url, token, filename, target_path, expected_
     local created = finalized_identity(tmp_identity)
     call("close", dirfd)
     if not created then return false, { kind = "unsafe_path" } end
-    return true, { path = target_path, created = created }
+    return true, { path = target_path, created = created, hash = content_hash() }
   end
   if rename_available and ffi.errno() == 17 then
     return finish_failure("collision", tmp_name)
@@ -234,7 +237,7 @@ function API.download_digest(server_url, token, filename, target_path, expected_
     call("unlinkat", dirfd, tmp_name, 0)
     call("close", dirfd)
     if not created then return false, { kind = "unsafe_path" } end
-    return true, { path = target_path, created = created }
+    return true, { path = target_path, created = created, hash = content_hash() }
   end
   if ffi.errno() == 17 then
     return finish_failure("collision", tmp_name)
@@ -283,7 +286,7 @@ function API.download_digest(server_url, token, filename, target_path, expected_
   local created = finalized_identity(target_identity)
   call("close", dirfd)
   if not created then return false, { kind = "unsafe_path" } end
-  return true, { path = target_path, created = created }
+  return true, { path = target_path, created = created, hash = content_hash() }
 end
 
 return API
