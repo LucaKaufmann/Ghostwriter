@@ -62,3 +62,61 @@ test('edit and bulk feed actions send each displayed version', async ({ page }) 
 	await expect.poll(() => writes.length).toBe(7);
 	expect(writes.slice(4).map((write) => write.version).sort()).toEqual(['"1"', '"2"', '"3"']);
 });
+
+for (const tombstone of [false, true]) {
+	test(`edit dialog exposes the ${tombstone ? 'restore' : 'retry'} choice and retains its proposal`, async ({ page }, testInfo) => {
+		await mockGhostwriterApi(page);
+		await setAuthenticatedSession(page);
+		const writes: { method: string; version: string; data: unknown }[] = [];
+		await page.route(/\/api\/feeds(?:\/feed-1)?$/, async (route) => {
+			if (route.request().method() === 'GET') return route.fallback();
+			writes.push({ method: route.request().method(), version: route.request().headers()['if-match'], data: route.request().postDataJSON() });
+			await route.fulfill({ status: writes.length === 1 ? 409 : 200, contentType: 'application/json', body: JSON.stringify(writes.length === 1 ? {
+				detail: { code: 'feed_conflict', current: { kind: tombstone ? 'tombstone' : 'feed', version: 4,
+					url: 'https://example.com/feed.xml', title: 'Server title', mode: 'raw', is_active: true, max_articles: 8 } }
+			} : { id: 'feed-1', version: 5 }) });
+		});
+		await page.goto('/sources/feeds');
+		await page.getByRole('row').filter({ hasText: 'Example Feed' }).getByRole('button').last().click();
+		await page.getByRole('menuitem', { name: 'Edit' }).click();
+		await page.locator('#edit-title').fill('My preserved proposal');
+		await page.getByRole('button', { name: 'Save Changes' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect(page.getByRole('alert')).toContainText(tombstone ? 'deleted' : 'Server title');
+		expect(writes).toHaveLength(1);
+		const action = page.getByRole('button', { name: tombstone ? 'Restore feed with my changes' : 'Retry with current server version' });
+		await expect(action).toBeVisible();
+		if (tombstone) await page.screenshot({ path: testInfo.outputPath('deleted-feed-restore.png'), fullPage: true });
+		await action.click();
+		await expect.poll(() => writes.length).toBe(2);
+		expect(writes[1].method).toBe(tombstone ? 'POST' : 'PUT');
+		expect(writes[1].version).toBe('"4"');
+		expect(writes[1].data).toMatchObject(writes[0].data as Record<string, unknown>);
+		expect(writes[1].data).toMatchObject({ title: 'My preserved proposal' });
+		if (tombstone) expect(writes[1].data).toMatchObject({ url: 'https://example.com/feed.xml' });
+	});
+}
+
+test('add dialog closes before offering explicit versioned restoration', async ({ page }) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	const writes: { version?: string; data: unknown }[] = [];
+	await page.route('**/api/feeds', async (route) => {
+		if (route.request().method() === 'GET') return route.fallback();
+		writes.push({ version: route.request().headers()['if-match'], data: route.request().postDataJSON() });
+		await route.fulfill({ status: writes.length === 1 ? 428 : 200, contentType: 'application/json', body: JSON.stringify(writes.length === 1
+			? { detail: { code: 'feed_version_required', current: { kind: 'tombstone', version: 9 } } }
+			: { id: 'restored', version: 10 }) });
+	});
+	await page.goto('/sources/feeds');
+	await page.getByRole('button', { name: 'Add Feed', exact: true }).first().click();
+	await page.locator('#url').fill('https://example.com/deleted.xml');
+	await page.locator('#title').fill('Restore proposal');
+	await page.getByRole('dialog').getByRole('button', { name: 'Add Feed', exact: true }).click();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	expect(writes).toHaveLength(1);
+	await page.getByRole('button', { name: 'Restore feed with my changes' }).click();
+	await expect.poll(() => writes.length).toBe(2);
+	expect(writes[1].version).toBe('"9"');
+	expect(writes[1].data).toEqual(writes[0].data);
+});

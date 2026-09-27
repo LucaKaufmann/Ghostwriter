@@ -29,8 +29,9 @@
 
 	const queryClient = useQueryClient();
 	let conflictMessage = $state('');
+	let conflictAction = $state('Retry with current server version');
 	let conflictRetry = $state<(() => void) | null>(null);
-	function offerConflict(err: Error, action: string, retry: (version: number) => void): boolean {
+	function offerConflict(err: Error, action: string, retry: (version: number) => void, restore?: (version: number) => void): boolean {
 		if (!(err instanceof ApiError) || (err.status !== 409 && err.status !== 428)) return false;
 		const detail = typeof err.error.detail === 'string' ? null : err.error.detail;
 		const version = detail?.current?.version;
@@ -40,9 +41,25 @@
 			? 'The server currently has this feed deleted.'
 			: `Server title: ${current?.title ?? 'unknown'}, mode: ${current?.mode ?? 'unknown'}, active: ${current?.is_active ? 'yes' : 'no'}, max articles: ${current?.max_articles ?? 'unknown'}.`;
 		conflictMessage = `This feed changed on the server (version ${version}). ${currentDescription} Review it before ${action}.`;
-		conflictRetry = () => retry(version);
+		const restoring = current?.kind === 'tombstone' && restore;
+		conflictAction = restoring ? 'Restore feed with my changes' : 'Retry with current server version';
+		conflictRetry = () => (restoring || retry)(version);
+		// The captured proposal survives closing its form; the page action must
+		// remain reachable outside the modal focus trap and overlay.
+		addDialogOpen = false;
+		editDialogOpen = false;
+		feedToDelete = null;
 		queryClient.invalidateQueries({ queryKey: ['feeds'] });
 		return true;
+	}
+
+	function offerEditConflict(err: Error, action: string, variables: { feed: Feed; data: FeedUpdate }, retry: (version: number) => void): boolean {
+		const { feed, data } = variables;
+		const proposed: FeedCreate = {
+			url: feed.url, title: data.title ?? feed.title, mode: data.mode ?? feed.mode,
+			is_active: data.is_active ?? feed.is_active, max_articles: data.max_articles ?? feed.max_articles
+		};
+		return offerConflict(err, action, retry, (version) => createFeedMutation.mutate({ data: proposed, version }));
 	}
 
 	// Queries
@@ -62,8 +79,11 @@
 			conflictRetry = null;
 		},
 		onError: (err: Error, variables) => {
-			if (err instanceof ApiError && err.status === 428 &&
-				offerConflict(err, 'restoring it', (version) => createFeedMutation.mutate({ ...variables, version }))) return;
+			const detail = err instanceof ApiError && typeof err.error.detail !== 'string' ? err.error.detail : null;
+			if (detail?.current?.kind === 'tombstone' &&
+				offerConflict(err, 'restoring it', (version) => createFeedMutation.mutate({ ...variables, version }),
+					(version) => createFeedMutation.mutate({ ...variables, version }))) return;
+			conflictRetry = null;
 			toast.error('Failed to create feed', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -96,7 +116,7 @@
 			conflictRetry = null;
 		},
 		onError: (err: Error, variables) => {
-			if (offerConflict(err, 'saving your edit', (version) => updateFeedMutation.mutate({ ...variables, feed: { ...variables.feed, version } }))) return;
+			if (offerEditConflict(err, 'saving your edit', variables, (version) => updateFeedMutation.mutate({ ...variables, feed: { ...variables.feed, version } }))) return;
 			toast.error('Failed to update feed', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -108,9 +128,10 @@
 		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success(variables.data.is_active ? 'Feed activated' : 'Feed paused');
+			conflictRetry = null;
 		},
 		onError: (err: Error, variables) => {
-			if (offerConflict(err, 'changing its status', (version) => toggleFeedMutation.mutate({ ...variables, feed: { ...variables.feed, version } }))) return;
+			if (offerEditConflict(err, 'changing its status', variables, (version) => toggleFeedMutation.mutate({ ...variables, feed: { ...variables.feed, version } }))) return;
 			toast.error('Failed to update feed status', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -334,7 +355,7 @@
 				const conflictIndex = results.findIndex((result) => result.status === 'rejected' && result.reason instanceof ApiError && result.reason.status === 409);
 				if (conflictIndex >= 0) {
 					const rejected = results[conflictIndex] as PromiseRejectedResult;
-					offerConflict(rejected.reason, 'changing its status', (version) => toggleFeedMutation.mutate({ feed: { ...selected[conflictIndex], version }, data: { is_active: isActive } }));
+					offerEditConflict(rejected.reason, 'changing its status', { feed: selected[conflictIndex], data: { is_active: isActive } }, (version) => toggleFeedMutation.mutate({ feed: { ...selected[conflictIndex], version }, data: { is_active: isActive } }));
 				}
 				toast.error(`${failureCount} feed update${failureCount === 1 ? '' : 's'} failed`);
 			}
@@ -379,7 +400,7 @@
 	{#if conflictRetry}
 		<div role="alert" class="rounded-lg border border-amber-500 p-4 space-y-2">
 			<p>{conflictMessage}</p>
-			<Button type="button" variant="outline" onclick={() => conflictRetry?.()}>Retry with current server version</Button>
+			<Button type="button" variant="outline" onclick={() => conflictRetry?.()}>{conflictAction}</Button>
 			<Button type="button" variant="ghost" onclick={() => (conflictRetry = null)}>Dismiss</Button>
 		</div>
 	{/if}
