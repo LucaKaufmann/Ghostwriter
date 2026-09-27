@@ -180,22 +180,19 @@ class BinderyPipeline:
     async def run(self) -> None:
         """Execute the full pipeline."""
         self.start_time = time.time()
-
-        # Pre-create synthetic feeds so feed_id is always available
-        self._ensure_synthetic_feeds()
-
-        # Get digest info for logging and current client config
-        digest_filename: str | None = None
-        min_word_count = 0
-        with Session(engine) as session:
-            digest = session.get(Digest, self.digest_id)
-            period = digest.period if digest else "manual"
-            digest_filename = digest.filename if digest else None
-            client_config = session.exec(select(ClientConfig)).first()
-            if client_config:
-                min_word_count = client_config.min_word_count
-
         try:
+            # These reads can fail too; keep them inside the persisted failure boundary.
+            self._ensure_synthetic_feeds()
+            digest_filename: str | None = None
+            min_word_count = 0
+            with Session(engine) as session:
+                digest = session.get(Digest, self.digest_id)
+                period = digest.period if digest else "manual"
+                digest_filename = digest.filename if digest else None
+                client_config = session.exec(select(ClientConfig)).first()
+                if client_config:
+                    min_word_count = client_config.min_word_count
+
             try:
                 await self._drain_source_acknowledgements(request_follow_up=False)
             except Exception:
@@ -346,7 +343,6 @@ class BinderyPipeline:
                                 )
                             )
                             wallabag_ids_by_guid[guid] = wb["id"]
-                            await _queue_seen(wb_feed_id, guid, wb["url"], wb["title"])
                 except Exception as e:
                     logger.warning(
                         f"Wallabag fetch failed, continuing with RSS only: {e!r}",
@@ -425,7 +421,6 @@ class BinderyPipeline:
                                 await _queue_seen(nl_feed_id, nl.guid, nl.url, nl.title)
                                 continue
                             newsletter_articles.append(nl)
-                            await _queue_seen(nl_feed_id, nl.guid, nl.url, nl.title)
                 except Exception as e:
                     logger.warning(f"Newsletter fetch failed, continuing without: {e}")
                     digest_logger.error(
@@ -606,13 +601,6 @@ class BinderyPipeline:
                         url=parsed_article.url,
                     )
 
-                    await _queue_seen(
-                        feed.id,
-                        parsed_article.guid,
-                        parsed_article.url,
-                        parsed_article.title,
-                    )
-
                     self._articles_enriched += 1
                     self._progress_dirty = True
                     await self._flush_progress_if_needed()
@@ -631,10 +619,7 @@ class BinderyPipeline:
             if wallabag_articles and wallabag_mode == "summarize":
                 await self._update_stage("enriching")
                 llm_sem = asyncio.Semaphore(3)
-                enriched_wallabag: list[ExtractedArticle] = []
-                wb_lock = asyncio.Lock()
-
-                async def _summarize_wb(article: ExtractedArticle) -> None:
+                async def _summarize_wb(article: ExtractedArticle) -> ExtractedArticle | None:
                     async with llm_sem:
                         summary_content, ai_failed = await self.llm_service.summarize(
                             article.content,
@@ -655,6 +640,10 @@ class BinderyPipeline:
                                         confidence=1.0,
                                     ),
                                 )
+                                await _queue_seen(
+                                    self._get_synthetic_feed_id("wallabag"),
+                                    article.guid, article.url, article.title,
+                                )
                                 return
                             result = ExtractedArticle(
                                 guid=article.guid,
@@ -672,23 +661,21 @@ class BinderyPipeline:
                             )
                         else:
                             result = article
-                    async with wb_lock:
-                        enriched_wallabag.append(result)
+                    return result
 
                 logger.info(
                     f"Summarizing {len(wallabag_articles)} Wallabag articles with concurrency=3"
                 )
-                await asyncio.gather(*[_summarize_wb(a) for a in wallabag_articles])
-                wallabag_articles = enriched_wallabag
+                enriched_wallabag = await asyncio.gather(
+                    *[_summarize_wb(a) for a in wallabag_articles]
+                )
+                wallabag_articles = [article for article in enriched_wallabag if article is not None]
 
             # Enrich newsletter articles with AI if configured (parallel)
             if newsletter_articles and newsletter_mode == "summarize":
                 await self._update_stage("enriching")
                 llm_sem = asyncio.Semaphore(3)
-                enriched_newsletters: list[ExtractedArticle] = []
-                nl_lock = asyncio.Lock()
-
-                async def _summarize_nl(article: ExtractedArticle) -> None:
+                async def _summarize_nl(article: ExtractedArticle) -> ExtractedArticle | None:
                     async with llm_sem:
                         summary_content, ai_failed = await self.llm_service.summarize(
                             article.content,
@@ -709,6 +696,10 @@ class BinderyPipeline:
                                         confidence=1.0,
                                     ),
                                 )
+                                await _queue_seen(
+                                    self._get_synthetic_feed_id("newsletter"),
+                                    article.guid, article.url, article.title,
+                                )
                                 return
                             result = ExtractedArticle(
                                 guid=article.guid,
@@ -726,14 +717,15 @@ class BinderyPipeline:
                             )
                         else:
                             result = article
-                    async with nl_lock:
-                        enriched_newsletters.append(result)
+                    return result
 
                 logger.info(
                     f"Summarizing {len(newsletter_articles)} newsletter articles with concurrency=3"
                 )
-                await asyncio.gather(*[_summarize_nl(a) for a in newsletter_articles])
-                newsletter_articles = enriched_newsletters
+                enriched_newsletters = await asyncio.gather(
+                    *[_summarize_nl(a) for a in newsletter_articles]
+                )
+                newsletter_articles = [article for article in enriched_newsletters if article is not None]
 
             # Pull completed media items for inclusion in digest
             media_articles: list[ExtractedArticle] = []
@@ -758,7 +750,7 @@ class BinderyPipeline:
                         .where(MediaItem.status == "completed")
                         .where(MediaItem.consumed_at.is_(None))
                         .where(MediaItem.content_type.in_(types_to_include))
-                        .order_by(MediaItem.created_at)
+                        .order_by(MediaItem.created_at, MediaItem.id)
                     ).all()
 
                     for item in completed_items:
@@ -783,6 +775,37 @@ class BinderyPipeline:
                         logger.info(
                             f"Including {len(media_articles)} completed media items in digest"
                         )
+
+            # RSS is first, then saved articles, newsletters, and completed media.
+            # Only selected items become seen/acknowledged/consumed at publication.
+            remaining = max(0, self.settings.max_articles_per_digest)
+            eligible_count = sum(map(len, (
+                extracted_articles, wallabag_articles, newsletter_articles, media_articles,
+            )))
+            extracted_articles = extracted_articles[:remaining]
+            remaining -= len(extracted_articles)
+            wallabag_articles = wallabag_articles[:remaining]
+            remaining -= len(wallabag_articles)
+            newsletter_articles = newsletter_articles[:remaining]
+            remaining -= len(newsletter_articles)
+            media_articles = media_articles[:remaining]
+            media_item_ids = media_item_ids[:len(media_articles)]
+            if eligible_count > self.settings.max_articles_per_digest:
+                digest_logger.info(
+                    f"Capped eligible articles from {eligible_count} to {self.settings.max_articles_per_digest}",
+                    component="pipeline", event="capped",
+                    context={"original": eligible_count, "capped": self.settings.max_articles_per_digest},
+                )
+            for feed, article in extracted_articles:
+                await _queue_seen(feed.id, article.guid, article.url, article.title)
+            if wallabag_articles:
+                wb_feed_id = self._get_synthetic_feed_id("wallabag")
+                for article in wallabag_articles:
+                    await _queue_seen(wb_feed_id, article.guid, article.url, article.title)
+            if newsletter_articles:
+                nl_feed_id = self._get_synthetic_feed_id("newsletter")
+                for article in newsletter_articles:
+                    await _queue_seen(nl_feed_id, article.guid, article.url, article.title)
 
             if (
                 not extracted_articles
