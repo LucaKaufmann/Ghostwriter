@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.config import Settings
+from app.services.outbound_fetch import FetchedResource
 from app.services.reader_service import fetch_html_document
 
 
@@ -47,7 +48,7 @@ async def test_fetch_html_document_blocks_private_redirect_target(monkeypatch):
             return _FakeStream()
 
     monkeypatch.setattr(
-        "app.services.reader_service.httpx.AsyncClient",
+        "app.services.outbound_fetch.httpx.AsyncClient",
         _FakeAsyncClient,
     )
 
@@ -58,3 +59,23 @@ async def test_fetch_html_document_blocks_private_redirect_target(monkeypatch):
         )
 
     assert requested_urls == ["http://93.184.216.34/article"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_html_document_decodes_response_charset(monkeypatch):
+    async def _fetch(_url, **kwargs):
+        assert kwargs["kind"] == "html"
+        return FetchedResource(
+            "https://example.com/final",
+            "text/html; charset=iso-8859-1",
+            "iso-8859-1",
+            b"<p>caf\xe9</p>",
+        )
+
+    monkeypatch.setattr("app.services.reader_service.fetch_resource", _fetch)
+    document = await fetch_html_document(
+        "https://example.com/start", settings=Settings(allow_private_hosts=True)
+    )
+    assert document.html == "<p>café</p>"
+    assert document.final_url == "https://example.com/final"
+    assert document.size_bytes == len(b"<p>caf\xe9</p>")
