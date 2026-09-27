@@ -24,4 +24,4 @@ Passed
 
 No live Wallabag, Gmail, podcast, YouTube, or LLM provider call was made. Later failure boundaries remain separate: EPUB creation, article persistence, media consumption, remote acknowledgement, and final completion are not one transaction. RECOVERY-01 will examine those boundaries; this PR claims only the pre-output retry boundary. No schema or public API change, merge, or deployment.
 
-Next action: root inspection and independent Sol review; after acceptance, publish the focused PR.
+Independent Sol review passed after two accepted test-evidence fixes: parse article chapter text/title from the EPUB, and exercise the real DB-backed Wallabag factory for both mode overrides. Focused35 tests passed again at be22a8f. Root combined backend suite with first-wave auth/environment changes passed276 tests (2 upstream warnings); no production code changed during review. Ready for PR; no merge/deployment.
