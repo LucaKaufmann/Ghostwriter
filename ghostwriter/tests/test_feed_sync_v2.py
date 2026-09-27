@@ -1,0 +1,230 @@
+"""Versioned feed sync, durable replay, and legacy safety fixtures."""
+
+import socket
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+from sqlmodel import Session, select
+
+from app.core.config import get_settings
+from app.core.database import engine
+from app.models.feed import Feed
+from app.models.feed_sync import FeedMutationReceipt
+from app.services.content_processor import ContentProcessor
+from app.services.outbound_fetch import FetchedResource
+from app.worker.cleanup import cleanup_old_tombstones
+
+
+@pytest.fixture
+def public_dns(monkeypatch, block_real_network):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, *a, **k: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port))
+    ])
+
+
+def url():
+    return f"https://example.com/{uuid4()}.xml"
+
+
+def create(client, value):
+    response = client.post("/api/feeds", json={"url": value, "title": "One", "mode": "raw",
+                                               "is_active": True, "max_articles": 5})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def binding(client):
+    response = client.get("/api/feeds/changes-v2")
+    assert response.status_code == 200
+    return response.json()
+
+
+def push(client, identity, items):
+    return client.post("/api/feeds/mutations-v2", json={"server_instance_id": identity,
+                                                       "mutations": items})
+
+
+def test_v2_cas_replay_tombstones(client, public_dns, monkeypatch):
+    value = url()
+    feed = create(client, value)
+    identity = binding(client)["server_instance_id"]
+    web = client.put(f"/api/feeds/{feed['id']}", json={"title": "Web"},
+                     headers={"If-Match": f'"{feed["version"]}"'})
+    assert web.status_code == 200, web.text
+    stale = {"op_id": str(uuid4()), "url": value, "kind": "upsert",
+             "base_version": feed["version"], "fields": {"title": "Stale"}}
+    fresh_url = url()
+    good = {"op_id": str(uuid4()), "url": fresh_url, "kind": "upsert",
+            "base_version": None, "fields": {"title": "New", "is_active": True,
+                                              "mode": "raw", "max_articles": 0}}
+    response = push(client, identity, [stale, good])
+    assert response.status_code == 200, response.text
+    conflict, applied = response.json()["results"]
+    assert conflict["status"] == "conflict" and conflict["current"]["title"] == "Web"
+    assert applied["status"] == "applied" and applied["current"]["max_articles"] == 0
+    async def no_dns(_url):
+        raise AssertionError("receipt replay must not resolve DNS")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr("app.services.feed_sync.validate_public_url_bounded", no_dns)
+        assert push(client, identity, [good]).json()["results"][0] == applied
+    altered = {**good, "fields": {**good["fields"], "title": "Changed"}}
+    assert push(client, identity, [altered]).json()["results"][0]["code"] == "op_id_reused"
+    delete = {"op_id": str(uuid4()), "url": fresh_url, "kind": "delete",
+              "base_version": applied["current"]["version"]}
+    tombstone = push(client, identity, [delete]).json()["results"][0]
+    assert tombstone["current"]["kind"] == "tombstone"
+    assert push(client, identity, [delete]).json()["results"][0] == tombstone
+    duplicate_delete = {**delete, "op_id": str(uuid4()),
+                        "base_version": tombstone["current"]["version"]}
+    acknowledged = push(client, identity, [duplicate_delete]).json()["results"][0]
+    assert acknowledged["status"] == "applied"
+    assert acknowledged["current"]["version"] == tombstone["current"]["version"]
+    stale_delete = {**delete, "op_id": str(uuid4())}
+    assert push(client, identity, [stale_delete]).json()["results"][0]["status"] == "conflict"
+    changes = client.get("/api/feeds/changes-v2", params={"since_version": feed["version"],
+                                                       "server_instance_id": identity}).json()
+    assert changes["changes"][-1] == tombstone["current"]
+    with Session(engine) as session:
+        assert session.exec(select(FeedMutationReceipt).where(
+            FeedMutationReceipt.op_id == good["op_id"])).first()
+
+
+def test_legacy_guards_and_restore(client, public_dns):
+    value = url()
+    feed = create(client, value)
+    assert client.post("/api/feeds/sync", json=[{"url": value, "title": "One", "mode": "raw",
+                                                  "is_active": True, "max_articles": 5}]).status_code == 200
+    assert client.post("/api/feeds/sync", json=[{"url": value, "title": "Changed"}]).status_code == 409
+    assert client.put(f"/api/feeds/{feed['id']}", json={"title": "Changed"}).status_code == 428
+    assert client.delete(f"/api/feeds/{feed['id']}").status_code == 428
+    deleted = client.delete(f"/api/feeds/{feed['id']}",
+                            headers={"If-Match": f'"{feed["version"]}"'})
+    assert deleted.status_code == 200
+    tombstone = next(row for row in binding(client)["changes"] if row["url"] == value)
+    assert tombstone["kind"] == "tombstone"
+    body = {"url": value, "title": "Restored", "mode": "raw", "max_articles": 0}
+    response = client.post("/api/feeds", json=body)
+    assert response.status_code == 428
+    assert response.json()["detail"]["current"] == tombstone
+    restored = client.post("/api/feeds", json=body,
+                           headers={"If-Match": f'"{tombstone["version"]}"'})
+    assert restored.status_code == 200
+    assert restored.json()["id"] == feed["id"]
+
+
+def test_envelope_and_item_validation(client, public_dns):
+    identity = binding(client)["server_instance_id"]
+    item = {"op_id": str(uuid4()), "url": url(), "kind": "upsert", "base_version": None,
+            "fields": {"title": "New", "is_active": True, "mode": "raw", "max_articles": 5}}
+    assert push(client, str(uuid4()), [item]).status_code == 409
+    assert push(client, identity, [item, item]).status_code == 422
+    assert push(client, identity, [item] * 101).status_code == 422
+    assert push(client, identity, [{**item, "op_id": "bad"}]).status_code == 422
+    assert client.post("/api/feeds/mutations-v2", json={"server_instance_id": identity}).status_code == 422
+    assert client.post("/api/feeds/mutations-v2", json={"server_instance_id": identity,
+                                                      "mutations": {}}).status_code == 422
+    bad = {**item, "op_id": str(uuid4()), "fields": {**item["fields"], "max_articles": -1}}
+    assert push(client, identity, [bad]).json()["results"][0]["code"] == "invalid_fields"
+    unknown = {**item, "op_id": str(uuid4()), "unexpected": "field"}
+    assert push(client, identity, [unknown]).json()["results"][0]["code"] == "invalid_fields"
+    fractional = {**item, "op_id": str(uuid4()), "base_version": 1.5}
+    assert push(client, identity, [fractional]).json()["results"][0]["code"] == "invalid_fields"
+    assert push(client, identity, [item]).json()["results"][0]["status"] == "applied"
+
+
+def test_legacy_zero_to_ten_mapping_cannot_overwrite(client, public_dns):
+    value = url()
+    feed = create(client, value)
+    changed = client.put(f"/api/feeds/{feed['id']}", json={"max_articles": 0},
+                         headers={"If-Match": f'"{feed["version"]}"'})
+    assert changed.status_code == 200
+    payload = {"url": value, "title": "One", "mode": "raw",
+               "is_active": True, "max_articles": 10}
+    assert client.post("/api/feeds/sync", json=[payload]).status_code == 409
+    assert client.get(f"/api/feeds/{feed['id']}").json()["max_articles"] == 0
+
+
+def test_synthetic_rows_stay_internal_and_unversioned(client, public_dns):
+    synthetic = f"synthetic://test-{uuid4()}"
+    with Session(engine) as session:
+        session.add(Feed(url=synthetic, title="Internal", is_active=True, mode="raw"))
+        session.commit()
+    assert all(row["url"] != synthetic for row in binding(client)["changes"])
+    assert all(row["url"] != synthetic for row in client.get("/api/feeds").json())
+    assert all(row["url"] != synthetic for row in client.get("/api/feeds/changes").json()["feeds"])
+    identity = binding(client)["server_instance_id"]
+    item = {"op_id": str(uuid4()), "url": synthetic, "kind": "delete", "base_version": 0}
+    assert push(client, identity, [item]).json()["results"][0]["code"] == "invalid_url"
+    with Session(engine) as session:
+        assert session.exec(select(Feed).where(Feed.url == synthetic)).one().version == 0
+
+
+@pytest.mark.asyncio
+async def test_tombstones_survive_cleanup(client, public_dns):
+    value = url()
+    feed = create(client, value)
+    client.delete(f"/api/feeds/{feed['id']}", headers={"If-Match": f'"{feed["version"]}"'})
+    assert await cleanup_old_tombstones() == 0
+    with Session(engine) as session:
+        assert session.exec(select(Feed).where(Feed.url == value)).first().deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_synced_zero_limit_reaches_all_feed_entries(client, public_dns, monkeypatch):
+    identity = binding(client)["server_instance_id"]
+    value = url()
+    op = {"op_id": str(uuid4()), "url": value, "kind": "upsert", "base_version": None,
+          "fields": {"title": "Unlimited", "is_active": True,
+                     "mode": "raw", "max_articles": 0}}
+    assert push(client, identity, [op]).json()["results"][0]["status"] == "applied"
+    with Session(engine) as session:
+        feed = session.exec(select(Feed).where(Feed.url == value)).one()
+        limit = feed.max_articles
+    entries = [{"id": str(i), "link": f"https://example.com/article-{i}",
+                "title": f"Article {i}"} for i in range(3)]
+    monkeypatch.setattr("feedparser.parse", lambda *a, **k: SimpleNamespace(bozo=False, entries=entries))
+
+    async def fetch(url, **kwargs):
+        return FetchedResource(url, "application/rss+xml", "utf-8", b"<rss/>")
+
+    monkeypatch.setattr("app.services.content_processor.fetch_resource", fetch)
+    articles = await ContentProcessor().parse_feed(value, max_entries=limit)
+    assert [article.url for article in articles] == [entry["link"] for entry in entries]
+
+
+def test_gated_dns_does_not_hold_writer_lock_or_leave_receipt(client, monkeypatch):
+    identity = binding(client)["server_instance_id"]
+    started = threading.Event()
+    release = threading.Event()
+
+    def resolve(host, port, *args, **kwargs):
+        if host == "slow.example.com":
+            started.set()
+            assert release.wait(5)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    settings = get_settings().model_copy(update={"fetch_timeout_seconds": 1.5})
+    monkeypatch.setattr("app.services.outbound_fetch.get_settings", lambda: settings)
+    slow = {"op_id": str(uuid4()), "url": "https://slow.example.com/rss", "kind": "upsert",
+            "base_version": None,
+            "fields": {"title": "Slow", "is_active": True, "mode": "raw", "max_articles": 5}}
+    fast = {**slow, "op_id": str(uuid4()), "url": "https://fast.example.com/rss"}
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            slow_future = pool.submit(push, client, identity, [slow])
+            assert started.wait(2)
+            fast_future = pool.submit(push, client, identity, [fast])
+            assert fast_future.result(timeout=1).json()["results"][0]["status"] == "applied"
+            assert client.get("/api/health").status_code == 200
+            assert not slow_future.done()
+            assert slow_future.result(timeout=3).status_code == 503
+    finally:
+        release.set()
+    with Session(engine) as session:
+        assert session.get(FeedMutationReceipt, slow["op_id"]) is None
+        assert session.exec(select(Feed).where(Feed.url == slow["url"])).first() is None

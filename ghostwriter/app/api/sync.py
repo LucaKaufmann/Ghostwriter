@@ -10,6 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from app.api.config import ConfigResponse, _config_to_response, get_or_create_config
@@ -123,7 +124,10 @@ async def combined_sync(
 
     if feed_since is None:
         # Initial sync: return all active feeds
-        feeds_statement = select(Feed).where(Feed.deleted_at == None).order_by(Feed.title)  # noqa: E711
+        feeds_statement = select(Feed).where(
+            Feed.deleted_at == None,  # noqa: E711
+            func.substr(Feed.url, 1, 12) != "synthetic://",
+        ).order_by(Feed.title)
         feeds = list(session.exec(feeds_statement).all())
         feeds_response = FeedChangesResponse(
             feeds=feeds,
@@ -135,12 +139,14 @@ async def combined_sync(
         feeds_statement = select(Feed).where(
             Feed.updated_at > feed_since,
             Feed.deleted_at == None,  # noqa: E711
+            func.substr(Feed.url, 1, 12) != "synthetic://",
         ).order_by(Feed.title)
         feeds = list(session.exec(feeds_statement).all())
 
         tombstones_statement = select(Feed).where(
             Feed.deleted_at != None,  # noqa: E711
             Feed.deleted_at > feed_since,
+            func.substr(Feed.url, 1, 12) != "synthetic://",
         )
         tombstoned_feeds = session.exec(tombstones_statement).all()
         tombstones = [
