@@ -15,3 +15,7 @@ Verification (Python 3.11.16; hermetic ENV-01 venv, no provider/network access):
 - `git diff --check`: passed.
 
 Synthetic tests cover manual/scheduled reference blocks across episode states and article-only references, private one-off retry, ownership boundaries, empty/missing files, failed/processing eligibility, permission and final-transaction failures with retry, exact-path collisions and symlinks, unknown-file 404, queue/PDF/download concurrency, feedback, and retained cover/audio/media content. No real provider generation, deployment, or multiprocess deployment smoke was run. Root's independent review and PR publication remain.
+
+## Review follow-up: resumable downloads
+
+Independent review caught that the first pre-opened `StreamingResponse` lost Starlette `FileResponse` byte ranges and `Content-Length`. The follow-up keeps Starlette's response metadata, range parsing, `If-Range`, and 206/416 behavior while reading all response bodies from the already-opened file descriptor. It never uses the ASGI path-send shortcut or reopens the path after deletion. Focused API tests cover ID and filename EPUB ranges (single, suffix, open-ended, multipart, invalid, and `If-Range`), PDF ranges, and full/ranged handles consumed after unlink. Verification: focused 25 passed; full backend 275 passed; changed-test Ruff and import-sort checks passed; no provider/network access.
