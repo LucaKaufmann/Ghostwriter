@@ -40,7 +40,7 @@ All PRs: `git diff --check`, focused behavior/failure tests, inspected final dif
 
 ## Package ledger
 
-Execution has started. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`. First wave completed as PR74 (HELPER), PR75 (ENV), PR76 (AUTH). KO-01, INGEST-01, WEB-01 and BUILD-NATIVE are active; remaining rows are pending. Result path convention: `docs/work-packages/results/ID.md` in the package branch.
+Execution is active. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`. PRs74–94 cover accepted foundation, backend and integration fixes; server sync and journey verification are active. Remaining native sync/delivery and recovery implementation stay dependency-gated. Result path convention: `docs/work-packages/results/ID.md` in the package branch.
 
 | ID | Priority/type | Outcome | Start condition |
 |---|---|---|---|
