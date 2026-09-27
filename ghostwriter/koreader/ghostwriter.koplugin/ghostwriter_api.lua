@@ -5,6 +5,7 @@ local socket = require("socket")
 local socketutil = require("socketutil")
 local http = require("socket.http")
 local url = require("socket.url")
+local lfs = require("libs/libkoreader-lfs")
 
 local API = {}
 
@@ -97,6 +98,11 @@ function API.get_new_digests(server_url, token, last_known_id)
 end
 
 function API.download_digest(server_url, token, filename, target_path)
+  if type(filename) ~= "string" or not filename:match("%.epub$")
+      or filename:find("[/\\%c]") or lfs.symlinkattributes(target_path)
+      or lfs.symlinkattributes(target_path .. ".part") then
+    return false, { kind = "unsafe_path" }
+  end
   local safe_filename = url.escape(filename)
   local req_url = join_url(server_url, "/api/digests/" .. safe_filename)
 
@@ -130,6 +136,10 @@ function API.download_digest(server_url, token, filename, target_path)
   end
 
   if code >= 200 and code < 300 then
+    if lfs.symlinkattributes(target_path) then
+      os.remove(tmp_path)
+      return false, { kind = "collision" }
+    end
     local renamed, rename_err = os.rename(tmp_path, target_path)
     if not renamed then
       os.remove(tmp_path)

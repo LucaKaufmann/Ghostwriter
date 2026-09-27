@@ -99,7 +99,8 @@ function ghostwriter:addToMainMenu(menu_items)
 end
 
 function ghostwriter:editConnectionSettings()
-  local dialog = MultiInputDialog:new({
+  local dialog
+  dialog = MultiInputDialog:new({
     title = _("Ghostwriter connection"),
     fields = {
       {
@@ -126,10 +127,12 @@ function ghostwriter:editConnectionSettings()
           text = _("Save"),
           callback = function()
             local values = dialog:getFields()
-            self.settings:setServerURL(values[1])
-            self.settings:setApiToken(values[2])
-            UIManager:close(dialog)
-            UIManager:show(InfoMessage:new({ text = _("Connection saved"), timeout = 2 }))
+            if self.settings:setConnection(values[1], values[2]) then
+              UIManager:close(dialog)
+              UIManager:show(InfoMessage:new({ text = _("Connection saved"), timeout = 2 }))
+            else
+              UIManager:show(InfoMessage:new({ text = _("Could not save connection"), timeout = 3 }))
+            end
           end,
         },
       },
