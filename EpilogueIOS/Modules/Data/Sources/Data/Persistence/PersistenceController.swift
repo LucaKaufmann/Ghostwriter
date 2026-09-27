@@ -63,7 +63,7 @@ public final class PersistenceController {
     /// Initialize the persistence controller
     /// - Parameter inMemory: If true, uses an in-memory store for testing
     private init(inMemory: Bool = false) {
-        let schema = Schema(versionedSchema: EpilogueSchemaV2.self)
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
 
         let modelConfiguration: ModelConfiguration
         if inMemory {

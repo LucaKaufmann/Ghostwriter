@@ -10,6 +10,25 @@ import XCTest
 @testable import GhostwriterClient
 
 final class GhostwriterClientTests: XCTestCase {
+
+    func testArticleIdentityBridgeUsesSharedGoldenVectors() {
+        let vectors = [
+            ("HTTPS://EXAMPLE.COM:443#section", "https://example.com/",
+             "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7"),
+            ("HTTP://Example.Com:80/Case/%2f%2F?a=1&a=2&z=%7e&b=%2B#f",
+             "http://example.com/Case/%2f%2F?a=1&a=2&z=%7e&b=%2B",
+             "8da1383570b252ff2b08f0df3947f9ff030aeeb5a441fd5a45f9ab39e9e111f2"),
+            ("https://[2001:DB8::1]:443/A?x=1", "https://[2001:db8::1]/A?x=1",
+             "4d2e7bf3be0c55e0fae50d35dac69a4f378d65e3f7a7cc26c5723bbb22953a77")
+        ]
+        for (input, normalized, key) in vectors {
+            let value = ArticleDeliveryIdentityBridge.identify(input)
+            XCTAssertEqual(value?.normalizedURL, normalized)
+            XCTAssertEqual(value?.articleKey, key)
+        }
+        XCTAssertNil(ArticleDeliveryIdentityBridge.identify("https://user@example.com/a"))
+        XCTAssertNil(ArticleDeliveryIdentityBridge.identify("/relative"))
+    }
     
     // MARK: - Model Encoding Tests
     

@@ -38,7 +38,14 @@ struct EpilogueApp: App {
         let fixtureRequested = launchOptions.isEnabled &&
             ProcessInfo.processInfo.arguments.contains("-ui-testing") &&
             ProcessInfo.processInfo.arguments.contains("-feed-v2-ui-fixture")
-        let persistence = fixtureRequested ? PersistenceController.preview : PersistenceController.shared
+        let deliveryFixtureOutcome = ["complete", "partial", "empty", "deferred", "failed"]
+            .first { ProcessInfo.processInfo.arguments.contains("-delivery-ui-\($0)") }
+            .flatMap(LocalGenerationOutcome.init(rawValue:))
+        let deliveryFixtureRequested = launchOptions.isEnabled &&
+            ProcessInfo.processInfo.arguments.contains("-ui-testing") &&
+            deliveryFixtureOutcome != nil
+        let persistence = (fixtureRequested || deliveryFixtureRequested) ?
+            PersistenceController.preview : PersistenceController.shared
         #else
         let persistence = PersistenceController.shared
         #endif
@@ -49,6 +56,9 @@ struct EpilogueApp: App {
         #if DEBUG
         if fixtureRequested {
             FeedV2TestHarness.seedUIFixture(context: context)
+        }
+        if deliveryFixtureRequested, let deliveryFixtureOutcome {
+            DeliveryUIFixture.seed(context: context, outcome: deliveryFixtureOutcome)
         }
         #endif
 
@@ -74,7 +84,8 @@ struct EpilogueApp: App {
         let localDigest = LocalDigestService(
             feedRepository: feeds,
             digestRepository: digests,
-            settingsRepository: settings
+            settingsRepository: settings,
+            modelContainer: persistence.container
         )
         _localDigestService = StateObject(wrappedValue: localDigest)
 
@@ -90,7 +101,8 @@ struct EpilogueApp: App {
             let scheduler = LocalDigestScheduler(
                 feedRepository: feeds,
                 digestRepository: digests,
-                settingsRepository: settings
+                settingsRepository: settings,
+                modelContainer: persistence.container
             )
             scheduler.registerBackgroundTasks()
             _localDigestScheduler = State(initialValue: scheduler)

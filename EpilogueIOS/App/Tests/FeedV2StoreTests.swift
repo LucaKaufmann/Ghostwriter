@@ -14,7 +14,7 @@ final class FeedV2StoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // SwiftData may retain the SQLite handle past XCTest teardown. Removing
         // the live file triggered SQLite's vnode-unlinked integrity warning.
-        let schema = Schema(versionedSchema: EpilogueSchemaV2.self)
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
         let configuration = ModelConfiguration(schema: schema,
                                                 url: directory.appendingPathComponent("Epilogue.sqlite"))
         return try ModelContainer(for: schema, migrationPlan: EpilogueMigrationPlan.self,
