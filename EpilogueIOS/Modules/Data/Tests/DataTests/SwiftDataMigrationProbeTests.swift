@@ -3,15 +3,8 @@ import SwiftData
 import Testing
 import Domain
 
-// Temporary feasibility probe. The V1 schema deliberately uses the shipping
-// Domain classes so the first container writes the exact current unversioned store.
-private enum ProbeV1: VersionedSchema {
-    static var versionIdentifier = Schema.Version(1, 0, 0)
-    static var models: [any PersistentModel.Type] {
-        [Feed.self, Digest.self, DigestArticle.self]
-    }
-}
-
+// The old store is written with the shipping Domain classes below. Its V1
+// migration schema is a separate frozen copy in CapturedSwiftDataV1.swift.
 private enum ProbeV2: VersionedSchema {
     static var versionIdentifier = Schema.Version(2, 0, 0)
     static var models: [any PersistentModel.Type] {
@@ -60,9 +53,9 @@ private enum ProbeV2: VersionedSchema {
 }
 
 private enum ProbePlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [ProbeV1.self, ProbeV2.self] }
+    static var schemas: [any VersionedSchema.Type] { [CapturedSwiftDataV1.self, ProbeV2.self] }
     static var stages: [MigrationStage] {
-        [.custom(fromVersion: ProbeV1.self, toVersion: ProbeV2.self,
+        [.custom(fromVersion: CapturedSwiftDataV1.self, toVersion: ProbeV2.self,
                  willMigrate: nil, didMigrate: { context in
             let feeds = try context.fetch(FetchDescriptor<ProbeV2.Feed>())
             for feed in feeds {
@@ -79,7 +72,71 @@ private enum ProbePlan: SchemaMigrationPlan {
 @Suite("SwiftData unversioned store migration probe")
 @MainActor
 struct SwiftDataMigrationProbeTests {
-    @Test("Shipping unversioned store opens as captured V1 then additive V2 and reopens")
+    @Test("Frozen V1 independently writes a legacy unversioned store that V2 can migrate")
+    func testCapturedLegacyStoreUpgrade() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("epilogue-captured-v1-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Epilogue.sqlite")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let digestID = UUID()
+        let articleID = UUID()
+
+        do {
+            // No Domain @Model participates in this independent legacy fixture.
+            let schema = Schema([CapturedSwiftDataV1.Feed.self,
+                                 CapturedSwiftDataV1.Digest.self,
+                                 CapturedSwiftDataV1.DigestArticle.self])
+            let config = ModelConfiguration(schema: schema, url: url)
+            let container = try ModelContainer(for: schema, configurations: [config])
+            let context = ModelContext(container)
+            context.insert(CapturedSwiftDataV1.Feed(
+                url: "https://example.test/legacy", name: "Legacy proposal",
+                mode: .fidelity, lastFetched: 73, maxArticles: 0,
+                isEnabled: false, locallyModified: false))
+            let digest = CapturedSwiftDataV1.Digest(
+                id: digestID, epubFilePath: "/tmp/captured-v1.epub",
+                articleCount: 1, briefingCount: 1, triggerType: .manual,
+                isComplete: true)
+            let article = CapturedSwiftDataV1.DigestArticle(
+                id: articleID, digest: digest, title: "Legacy article",
+                content: "Body", originalUrl: "https://example.test/article",
+                feedUrl: "https://example.test/legacy", feedName: "Legacy proposal",
+                contentType: .briefing)
+            context.insert(digest)
+            context.insert(article)
+            try context.save()
+        }
+        #expect(FileManager.default.fileExists(atPath: url.path))
+
+        func verify() throws {
+            let schema = Schema(versionedSchema: ProbeV2.self)
+            let config = ModelConfiguration(schema: schema, url: url)
+            let container = try ModelContainer(for: schema,
+                                               migrationPlan: ProbePlan.self,
+                                               configurations: [config])
+            let context = ModelContext(container)
+            let feed = try #require(context.fetch(FetchDescriptor<ProbeV2.Feed>()).first)
+            #expect(feed.url == "https://example.test/legacy")
+            #expect(feed.name == "Legacy proposal")
+            #expect(feed.mode == .fidelity)
+            #expect(feed.maxArticles == 0)
+            #expect(feed.isEnabled == false)
+            #expect(feed.locallyModified == false)
+            #expect(feed.proposalName == "Legacy proposal")
+            #expect(feed.proposalMode == .fidelity)
+            #expect(feed.proposalMaxArticles == 0)
+            #expect(feed.proposalIsEnabled == false)
+            let digest = try #require(context.fetch(FetchDescriptor<Digest>()).first)
+            #expect(digest.id == digestID)
+            #expect(digest.articles.first?.id == articleID)
+            #expect(digest.articles.first?.digest?.id == digestID)
+        }
+        try verify()
+        try verify()
+    }
+
+    @Test("Shipping unversioned store migrates through independent captured V1 and reopens V2")
     func testShippingStoreUpgrade() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("epilogue-swiftdata-probe-\(UUID().uuidString)", isDirectory: true)
