@@ -34,9 +34,12 @@ This is a KOReader plugin scaffold for syncing Ghostwriter digest EPUB files.
   rename that collision manually before retrying. Existing installations may
   need to resolve such collisions once because older downloads were not
   recorded as plugin-owned.
-- Host regression checks: `lua ghostwriter/koreader/tests/run.lua` from the
+- Downloads use a uniquely named `.part.*` file and require filesystem hard
+  links for collision-safe finalization. A folder on a filesystem without hard
+  link support will report a failed download and preserve existing books.
+- Host regression checks: `luajit ghostwriter/koreader/tests/run.lua` from the
   repository root. The harness uses temporary files under `/private/tmp` and
-  mocks the KOReader UI and Ghostwriter network calls; it requires host Lua
-  and macOS `stat`.
+  mocks the KOReader UI and Ghostwriter network calls; it requires LuaJIT and
+  macOS `stat`.
 - This is an MVP starter and should be validated on real KOReader hardware.
 - Network/TLS behavior varies by device firmware; test against your deployment.
