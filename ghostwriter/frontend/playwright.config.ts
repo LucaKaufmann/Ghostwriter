@@ -2,6 +2,8 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
 	testDir: './tests/e2e',
+	// Live backend integration has its own dependency-provisioned workflow/config.
+	testIgnore: '**/reading-listening.spec.ts',
 	timeout: 60_000,
 	expect: {
 		timeout: 10_000
