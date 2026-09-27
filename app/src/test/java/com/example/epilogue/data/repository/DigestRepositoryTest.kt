@@ -2,6 +2,7 @@ package com.example.epilogue.data.repository
 
 import androidx.room.Room
 import com.example.epilogue.data.local.DigestEntity
+import com.example.epilogue.data.local.ArticleDeliveryEntity
 import com.example.epilogue.data.local.EpilogueDatabase
 import com.example.epilogue.domain.model.ProcessedArticle
 import com.example.epilogue.domain.model.TriggerType
@@ -9,7 +10,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Before
@@ -23,6 +27,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
@@ -47,6 +53,84 @@ class DigestRepositoryTest {
             feedNames = "Fixture", remoteId = remoteId
         )
         return entity.copy(id = database.digestDao().insertDigest(entity))
+    }
+
+    @Test fun `reset clears captured history and preserves a later edition`() = runBlocking {
+        val oldFile = files.newFile("reset-old.epub")
+        val old = record(oldFile)
+        database.articleDeliveryDao().put(ArticleDeliveryEntity("https://example.test/feed",
+            "article-1", "delivered", firstDigestId = old.id))
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val deleting = async(Dispatchers.IO) {
+            database.digestDao().deleteAllWithArtifacts { path ->
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                File(path).delete()
+            }
+        }
+        assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+        val writerStarted = CountDownLatch(1)
+        val lateFile = files.newFile("reset-late.epub")
+        val inserting = async(Dispatchers.IO) {
+            writerStarted.countDown()
+            record(lateFile, generatedAt = 2)
+        }
+        assertTrue(withContext(Dispatchers.IO) { writerStarted.await(5, TimeUnit.SECONDS) })
+        delay(100)
+        assertFalse(inserting.isCompleted)
+        release.countDown()
+        assertTrue(deleting.await())
+        val late = inserting.await()
+        assertNull(repository.getDigestById(old.id))
+        assertNotNull(repository.getDigestById(late.id))
+        assertEquals("delivered", database.articleDeliveryDao()
+            .get("https://example.test/feed", "article-1")?.state)
+        assertFalse(oldFile.exists())
+    }
+
+    @Test fun `later reset failure cannot restore rows for already deleted files`() = runBlocking {
+        val firstFile = files.newFile("first-reset.epub")
+        val secondFile = files.newFile("second-reset.epub")
+        val first = record(firstFile)
+        val second = record(secondFile)
+        var calls = 0
+        val failure = runCatching {
+            database.digestDao().deleteAllWithArtifacts { path ->
+                if (++calls == 2) throw IOException("later unlink failure")
+                File(path).delete()
+            }
+        }.exceptionOrNull()
+        assertTrue(failure is IOException)
+        assertNull(repository.getDigestById(first.id))
+        assertFalse(firstFile.exists())
+        assertNotNull(repository.getDigestById(second.id))
+        assertTrue(secondFile.exists())
+    }
+
+    @Test fun `cancel during reset commits its finished deletion before stopping`() = runBlocking {
+        val firstFile = files.newFile("first-cancel.epub")
+        val secondFile = files.newFile("second-cancel.epub")
+        val first = record(firstFile)
+        val second = record(secondFile)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val deleting = async(Dispatchers.IO) {
+            database.digestDao().deleteAllWithArtifacts { path ->
+                File(path).delete().also {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+            }
+        }
+        assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+        deleting.cancel()
+        release.countDown()
+        deleting.join()
+        assertNull(repository.getDigestById(first.id))
+        assertFalse(firstFile.exists())
+        assertNotNull(repository.getDigestById(second.id))
+        assertTrue(secondFile.exists())
     }
 
     @Test fun `legacy shared path remains until final reference is deleted`() = runBlocking {
