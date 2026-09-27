@@ -133,6 +133,13 @@ class YouTubeService:
                 _, stderr = await asyncio.wait_for(
                     process.communicate(), timeout=120
                 )
+            except asyncio.CancelledError:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.communicate()
+                raise
             except asyncio.TimeoutError:
                 process.kill()
                 await process.communicate()

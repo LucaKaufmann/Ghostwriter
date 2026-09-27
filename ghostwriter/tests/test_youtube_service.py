@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -100,3 +101,29 @@ async def test_get_transcript_invalid_url(service):
     result = await service.get_transcript("https://example.com")
     assert result.error is not None
     assert "Could not extract video ID" in result.error
+
+
+@pytest.mark.asyncio
+async def test_cancelled_audio_download_reaps_ytdlp_before_returning(service):
+    entered = asyncio.Event()
+    events = []
+
+    async def communicate():
+        if not events:
+            entered.set()
+            await asyncio.Event().wait()
+        events.append("reaped")
+        return b"", b""
+
+    process = MagicMock()
+    process.communicate = communicate
+    process.kill.side_effect = lambda: events.append("killed")
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)):
+        task = asyncio.create_task(service._transcribe_audio(
+            "https://youtube.com/watch?v=fixture", "local", "base.en"
+        ))
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert events == ["killed", "reaped"]
