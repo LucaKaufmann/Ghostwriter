@@ -12,3 +12,5 @@ Verification from `ghostwriter/`, using the read-only ENV-01 venv:
 Review correction: the original fixture replaced `_complete` before its transaction, so it missed both rollback inside the actual commit and an exception after commit. The revised fixture exposes the second case's failed status with nonzero article count and committed seen rows. The original remote mock also treated every thrown error as no effect; the revised test shows both outcomes and the decision note labels real remote outcome unknown.
 
 Limits: restart is lifespan recovery against a temporary DB, not a killed process; remotes and EPUB bytes are synthetic, so this proves ordering/durability behavior rather than provider or reader compatibility. A full backend suite is the orchestrator's integrated check. No PR was created pending independent root review.
+
+Final independent Sol review of corrected real-transaction fault injection and unknown remote outcomes returned no actionable findings. This PR is evidence/design; the atomic-publication and durable-ack implementation remains a separate centrally allocated follow-up.
