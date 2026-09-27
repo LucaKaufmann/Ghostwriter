@@ -552,16 +552,27 @@ final class IOSFeedV2StoreEngine {
                 throw StoreError.invalidEdit
             }
             let value = try state(context)
-            target.isLocallyDeleted = true
-            target.locallyModified = true
-            target.mutationRevision = (target.mutationRevision ?? 0) + 1
             let scopeKey = value.destinationURL.flatMap { url in
                 value.configurationId.map { url + "\n" + $0 }
             } ?? "__unbound__"
-            context.insert(FeedMutation(url: url, scopeKey: scopeKey, kind: "delete",
+            let scoped = try mutations(context).filter {
+                $0.url == url && $0.scopeKey == scopeKey
+            }
+            let deletion = FeedMutation(url: url, scopeKey: scopeKey, kind: "delete",
                                         baseVersion: target.serverVersion,
                                         sequence: value.nextSequence,
-                                        localRevision: target.mutationRevision ?? 0))
+                                        localRevision: (target.mutationRevision ?? 0) + 1)
+            if let known = scoped.compactMap({ storedSnapshot($0) })
+                .max(by: { $0.version < $1.version }) {
+                setSnapshot(known, on: deletion)
+            } else if scoped.isEmpty {
+                // The feed still contains the server baseline before hiding it.
+                captureVisibleServerSnapshot(target, on: deletion)
+            }
+            target.isLocallyDeleted = true
+            target.locallyModified = true
+            target.mutationRevision = deletion.localRevision
+            context.insert(deletion)
             value.nextSequence += 1
         }
     }
@@ -669,6 +680,11 @@ final class IOSFeedV2StoreEngine {
                 }
                 if action == .keepRemoved && snapshot != nil { throw StoreError.invalidEdit }
                 if let snapshot {
+                    if action == .discard,
+                       snapshot.version < (target?.serverVersion ?? -1) {
+                        // Never consume the intent using a stale baseline.
+                        throw StoreError.invalidSnapshot
+                    }
                     try setVisible(snapshot, context: context, preserveLocalDelete: false)
                 } else if action == .discard && selected.baseVersion != nil {
                     // A rejected edit must have its prior server values; never
