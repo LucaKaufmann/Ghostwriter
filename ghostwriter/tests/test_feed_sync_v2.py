@@ -341,6 +341,25 @@ def test_existing_dead_domain_can_update_and_delete_without_dns(client, public_d
         }
 
 
+def test_web_metadata_put_does_not_revalidate_immutable_feed_url(client, public_dns, monkeypatch):
+    feed = create(client, url())
+
+    async def failed_dns(_url):
+        raise AssertionError("metadata-only PUT must not resolve the stored URL")
+
+    monkeypatch.setattr("app.api.feeds._validate_feed_url", failed_dns)
+    edited = client.put(f"/api/feeds/{feed['id']}",
+                        json={"title": "Unreachable feed", "is_active": False},
+                        headers={"If-Match": f'"{feed["version"]}"'})
+    assert edited.status_code == 200
+    assert edited.json()["title"] == "Unreachable feed"
+    assert edited.json()["is_active"] is False
+    stale = client.put(f"/api/feeds/{feed['id']}", json={"title": "Stale edit"},
+                       headers={"If-Match": f'"{feed["version"]}"'})
+    assert stale.status_code == 409
+    assert client.get(f"/api/feeds/{feed['id']}").json()["title"] == "Unreachable feed"
+
+
 def test_web_put_cannot_implicitly_restore_tombstone(client, public_dns):
     value = url()
     feed = create(client, value)

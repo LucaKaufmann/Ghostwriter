@@ -17,7 +17,7 @@ from app.core.database import engine
 from app.core.logging import digest_logger
 from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle
-from app.models.feed import Feed
+from app.models.feed import Feed, readable_article_limit
 from app.models.manual_cover import ManualCover
 from app.models.media_item import MediaItem
 from app.models.seen_article import SeenArticle
@@ -1058,7 +1058,7 @@ class BinderyPipeline:
             Tuple of (list of (feed, parsed_article) tuples, total article count).
         """
         parsed = await self.content_processor.parse_feed(
-            feed.url, max_entries=feed.max_articles
+            feed.url, max_entries=readable_article_limit(feed.max_articles)
         )
         total_count = len(parsed)
 

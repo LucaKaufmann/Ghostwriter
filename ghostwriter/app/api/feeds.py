@@ -408,7 +408,6 @@ async def update_feed(
         raise HTTPException(422, detail="Invalid feed fields")
     url = feed.url
     session.rollback()
-    await _validate_feed_url(url)
     return feed_sync.write_web(session, url=url, kind="upsert", fields=update_data,
                                expected=_if_match(if_match), feed_id=feed_id)
 

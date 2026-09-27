@@ -126,6 +126,12 @@ async def test_parse_feed_respects_max_entries(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_parse_feed_rejects_negative_direct_limit():
+    with pytest.raises(ValueError, match="nonnegative"):
+        await ContentProcessor().parse_feed("https://example.com/feed.xml", max_entries=-1)
+
+
+@pytest.mark.asyncio
 async def test_parse_feed_preserves_filter_metadata(monkeypatch):
     settings = Settings(allow_private_hosts=True)
     processor = ContentProcessor(settings=settings)
