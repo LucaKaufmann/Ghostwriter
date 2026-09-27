@@ -204,10 +204,13 @@ FORWARDED_ALLOW_IPS=203.0.113.10
 
 For a reverse proxy, set both trust settings to its **source IP as seen by
 Ghostwriter** (the container-network address may differ from its public
-address). `TRUSTED_PROXY_HOSTS` controls forwarded host and scheme handling in
-Ghostwriter. Uvicorn uses `FORWARDED_ALLOW_IPS` to accept `X-Forwarded-For` from
-that proxy, so login and registration limits use the forwarded client IP.
-Uvicorn otherwise trusts forwarded client IPs only from loopback. Configure the
+address). Uvicorn uses `FORWARDED_ALLOW_IPS` to accept `X-Forwarded-For` and
+`X-Forwarded-Proto` from that proxy, so login and registration limits use the
+forwarded client IP and generated URLs use the public scheme. Uvicorn changes
+the request's client IP before Ghostwriter checks `TRUSTED_PROXY_HOSTS`, so do
+not rely on `X-Forwarded-Host` for the public hostname in this setup. Configure
+the proxy to send a sanitized public `Host` header directly. Uvicorn otherwise
+trusts forwarded client IPs only from loopback. Configure the
 proxy to replace or safely append client addresses, and never set
 `FORWARDED_ALLOW_IPS=*`: that would let direct clients spoof their rate-limit IP.
 Clients behind the same NAT still share one auth bucket.

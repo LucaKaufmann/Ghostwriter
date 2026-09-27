@@ -13,6 +13,7 @@ from app.core import auth as auth_core
 from app.core import rate_limit
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
+from app.main import ProxyHeadersMiddleware as GhostwriterProxyHeadersMiddleware
 
 
 @pytest.fixture(autouse=True)
@@ -135,3 +136,72 @@ def test_uvicorn_trusted_proxy_client_address_drives_bucket(tmp_path, monkeypatc
         assert untrusted.post(
             "/auth-attempt", headers={"x-forwarded-for": "198.51.100.13"}
         ).status_code == 429
+
+
+def test_public_host_and_scheme_with_both_proxy_middlewares(tmp_path, monkeypatch):
+    settings = Settings(
+        _env_file=None,
+        data_dir=str(tmp_path),
+        auth_rate_limit_max=1,
+        auth_rate_limit_window_seconds=60,
+    )
+    monkeypatch.setattr(rate_limit, "get_settings", lambda: settings)
+    app = FastAPI()
+
+    @app.post("/auth-probe")
+    async def auth_probe(request: Request):
+        rate_limit.check_auth_rate_limit(request)
+        return {
+            "scheme": request.url.scheme,
+            "host": request.url.hostname,
+            "client": request.client.host,
+        }
+
+    app.add_middleware(
+        GhostwriterProxyHeadersMiddleware, trusted_hosts=["203.0.113.10/32"]
+    )
+    wrapped = ProxyHeadersMiddleware(app, trusted_hosts="203.0.113.10")
+    with TestClient(wrapped, client=("203.0.113.10", 5000)) as client:
+        headers = {
+            "host": "ghostwriter.example.com",
+            "x-forwarded-host": "untrusted.example.com",
+            "x-forwarded-proto": "https",
+            "x-forwarded-for": "198.51.100.10",
+        }
+        first = client.post("/auth-probe", headers=headers)
+        assert first.status_code == 200
+        assert first.json() == {
+            "scheme": "https",
+            "host": "ghostwriter.example.com",
+            "client": "198.51.100.10",
+        }
+        assert client.post(
+            "/auth-probe", headers={**headers, "x-forwarded-for": "198.51.100.11"}
+        ).status_code == 200
+        assert client.post("/auth-probe", headers=headers).status_code == 429
+
+
+def test_expired_clients_are_pruned_without_returning(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(rate_limit.time, "time", lambda: clock[0])
+    limiter = rate_limit.RateLimiter(max_requests=2, window_seconds=60)
+    for client_number in range(500):
+        assert limiter.allow(f"client-{client_number}")
+    assert len(limiter._hits) == 500
+
+    clock[0] += 61
+    assert limiter.allow("new-client")
+    assert len(limiter._hits) == 1
+    assert limiter.allow("client-0")  # An expired client recovers.
+
+
+def test_many_client_churn_is_bounded_and_preserves_active_limit(monkeypatch):
+    monkeypatch.setattr(rate_limit.time, "time", lambda: 1000.0)
+    limiter = rate_limit.RateLimiter(
+        max_requests=1, window_seconds=60, max_clients=32
+    )
+    assert limiter.allow("active-client")
+    for client_number in range(1000):
+        assert limiter.allow(f"one-off-{client_number}")
+        assert not limiter.allow("active-client")
+        assert len(limiter._hits) <= 32
