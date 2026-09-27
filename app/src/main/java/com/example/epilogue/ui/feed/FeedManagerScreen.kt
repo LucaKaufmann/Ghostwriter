@@ -54,10 +54,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
+import com.example.epilogue.data.local.FeedMutationEntity
 import com.example.epilogue.ui.LocalEinkMode
 import com.example.epilogue.ui.components.SyncStatusIndicator
 import com.example.epilogue.service.DigestSyncWorker
 import com.example.epilogue.service.FeedSyncWorker
+import org.json.JSONObject
 
 private const val FEEDS_PER_PAGE = 5
 
@@ -70,6 +72,8 @@ fun FeedManagerScreen(
     viewModel: FeedViewModel = hiltViewModel()
 ) {
     val feeds by viewModel.feeds.collectAsState()
+    val unresolved by viewModel.unresolved.collectAsState()
+    val syncState by viewModel.syncState.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
     val einkMode = LocalEinkMode.current
 
@@ -98,7 +102,7 @@ fun FeedManagerScreen(
             }
         }
     ) { innerPadding ->
-        if (feeds.isEmpty()) {
+        if (feeds.isEmpty() && unresolved.isEmpty() && syncState?.lastOutcome !in setOf("server_changed", "server_upgrade_required", "failed", "partial")) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -116,7 +120,9 @@ fun FeedManagerScreen(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
-        } else if (einkMode) {
+        } else if (einkMode && unresolved.isEmpty() &&
+            syncState?.lastOutcome !in setOf("server_changed", "server_upgrade_required", "failed", "partial") &&
+            uiState.error == null && uiState.olderServerPreview.isEmpty()) {
             // E-ink mode: Paginated feed list
             PaginatedFeedList(
                 feeds = feeds,
@@ -135,6 +141,42 @@ fun FeedManagerScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                syncState?.takeIf { it.lastOutcome in setOf("server_changed", "server_upgrade_required", "failed", "partial") }?.let { state ->
+                    item {
+                        Card(Modifier.fillMaxWidth()) {
+                            Text(when (state.lastOutcome) {
+                                "server_changed" -> "Feed sync paused: server or destination changed. Resolve binding before sending edits."
+                                "server_upgrade_required" -> "Feed sync paused: server upgrade required. Local edits are safe on this device."
+                                else -> "Feed sync ${state.lastOutcome}: ${state.lastDiagnostic ?: "Review pending edits"}"
+                            }, Modifier.padding(16.dp))
+                            if (state.lastOutcome == "server_upgrade_required") {
+                                TextButton(onClick = viewModel::previewOlderServerFeeds) {
+                                    Text("Preview server feeds (read only)")
+                                }
+                            } else if (state.lastOutcome == "server_changed") {
+                                TextButton(onClick = viewModel::reviewChangedServer) {
+                                    Text("Review this server's feeds")
+                                }
+                            }
+                        }
+                    }
+                }
+                if (uiState.olderServerPreview.isNotEmpty()) item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Older server feeds — read only", style = MaterialTheme.typography.titleMedium)
+                            uiState.olderServerPreview.forEach { Text("${it.title} · ${it.url}") }
+                        }
+                    }
+                }
+                uiState.error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
+                items(unresolved, key = { "proposal-${it.opId}" }) { proposal ->
+                    FeedResolutionCard(proposal,
+                        onResolve = { action -> viewModel.resolve(proposal.opId, action) },
+                        onCorrect = { title, mode, enabled, cap ->
+                            viewModel.correctRejected(proposal.opId, title, mode, enabled, cap)
+                        })
+                }
                 items(feeds, key = { it.url }) { feed ->
                     FeedItem(
                         feed = feed,
@@ -149,9 +191,9 @@ fun FeedManagerScreen(
     if (uiState.showAddDialog) {
         AddFeedDialog(
             onDismiss = { viewModel.hideAddDialog() },
+            error = uiState.error,
             onConfirm = { url, name, mode, maxArticles, isEnabled ->
                 viewModel.addFeed(url, name, mode, maxArticles, isEnabled)
-                viewModel.hideAddDialog()
             }
         )
     }
@@ -167,6 +209,107 @@ fun FeedManagerScreen(
         )
     }
 }
+
+@Composable
+private fun FeedResolutionCard(
+    proposal: FeedMutationEntity,
+    onResolve: (String) -> Unit,
+    onCorrect: (String, ProcessingMode, Boolean, Int) -> Unit
+) {
+    val local = remember(proposal.fieldsJson) { runCatching { JSONObject(proposal.fieldsJson) }.getOrDefault(JSONObject()) }
+    val server = remember(proposal.serverSnapshotJson) {
+        proposal.serverSnapshotJson?.let { runCatching { JSONObject(it) }.getOrNull() }
+    }
+    var correcting by rememberSaveable(proposal.opId) { mutableStateOf(false) }
+    val absent = server == null || server.optString("kind") == "tombstone"
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(proposal.url, style = MaterialTheme.typography.titleMedium)
+            Text(if (proposal.state == "rejected") "Rejected: ${proposal.rejectionCode ?: "invalid proposal"}"
+                else if (absent) "Not present on server" else "Feed conflict",
+                color = MaterialTheme.colorScheme.error)
+            proposal.rejectionMessage?.let { Text(it) }
+            Text("Server: " + if (absent) "removed or absent" else
+                "${server!!.optString("title")} · ${feedModeLabel(server.optString("mode"))} · " +
+                    "${feedEnabledLabel(server.optBoolean("is_active"))} · ${feedCapLabel(server.optInt("max_articles"))}")
+            Text("Your proposal: " + if (proposal.kind == "delete") "Delete feed" else
+                "${local.optString("title", "unchanged")} · ${if (local.has("mode")) feedModeLabel(local.optString("mode")) else "unchanged"} · " +
+                    "${if (local.has("is_active")) feedEnabledLabel(local.optBoolean("is_active")) else "unchanged"} · " +
+                    "${if (local.has("max_articles")) feedCapLabel(local.optInt("max_articles")) else "unchanged"}")
+            Text("Later edits for this feed remain blocked until you resolve them.",
+                style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                when {
+                    proposal.state == "rejected" -> {
+                        TextButton(onClick = { onResolve("discard") }) { Text("Discard") }
+                        TextButton(onClick = { if (proposal.kind == "delete") onResolve("correct") else correcting = true }) {
+                            Text("Correct")
+                        }
+                    }
+                    proposal.kind == "delete" -> {
+                        TextButton(onClick = { onResolve("keep_feed") }) { Text("Keep feed") }
+                        TextButton(onClick = { onResolve("delete_anyway") }) { Text("Delete anyway") }
+                    }
+                    absent -> {
+                        TextButton(onClick = { onResolve("keep_removed") }) { Text("Keep removed") }
+                        TextButton(onClick = { onResolve("add_to_server") }) { Text("Add to server") }
+                    }
+                    else -> {
+                        TextButton(onClick = { onResolve("keep_server") }) { Text("Keep server") }
+                        TextButton(onClick = { onResolve("apply_mine") }) { Text("Apply mine") }
+                    }
+                }
+            }
+        }
+    }
+    if (correcting) {
+        var title by rememberSaveable(proposal.opId) { mutableStateOf(local.optString("title")) }
+        var cap by rememberSaveable(proposal.opId) { mutableStateOf(local.optString("max_articles", "0")) }
+        var mode by rememberSaveable(proposal.opId) {
+            mutableStateOf(if (local.optString("mode") == "summarize") ProcessingMode.BRIEFING else ProcessingMode.FIDELITY)
+        }
+        var enabled by rememberSaveable(proposal.opId) { mutableStateOf(local.optBoolean("is_active", true)) }
+        AlertDialog(
+            onDismissRequest = { correcting = false },
+            title = { Text("Correct feed proposal") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(title, { title = it }, label = { Text("Title") })
+                    OutlinedTextField(cap, { cap = it }, label = { Text("Max articles (0 = unlimited)") })
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Summarize")
+                        Switch(checked = mode == ProcessingMode.BRIEFING,
+                            onCheckedChange = { mode = if (it) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY })
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Enabled")
+                        Switch(checked = enabled, onCheckedChange = { enabled = it })
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val number = cap.toIntOrNull()
+                    if (title.isNotBlank() && number != null && number >= 0) {
+                        onCorrect(title, mode, enabled, number)
+                        correcting = false
+                    }
+                }) { Text("Save correction") }
+            },
+            dismissButton = { TextButton(onClick = { correcting = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+private fun feedModeLabel(mode: String): String = when (mode) {
+    "raw" -> "Fidelity"
+    "summarize" -> "Briefing"
+    else -> mode
+}
+
+private fun feedEnabledLabel(enabled: Boolean): String = if (enabled) "Enabled" else "Paused"
+
+private fun feedCapLabel(cap: Int): String = if (cap == 0) "Unlimited" else "Max $cap articles"
 
 /**
  * Paginated feed list for e-ink mode.
@@ -321,6 +464,7 @@ private val maxArticleOptions = listOf(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 0)
 @Composable
 fun AddFeedDialog(
     onDismiss: () -> Unit,
+    error: String? = null,
     onConfirm: (
         url: String,
         name: String,
@@ -346,8 +490,13 @@ fun AddFeedDialog(
                     onValueChange = { url = it },
                     label = { Text("Feed URL") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    isError = error != null
                 )
+                if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall)
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name,

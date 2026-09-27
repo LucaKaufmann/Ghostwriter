@@ -57,7 +57,7 @@ struct HistoryView: View {
                 get: { digestToShare != nil },
                 set: { if !$0 { digestToShare = nil } }
             )) {
-                if let digest = digestToShare {
+                if let digest = digestToShare, DigestArtifactEligibility.hasLocalEPUB(digest) {
                     let fileURL = URL(fileURLWithPath: digest.epubFilePath)
                     ActivityViewController(activityItems: [fileURL])
                 }
@@ -97,7 +97,7 @@ struct HistoryView: View {
     }
 
     private func digestRow(_ digest: Digest) -> some View {
-        let epubAvailable = hasLocalEPUB(digest)
+        let epubAvailable = DigestArtifactEligibility.hasLocalEPUB(digest)
         let lifecycle = digest.lifecycleState
         let baseRow: AnyView = {
             if lifecycle == .completed {
@@ -125,7 +125,7 @@ struct HistoryView: View {
                     }
                 }
                 .swipeActions(edge: .leading) {
-                    if let remoteId = digest.remoteId {
+                    if let remoteId = digest.remoteId, DigestArtifactEligibility.canDownloadRemoteFile(digest) {
                         if pdfDownloadsEnabled {
                             Button {
                                 downloadDigestPdf(digest, remoteId: remoteId)
@@ -165,7 +165,7 @@ struct HistoryView: View {
                             }
                             .tint(.blue)
                         }
-                    } else if lifecycle == .completed {
+                    } else if digest.remoteId == nil, lifecycle == .completed, epubAvailable {
                         Button {
                             digestToShare = digest
                         } label: {
@@ -186,8 +186,10 @@ struct HistoryView: View {
 
     private func deleteDigest(_ digest: Digest) {
         // Delete EPUB file from disk
-        let fileURL = URL(fileURLWithPath: digest.epubFilePath)
-        try? FileManager.default.removeItem(at: fileURL)
+        if !digest.epubFilePath.isEmpty {
+            let fileURL = URL(fileURLWithPath: digest.epubFilePath)
+            try? FileManager.default.removeItem(at: fileURL)
+        }
 
         // Delete from database
         modelContext.delete(digest)
@@ -195,6 +197,10 @@ struct HistoryView: View {
     }
 
     private func openInReader(_ digest: Digest) {
+        guard DigestArtifactEligibility.hasLocalEPUB(digest) else {
+            statusMessage = "EPUB file not available."
+            return
+        }
         let fileURL = URL(fileURLWithPath: digest.epubFilePath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             if digest.remoteId != nil {
@@ -207,12 +213,8 @@ struct HistoryView: View {
         UIApplication.shared.open(fileURL)
     }
 
-    private func hasLocalEPUB(_ digest: Digest) -> Bool {
-        guard !digest.epubFilePath.isEmpty else { return false }
-        return FileManager.default.fileExists(atPath: digest.epubFilePath)
-    }
-
     private func downloadDigest(_ digest: Digest, remoteId: String) {
+        guard DigestArtifactEligibility.canDownloadRemoteFile(digest) else { return }
         guard !downloadingDigestIDs.contains(digest.id) else { return }
         downloadingDigestIDs.insert(digest.id)
 
@@ -243,6 +245,7 @@ struct HistoryView: View {
     }
 
     private func downloadDigestPdf(_ digest: Digest, remoteId: String) {
+        guard DigestArtifactEligibility.canDownloadRemoteFile(digest) else { return }
         guard !downloadingDigestIDs.contains(digest.id) else { return }
         downloadingDigestIDs.insert(digest.id)
 
@@ -347,7 +350,11 @@ struct DigestRow: View {
                         .lineLimit(2)
                 }
 
-                if digest.remoteId != nil, !epubAvailable {
+                if digest.remoteId != nil, digest.articleCount == 0 {
+                    Text("No EPUB for empty digest")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else if digest.remoteId != nil, !epubAvailable {
                     Text("EPUB not downloaded")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -355,6 +362,16 @@ struct DigestRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+enum DigestArtifactEligibility {
+    static func canDownloadRemoteFile(_ digest: Digest) -> Bool {
+        digest.remoteId != nil && digest.articleCount > 0
+    }
+
+    static func hasLocalEPUB(_ digest: Digest) -> Bool {
+        !digest.epubFilePath.isEmpty && FileManager.default.fileExists(atPath: digest.epubFilePath)
     }
 }
 

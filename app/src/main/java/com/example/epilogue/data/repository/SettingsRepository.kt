@@ -2,6 +2,8 @@ package com.example.epilogue.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.room.withTransaction
+import com.example.epilogue.data.local.EpilogueDatabase
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.example.epilogue.domain.model.DigestPeriod
@@ -20,7 +22,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class SettingsRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val database: EpilogueDatabase
 ) {
 
     companion object {
@@ -331,6 +334,15 @@ class SettingsRepository @Inject constructor(
      * Sets the Ghostwriter server URL.
      */
     suspend fun setGhostwriterUrl(url: String?) = withContext(Dispatchers.IO) {
+        val newNormalized = url?.trim()?.trimEnd('/')?.removeSuffix("/api")
+        database.withTransaction {
+            val state = database.feedSyncStateDao().active()
+            if (state != null && state.bindingUrl != newNormalized) {
+                database.feedSyncStateDao().put(state.copy(suspended = true,
+                    generation = state.generation + 1, lastOutcome = "server_changed",
+                    lastDiagnostic = "Destination changed"))
+            }
+        }
         if (url.isNullOrBlank()) {
             prefs.edit().remove(KEY_GHOSTWRITER_URL).apply()
         } else {

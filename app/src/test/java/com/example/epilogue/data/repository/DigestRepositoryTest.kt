@@ -34,7 +34,8 @@ class DigestRepositoryTest {
     @Before fun setUp() {
         database = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), EpilogueDatabase::class.java)
             .allowMainThreadQueries().build()
-        repository = DigestRepository(database.digestDao())
+        repository = DigestRepository(database.digestDao(), database,
+            database.articleDeliveryDao(), database.generationRunDao())
     }
 
     @After fun tearDown() { database.close() }

@@ -38,6 +38,7 @@ struct SettingsView: View {
     @State private var showExportPicker = false
     @State private var exportError: String?
     @State private var serverSchedule: GhostwriterSchedule?
+    @State private var feedBindingError: String?
 
     var body: some View {
         NavigationStack {
@@ -235,9 +236,25 @@ struct SettingsView: View {
                             }
                         }
                         .disabled(ghostwriterCoordinator.isSyncing)
+                        if ghostwriterCoordinator.requiresNewFeedBinding {
+                            Button("Connect to this server as a new feed source") {
+                                do {
+                                    try ghostwriterCoordinator.startNewFeedBinding()
+                                    Task { await syncNow() }
+                                } catch {
+                                    feedBindingError = error.localizedDescription
+                                }
+                            }
+                            Text("Pending edits for the previous server remain saved for review.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     } footer: {
                         if let error = ghostwriterCoordinator.lastSyncError {
                             Text("Sync error: \(error.localizedDescription)")
+                                .foregroundColor(.red)
+                        } else if let feedBindingError {
+                            Text("Feed connection error: \(feedBindingError)")
                                 .foregroundColor(.red)
                         } else if let lastSync = ghostwriterCoordinator.lastSyncTime {
                             Text("Last sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))")
@@ -263,6 +280,16 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(isGenerating || localDigestService.isGenerating || ghostwriterCoordinator.isSyncing)
+
+                    if !ghostwriterEnabled {
+                        Button {
+                            Task { await localDigestService.generateDigest(mode: .regenerate) }
+                        } label: {
+                            Label("Regenerate including delivered articles", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(isGenerating || localDigestService.isGenerating || ghostwriterCoordinator.isSyncing)
+                        LocalGenerationDiagnosticsView(service: localDigestService)
+                    }
 
                     if ghostwriterEnabled {
                         if let status = ghostwriterStatus {
@@ -293,10 +320,8 @@ struct SettingsView: View {
                     } else if let error = localDigestService.generationError {
                         Text("Last error: \(error.localizedDescription)")
                             .foregroundColor(.red)
-                    } else if let digest = localDigestService.lastGeneratedDigest {
-                        Text("Last digest: \(digest.articleCount) articles")
                     } else {
-                        Text("Will generate a digest locally on this device")
+                        Text("Normal editions include new articles once. Regeneration may include previously delivered articles again.")
                     }
                 }
             }
@@ -400,7 +425,7 @@ struct SettingsView: View {
     }
 
     private func syncNow() async {
-        await ghostwriterCoordinator.performFullSync()
+        await ghostwriterCoordinator.performFullSyncIncludingDigests()
     }
 
     private func generateDigestNow() async {

@@ -49,8 +49,7 @@ let project = Project(
                 .project(target: "ContentProcessing", path: "../Modules/ContentProcessing"),
                 .project(target: "EPUBGeneration", path: "../Modules/EPUBGeneration"),
                 .project(target: "AIServices", path: "../Modules/AIServices"),
-                .project(target: "GhostwriterClient", path: "../Modules/GhostwriterClient"),
-                .xcframework(path: "../../shared/build/XCFrameworks/release/EpilogueShared.xcframework")
+                .project(target: "GhostwriterClient", path: "../Modules/GhostwriterClient")
             ]
         ),
         .target(

@@ -112,15 +112,15 @@ class AndroidFeedStorePort @Inject constructor(
     }
 
     override suspend fun upsertAll(feeds: List<SharedFeed>) {
-        feedRepository.upsertAll(feeds.map { it.toApp() })
+        error("Legacy feed pull is disabled; use the v2 transactional store")
     }
 
     override suspend fun deleteByUrls(urls: List<String>) {
-        feedRepository.deleteByUrls(urls)
+        error("Legacy feed tombstone apply is disabled; use the v2 transactional store")
     }
 
     override suspend fun clearAllLocallyModified() {
-        feedRepository.clearAllLocallyModified()
+        error("Legacy global dirty clear is disabled; use per-operation v2 receipts")
     }
 }
 
@@ -174,19 +174,7 @@ class AndroidGhostwriterSyncPort @Inject constructor(
     }
 
     override suspend fun syncFeeds(feeds: List<SharedFeedSyncRequest>): SyncPortResult<SharedFeedSyncResponse> {
-        val appFeeds = feeds.map { it.toAppDomainFeed() }
-        return when (val result = ghostwriterRepository.syncFeeds(appFeeds)) {
-            is GhostwriterRepository.GhostwriterResult.Success -> SyncPortResult.Success(
-                SharedFeedSyncResponse(
-                    synced = result.data.synced,
-                    created = result.data.created,
-                    updated = result.data.updated,
-                    unchanged = result.data.unchanged
-                )
-            )
-            is GhostwriterRepository.GhostwriterResult.Error -> SyncPortResult.Error(result.message, result.code)
-            is GhostwriterRepository.GhostwriterResult.NotConfigured -> SyncPortResult.NotConfigured
-        }
+        return SyncPortResult.Error("Legacy feed writes are disabled; use v2", null)
     }
 
     override suspend fun getFeedChanges(since: String?): SyncPortResult<SharedFeedChangesResponse> {

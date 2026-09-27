@@ -12,31 +12,44 @@ import Data
 import ContentProcessing
 import EPUBGeneration
 import AIServices
+import SwiftData
 
 @MainActor
 public final class LocalDigestService: ObservableObject {
     private let feedRepository: FeedRepositoryProtocol
     private let digestRepository: DigestRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
+    private let modelContainer: ModelContainer
     private let logger = Logger(subsystem: "com.epilogue", category: "LocalDigest")
 
     @Published public private(set) var isGenerating = false
     @Published public private(set) var generationError: Error?
-    @Published public private(set) var lastGeneratedDigest: Digest?
+    @Published public private(set) var lastGeneratedDigest: Domain.Digest?
     @Published public private(set) var generationStatus: String = ""
+    @Published public private(set) var lastGenerationOutcome: LocalGenerationOutcome?
+    @Published public private(set) var lastGenerationDiagnostics: GenerationDiagnostics?
 
     public init(
         feedRepository: FeedRepositoryProtocol,
         digestRepository: DigestRepositoryProtocol,
-        settingsRepository: SettingsRepositoryProtocol
+        settingsRepository: SettingsRepositoryProtocol,
+        modelContainer: ModelContainer
     ) {
         self.feedRepository = feedRepository
         self.digestRepository = digestRepository
         self.settingsRepository = settingsRepository
+        self.modelContainer = modelContainer
+        if let run = try? DeliveryStore(container: modelContainer).latestRun(),
+           let outcome = LocalGenerationOutcome(rawValue: run.outcome) {
+            lastGenerationOutcome = outcome
+            lastGenerationDiagnostics = try? JSONDecoder().decode(
+                GenerationDiagnostics.self, from: Data(run.diagnosticsJSON.utf8))
+            generationStatus = Self.description(outcome, lastGenerationDiagnostics)
+        }
     }
 
     /// Generate a digest locally on device
-    public func generateDigest() async {
+    public func generateDigest(mode: LocalGenerationMode = .normal) async {
         guard !isGenerating else {
             logger.warning("Generation already in progress")
             return
@@ -79,34 +92,64 @@ public final class LocalDigestService: ObservableObject {
 
             let digestGenerator = DigestGenerator(
                 feedRepository: feedRepository,
-                digestRepository: digestRepository,
                 articleRepository: articleRepository,
-                epubBuilder: epubBuilder
+                epubBuilder: epubBuilder,
+                deliveryStore: DeliveryStore(container: modelContainer),
+                filterSignature: DeliveryFilterSignature.make(minWordCount: minWordCount)
             )
 
             // Generate
             generationStatus = "Fetching and processing feeds..."
             logger.info("Starting digest generation pipeline")
 
-            let digest = try await digestGenerator.generateDigest(
+            let result = try await digestGenerator.generateDigest(
                 triggerType: .manual,
-                period: "manual"
+                period: "manual",
+                mode: mode
             )
 
-            lastGeneratedDigest = digest
-            generationStatus = "Complete! \(digest.articleCount) articles"
-            logger.info("Local digest generation complete: \(digest.articleCount) articles, path: \(digest.epubFilePath)")
-            await CustomExportHelper.exportIfConfigured(
-                fileURL: URL(fileURLWithPath: digest.epubFilePath),
-                settingsRepository: settingsRepository
-            )
+            lastGeneratedDigest = result.digest
+            lastGenerationOutcome = result.outcome
+            lastGenerationDiagnostics = result.diagnostics
+            generationStatus = Self.description(result.outcome, result.diagnostics)
+            if let digest = result.digest {
+                logger.info("Local digest generation complete: \(digest.articleCount) articles")
+                await CustomExportHelper.exportIfConfigured(
+                    fileURL: URL(fileURLWithPath: digest.epubFilePath),
+                    settingsRepository: settingsRepository
+                )
+            }
 
         } catch {
             generationError = error
-            generationStatus = "Failed: \(error.localizedDescription)"
+            generationStatus = error is CancellationError ? "Generation cancelled" :
+                "Failed: \(error.localizedDescription)"
             logger.error("Local digest generation failed: \(error.localizedDescription)")
         }
 
         isGenerating = false
+    }
+
+    private static func description(_ outcome: LocalGenerationOutcome,
+                                    _ diagnostics: GenerationDiagnostics?) -> String {
+        guard let diagnostics else { return outcome.rawValue.capitalized }
+        let articleWord = diagnostics.deliveredCount == 1 ? "article" : "articles"
+        let failureWord = diagnostics.failedCount == 1 ? "failure" : "failures"
+        switch outcome {
+        case .complete:
+            return "Complete: \(diagnostics.deliveredCount) \(articleWord)"
+        case .partial:
+            return "Partial: \(diagnostics.deliveredCount) \(articleWord), \(diagnostics.failedCount) \(failureWord), \(diagnostics.deferredCount) deferred"
+        case .empty:
+            return "No new articles to include"
+        case .deferred:
+            return "No articles included; more remain for the next edition"
+        case .failed:
+            return "Generation failed: \(diagnostics.failedCount) \(diagnostics.failedCount == 1 ? "issue" : "issues")"
+        case .cancelled:
+            return "Generation cancelled"
+        case .conflict:
+            return "Another edition claimed these articles; retry generation"
+        }
     }
 }

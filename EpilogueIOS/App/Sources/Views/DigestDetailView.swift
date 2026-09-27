@@ -40,10 +40,12 @@ struct DigestDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding()
+            } else if digest.isComplete && digest.articleCount == 0 {
+                ContentUnavailableView("No articles in this digest", systemImage: "text.book.closed")
             } else if digest.isComplete {
                 EinkReaderView(
                     articles: orderedArticles,
-                    epubFilePath: digest.epubFilePath,
+                    epubFilePath: DigestArtifactEligibility.hasLocalEPUB(digest) ? digest.epubFilePath : nil,
                     remoteDigestId: digest.remoteId
                 )
             } else if digest.isFailed {

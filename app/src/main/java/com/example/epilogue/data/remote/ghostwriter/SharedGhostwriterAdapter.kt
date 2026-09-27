@@ -61,11 +61,11 @@ class SharedGhostwriterAdapter private constructor(
     }
 
     suspend fun syncFeeds(feeds: List<FeedSyncRequest>): FeedSyncResponse {
-        return client.syncFeeds(feeds.map { it.toShared() }).toApp()
+        error("Legacy feed writes are disabled; use v2")
     }
 
     suspend fun deleteFeedByUrl(feedUrl: String) {
-        client.deleteFeedByUrl(feedUrl)
+        error("Legacy feed deletes are disabled; use the durable v2 outbox")
     }
 
     suspend fun triggerDigest(period: String): DigestTriggerResponse {
