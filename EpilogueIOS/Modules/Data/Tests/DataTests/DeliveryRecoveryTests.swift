@@ -196,4 +196,47 @@ struct DeliveryRecoveryTests {
             GenerationDiagnostics.self, from: Data(#"{"feeds":[]}"#.utf8))
         #expect(legacy.mode == nil)
     }
+
+    @Test("Unknown run mode retains feed diagnostics and cannot reuse another claim")
+    func unknownModeRetainsDiagnosticsConservatively() throws {
+        var feed = FeedIngestionResult(feedUrl: "https://feed.test/rss")
+        feed.feedError = "fetch_failed"
+        feed.capDeferredCount = 1
+        let encoded = try JSONEncoder().encode(
+            GenerationDiagnostics(feeds: [feed], mode: .normal))
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["mode"] = "future_mode"
+        let unknown = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(GenerationDiagnostics.self, from: unknown)
+        #expect(decoded.mode == nil)
+        #expect(decoded.failedCount == 1)
+        #expect(decoded.deferredCount == 1)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(GenerationDiagnostics.self,
+                from: Data(#"{"feeds":"invalid","mode":"future_mode"}"#.utf8))
+        }
+
+        for foreignClaim in [false, true] {
+            let value = try fixture(nil)
+            let context = ModelContext(try container(at: value.directory))
+            let run = try #require(context.fetch(FetchDescriptor<GenerationRun>()).first)
+            run.trigger = TriggerType.manual.rawValue
+            run.diagnosticsJSON = String(decoding: unknown, as: UTF8.self)
+            if foreignClaim {
+                let claim = try #require(context.fetch(FetchDescriptor<ArticleDelivery>()).first)
+                claim.firstDigestId = UUID()
+            }
+            try context.save()
+            try DeliveryStore(container: try container(at: value.directory))
+                .reconcileInterruptedLocalRuns(now: Date())
+            let after = ModelContext(try container(at: value.directory))
+            let recovered = try #require(after.fetch(FetchDescriptor<GenerationRun>()).first)
+            #expect(recovered.outcome == (foreignClaim ? "failed" : "partial"))
+            let retained = try JSONDecoder().decode(
+                GenerationDiagnostics.self, from: Data(recovered.diagnosticsJSON.utf8))
+            #expect(retained.mode == nil)
+            #expect(retained.failedCount >= 1)
+            #expect(retained.deferredCount == 1)
+        }
+    }
 }
