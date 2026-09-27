@@ -13,6 +13,7 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--legacy-feed-caps", action="store_true")
     args = parser.parse_args()
     root = Path(tempfile.mkdtemp(prefix="ghostwriter_journey_"))
     from app.core.config import Settings, get_settings
@@ -129,6 +130,24 @@ def main() -> None:
         root / "output",
         article_url=f"http://127.0.0.1:{args.port}/fixture-article",
     )
+
+    if args.legacy_feed_caps:
+        from sqlmodel import Session
+
+        from app.core.database import engine
+        from app.models.feed import Feed
+        from app.services import feed_sync
+
+        with Session(engine) as session:
+            feed_sync._begin_write(session)
+            clock = feed_sync._clock(session)
+            for name, cap in (("large", 2**40), ("negative", -1)):
+                session.add(Feed(
+                    url=f"http://127.0.0.1:{args.port}/legacy-{name}",
+                    title=f"Legacy {name} cap", is_active=False, max_articles=cap,
+                    version=feed_sync._next_version(clock),
+                ))
+            session.commit()
 
     try:
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")

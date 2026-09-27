@@ -4,10 +4,16 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
+from pydantic import field_validator
 from sqlalchemy import BigInteger, Column, String
 from sqlmodel import Field, SQLModel
 
 MAX_FEED_ARTICLES = 2**31 - 1
+
+
+def readable_article_limit(value: int) -> int:
+    """Project legacy stored caps to the native wire range without rewriting data."""
+    return min(MAX_FEED_ARTICLES, max(0, value))
 
 
 class FeedBase(SQLModel):
@@ -68,6 +74,11 @@ class FeedRead(SQLModel):
     updated_at: datetime
     deleted_at: datetime | None = None
     version: int
+
+    @field_validator("max_articles")
+    @classmethod
+    def compatible_article_limit(cls, value: int) -> int:
+        return readable_article_limit(value)
 
 
 class FeedSync(SQLModel):

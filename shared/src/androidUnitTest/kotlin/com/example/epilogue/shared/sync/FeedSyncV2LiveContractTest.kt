@@ -37,6 +37,12 @@ class FeedSyncV2LiveContractTest {
             val clientA = handleA.client
             val clientB = handleB.client
             val initial = success(clientA.getFeedChangesV2(destination, null, null))
+            // Fixture rows predate write validation. Decode their wire projection
+            // through the real Kotlin Int DTO without changing the stored caps.
+            assertEquals(Int.MAX_VALUE,
+                initial.changes.single { it.url == "$baseUrl/legacy-large" }.maxArticles)
+            assertEquals(0,
+                initial.changes.single { it.url == "$baseUrl/legacy-negative" }.maxArticles)
             val instance = initial.serverInstanceId
             assertTrue(initial.changes.none { it.url == feedUrl })
             assertEquals(instance, success(clientB.getFeedChangesV2(destination, null, null)).serverInstanceId)
