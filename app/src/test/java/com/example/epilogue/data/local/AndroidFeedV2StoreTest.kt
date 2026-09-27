@@ -455,6 +455,53 @@ class AndroidFeedV2StoreTest {
         database.close()
     }
 
+    @Test fun `rejected title successor inherits acknowledged mode after Room reopen`() = runBlocking {
+        context.deleteDatabase(name)
+        var database = db()
+        var store = AndroidFeedV2Store(database, settings)
+        configured = true
+        val (token, binding) = bind(store, listOf(remote("Server", 5)), 5)
+        store.saveLocal(feed("Server").copy(mode = ProcessingMode.BRIEFING))
+        val first = value(store.loadPendingMutations(token, binding, 100)).single()
+        store.saveLocal(feed("Bad title").copy(mode = ProcessingMode.BRIEFING))
+        val successor = database.feedMutationDao().forUrl(url).single { it.opId != first.opId }
+        assertFalse(successor.fieldsJson.contains("mode"))
+        val staleSnapshot = successor.serverSnapshotJson
+        assertTrue(staleSnapshot!!.contains("\"raw\""))
+        val acknowledged = remote("Server", 6).copy(mode = "summarize")
+        assertTrue(store.acknowledge(token, binding, first.opId, first.sentRevision,
+            acknowledged) is FeedV2StoreResult.Success)
+        val rebased = database.feedMutationDao().byId(successor.opId)!!
+        assertEquals(6L, rebased.baseVersion)
+        assertTrue(rebased.serverSnapshotJson!!.contains("\"summarize\""))
+        // A pre-fix queued row may already be persisted with the older snapshot.
+        database.feedMutationDao().update(rebased.copy(serverSnapshotJson = staleSnapshot))
+        store.endSyncRun(token)
+        database.close()
+
+        database = db()
+        store = AndroidFeedV2Store(database, settings)
+        val nextToken = value(store.beginSyncRun(store.currentDestination()!!))
+        val nextBinding = value(store.getServerIdentity(nextToken))!!
+        val sent = value(store.loadPendingMutations(nextToken, nextBinding, 100)).single()
+        assertEquals(successor.opId, sent.opId)
+        assertTrue(store.recordRejection(nextToken, nextBinding, sent.opId, sent.sentRevision,
+            "invalid_fields", "Title invalid") is FeedV2StoreResult.Success)
+        val rejected = database.feedMutationDao().byId(sent.opId)!!
+        assertTrue(rejected.serverSnapshotJson!!.contains("\"summarize\""))
+        val draft = requireNotNull(correctionDraft(rejected))
+        assertEquals(ProcessingMode.BRIEFING, draft.mode)
+        assertTrue(store.correctRejected(sent.opId, "Corrected", draft.mode,
+            draft.enabled, draft.maxArticles))
+        val corrected = value(store.loadPendingMutations(nextToken, nextBinding, 100)).single()
+        assertEquals("summarize", corrected.payload.fields!!.mode)
+        assertTrue(store.acknowledge(nextToken, nextBinding, corrected.opId, corrected.sentRevision,
+            remote("Corrected", 7).copy(mode = "summarize")) is FeedV2StoreResult.Success)
+        assertEquals(ProcessingMode.BRIEFING, database.feedDao().getFeedByUrl(url)!!.mode)
+        store.endSyncRun(nextToken)
+        database.close()
+    }
+
     @Test fun `only per URL head is actionable and direct successor resolution is rejected after reopen`() = runBlocking {
         context.deleteDatabase(name)
         configured = true

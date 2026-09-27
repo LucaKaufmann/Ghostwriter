@@ -42,4 +42,13 @@ class FeedCorrectionDraftTest {
         assertTrue(draft.enabled)
         assertEquals(5, draft.maxArticles)
     }
+
+    @Test fun `rejected invalid title and cap remain editable`() {
+        val draft = requireNotNull(correctionDraft(rejected(
+            """{"title":"","max_articles":-1}""")))
+        assertEquals("", draft.title)
+        assertEquals(-1, draft.maxArticles)
+        assertEquals(ProcessingMode.BRIEFING, draft.mode)
+        assertFalse(draft.enabled)
+    }
 }
