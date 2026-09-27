@@ -40,7 +40,7 @@ All PRs: `git diff --check`, focused behavior/failure tests, inspected final dif
 
 ## Package ledger
 
-Execution is active. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`. PRs74–94 cover accepted foundation, backend and integration fixes; server sync and journey verification are active. Remaining native sync/delivery and recovery implementation stay dependency-gated. Result path convention: `docs/work-packages/results/ID.md` in the package branch.
+Execution is in final review and integration. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`; the [PR index](results/PR-INDEX.md) lists the published work. The table below is the original scope/dependency map, not live completion status. Most implementation is published; the last original package and review corrections remain explicitly tracked until final combined verification. Result path convention: `docs/work-packages/results/ID.md` on the relevant branch.
 
 | ID | Priority/type | Outcome | Start condition |
 |---|---|---|---|
