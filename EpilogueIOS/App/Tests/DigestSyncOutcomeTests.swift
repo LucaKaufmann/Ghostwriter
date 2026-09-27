@@ -120,6 +120,8 @@ final class DigestSyncOutcomeTests: XCTestCase {
         XCTAssertEqual(ids, ["empty"])
         XCTAssertEqual(count, 1)
         XCTAssertNotEqual(lastSync, prior)
+        let stored = try await fixture.repository.getDigestByRemoteId("empty")
+        XCTAssertEqual(stored?.epubFilePath, "")
     }
 
     func testZeroArticleLegacyDigestIsIndexedAfterEmptyArticleFetch() async throws {
@@ -137,6 +139,52 @@ final class DigestSyncOutcomeTests: XCTestCase {
         XCTAssertEqual(ids, ["empty-legacy"])
         XCTAssertEqual(articleCalls, 1)
         XCTAssertNotNil(lastSync)
+        let stored = try await fixture.repository.getDigestByRemoteId("empty-legacy")
+        XCTAssertEqual(stored?.epubFilePath, "")
+    }
+
+    func testRemoteArtifactEligibilityRequiresNonemptyDigestAndRealLocalFile() {
+        let empty = Digest(epubFilePath: "", articleCount: 0, triggerType: .ghostwriter,
+                           isComplete: true, remoteId: "empty")
+        let indexed = Digest(epubFilePath: "", articleCount: 1, triggerType: .ghostwriter,
+                             isComplete: true, remoteId: "indexed")
+        XCTAssertFalse(DigestArtifactEligibility.canDownloadRemoteFile(empty))
+        XCTAssertFalse(DigestArtifactEligibility.hasLocalEPUB(empty))
+        XCTAssertTrue(DigestArtifactEligibility.canDownloadRemoteFile(indexed))
+        XCTAssertFalse(DigestArtifactEligibility.hasLocalEPUB(indexed))
+    }
+
+    func testIndexedNonemptyDigestRetriesDownloadAndUpdatesArtifactPath() async throws {
+        let fixture = try await Fixture(download: false)
+        let plan: @MainActor () async throws -> SharedDigestSyncPlan = { [self] in
+            .combined(digests: [combined("indexed")], shouldDownloadEpubs: false)
+        }
+        var fail = true
+        var downloads = 0
+        let service = try fixture.service(plan: plan, download: { _ in
+            downloads += 1
+            if fail { throw FixtureError.download }
+            return Data("epub".utf8)
+        })
+        try await service.sync()
+        let indexed = try await fixture.repository.getDigestByRemoteId("indexed")
+        XCTAssertNotNil(indexed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: indexed!.epubFilePath))
+
+        try await fixture.settings.setGhostwriterDownloadEpubsOnSync(true)
+        do {
+            try await service.sync()
+            XCTFail("Expected download failure")
+        } catch is DigestSyncIngestionError {}
+        XCTAssertEqual(downloads, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: indexed!.epubFilePath))
+
+        fail = false
+        try await service.sync()
+        XCTAssertEqual(downloads, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: indexed!.epubFilePath))
+        let count = try await fixture.repository.getDigestCount()
+        XCTAssertEqual(count, 1)
     }
 
     func testDirectCombinedAllFailuresAndEmptySuccess() async throws {

@@ -8,6 +8,8 @@ After combined config reconciliation succeeds, schedules are fetched again befor
 
 Review correction: a completed zero-article digest has no server EPUB, so both combined and legacy ingestion save its remote identity without downloading one. A nonempty digest still requires its EPUB when downloads are enabled. Normal cadence skips an empty digest payload but always ingests nonempty `newDigests` already returned by combined sync; both explicit Settings “Sync Now” actions use forced sync. This refines the initial handoff cadence plan, which would have delayed a new digest returned immediately after a recent empty sync. The obsolete v1 feed cursor is no longer read for combined sync, and a known-digest-ID read failure is reported without blocking independent config and schedule work.
 
+Final review correction: a zero-article remote digest persists an empty EPUB path, and History/Detail do not offer unavailable download, open, or share actions. Indexed nonempty remote digests remain downloadable. The combined request now keeps its own in-memory feed timestamp from the server response to avoid repeatedly transferring the full ignored v1 feed payload; it never writes the user-visible `lastFeedSyncTime`, and changing server URL clears it. A malformed timestamp leaves config, digest, and schedule processing intact.
+
 Verification on 2026-09-27:
 
 - `:shared:assembleEpilogueSharedXCFramework` with JDK 17: passed (15 tasks; fresh debug and release frameworks from corrected config source).
@@ -15,6 +17,8 @@ Verification on 2026-09-27:
 - `xcodebuildmcp simulator build` for `Epilogue` Debug with isolated derived data: passed.
 - `xcodebuildmcp simulator test` focused on `GhostwriterSyncCoordinatorTests` on iPhone 16 Pro Max iOS 18.6: 15 passed, 0 failed. Covers both entry points, component failures, 404/405/503 fallback, digest cadence, cancellation, configuration reads, fresh schedules, feed outbox retention/actions, and real SwiftData partial digest retry without duplicate IDs.
 - After the review corrections and accepted feed integration, focused coordinator + digest simulator tests passed 24/24 and the full App suite passed 59/59 on the same simulator. The focused run includes zero-article combined/legacy indexing, recently fetched nonempty digest ingestion, and independent work after known-ID read failure. The test runner emitted a CoreData editable-model checksum diagnostic but reported no test failures.
+- After the final review corrections, focused coordinator + digest simulator tests passed 27/27. An isolated in-memory iOS UI fixture passed 1/1, rendering the zero-article/no-file state and nonempty indexed state and checking their actions. The full App suite passed 63/63. The runner again emitted the CoreData editable-model checksum diagnostic without test failures.
+- A final real SwiftData retry fixture for an already indexed nonempty digest passed with the digest service suite (10/10): failed download leaves the indexed row retryable; a successful retry updates its EPUB path without creating another row. The rendered fixture passed again with a saved Xcode result bundle; inspected screenshots are [history](assets/IOS-SYNC-STATUS/history.png) and [empty detail](assets/IOS-SYNC-STATUS/empty-detail.png).
 - `git diff --check`: passed.
 
 Existing native manual setting edits do not have durable offline change tracking; this change reports incomplete sync and protects in-flight local values but does not introduce a settings outbox. Historical already-incomplete digest rows are not repaired by retrying the sync.

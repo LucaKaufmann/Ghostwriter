@@ -87,6 +87,8 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     private let settingsRepository: SettingsRepositoryProtocol
     var operations: SyncOperations
     var now: () -> Date
+    private var combinedFeedDestination: String?
+    private var combinedFeedTimestamp: Date?
     private let logger = Logger(subsystem: "com.epilogue", category: "GhostwriterSync")
 
     @Published public private(set) var isSyncing = false
@@ -275,10 +277,19 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                 try record(error, component: .digest, phase: "known IDs read", into: &issues)
             }
 
+            // This cursor only reduces the unused v1 feed payload in the combined response.
+            // It is not the feed-v2 apply cursor or a user-visible feed success timestamp.
+            let destination = try? await settingsRepository.getGhostwriterURL()
+            try Task.checkCancellation()
+            if destination != combinedFeedDestination {
+                combinedFeedDestination = destination
+                combinedFeedTimestamp = nil
+            }
+
             let response: SyncResponse
             do {
-                // The combined feed section is v1 and ignored; no v1 cursor is needed.
-                response = try await operations.fetchCombined(nil, knownDigestIDs)
+                // The combined feed section is ignored; this cursor only limits its payload.
+                response = try await operations.fetchCombined(combinedFeedTimestamp, knownDigestIDs)
                 try Task.checkCancellation()
             } catch {
                 try rethrowCancellation(error)
@@ -292,6 +303,10 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                 }
                 finish(issues)
                 return
+            }
+
+            if let timestamp = response.feeds.serverTimestamp.toISO8601Date() {
+                combinedFeedTimestamp = timestamp
             }
 
             issues.append(contentsOf: try await applyCombined(response,

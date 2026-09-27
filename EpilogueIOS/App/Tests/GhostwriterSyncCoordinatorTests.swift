@@ -55,10 +55,11 @@ final class GhostwriterSyncCoordinatorTests: XCTestCase {
             return try! JSONDecoder().decode([ScheduleResponse].self, from: Data(json.utf8))
         }
 
-        static func response(digests: String = "[]") throws -> SyncResponse {
+        static func response(digests: String = "[]",
+                             serverTimestamp: String = "2026-09-27T10:00:00Z") throws -> SyncResponse {
             let json = """
             {"config":{"timezone":"UTC","updated_at":"2026-09-27T10:00:00Z"},
-             "feeds":{"feeds":[],"tombstones":[],"server_timestamp":"2026-09-27T10:00:00Z"},
+             "feeds":{"feeds":[],"tombstones":[],"server_timestamp":"\(serverTimestamp)"},
              "digests":{"new_digests":\(digests)},
              "schedules":[{"id":"morning","period":"morning","hour":6,"minute":0,
                            "enabled":true,"timezone":"UTC"}]}
@@ -254,7 +255,7 @@ final class GhostwriterSyncCoordinatorTests: XCTestCase {
         fixture.coordinator.operations.lastDigestSync = { nil }
         fixture.coordinator.operations.knownDigestIDs = { throw FixtureError.read }
         fixture.coordinator.operations.fetchCombined = { since, ids in
-            XCTAssertNil(since)
+            XCTAssertEqual(since, "2026-09-27T10:00:00Z".toISO8601Date())
             XCTAssertEqual(ids, [])
             return try Fixture.response()
         }
@@ -287,6 +288,49 @@ final class GhostwriterSyncCoordinatorTests: XCTestCase {
         await fixture.coordinator.performFullSync()
         XCTAssertEqual(ingestCalls, 1)
         XCTAssertNil(fixture.coordinator.lastSyncError)
+    }
+
+    func testPrivateCombinedCursorDoesNotClaimFeedSuccessAndResetsForDestination() async throws {
+        let fixture = try await Fixture(now: fixedNow)
+        var cursors: [Date?] = []
+        fixture.coordinator.operations.fetchCombined = { since, _ in
+            cursors.append(since)
+            return try Fixture.response()
+        }
+        await fixture.coordinator.performFullSync()
+        await fixture.coordinator.performFullSync()
+        let expected = "2026-09-27T10:00:00Z".toISO8601Date()
+        XCTAssertNil(cursors[0])
+        XCTAssertEqual(cursors[1], expected)
+        let visibleFeedSuccess = try await fixture.settings.getLastFeedSyncTime()
+        XCTAssertNil(visibleFeedSuccess)
+
+        try await fixture.settings.setGhostwriterURL("https://other.invalid")
+        await fixture.coordinator.performFullSync()
+        XCTAssertNil(cursors[2])
+        XCTAssertNil(fixture.coordinator.lastSyncError)
+    }
+
+    func testMalformedCombinedTimestampAndFetchFailureDoNotBlockOtherWork() async throws {
+        let fixture = try await Fixture(now: fixedNow)
+        var cursors: [Date?] = []
+        var configCalls = 0
+        fixture.coordinator.operations.applyConfig = { _ in configCalls += 1 }
+        fixture.coordinator.operations.fetchCombined = { since, _ in
+            cursors.append(since)
+            return try Fixture.response(serverTimestamp: "bad timestamp")
+        }
+        await fixture.coordinator.performFullSync()
+        await fixture.coordinator.performFullSync()
+        XCTAssertEqual(cursors.count, 2)
+        XCTAssertTrue(cursors.allSatisfy { $0 == nil })
+        XCTAssertEqual(configCalls, 2)
+        XCTAssertNil(fixture.coordinator.lastSyncError)
+
+        fixture.coordinator.operations.fetchCombined = { _, _ in throw FixtureError.read }
+        await fixture.coordinator.performFullSync()
+        XCTAssertNil(fixture.coordinator.lastSyncError)
+        XCTAssertEqual(fixture.coordinator.lastSyncTime, fixedNow)
     }
 
     func testScheduleFetchFailureAndAllDigestFailureRetainPriorSuccessTime() async throws {
