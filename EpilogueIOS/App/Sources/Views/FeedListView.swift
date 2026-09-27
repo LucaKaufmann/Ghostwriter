@@ -129,6 +129,7 @@ struct FeedListView: View {
                     Button(action: { showingAddFeed = true }) {
                         Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Add feed")
                 }
             }
             .refreshable {
@@ -534,7 +535,10 @@ struct FeedResolutionView: View {
                 if mutation.status == "rejected" {
                     Section("Rejected") {
                         Text(mutation.rejectionMessage ?? mutation.rejectionCode ?? "The server rejected this change.")
-                        if mutation.kind != "delete" {
+                        if mutation.kind != "delete", mutation.rejectionCode == "invalid_url" {
+                            Text("This proposal cannot change its URL. Discard it, then add the feed again with a corrected URL.")
+                                .foregroundStyle(.secondary)
+                        } else if mutation.kind != "delete" {
                             TextField("Corrected title", text: $correctedTitle)
                             Button("Correct and retry") { resolve(.correct, title: correctedTitle) }
                         }

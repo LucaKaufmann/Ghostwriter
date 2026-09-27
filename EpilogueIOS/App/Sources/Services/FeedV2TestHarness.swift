@@ -28,23 +28,26 @@ final class FeedV2TestHarness {
             let examples: [(String, String, String, String?, Bool)] = [
                 ("conflict", "Web headline", "conflict", "My headline", false),
                 ("rejected", "Rejected feed", "rejected", "Bad request", false),
+                ("invalid-url", "Invalid URL feed", "rejected", "Invalid URL feed", false),
                 ("absent", "Missing feed", "needs_resolution", "Missing feed", true),
                 ("delete", "Removed locally", "conflict", nil, true),
                 ("rejected-delete", "Rejected removal", "rejected", nil, true)
             ]
             for (index, example) in examples.enumerated() {
                 let url = "https://example.test/\(example.0).xml"
+                let serverPresent = !["absent", "invalid-url"].contains(example.0)
                 context.insert(Domain.Feed(url: url, name: example.1, mode: .fidelity,
-                                           serverId: example.0 == "absent" ? nil : UUID().uuidString.lowercased(),
-                                           serverVersion: example.0 == "absent" ? nil : 8,
+                                           serverId: serverPresent ? UUID().uuidString.lowercased() : nil,
+                                           serverVersion: serverPresent ? 8 : nil,
                                            isLocallyDeleted: example.4))
                 let mutation = FeedMutation(url: url, scopeKey: scope,
                                             kind: example.0.contains("delete") ? "delete" : "upsert",
-                                            baseVersion: 7, title: example.3,
+                                            baseVersion: example.0 == "invalid-url" ? nil : 7,
+                                            title: example.3,
                                             isActive: true, mode: "raw", maxArticles: 5,
                                             sequence: Int64(index + 1), localRevision: 1,
                                             status: example.2, sent: true)
-                if example.0 != "absent" {
+                if serverPresent {
                     mutation.serverKind = "feed"
                     mutation.serverTitle = example.1
                     mutation.serverIsActive = true
@@ -55,6 +58,9 @@ final class FeedV2TestHarness {
                 if example.0 == "rejected" {
                     mutation.rejectionCode = "invalid_fields"
                     mutation.rejectionMessage = "The title needs correction."
+                } else if example.0 == "invalid-url" {
+                    mutation.rejectionCode = "invalid_url"
+                    mutation.rejectionMessage = "The server rejected this feed URL."
                 } else if example.0 == "rejected-delete" {
                     mutation.rejectionCode = "delete_denied"
                     mutation.rejectionMessage = "The server rejected this removal."
