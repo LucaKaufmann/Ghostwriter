@@ -197,7 +197,7 @@ class BinderyPipeline:
 
         try:
             try:
-                await self._drain_source_acknowledgements()
+                await self._drain_source_acknowledgements(request_follow_up=False)
             except Exception:
                 logger.exception("Pending source acknowledgement scan failed")
             await self._update_stage("fetching")
@@ -881,7 +881,7 @@ class BinderyPipeline:
             except Exception:
                 logger.exception("Digest completion logging failed after publication")
             try:
-                await self._drain_source_acknowledgements()
+                await self._drain_source_acknowledgements(digest_id=self.digest_id)
             except Exception:
                 logger.exception("Source acknowledgement scan failed after publication")
 
@@ -997,9 +997,13 @@ class BinderyPipeline:
             )
         return cover
 
-    async def _drain_source_acknowledgements(self) -> None:
+    async def _drain_source_acknowledgements(
+        self, *, digest_id: UUID | None = None, request_follow_up: bool = True,
+    ) -> None:
         await drain_pending(
             engine=engine,
+            digest_id=digest_id,
+            request_follow_up=request_follow_up,
             newsletter_factory=lambda: NewsletterService(self.settings),
             wallabag_factory=lambda session: WallabagService.from_db_or_settings(
                 session, self.settings
