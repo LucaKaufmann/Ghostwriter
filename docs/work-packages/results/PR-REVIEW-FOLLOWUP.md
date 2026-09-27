@@ -119,3 +119,11 @@ The paginated74–117 sweep covered inline comments, review bodies and issue com
 - PR115c526cb6 now passed independent Sol review, was pushed and integrated157f309; the real KMP serialized re-add has complete fields and acknowledges after the delete across disk reopen.
 - PR106699ee13 contract corrections received independent Sol source review: no actionable contradiction; native compatibility previews are read-only UI state, Room binding is transactional, V3 owns delivery, and cancellation retains retryable attempt markers.
 - Remote refresh:82/86/87 also merged externally; main86d3efd integrated64222b8. Only conflict was the contract add/add; current reviewed wording was retained. Product source was unchanged by this merge.
+
+## Refresh through PR118 (later heads)
+
+- PR111/4116241870: newer typing during an in-flight edit must survive a delayed409; web owner assigned.
+- PR116/4116254668: valid explicit regeneration must survive recovery even when delivery claims retain the original firstDigestId; iOS owner assigned. Preserve original delivery claims and negative artifact checks.
+- PR106/4116229219: current next-action wording no longer says the unfinished118follow-up is accepted. PR106/4116216185 requested acceptance on an older snapshot; it is superseded and must not override active findings.
+- PR106/4116216180: PR-INDEX now links45 verified result/design/checkpoint paths at immutable published commit SHAs. Each target was checked with git cat-file; the docs-only continuity branch need not duplicate implementation evidence or screenshots to provide portable recovery.
+- Sweep74–118 covered all paginated inline/review/issue bodies.149 current-head successful checks,24 skipped,2 pending (112/116iOS),0 failed. Exact snapshots remain in temporary pr-feedback; record final refreshed outcomes before acceptance.

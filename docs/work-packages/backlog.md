@@ -20,7 +20,7 @@ All packages inherit the [worker prompt](worker-prompt.md). The orchestrator own
 
 User model preference: **Sol (`gpt-6-sol`) for every subagent**, including research, implementation, and independent review. Select it explicitly at launch; use a self-contained brief when full-history forks cannot accept model overrides. Do not silently substitute another model.
 
-Current environment supports the root plus three concurrent subagents. Recheck capacity on launch; reserve root for integration. Do not create separate user-facing chats unless requested. Three preparation workers are read-only and do not count as implementation started.
+Current environment supports the root plus three concurrent subagents. Recheck capacity on launch; reserve root for integration. Do not create separate user-facing chats unless requested. Preparation used three read-only workers and did not start implementation.
 
 First recommended dispatch: **ENV-01, AUTH-01, HELPER-01**. ENV-01 owns global Python test/configuration files, so AUTH-01 uses task-specific test modules and waits for ENV-01's verified environment before final full-suite acceptance. As slots free, launch **KO-01**, **INGEST-01**, and **WEB-01** where ownership permits. Build preparation and contract packages can then run alongside backend fixes. The package ledger records dependencies, not a promise to run every row at once.
 
@@ -40,7 +40,7 @@ All PRs: `git diff --check`, focused behavior/failure tests, inspected final dif
 
 ## Package ledger
 
-Execution is in final review and integration. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`; the [PR index](results/PR-INDEX.md) lists the published work. The table below is the original scope/dependency map, not live completion status. Most implementation is published; the last original package and review corrections remain explicitly tracked until final combined verification. Result path convention: `docs/work-packages/results/ID.md` on the relevant branch.
+Execution is in final review and integration. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`; the [PR index](results/PR-INDEX.md) lists the published work. The table below is the original scope/dependency map, not live completion status. All 29 original package outcomes are published; review corrections remain explicitly tracked until final combined verification. Result path convention: `docs/work-packages/results/ID.md` on the relevant branch.
 
 | ID | Priority/type | Outcome | Start condition |
 |---|---|---|---|
