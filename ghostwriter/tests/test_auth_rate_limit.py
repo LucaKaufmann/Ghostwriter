@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.auth import router
 from app.core import auth as auth_core
@@ -93,3 +94,44 @@ def test_disabled_rate_limit_does_not_reject(tmp_path, monkeypatch):
         assert [client.post("/auth/login", json=body).status_code for _ in range(3)] == [
             401, 401, 401
         ]
+
+
+def test_uvicorn_trusted_proxy_client_address_drives_bucket(tmp_path, monkeypatch):
+    settings = Settings(
+        _env_file=None,
+        data_dir=str(tmp_path),
+        auth_rate_limit_max=1,
+        auth_rate_limit_window_seconds=60,
+    )
+    monkeypatch.setattr(rate_limit, "get_settings", lambda: settings)
+    app = FastAPI()
+
+    @app.post("/auth-attempt")
+    async def auth_attempt(request: Request):
+        rate_limit.check_auth_rate_limit(request)
+        return {"ok": True}
+
+    wrapped = ProxyHeadersMiddleware(app, trusted_hosts="203.0.113.10")
+    with TestClient(wrapped, client=("203.0.113.10", 5000)) as trusted:
+        assert trusted.post(
+            "/auth-attempt", headers={"x-forwarded-for": "198.51.100.10"}
+        ).status_code == 200
+        assert trusted.post(
+            "/auth-attempt", headers={"x-forwarded-for": "198.51.100.11"}
+        ).status_code == 200
+        assert trusted.post(
+            "/auth-attempt", headers={"x-forwarded-for": "198.51.100.10"}
+        ).status_code == 429
+        # Uvicorn selects the nearest untrusted hop, not the spoofed prefix.
+        assert trusted.post(
+            "/auth-attempt",
+            headers={"x-forwarded-for": "192.0.2.55, 198.51.100.10"},
+        ).status_code == 429
+
+    with TestClient(wrapped, client=("203.0.113.20", 5000)) as untrusted:
+        assert untrusted.post(
+            "/auth-attempt", headers={"x-forwarded-for": "198.51.100.12"}
+        ).status_code == 200
+        assert untrusted.post(
+            "/auth-attempt", headers={"x-forwarded-for": "198.51.100.13"}
+        ).status_code == 429

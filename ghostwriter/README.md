@@ -183,7 +183,18 @@ ALLOW_PRIVATE_HOSTS=false
 CORS_ALLOW_ORIGINS=https://ghostwriter.example.com
 ENABLE_API_DOCS=false
 TRUSTED_PROXY_HOSTS=203.0.113.10/32
+FORWARDED_ALLOW_IPS=203.0.113.10
 ```
+
+For a reverse proxy, set both trust settings to its **source IP as seen by
+Ghostwriter** (the container-network address may differ from its public
+address). `TRUSTED_PROXY_HOSTS` controls forwarded host and scheme handling in
+Ghostwriter. Uvicorn uses `FORWARDED_ALLOW_IPS` to accept `X-Forwarded-For` from
+that proxy, so login and registration limits use the forwarded client IP.
+Uvicorn otherwise trusts forwarded client IPs only from loopback. Configure the
+proxy to replace or safely append client addresses, and never set
+`FORWARDED_ALLOW_IPS=*`: that would let direct clients spoof their rate-limit IP.
+Clients behind the same NAT still share one auth bucket.
 
 ### whisper.cpp Binary Override (ARM / Raspberry Pi)
 
