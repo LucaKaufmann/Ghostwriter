@@ -215,6 +215,8 @@ dependencies {
 
     // Testing
     testImplementation("junit:junit:4.13.2")
+    // Exercise Android XML serialization rather than null-returning JVM stubs.
+    testImplementation("org.robolectric:robolectric:4.16.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     testImplementation("io.mockk:mockk:1.13.9")
     testImplementation("io.ktor:ktor-client-mock:2.3.12")

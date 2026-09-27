@@ -22,8 +22,13 @@ struct OpenAIServiceTests {
     @Test("Missing API key throws error")
     func testMissingAPIKey() async throws {
         let service = OpenAIService(apiKey: "")
-        await #expect(throws: AIServiceError.missingAPIKey) {
+        do {
             _ = try await service.summarize(title: "Test", content: "Content", author: nil)
+            Issue.record("Expected missingAPIKey")
+        } catch AIServiceError.missingAPIKey {
+            // Match the enum case without imposing Equatable on provider errors.
+        } catch {
+            Issue.record("Expected missingAPIKey, received: \(error)")
         }
     }
 

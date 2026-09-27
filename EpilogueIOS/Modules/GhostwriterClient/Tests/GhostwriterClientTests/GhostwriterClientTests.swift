@@ -216,15 +216,24 @@ final class GhostwriterClientTests: XCTestCase {
     // MARK: - Client Initialization Tests
     
     func testClientInitializationWithValidURL() throws {
-        let client = try GhostwriterClient(baseURLString: "https://ghostwriter.example.com", apiKey: "test-key")
-        XCTAssertNotNil(client)
+        for url in [
+            "https://ghostwriter.example.com",
+            "https://ghostwriter.example.com/base/path",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://[::1]:8080"
+        ] {
+            XCTAssertNoThrow(try GhostwriterClient(baseURLString: url, apiKey: "test-key"), url)
+        }
     }
     
     func testClientInitializationWithInvalidURL() {
-        XCTAssertThrowsError(try GhostwriterClient(baseURLString: "not a valid url")) { error in
-            guard case GhostwriterError.invalidURL = error else {
-                XCTFail("Expected invalidURL error")
-                return
+        for url in ["not a valid url", "/relative/path", "ftp://example.com", "http://", "https://"] {
+            XCTAssertThrowsError(try GhostwriterClient(baseURLString: url), url) { error in
+                guard case GhostwriterError.invalidURL = error else {
+                    XCTFail("Expected invalidURL error for \(url), got \(error)")
+                    return
+                }
             }
         }
     }
