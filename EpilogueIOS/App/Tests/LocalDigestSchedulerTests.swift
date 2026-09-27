@@ -173,6 +173,53 @@ final class LocalDigestSchedulerTests: XCTestCase {
         XCTAssertFalse(covered)
     }
 
+    @MainActor
+    func testProductionCalendarFollowsTimeZoneChangeWhileInjectedCalendarStaysFixed() throws {
+        let originalTimeZone = NSTimeZone.default
+        defer { NSTimeZone.default = originalTimeZone }
+        let utc = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let honolulu = try XCTUnwrap(TimeZone(identifier: "Pacific/Honolulu"))
+        NSTimeZone.default = utc
+
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
+        let container = try ModelContainer(for: schema, configurations: [
+            ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        ])
+        let context = ModelContext(container)
+        let feeds = FeedRepository(modelContext: context)
+        let digests = DigestRepository(modelContext: context)
+        let settings = SettingsRepository(userDefaults: UserDefaults(
+            suiteName: "scheduler-calendar-\(UUID().uuidString)")!)
+        let production = LocalDigestScheduler(
+            feedRepository: feeds, digestRepository: digests,
+            settingsRepository: settings, modelContainer: container)
+        var fixedUTC = Calendar(identifier: .gregorian)
+        fixedUTC.timeZone = utc
+        let injected = LocalDigestScheduler(
+            feedRepository: feeds, digestRepository: digests,
+            settingsRepository: settings, modelContainer: container,
+            calendar: fixedUTC)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-03-01T10:00:00Z"))
+        let periods: Set<DigestPeriod> = [.morning]
+        let utcNext = try XCTUnwrap(injected.nextScheduledDigestTime(from: now, periods: periods))
+        XCTAssertEqual(production.nextScheduledDigestTime(from: now, periods: periods), utcNext)
+        XCTAssertEqual(LocalDigestScheduler.latestElapsedPeriod(
+            now: now, periods: periods, calendar: .autoupdatingCurrent), .morning)
+
+        // The same process and scheduler now see March 1 at midnight in Hawaii,
+        // rather than March 1 at 10:00 in UTC; morning moves from tomorrow to today.
+        NSTimeZone.default = honolulu
+        let localNext = try XCTUnwrap(production.nextScheduledDigestTime(from: now, periods: periods))
+        XCTAssertEqual(localNext.timeIntervalSince(now),
+                       TimeInterval(DigestPeriod.morning.hour * 60 * 60))
+        XCTAssertEqual(utcNext.timeIntervalSince(now),
+                       TimeInterval((24 - 10 + DigestPeriod.morning.hour) * 60 * 60))
+        XCTAssertNotEqual(localNext, utcNext)
+        XCTAssertEqual(injected.nextScheduledDigestTime(from: now, periods: periods), utcNext)
+        XCTAssertNil(LocalDigestScheduler.latestElapsedPeriod(
+            now: now, periods: periods, calendar: .autoupdatingCurrent))
+    }
+
     private func makeDate(hour: Int, minute: Int) -> Date {
         let components = DateComponents(
             calendar: calendar,
