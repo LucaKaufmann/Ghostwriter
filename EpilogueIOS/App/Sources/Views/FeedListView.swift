@@ -538,6 +538,7 @@ struct FeedResolutionView: View {
                         if mutation.kind != "delete", mutation.rejectionCode == "invalid_url" {
                             Text("This proposal cannot change its URL. Discard this proposal and resolve any remaining changes for this URL before adding the corrected URL. For a feed absent from the server, choose Keep removed.")
                                 .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("invalidURLResolutionGuidance")
                         } else if mutation.kind != "delete" {
                             TextField("Corrected title", text: $correctedTitle)
                             Button("Correct and retry") { resolve(.correct, title: correctedTitle) }

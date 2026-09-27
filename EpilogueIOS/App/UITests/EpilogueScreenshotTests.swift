@@ -66,9 +66,10 @@ final class EpilogueScreenshotTests: XCTestCase {
 
         app.staticTexts["Invalid URL feed"].tap()
         XCTAssertTrue(waitForExists(app.buttons["Discard proposal"]))
-        XCTAssertTrue(waitForExists(app.staticTexts[
-            "This proposal cannot change its URL. Discard this proposal and resolve any remaining changes for this URL before adding the corrected URL. For a feed absent from the server, choose Keep removed."
-        ]))
+        let guidance = app.staticTexts["invalidURLResolutionGuidance"]
+        XCTAssertTrue(waitForExists(guidance))
+        XCTAssertEqual(guidance.label,
+                       "This proposal cannot change its URL. Discard this proposal and resolve any remaining changes for this URL before adding the corrected URL. For a feed absent from the server, choose Keep removed.")
         XCTAssertFalse(app.textFields["Corrected title"].exists)
         XCTAssertFalse(app.buttons["Correct and retry"].exists)
         capture(name: "feed-v2-rejected-invalid-url")
