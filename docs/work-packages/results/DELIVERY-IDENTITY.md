@@ -13,3 +13,7 @@ Verification on the isolated `codex/delivery-identity-core` worktree (base `ad7f
 - `git diff --check`: clean.
 
 The current base's older `GhostwriterApiClientTest.kt` uses two `String.toByteArray()` calls that cannot compile for Kotlin/Native. For the iOS test only, these two calls were temporarily changed to `encodeToByteArray()` and then restored before commit. The separate KMP lane owns the permanent two-line portability fix, so this branch's unchanged base alone cannot rerun the iOS common tests until that fix is integrated. No Android or iOS generation caller has cut over to this helper yet; no native fallback parity or deliver-once behavior is claimed here. No schema, UI, generation flow, or provider call changed.
+
+## Final shared integration
+
+Rebased the two reviewed helper commits onto accepted shared sync `1e2350d` (code `0d18fb4`), which includes the permanent UTF-8 test fix. The combined `:shared:testDebugUnitTest :shared:iosSimulatorArm64Test --offline --no-daemon` command passed on both platforms after host-validation corrections; no temporary source edits were needed. Full Sol review findings on embedded IPv4 and trailing DNS dots were corrected, and correction review was clean. Native delivery callers remain a later stage.
