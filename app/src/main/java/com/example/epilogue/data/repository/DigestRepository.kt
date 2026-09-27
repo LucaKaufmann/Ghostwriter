@@ -13,6 +13,8 @@ import com.example.epilogue.domain.model.ProcessedArticle
 import com.example.epilogue.domain.model.TriggerType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -130,6 +132,28 @@ class DigestRepository @Inject constructor(
         )
 
         cleanupOldDigests()
+    }
+
+    /** Keep a newly generated EPUB owned until its history finalization succeeds. */
+    suspend fun <T> withGeneratedArtifact(file: File, action: suspend () -> T): T {
+        var completed = false
+        try {
+            val result = action()
+            completed = true
+            return result
+        } finally {
+            if (!completed) {
+                // Cancellation must not interrupt the reference check and cleanup.
+                // A finalization failure may occur after the history row was committed.
+                withContext(NonCancellable) {
+                    try {
+                        digestDao.removeUnreferencedArtifact(file.absolutePath, ::removeArtifact)
+                    } catch (failure: Exception) {
+                        Log.w("DigestRepository", "Could not clean generated EPUB", failure)
+                    }
+                }
+            }
+        }
     }
 
     suspend fun markDigestFailed(digestId: Long, errorMessage: String) {

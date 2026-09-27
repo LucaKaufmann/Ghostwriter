@@ -63,17 +63,20 @@ class EpubGenerator @Inject constructor(
         articles: List<ProcessedArticle>,
         date: Date = Date(),
         period: DigestPeriod? = null
-    ): EpubGenerationResult? = withContext(Dispatchers.IO) {
-        if (articles.isEmpty()) return@withContext null
-
+    ): EpubGenerationResult? {
+        if (articles.isEmpty()) return null
         var outputFile: File? = null
-        try {
-            val book = createBook(articles, date, period)
-            val file = writeEpub(book, date, period)
-            outputFile = file
-            scanFile(file)
-            EpubGenerationResult(file, articles)
+        return try {
+            withContext(Dispatchers.IO) {
+                val book = createBook(articles, date, period)
+                val file = writeEpub(book, date, period)
+                outputFile = file
+                scanFile(file)
+                EpubGenerationResult(file, articles)
+            }
         } catch (e: Exception) {
+            // Also covers cancellation during the dispatch back from IO, when
+            // withContext discards its successful result before the caller sees it.
             outputFile?.delete()
             if (e is CancellationException) throw e
             null

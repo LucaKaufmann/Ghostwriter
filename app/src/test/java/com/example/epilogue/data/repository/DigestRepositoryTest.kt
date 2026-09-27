@@ -3,8 +3,14 @@ package com.example.epilogue.data.repository
 import androidx.room.Room
 import com.example.epilogue.data.local.DigestEntity
 import com.example.epilogue.data.local.EpilogueDatabase
+import com.example.epilogue.domain.model.ProcessedArticle
 import com.example.epilogue.domain.model.TriggerType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -16,6 +22,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
@@ -91,5 +98,63 @@ class DigestRepositoryTest {
         assertTrue(repository.deleteAllDigests())
         assertFalse(shared.exists())
         assertEquals(0, database.digestDao().getDigestCount())
+    }
+
+    @Test fun `failed history finalization removes only the newly generated artifact`() = runBlocking {
+        val previous = files.newFile("previous.epub").apply { writeText("keep") }
+        record(previous)
+        val generated = files.newFile("generated.epub").apply { writeText("new") }
+        val pendingId = repository.createPendingDigest(emptyList(), TriggerType.MANUAL)
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_history_insert BEFORE INSERT ON digest_articles " +
+                "BEGIN SELECT RAISE(ABORT, 'fixture finalization failure'); END"
+        )
+
+        val failure = runCatching {
+            repository.withGeneratedArtifact(generated) {
+                repository.completePendingDigest(
+                    pendingId,
+                    listOf(ProcessedArticle("Article", "Author", "Body", "https://example.com", false)),
+                    emptyList(),
+                    generated.absolutePath
+                )
+            }
+        }.exceptionOrNull()
+        assertNotNull(failure)
+        assertTrue(failure.toString().contains("fixture finalization failure"))
+
+        assertFalse(generated.exists())
+        assertEquals("keep", previous.readText())
+        assertEquals("", repository.getDigestById(pendingId)?.epubFilePath)
+    }
+
+    @Test fun `cancelled history finalization removes generated artifact and propagates cancellation`() = runBlocking {
+        val generated = files.newFile("cancelled.epub")
+        val finalization = async {
+            repository.withGeneratedArtifact(generated) {
+                currentCoroutineContext().cancel(CancellationException("fixture cancellation"))
+                yield()
+            }
+        }
+        val failure = runCatching {
+            finalization.await()
+        }.exceptionOrNull()
+        assertTrue(failure is CancellationException)
+        assertFalse(generated.exists())
+    }
+
+    @Test fun `failure after history commit preserves referenced generated artifact`() = runBlocking {
+        val generated = files.newFile("committed.epub").apply { writeText("saved") }
+        val pendingId = repository.createPendingDigest(emptyList(), TriggerType.MANUAL)
+        val failure = runCatching {
+            repository.withGeneratedArtifact(generated) {
+                repository.completePendingDigest(pendingId, emptyList(), emptyList(), generated.absolutePath)
+                throw IOException("fixture after commit")
+            }
+        }.exceptionOrNull()
+        assertTrue(failure is IOException)
+        assertEquals("fixture after commit", failure?.message)
+        assertEquals(generated.absolutePath, repository.getDigestById(pendingId)?.epubFilePath)
+        assertEquals("saved", generated.readText())
     }
 }
