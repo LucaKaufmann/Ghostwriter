@@ -16,3 +16,5 @@ Settings now separates ordinary **Run Now** from **Regenerate including previous
 - All source/provider fixtures are synthetic; no paid provider was called. This run did not execute a live feed-to-EPUB generation against a network feed.
 
 Independent Sol review: the initial review findings on fetch-failure exclusion and capped regeneration were fixed; follow-up duplicate URL fetching was fixed. Final commit review of `60fe3128aa52d8ddc53f4550c1cbfd0b94fbc1ca` returned no accepted/actionable findings. Root inspected the final diff and persisted partial-run screenshot; all verification above is local fixture evidence.
+
+Hosted check run36328444942 initially failed in Robolectric MavenArtifactFetcher with a SocketException during FeedViewModelTest class setup; the log did not identify the exact failed artifact. No product assertion failed. Test-only correction7d6a8cb explicitly uses the same SDK34/basic Application/no-manifest configuration as delivery fixtures. Focused tests and full local157 Android/46shared/debug build passed again; hosted verification must pass on the updated head before closeout. Root inspected the two-line fixture configuration change.
