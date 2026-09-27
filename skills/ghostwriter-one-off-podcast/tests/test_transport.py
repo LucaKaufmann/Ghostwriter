@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import io
+import sys
 import tempfile
 import unittest
 import urllib.request
@@ -13,11 +14,12 @@ from unittest.mock import patch
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/create_one_off_podcast.py"
 spec = importlib.util.spec_from_file_location("podcast_helper_transport", SCRIPT)
 helper = importlib.util.module_from_spec(spec)
-import sys
 sys.modules[spec.name] = helper
 spec.loader.exec_module(helper)
 TOKEN = "synthetic-secret-token"
 BASE = "https://example.test/api"
+EPISODE_ID = "12345678-1234-1234-1234-123456789abc"
+DOWNLOAD = BASE + f"/podcast/episodes/{EPISODE_ID}/download"
 
 
 class FakeHTTP(urllib.request.BaseHandler):
@@ -210,24 +212,105 @@ class TransportTests(unittest.TestCase):
             ))
         self.assertEqual(len(fake.seen), 1)
 
-    def test_same_origin_download_and_cross_origin_audio_rejection(self):
+    def test_download_uses_configured_api_for_public_and_same_origin_urls(self):
         fake, patched = self.use_routes({
-            "https://example.test/audio": (200, {"Content-Type": "audio/mpeg"}, b"audio bytes"),
+            DOWNLOAD: (200, {"Content-Type": "audio/mpeg"}, b"audio bytes"),
         })
         with tempfile.TemporaryDirectory() as directory, patched:
+            for advertised_url in (
+                f"https://public.test/api/podcast/episodes/{EPISODE_ID}/download",
+                f"https://example.test/api/podcast/episodes/{EPISODE_ID}/download",
+                f"/api/podcast/episodes/{EPISODE_ID}/download",
+            ):
+                with self.subTest(advertised_url=advertised_url):
+                    path = helper.download_episode(
+                        api_base=BASE, token=TOKEN,
+                        detail={"id": EPISODE_ID, "download_url": advertised_url},
+                        output=str(Path(directory) / "episode.mp3"),
+                        allow_insecure_http=False,
+                    )
+                    self.assertEqual(path.read_bytes(), b"audio bytes")
+        self.assertEqual([req.full_url for req in fake.seen], [DOWNLOAD] * 3)
+        self.assertTrue(all(req.get_header("Authorization") == "Bearer " + TOKEN for req in fake.seen))
+
+    def test_download_rejects_malformed_id_and_advertised_url_before_open(self):
+        fake, patched = self.use_routes({})
+        with tempfile.TemporaryDirectory() as directory, patched:
+            for episode_id in ("../secret", "123", EPISODE_ID + "/extra", "{" + EPISODE_ID + "}"):
+                with self.subTest(episode_id=episode_id):
+                    self.assert_exit(helper.EXIT_DOWNLOAD, lambda: helper.download_episode(
+                        api_base=BASE, token=TOKEN,
+                        detail={"id": episode_id, "download_url": "https://public.test/audio"},
+                        output=None, allow_insecure_http=False,
+                    ))
+            for advertised_url in ("ftp://public.test/audio", "https://public.test:bad/audio",
+                                   "https://person:pass@public.test/audio"):
+                with self.subTest(advertised_url=advertised_url):
+                    self.assert_exit(helper.EXIT_DOWNLOAD, lambda: helper.download_episode(
+                        api_base=BASE, token=TOKEN,
+                        detail={"id": EPISODE_ID, "download_url": advertised_url},
+                        output=str(Path(directory) / "rejected.mp3"),
+                        allow_insecure_http=False,
+                    ))
+            self.assertFalse((Path(directory) / "rejected.mp3").exists())
+        self.assertEqual(fake.seen, [])
+
+    def test_download_canonicalizes_hex_id_in_route_and_default_filename(self):
+        fake, patched = self.use_routes({
+            DOWNLOAD: (200, {"Content-Type": "audio/mpeg"}, b"audio bytes"),
+        })
+        with tempfile.TemporaryDirectory() as directory, patched, patch.object(helper.Path, "cwd", return_value=Path(directory)):
             path = helper.download_episode(
                 api_base=BASE, token=TOKEN,
-                detail={"id": "123", "download_url": "/audio"},
-                output=str(Path(directory) / "episode.mp3"), allow_insecure_http=False,
+                detail={"episode_id": EPISODE_ID.replace("-", "").upper(), "stream_url": "https://public.test/audio"},
+                output=None, allow_insecure_http=False,
             )
+            self.assertEqual(path.name, f"ghostwriter-podcast-{EPISODE_ID}.mp3")
             self.assertEqual(path.read_bytes(), b"audio bytes")
+        self.assertEqual([req.full_url for req in fake.seen], [DOWNLOAD])
+
+    def test_download_redirect_to_public_origin_never_sends_credentials(self):
+        fake, patched = self.use_routes({
+            DOWNLOAD: (302, {"Location": "https://public.test/audio"}, b""),
+        })
+        with tempfile.TemporaryDirectory() as directory, patched:
             self.assert_exit(helper.EXIT_DOWNLOAD, lambda: helper.download_episode(
                 api_base=BASE, token=TOKEN,
-                detail={"id": "123", "download_url": "//other.test/audio"},
+                detail={"id": EPISODE_ID, "download_url": "https://public.test/audio"},
                 output=str(Path(directory) / "rejected.mp3"), allow_insecure_http=False,
             ))
             self.assertFalse((Path(directory) / "rejected.mp3").exists())
-        self.assertEqual(len(fake.seen), 1)
+        self.assertEqual([req.full_url for req in fake.seen], [DOWNLOAD])
+
+    def test_remote_http_download_still_requires_explicit_opt_in(self):
+        base = "http://internal.test/api"
+        url = base + f"/podcast/episodes/{EPISODE_ID}/download"
+        fake, patched = self.use_routes({
+            url: (200, {"Content-Type": "audio/mpeg"}, b"audio bytes"),
+        })
+        detail = {"id": EPISODE_ID, "download_url": "https://public.test/audio"}
+        with tempfile.TemporaryDirectory() as directory, patched:
+            output = str(Path(directory) / "episode.mp3")
+            self.assert_exit(helper.EXIT_DOWNLOAD, lambda: helper.download_episode(
+                api_base=base, token=TOKEN, detail=detail,
+                output=output, allow_insecure_http=False,
+            ))
+            self.assertFalse(Path(output).exists())
+            path = helper.download_episode(
+                api_base=base, token=TOKEN, detail=detail,
+                output=output, allow_insecure_http=True,
+            )
+            self.assertEqual(path.read_bytes(), b"audio bytes")
+        self.assertEqual([req.full_url for req in fake.seen], [url])
+
+    def test_poll_rejects_untrusted_episode_id_before_open(self):
+        fake, patched = self.use_routes({})
+        with patched:
+            self.assert_exit(helper.EXIT_API, lambda: helper.poll_episode(
+                api_base=BASE, token=TOKEN, episode_id="../other",
+                interval_seconds=0, timeout_seconds=1,
+            ))
+        self.assertEqual(fake.seen, [])
 
     def test_error_body_does_not_print_token(self):
         first = BASE + "/fail"
