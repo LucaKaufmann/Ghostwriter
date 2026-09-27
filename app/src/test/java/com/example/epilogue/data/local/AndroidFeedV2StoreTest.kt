@@ -6,6 +6,7 @@ import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
+import com.example.epilogue.ui.feed.correctionDraft
 import com.example.epilogue.shared.ghostwriter.FeedChangesV2Response
 import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
 import com.example.epilogue.shared.sync.FeedV2Binding
@@ -96,6 +97,50 @@ class AndroidFeedV2StoreTest {
             .getEnabledFeedsList().single().name)
         assertEquals(proposal.opId, database.feedMutationDao().forScope(scope).single().opId)
         configured = true
+        assertTrue(FeedRepository(database.feedDao(), store, settings).getEnabledFeedsList().isEmpty())
+        database.close()
+    }
+
+    @Test fun `disabled generation includes hidden absent upsert after full bind and Room reopen`() = runBlocking {
+        context.deleteDatabase(name)
+        var database = db()
+        var store = AndroidFeedV2Store(database, settings)
+        store.saveLocal(feed("Offline proposal"))
+        val head = database.feedMutationDao().forUrl(url).single()
+        database.feedMutationDao().update(head.copy(state = "legacy_unresolved"))
+        configured = true
+        val (token, _) = bind(store, emptyList())
+        assertTrue(database.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+        assertEquals("needs_resolution", database.feedMutationDao().forUrl(url).single().state)
+        assertTrue(FeedRepository(database.feedDao(), store, settings).getEnabledFeedsList().isEmpty())
+        store.endSyncRun(token)
+        configured = false
+        assertEquals("Offline proposal", FeedRepository(database.feedDao(), store, settings)
+            .getEnabledFeedsList().single().name)
+        database.close()
+
+        database = db()
+        store = AndroidFeedV2Store(database, settings)
+        assertEquals("Offline proposal", FeedRepository(database.feedDao(), store, settings)
+            .getEnabledFeedsList().single().name)
+        assertEquals(head.opId, database.feedMutationDao().forUrl(url).first().opId)
+        database.close()
+    }
+
+    @Test fun `disabled generation keeps a later local delete hidden after absent bind`() = runBlocking {
+        context.deleteDatabase(name)
+        val database = db()
+        val store = AndroidFeedV2Store(database, settings)
+        store.saveLocal(feed("Local"))
+        val head = database.feedMutationDao().forUrl(url).first()
+        database.feedMutationDao().update(head.copy(state = "legacy_unresolved"))
+        store.deleteLocal(url)
+        configured = true
+        val (token, _) = bind(store, emptyList())
+        store.endSyncRun(token)
+        assertEquals(listOf("upsert", "delete"), database.feedMutationDao().forUrl(url).map { it.kind })
+        assertTrue(database.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+        configured = false
         assertTrue(FeedRepository(database.feedDao(), store, settings).getEnabledFeedsList().isEmpty())
         database.close()
     }
@@ -363,6 +408,50 @@ class AndroidFeedV2StoreTest {
         assertTrue(store.resolve(successor.opId, "discard"))
         assertTrue(database.feedMutationDao().forUrl(url).isEmpty())
         store.endSyncRun(token)
+        database.close()
+    }
+
+    @Test fun `sparse rejected title correction excludes later disable after Room reopen`() = runBlocking {
+        context.deleteDatabase(name)
+        var database = db()
+        var store = AndroidFeedV2Store(database, settings)
+        configured = true
+        val (token, binding) = bind(store, listOf(remote("Server", 5)), 5)
+        store.saveLocal(feed("Invalid"))
+        val sent = value(store.loadPendingMutations(token, binding, 100)).single()
+        store.saveLocal(feed("Invalid").copy(isEnabled = false))
+        val successorId = database.feedMutationDao().forUrl(url).single { it.opId != sent.opId }.opId
+        assertTrue(store.recordRejection(token, binding, sent.opId, sent.sentRevision,
+            "invalid_fields", "Title invalid") is FeedV2StoreResult.Success)
+        val head = database.feedMutationDao().byId(sent.opId)!!
+        assertTrue(head.fieldsJson.contains("Invalid"))
+        assertFalse(head.fieldsJson.contains("is_active"))
+        assertTrue(head.serverSnapshotJson!!.contains("Server"))
+        assertFalse(database.feedDao().getFeedByUrl(url)!!.isEnabled)
+        store.endSyncRun(token)
+        database.close()
+
+        database = db()
+        store = AndroidFeedV2Store(database, settings)
+        val draft = requireNotNull(correctionDraft(database.feedMutationDao().byId(sent.opId)!!))
+        assertEquals("Invalid", draft.title)
+        assertTrue(draft.enabled) // the head's server state, not the queued disable
+        assertTrue(store.correctRejected(sent.opId, "Corrected", draft.mode,
+            draft.enabled, draft.maxArticles))
+        val successor = database.feedMutationDao().byId(successorId)!!
+        assertEquals("needs_resolution", successor.state)
+        assertTrue(store.resolve(successor.opId, "discard").not()) // head still owns the URL
+        val destination = store.currentDestination()!!
+        val nextToken = value(store.beginSyncRun(destination))
+        val nextBinding = value(store.getServerIdentity(nextToken))!!
+        val corrected = value(store.loadPendingMutations(nextToken, nextBinding, 100)).single()
+        assertEquals("Corrected", corrected.payload.fields!!.title)
+        assertEquals(true, corrected.payload.fields!!.isActive)
+        assertTrue(store.acknowledge(nextToken, nextBinding, corrected.opId, corrected.sentRevision,
+            remote("Corrected", 6)) is FeedV2StoreResult.Success)
+        assertTrue(store.resolve(successor.opId, "discard"))
+        assertTrue(database.feedDao().getFeedByUrl(url)!!.isEnabled)
+        store.endSyncRun(nextToken)
         database.close()
     }
 

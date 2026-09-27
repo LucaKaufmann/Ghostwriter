@@ -172,7 +172,6 @@ fun FeedManagerScreen(
                 uiState.error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
                 items(unresolved, key = { "proposal-${it.opId}" }) { proposal ->
                     FeedResolutionCard(proposal,
-                        current = feeds.find { it.url == proposal.url },
                         onResolve = { action -> viewModel.resolve(proposal.opId, action) },
                         onCorrect = { title, mode, enabled, cap ->
                             viewModel.correctRejected(proposal.opId, title, mode, enabled, cap)
@@ -218,42 +217,45 @@ internal data class FeedCorrectionDraft(
     val maxArticles: Int
 )
 
-/** Sparse rejected fields override the complete server state, then the visible local row. */
-internal fun correctionDraft(proposal: FeedMutationEntity, current: Feed?): FeedCorrectionDraft {
-    val fields = runCatching { JSONObject(proposal.fieldsJson) }.getOrDefault(JSONObject())
+/** A correction may use the rejected head and its server snapshot, never a later optimistic row. */
+internal fun correctionDraft(proposal: FeedMutationEntity): FeedCorrectionDraft? {
+    val fields = runCatching { JSONObject(proposal.fieldsJson) }.getOrNull() ?: return null
     val server = proposal.serverSnapshotJson?.let { runCatching { JSONObject(it) }.getOrNull() }
         ?.takeIf { it.optString("kind") == "feed" }
     val title = when {
         fields.has("title") -> fields.optString("title")
-        server != null -> server.optString("title")
-        else -> current?.name.orEmpty()
+        server?.has("title") == true -> server.optString("title")
+        else -> return null
     }
-    val mode = when {
-        fields.has("mode") -> fields.optString("mode") == "summarize"
-        server != null -> server.optString("mode") == "summarize"
-        else -> current?.mode == ProcessingMode.BRIEFING
+    val modeValue = when {
+        fields.has("mode") -> fields.optString("mode")
+        server?.has("mode") == true -> server.optString("mode")
+        else -> return null
     }
     val enabled = when {
         fields.has("is_active") -> fields.optBoolean("is_active")
-        server != null -> server.optBoolean("is_active")
-        else -> current?.isEnabled ?: true
+        server?.has("is_active") == true -> server.optBoolean("is_active")
+        else -> return null
     }
     val cap = when {
         fields.has("max_articles") -> fields.optInt("max_articles")
-        server != null -> server.optInt("max_articles")
-        else -> current?.maxArticles ?: 0
+        server?.has("max_articles") == true -> server.optInt("max_articles")
+        else -> return null
     }
-    return FeedCorrectionDraft(title, if (mode) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY,
+    if (title.isBlank() || modeValue !in setOf("raw", "summarize") || cap < 0) return null
+    return FeedCorrectionDraft(title, if (modeValue == "summarize") ProcessingMode.BRIEFING else ProcessingMode.FIDELITY,
         enabled, cap)
 }
 
 @Composable
 private fun FeedResolutionCard(
     proposal: FeedMutationEntity,
-    current: Feed?,
     onResolve: (String) -> Unit,
     onCorrect: (String, ProcessingMode, Boolean, Int) -> Unit
 ) {
+    val draft = remember(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+        correctionDraft(proposal)
+    }
     val local = remember(proposal.fieldsJson) { runCatching { JSONObject(proposal.fieldsJson) }.getOrDefault(JSONObject()) }
     val server = remember(proposal.serverSnapshotJson) {
         proposal.serverSnapshotJson?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -280,7 +282,8 @@ private fun FeedResolutionCard(
                 when {
                     proposal.state == "rejected" -> {
                         TextButton(onClick = { onResolve("discard") }) { Text("Discard") }
-                        TextButton(onClick = { if (proposal.kind == "delete") onResolve("correct") else correcting = true }) {
+                        TextButton(onClick = { if (proposal.kind == "delete") onResolve("correct") else correcting = true },
+                            enabled = proposal.kind == "delete" || draft != null) {
                             Text("Correct")
                         }
                     }
@@ -298,12 +301,14 @@ private fun FeedResolutionCard(
                     }
                 }
             }
+            if (proposal.state == "rejected" && proposal.kind != "delete" && draft == null) {
+                Text("This proposal lacks the server values needed for a safe correction. Discard it and edit the feed again.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
-    if (correcting) {
-        val initial = remember(proposal.opId) {
-            correctionDraft(proposal, current)
-        }
+    if (correcting && draft != null) {
+        val initial = draft
         var title by rememberSaveable(proposal.opId) {
             mutableStateOf(initial.title)
         }
