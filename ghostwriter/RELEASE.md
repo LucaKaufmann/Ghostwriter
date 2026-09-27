@@ -41,22 +41,19 @@ again when returning to v2.
    project executable.
 5. Run backend checks:
    ```bash
-   python -m pytest -q \
-     tests/test_health.py \
-     tests/test_feeds.py \
-     tests/test_auth_registration.py \
-     tests/test_alembic_bootstrap.py \
-     tests/test_podcast_multi_digest_migration.py \
-     tests/test_digest_download_formats.py \
-     tests/test_article_eligibility_filter.py \
-     tests/test_markdown_utils.py \
-     --durations=10
+   python -m pytest -q --durations=10
    ```
 6. Run targeted tests for the changed release surface.
-7. Verify Alembic head and migration paths:
+7. Verify Alembic head, upgrade, and stopped-backup/restore paths. The
+   [release-readiness checks](docs/release-readiness.md) exercise migration
+   021 through current head, feed-sync 026 identity rotation, and preservation
+   of source acknowledgements from 027:
    ```bash
    alembic heads
    DATA_DIR="$(mktemp -d)" alembic upgrade head
+   python -m pytest -q tests/test_release_recovery.py \
+     tests/test_feed_sync_migration.py \
+     tests/test_source_acknowledgement_migration.py
    ```
 8. Run frontend checks with Node 24, matching CI:
    ```bash
@@ -64,6 +61,13 @@ again when returning to v2.
    npm ci
    npm run check
    npm run build
+   npm run test:e2e
+   ```
+   Run the dedicated [live reading/listening fixture](docs/fixture-journey.md)
+   with its Python dependencies and `ffmpeg` available:
+   ```bash
+   JOURNEY_PYTHON=/path/to/python npm run test:e2e -- \
+     --config=tests/e2e/reading-listening.playwright.config.ts
    ```
 9. Build and smoke-test the container locally with `VERSION=<release>`.
 10. Merge the release prep PR into `main`.
