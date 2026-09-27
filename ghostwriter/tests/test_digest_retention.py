@@ -297,6 +297,24 @@ def test_collision_in_pdf_claims_blocks_service(client):
     assert epub.exists() and pdf.exists()
 
 
+@pytest.mark.parametrize("claimed_format", ["epub", "pdf"])
+def test_casefolded_artifact_claim_blocks_deletion(client, claimed_format):
+    from app.services.digest_deletion import DeletionConflict, delete_digest
+
+    did, _, _, name, epub, pdf = seeded()
+    other_name = name.upper() if claimed_format == "epub" else pdf.name.upper()
+    with Session(engine) as session:
+        session.add(Digest(
+            id=uuid4(), filename=other_name, period="manual", status="completed",
+        ))
+        session.commit()
+    with pytest.raises(DeletionConflict, match="shared"):
+        delete_digest(did, os.environ["OUTPUT_DIR"])
+    with Session(engine) as session:
+        assert session.get(Digest, did).status == "completed"
+    assert epub.exists() and pdf.exists()
+
+
 def test_queue_and_deletion_serialize_on_writer(client, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event

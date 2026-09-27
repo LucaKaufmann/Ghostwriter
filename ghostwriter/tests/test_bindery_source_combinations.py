@@ -241,6 +241,70 @@ async def test_empty_active_rss_still_allows_media(scene):
 
 
 @pytest.mark.asyncio
+async def test_final_cap_retains_excluded_saved_mail_and_media_for_next_edition(scene):
+    engine, output_dir, make = scene
+    saved = [wallabag_entry(), {**wallabag_entry(), "id": 8,
+                                "url": "https://example.com/saved-8", "title": "Saved 8"}]
+    mail = [article("newsletter-1"), article("newsletter-2")]
+    pipeline, wb, nl = make(
+        wallabag=WallabagStub(saved), newsletter=NewsletterStub(mail), media="podcast",
+    )
+    pipeline.settings = pipeline.settings.model_copy(update={"max_articles_per_digest": 2})
+    await pipeline.run()
+    rows = inspect_edition(engine, output_dir, pipeline.digest_id, 2)
+    assert [row.title for row in rows] == ["Saved analysis", "Saved 8"]
+    assert wb.marked == [7, 8] and nl.marked == []
+    with Session(engine) as session:
+        assert {seen.guid for seen in session.exec(select(SeenArticle)).all()} == {
+            "wallabag-7", "wallabag-8",
+        }
+        assert session.exec(select(MediaItem)).one().consumed_at is None
+
+    following, _, following_mail = make(
+        wallabag=WallabagStub([]), newsletter=NewsletterStub(mail),
+    )
+    following.settings = following.settings.model_copy(update={"max_articles_per_digest": 2})
+    await following.run()
+    next_rows = inspect_edition(engine, output_dir, following.digest_id, 2)
+    assert [row.content_type for row in next_rows] == ["article", "article"]
+    assert following_mail.marked == ["message-newsletter-1", "message-newsletter-2"]
+    with Session(engine) as session:
+        assert session.exec(select(MediaItem)).one().consumed_at is None
+
+
+@pytest.mark.asyncio
+async def test_media_only_cap_consumes_only_selected_items(scene):
+    engine, output_dir, make = scene
+    pipeline, _, _ = make(media="podcast")
+    with Session(engine) as session:
+        first = session.exec(select(MediaItem)).one()
+        for number in (2, 3):
+            session.add(MediaItem(
+                media_feed_id=first.media_feed_id,
+                guid=f"podcast-{number}", url=f"https://example.com/podcast/{number}",
+                title=f"Podcast {number}", content="A complete transcript for a reading edition.",
+                word_count=7, content_type="podcast", status="completed",
+            ))
+        session.commit()
+    pipeline.settings = pipeline.settings.model_copy(update={"max_articles_per_digest": 2})
+    await pipeline.run()
+    inspect_edition(engine, output_dir, pipeline.digest_id, 2)
+    with Session(engine) as session:
+        items = session.exec(select(MediaItem).order_by(MediaItem.created_at, MediaItem.id)).all()
+        assert [item.consumed_digest_id for item in items] == [
+            pipeline.digest_id, pipeline.digest_id, None,
+        ]
+
+    following, _, _ = make()
+    following.settings = following.settings.model_copy(update={"max_articles_per_digest": 2})
+    await following.run()
+    inspect_edition(engine, output_dir, following.digest_id, 1)
+    with Session(engine) as session:
+        leftover = session.exec(select(MediaItem).where(MediaItem.guid == "podcast-3")).one()
+        assert leftover.consumed_digest_id == following.digest_id
+
+
+@pytest.mark.asyncio
 async def test_truly_empty_and_disabled_sources_complete_without_epub(scene):
     engine, output_dir, make = scene
     empty, _, _ = make()

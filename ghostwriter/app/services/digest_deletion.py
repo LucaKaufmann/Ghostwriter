@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock, RLock
+from unicodedata import normalize
 from uuid import UUID
 from weakref import WeakValueDictionary
 
@@ -105,12 +106,20 @@ def check_owned_files(
         return ()
     paths = safe_digest_paths(output_dir, digest.filename)
     base = Path(output_dir).resolve()
+    def claim_key(path: Path) -> str:
+        # macOS volumes may resolve case/Unicode variants to the same file.
+        return normalize("NFC", path.name).casefold()
+
+    own_claims = {claim_key(path) for path in paths}
     for other in session.exec(select(Digest).where(Digest.id != digest.id)).all():
         if not other.filename or Path(other.filename).name != other.filename:
             continue
         # Even an invalid historical filename can claim the exact PDF path.
         other_paths = {base / other.filename, base / pdf_filename(other.filename)}
-        if set(paths).intersection(other_paths):
+        if own_claims.intersection(claim_key(path) for path in other_paths) or any(
+            path.exists() and other_path.exists() and path.samefile(other_path)
+            for path in paths for other_path in other_paths
+        ):
             raise DeletionConflict("Digest filename is shared")
     return paths
 
