@@ -377,12 +377,32 @@ def test_opened_download_survives_concurrent_unlink(client):
 
     did, _, _, name, epub, _ = seeded()
     response = _stream_open_file(epub, name, "application/epub+zip")
+    ranged = _stream_open_file(epub, name, "application/epub+zip")
     delete_digest(did, os.environ["OUTPUT_DIR"])
 
-    async def read():
-        return b"".join([part async for part in response.body_iterator])
+    async def read(opened_response, headers):
+        events = []
 
-    assert asyncio.run(read()) == b"epub"
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(event):
+            events.append(event)
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": headers,
+            "extensions": {},
+        }
+        await opened_response(scope, receive, send)
+        return b"".join(
+            event["body"] for event in events if event["type"] == "http.response.body"
+        )
+
+    assert asyncio.run(read(response, [])) == b"epub"
+    assert asyncio.run(read(ranged, [(b"range", b"bytes=1-2")])) == b"pu"
     assert not epub.exists()
 
 

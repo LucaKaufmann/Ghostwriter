@@ -4,18 +4,21 @@ import logging
 import os
 import posixpath
 import re
+import stat
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal
 from uuid import UUID, uuid4
 
+import anyio
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlmodel import Session, select
+from starlette.datastructures import MutableHeaders
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
@@ -668,21 +671,104 @@ def _to_extracted_articles(articles: list[DigestArticle]) -> list[ExtractedArtic
     return extracted
 
 
-def _stream_open_file(path: Path, filename: str, media_type: str) -> StreamingResponse:
+class _OpenedFileResponse(FileResponse):
+    """Keep FileResponse's range/header behavior on an already-open handle."""
+
+    def __init__(self, file: BinaryIO, path: Path, filename: str, media_type: str):
+        self._file = file
+        super().__init__(
+            path=path, filename=filename, media_type=media_type,
+            stat_result=os.fstat(file.fileno()),
+        )
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._file.close()
+
+    async def _handle_simple(self, send, send_header_only: bool, send_pathsend: bool) -> None:
+        # Never use pathsend: it would open the unlinked path after deletion.
+        await send({"type": "http.response.start", "status": self.status_code, "headers": self.raw_headers})
+        if send_header_only:
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            return
+        while True:
+            chunk = await anyio.to_thread.run_sync(self._file.read, self.chunk_size)
+            more_body = len(chunk) == self.chunk_size
+            await send({"type": "http.response.body", "body": chunk, "more_body": more_body})
+            if not more_body:
+                break
+
+    async def _handle_single_range(
+        self, send, start: int, end: int, file_size: int, send_header_only: bool,
+    ) -> None:
+        headers = MutableHeaders(raw=list(self.raw_headers))
+        headers["content-range"] = f"bytes {start}-{end - 1}/{file_size}"
+        headers["content-length"] = str(end - start)
+        await send({"type": "http.response.start", "status": 206, "headers": headers.raw})
+        if send_header_only:
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            return
+        await anyio.to_thread.run_sync(self._file.seek, start)
+        while start < end:
+            chunk = await anyio.to_thread.run_sync(
+                self._file.read, min(self.chunk_size, end - start),
+            )
+            start += len(chunk)
+            more_body = len(chunk) == self.chunk_size and start < end
+            await send({"type": "http.response.body", "body": chunk, "more_body": more_body})
+            if not more_body:
+                break
+
+    async def _handle_multiple_ranges(
+        self, send, ranges: list[tuple[int, int]], file_size: int,
+        send_header_only: bool,
+    ) -> None:
+        from secrets import token_hex
+
+        boundary = token_hex(13)
+        content_length, header_generator = self.generate_multipart(
+            ranges, boundary, file_size, self.headers["content-type"],
+        )
+        headers = MutableHeaders(raw=list(self.raw_headers))
+        headers["content-type"] = f"multipart/byteranges; boundary={boundary}"
+        headers["content-length"] = str(content_length)
+        await send({"type": "http.response.start", "status": 206, "headers": headers.raw})
+        if send_header_only:
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            return
+        for start, end in ranges:
+            await send({"type": "http.response.body", "body": header_generator(start, end), "more_body": True})
+            await anyio.to_thread.run_sync(self._file.seek, start)
+            while start < end:
+                chunk = await anyio.to_thread.run_sync(
+                    self._file.read, min(self.chunk_size, end - start),
+                )
+                if not chunk:
+                    break
+                start += len(chunk)
+                await send({"type": "http.response.body", "body": chunk, "more_body": True})
+            await send({"type": "http.response.body", "body": b"\r\n", "more_body": True})
+        await send({
+            "type": "http.response.body",
+            "body": f"--{boundary}--".encode("latin-1"),
+            "more_body": False,
+        })
+
+
+def _stream_open_file(path: Path, filename: str, media_type: str) -> FileResponse:
     try:
-        file = path.open("rb")
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        file = os.fdopen(fd, "rb")
+        if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
+            file.close()
+            raise HTTPException(status_code=409, detail="Digest file is not regular")
+        return _OpenedFileResponse(file, path, filename, media_type)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Digest file not found") from exc
-
-    def chunks():
-        with file:
-            while block := file.read(64 * 1024):
-                yield block
-
-    return StreamingResponse(
-        chunks(), media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Digest file is unavailable") from exc
 
 
 @router.get("/{digest_id}/download", dependencies=[Depends(verify_api_key)])
@@ -693,7 +779,7 @@ async def download_digest_by_id(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
-) -> StreamingResponse:
+) -> FileResponse:
     digest = session.get(Digest, digest_id)
     if digest is None:
         raise HTTPException(status_code=404, detail="Digest not found")
@@ -759,7 +845,7 @@ async def download_digest(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
-) -> StreamingResponse:
+) -> FileResponse:
     digests = session.exec(select(Digest).where(Digest.filename == filename)).all()
     if not digests:
         raise HTTPException(status_code=404, detail="Digest not found")
