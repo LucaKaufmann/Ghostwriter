@@ -235,7 +235,12 @@ public final class DeliveryStore {
                         run.diagnosticsJSON = String(data: try JSONEncoder().encode(
                             GenerationDiagnostics(feeds: old.feeds, runError: "interrupted")),
                             encoding: .utf8) ?? "{}"
-                        if let digest, digest.remoteId == nil, !digest.isComplete {
+                        if let digest, digest.remoteId == nil,
+                           [.scheduled, .manual, .test].contains(digest.triggerType) {
+                            // A completed flag on an unusable local artifact would
+                            // otherwise make the scheduler treat this failed run
+                            // as permanent coverage for its period.
+                            digest.isComplete = false
                             digest.errorMessage = "Interrupted local generation"
                         }
                     }
