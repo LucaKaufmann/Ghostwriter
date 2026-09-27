@@ -388,7 +388,7 @@ test('an older delayed conflict cannot replace a newer edit proposal', async ({ 
 	await expect(page.getByRole('alert').last()).toContainText('feed-1 server');
 });
 
-test('delayed restore success preserves a newly opened Add draft', async ({ page }) => {
+test('delayed restore keeps an unrelated Add submission actionable', async ({ page }) => {
 	await mockGhostwriterApi(page);
 	await setAuthenticatedSession(page);
 	await page.route('**/api/feeds/feed-1', async (route) => route.fulfill({
@@ -399,12 +399,19 @@ test('delayed restore success preserves a newly opened Add draft', async ({ page
 	let release!: () => void;
 	const held = new Promise<void>((resolve) => { release = resolve; });
 	let restoring = false;
+	let added = false;
 	await page.route('**/api/feeds', async (route) => {
 		if (route.request().method() === 'GET') return route.fallback();
-		restoring = true;
-		await held;
+		const data = route.request().postDataJSON();
+		const isRestore = data.url === 'https://example.com/feed.xml';
+		if (isRestore) {
+			restoring = true;
+			await held;
+		} else {
+			added = true;
+		}
 		await route.fulfill({ status: 200, contentType: 'application/json',
-			body: JSON.stringify({ id: 'feed-1', version: 5 }) });
+			body: JSON.stringify({ id: isRestore ? 'feed-1' : 'new-feed', version: 5 }) });
 	});
 	await page.goto('/sources/feeds');
 	await page.getByRole('row').filter({ hasText: 'Example Feed' }).getByRole('button').last().click();
@@ -416,9 +423,14 @@ test('delayed restore success preserves a newly opened Add draft', async ({ page
 	await page.getByRole('button', { name: 'Add Feed', exact: true }).first().click();
 	await page.locator('#url').fill('https://example.com/new-draft.xml');
 	await page.locator('#title').fill('Keep this Add draft');
+	const addSubmit = page.getByRole('dialog').getByRole('button', { name: 'Add Feed', exact: true });
+	await expect(addSubmit).toBeEnabled();
+	await expect(addSubmit).toHaveText('Add Feed');
+	await addSubmit.click();
+	await expect.poll(() => added).toBe(true);
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Restore feed with my changes' })).toBeVisible();
 	release();
 	await expect(page.getByRole('alert')).toHaveCount(0);
-	await expect(page.getByRole('dialog')).toBeVisible();
-	await expect(page.locator('#url')).toHaveValue('https://example.com/new-draft.xml');
-	await expect(page.locator('#title')).toHaveValue('Keep this Add draft');
+	await expect(page.getByRole('dialog')).toHaveCount(0);
 });

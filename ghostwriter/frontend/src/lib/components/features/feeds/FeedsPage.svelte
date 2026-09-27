@@ -88,7 +88,7 @@
 		const proposed = mergedProposal(feed, data, activeSnapshot);
 		return offerConflict(err, action,
 			(version, conflict) => retry(version, conflict, activeSnapshot),
-			(version, conflict) => createFeedMutation.mutate({ data: proposed, version, conflict,
+			(version, conflict) => restoreFeedMutation.mutate({ data: proposed, version, conflict,
 				origin: 'restore', partialData: data, activeSnapshot }),
 			variables.conflict,
 			() => {
@@ -104,47 +104,62 @@
 	}));
 
 	// Mutations
-	const createFeedMutation = createMutation(() => ({
-		mutationFn: ({ data, version, existingId }: { data: FeedCreate; version?: number; conflict?: number; existingId?: string; origin: 'add' | 'restore'; addSession?: number; partialData?: FeedUpdate; activeSnapshot?: Partial<Feed> }) => {
-			if (existingId && version !== undefined) {
-				const { url: _url, ...fields } = data;
-				return api.updateFeed(existingId, fields, version);
-			}
-			return api.createFeed(data, version);
-		},
-			onSuccess: (_data, variables) => {
-			queryClient.invalidateQueries({ queryKey: ['feeds'] });
-			toast.success('Feed saved successfully');
-			if (variables.origin === 'add' && variables.addSession === addSession) {
-				addDialogOpen = false;
-				resetForm();
-			}
-			finishConflict(variables.conflict);
-		},
-		onError: (err: Error, variables) => {
-			const detail = err instanceof ApiError && typeof err.error.detail !== 'string' ? err.error.detail : null;
-			if (detail?.current?.kind === 'tombstone' &&
-				offerConflict(err, 'restoring it', (version, conflict) => createFeedMutation.mutate({ ...variables, existingId: undefined, version, conflict }),
-					(version, conflict) => createFeedMutation.mutate({ ...variables, existingId: undefined, version, conflict }),
-					variables.conflict,
-					() => { if (variables.origin === 'add' && variables.addSession === addSession) addDialogOpen = false; },
-					variables.data)) return;
-			if (variables.conflict !== undefined && detail?.current?.kind === 'feed' &&
-				typeof detail.current.id === 'string') {
-				const existingId = detail.current.id;
-				const activeSnapshot = { ...variables.activeSnapshot, ...detail.current };
-				const data = variables.partialData
-					? mergedProposal(variables.data, variables.partialData, activeSnapshot)
-					: variables.data;
-				if (offerConflict(err, 'saving your proposed settings', (version, conflict) =>
-					createFeedMutation.mutate({ ...variables, data, activeSnapshot, existingId, version, conflict }),
-					undefined, variables.conflict, undefined, variables.data)) return;
-			}
-			releaseConflict(variables.conflict);
-			toast.error('Failed to create feed', {
-				description: err.message ?? 'Unknown error'
-			});
+	type SaveFeedVariables = { data: FeedCreate; version?: number; conflict?: number;
+		existingId?: string; origin: 'add' | 'restore'; addSession?: number;
+		partialData?: FeedUpdate; activeSnapshot?: Partial<Feed> };
+	function saveFeed({ data, version, existingId }: SaveFeedVariables) {
+		if (existingId && version !== undefined) {
+			const { url: _url, ...fields } = data;
+			return api.updateFeed(existingId, fields, version);
 		}
+		return api.createFeed(data, version);
+	}
+	function onFeedSaved(_data: Feed, variables: SaveFeedVariables) {
+		queryClient.invalidateQueries({ queryKey: ['feeds'] });
+		toast.success('Feed saved successfully');
+		if (variables.origin === 'add' && variables.addSession === addSession) {
+			addDialogOpen = false;
+			resetForm();
+		}
+		finishConflict(variables.conflict);
+	}
+	function onFeedSaveError(err: Error, variables: SaveFeedVariables) {
+		const detail = err instanceof ApiError && typeof err.error.detail !== 'string' ? err.error.detail : null;
+		if (detail?.current?.kind === 'tombstone' &&
+			offerConflict(err, 'restoring it', (version, conflict) => restoreFeedMutation.mutate({
+				...variables, origin: 'restore', existingId: undefined, version, conflict
+			}), (version, conflict) => restoreFeedMutation.mutate({
+				...variables, origin: 'restore', existingId: undefined, version, conflict
+			}), variables.conflict,
+			() => { if (variables.origin === 'add' && variables.addSession === addSession) addDialogOpen = false; },
+			variables.data)) return;
+		if (variables.conflict !== undefined && detail?.current?.kind === 'feed' &&
+			typeof detail.current.id === 'string') {
+			const existingId = detail.current.id;
+			const activeSnapshot = { ...variables.activeSnapshot, ...detail.current };
+			const data = variables.partialData
+				? mergedProposal(variables.data, variables.partialData, activeSnapshot)
+				: variables.data;
+			if (offerConflict(err, 'saving your proposed settings', (version, conflict) =>
+				restoreFeedMutation.mutate({ ...variables, origin: 'restore', data, activeSnapshot,
+					existingId, version, conflict }),
+				undefined, variables.conflict, undefined, variables.data)) return;
+		}
+		releaseConflict(variables.conflict);
+		toast.error('Failed to create feed', {
+			description: err.message ?? 'Unknown error'
+		});
+	}
+
+	const createFeedMutation = createMutation(() => ({
+		mutationFn: saveFeed,
+		onSuccess: onFeedSaved,
+		onError: onFeedSaveError
+	}));
+	const restoreFeedMutation = createMutation(() => ({
+		mutationFn: saveFeed,
+		onSuccess: onFeedSaved,
+		onError: onFeedSaveError
 	}));
 
 	const deleteFeedMutation = createMutation(() => ({
