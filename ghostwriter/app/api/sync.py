@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
@@ -38,7 +38,7 @@ def _parse_digest_ids(value: str | None) -> set[UUID]:
         return {UUID(part.strip()) for part in value.split(",") if part.strip()}
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=422,
             detail="digest_ids must be a comma-separated list of UUIDs",
         ) from exc
 
