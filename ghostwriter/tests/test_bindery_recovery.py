@@ -28,6 +28,7 @@ class WallabagRemote:
     def __init__(self):
         self.marked = []
         self.fail_mark = False
+        self.apply_then_fail = False
 
     async def fetch_unread_articles(self):
         if self.marked:
@@ -44,6 +45,8 @@ class WallabagRemote:
         if self.fail_mark:
             raise RuntimeError("remote marker unavailable")
         self.marked.append(entry_id)
+        if self.apply_then_fail:
+            raise RuntimeError("remote response lost after marker")
 
 
 class NewsletterRemote:
@@ -52,6 +55,7 @@ class NewsletterRemote:
     def __init__(self):
         self.marked = []
         self.fail_mark = False
+        self.apply_then_fail = False
 
     async def fetch_newsletters(self):
         if self.marked:
@@ -67,6 +71,8 @@ class NewsletterRemote:
         if self.fail_mark:
             raise RuntimeError("remote marker unavailable")
         self.marked.extend(ids)
+        if self.apply_then_fail:
+            raise RuntimeError("remote response lost after marker")
 
 
 class ArtifactWriter:
@@ -152,7 +158,9 @@ def scene(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("boundary", ["artifact", "articles", "media", "completion"])
+@pytest.mark.parametrize(
+    "boundary", ["artifact", "articles", "media", "completion_commit", "completion_log"]
+)
 async def test_failed_boundaries_leave_distinct_durable_state(scene, monkeypatch, boundary):
     pipeline = scene.new_pipeline()
     events = []
@@ -174,10 +182,18 @@ async def test_failed_boundaries_leave_distinct_durable_state(scene, monkeypatch
         def fail_media(_mapper, _connection, _target):
             raise RuntimeError("media consumed failure")
         event.listen(MediaItem, "before_update", fail_media)
+    elif boundary == "completion_commit":
+        def fail_final_commit(session):
+            if any(
+                isinstance(obj, Digest) and obj.status == "completed"
+                for obj in session.dirty
+            ):
+                raise RuntimeError("completion commit failure")
+        event.listen(Session, "before_commit", fail_final_commit)
     else:
-        async def fail_completion(*args, **kwargs):
-            raise RuntimeError("completion failure")
-        monkeypatch.setattr(pipeline, "_complete", fail_completion)
+        def fail_final_log(*args, **kwargs):
+            raise RuntimeError("completion log failure")
+        monkeypatch.setattr(bindery.digest_logger, "pipeline_completed", fail_final_log)
 
     try:
         with pytest.raises(RuntimeError):
@@ -185,47 +201,69 @@ async def test_failed_boundaries_leave_distinct_durable_state(scene, monkeypatch
     finally:
         if boundary == "media":
             event.remove(MediaItem, "before_update", fail_media)
+        elif boundary == "completion_commit":
+            event.remove(Session, "before_commit", fail_final_commit)
 
     first = scene.snapshot(pipeline.digest_id)
     assert first["status"] == "failed"
-    assert first["stage"] == "compiling"
-    assert events == [("failed", "compiling")]
-    assert first["count"] == 0
-    assert first["seen"] == 0
+    final_log_committed = boundary == "completion_log"
+    assert first["stage"] == ("completed" if final_log_committed else "compiling")
+    assert events == [("failed", first["stage"])]
+    assert first["count"] == (3 if final_log_committed else 0)
+    assert first["seen"] == (2 if final_log_committed else 0)
     assert first["artifact"] == (boundary != "artifact")
     assert len(first["rows"]) == {
-        "artifact": 0, "articles": 1, "media": 3, "completion": 3,
+        "artifact": 0, "articles": 1, "media": 3,
+        "completion_commit": 3, "completion_log": 3,
     }[boundary]
     assert first["media_digest"] == (
-        pipeline.digest_id if boundary == "completion" else None
+        pipeline.digest_id if boundary.startswith("completion") else None
     )
-    assert scene.remote.marked == ([7] if boundary == "completion" else [])
-    assert scene.mail.marked == (["message-1"] if boundary == "completion" else [])
+    assert scene.remote.marked == ([7] if boundary.startswith("completion") else [])
+    assert scene.mail.marked == (
+        ["message-1"] if boundary.startswith("completion") else []
+    )
 
     scene.writer.fail = False
+    if boundary == "completion_log":
+        monkeypatch.setattr(
+            bindery.digest_logger, "pipeline_completed", lambda *args, **kwargs: None
+        )
     retry = scene.new_pipeline()
     await retry.run()
     second = scene.snapshot(retry.digest_id)
     assert second["status"] == "completed"
-    assert second["artifact"] == (boundary != "completion")
-    assert len(second["rows"]) == (0 if boundary == "completion" else 3)
+    assert second["artifact"] == (not boundary.startswith("completion"))
+    assert len(second["rows"]) == (
+        0 if boundary.startswith("completion") else 3
+    )
     assert second["count"] == len(second["rows"])
     assert second["media_digest"] == (
-        pipeline.digest_id if boundary == "completion" else retry.digest_id
+        pipeline.digest_id if boundary.startswith("completion") else retry.digest_id
     )
 
 
 @pytest.mark.asyncio
-async def test_remote_marker_errors_are_logged_but_job_completes(scene, caplog):
-    scene.remote.fail_mark = True
-    scene.mail.fail_mark = True
+@pytest.mark.parametrize("marker_effect", ["none", "applied_then_error"])
+async def test_remote_marker_errors_are_logged_but_job_completes(
+    scene, caplog, marker_effect
+):
+    scene.remote.fail_mark = marker_effect == "none"
+    scene.mail.fail_mark = marker_effect == "none"
+    scene.remote.apply_then_fail = marker_effect == "applied_then_error"
+    scene.mail.apply_then_fail = marker_effect == "applied_then_error"
     pipeline = scene.new_pipeline()
     await pipeline.run()
     state = scene.snapshot(pipeline.digest_id)
     assert state["status"] == "completed"
     assert len(state["rows"]) == 3
     assert state["seen"] == 2
-    assert scene.remote.marked == scene.mail.marked == []
+    assert scene.remote.marked == (
+        [] if marker_effect == "none" else [7]
+    )
+    assert scene.mail.marked == (
+        [] if marker_effect == "none" else ["message-1"]
+    )
     assert "Failed to mark newsletter emails as read" in caplog.text
     assert "Failed to mark wallabag entry" in caplog.text
 
@@ -240,12 +278,19 @@ async def test_cancellation_leaves_processing_until_restart(scene, monkeypatch):
 
     pipeline = scene.new_pipeline()
 
-    async def cancel_at_complete(*args, **kwargs):
-        raise asyncio.CancelledError()
+    def cancel_at_final_commit(session):
+        if any(
+            isinstance(obj, Digest) and obj.status == "completed"
+            for obj in session.dirty
+        ):
+            raise asyncio.CancelledError()
 
-    monkeypatch.setattr(pipeline, "_complete", cancel_at_complete)
-    with pytest.raises(asyncio.CancelledError):
-        await pipeline.run()
+    event.listen(Session, "before_commit", cancel_at_final_commit)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await pipeline.run()
+    finally:
+        event.remove(Session, "before_commit", cancel_at_final_commit)
     before = scene.snapshot(pipeline.digest_id)
     assert before["status"] == "processing"
     assert len(before["rows"]) == 3
@@ -265,6 +310,27 @@ async def test_cancellation_leaves_processing_until_restart(scene, monkeypatch):
     assert len(after["rows"]) == 3
     assert after["artifact"]
     assert after["media_digest"] == pipeline.digest_id
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_final_commit_keeps_completed_job(scene, monkeypatch):
+    pipeline = scene.new_pipeline()
+
+    def cancel_completion_log(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        bindery.digest_logger, "pipeline_completed", cancel_completion_log
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await pipeline.run()
+    state = scene.snapshot(pipeline.digest_id)
+    assert state["status"] == "completed"
+    assert state["stage"] == "completed"
+    assert state["count"] == 3
+    assert state["seen"] == 2
+    assert len(state["rows"]) == 3
+    assert state["artifact"]
 
 
 @pytest.mark.asyncio
