@@ -313,12 +313,20 @@ async def test_httpx_environment_configuration_is_preserved(monkeypatch):
     seen = []
 
     def client_with_mock_transport(*args, **kwargs):
-        seen.append((kwargs["trust_env"], os.environ["HTTPS_PROXY"], os.environ["SSL_CERT_FILE"]))
+        seen.append(
+            (
+                kwargs["trust_env"],
+                os.environ["HTTPS_PROXY"],
+                os.environ["SSL_CERT_FILE"],
+            )
+        )
         # The test uses a mock transport; do not configure a real proxy or CA.
         kwargs["trust_env"] = False
         return original_client(*args, **kwargs)
 
-    monkeypatch.setattr("app.services.outbound_fetch.httpx.AsyncClient", client_with_mock_transport)
+    monkeypatch.setattr(
+        "app.services.outbound_fetch.httpx.AsyncClient", client_with_mock_transport
+    )
     await fetch_resource(
         "https://example.com/article",
         settings=Settings(allow_private_hosts=True),
@@ -348,7 +356,7 @@ async def test_expired_dns_jobs_remain_bounded_until_workers_finish(monkeypatch)
             active += 1
             if active == outbound_fetch.MAX_DNS_VALIDATIONS:
                 started.set()
-        release.wait(4)
+        release.wait(10)
         with lock:
             active -= 1
         return ["93.184.216.34"]
@@ -374,8 +382,9 @@ async def test_expired_dns_jobs_remain_bounded_until_workers_finish(monkeypatch)
         for task in tasks:
             with pytest.raises(httpx.ReadTimeout):
                 await task
-        for _ in range(3):
-            with pytest.raises(httpx.PoolTimeout, match="DNS validation capacity"):
+
+        async def extra_fetch():
+            with pytest.raises(httpx.ReadTimeout):
                 await fetch_resource(
                     "https://example.com/extra",
                     settings=_settings(fetch_timeout_seconds=1),
@@ -383,25 +392,20 @@ async def test_expired_dns_jobs_remain_bounded_until_workers_finish(monkeypatch)
                     headers={},
                     transport=transport,
                 )
+
+        await asyncio.gather(*(extra_fetch() for _ in range(3)))
         with lock:
             assert active == outbound_fetch.MAX_DNS_VALIDATIONS
     finally:
         release.set()
-    # Once OS calls finish, admission recovers without creating extra workers.
-    for _ in range(100):
-        try:
-            recovered = await fetch_resource(
-                "https://example.com/recovered",
-                settings=_settings(),
-                kind="html",
-                headers={},
-                transport=transport,
-            )
-            break
-        except httpx.PoolTimeout:
-            await asyncio.sleep(0.01)
-    else:
-        pytest.fail("DNS validation admission did not recover")
+    # Once OS calls finish, the waiting caller proceeds without extra threads.
+    recovered = await fetch_resource(
+        "https://example.com/recovered",
+        settings=_settings(),
+        kind="html",
+        headers={},
+        transport=transport,
+    )
     assert recovered.data == b"<html/>"
 
 
@@ -455,13 +459,19 @@ async def test_html_and_xml_content_types_are_distinct(public_dns):
     )
     with pytest.raises(NonFeedContentError):
         await fetch_resource(
-            "https://example.com/feed", settings=_settings(), kind="feed",
-            headers={}, transport=html,
+            "https://example.com/feed",
+            settings=_settings(),
+            kind="feed",
+            headers={},
+            transport=html,
         )
     with pytest.raises(NonHtmlContentError):
         await fetch_resource(
-            "https://example.com/article", settings=_settings(), kind="html",
-            headers={}, transport=xml,
+            "https://example.com/article",
+            settings=_settings(),
+            kind="html",
+            headers={},
+            transport=xml,
         )
 
 
@@ -481,7 +491,9 @@ async def test_explicit_private_host_opt_in_uses_mock_transport():
 
     def handler(request):
         requested.append(str(request.url))
-        return httpx.Response(200, stream=OneChunk(b"<html/>"), headers={"content-type": "text/html"})
+        return httpx.Response(
+            200, stream=OneChunk(b"<html/>"), headers={"content-type": "text/html"}
+        )
 
     result = await fetch_resource(
         "http://127.0.0.1/article",
@@ -492,3 +504,53 @@ async def test_explicit_private_host_opt_in_uses_mock_transport():
     )
     assert result.data == b"<html/>"
     assert requested == ["http://127.0.0.1/article"]
+
+
+@pytest.mark.asyncio
+async def test_healthy_concurrency_waits_for_dns_admission(monkeypatch):
+    import time
+
+    from app.services import outbound_fetch
+
+    def healthy_resolver(_hostname):
+        time.sleep(0.03)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr("app.core.net._resolve_host", healthy_resolver)
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(200, stream=OneChunk(b"<html/>"))
+    )
+    results = await asyncio.gather(
+        *(
+            fetch_resource(
+                "https://example.com/article",
+                settings=_settings(fetch_timeout_seconds=1),
+                kind="html",
+                headers={},
+                transport=transport,
+            )
+            for _ in range(outbound_fetch.MAX_DNS_VALIDATIONS * 2)
+        )
+    )
+    assert all(result.data == b"<html/>" for result in results)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["html", "feed"])
+async def test_malformed_content_location_does_not_invalidate_body(public_dns, kind):
+    fetched = await fetch_resource(
+        "https://example.com/body",
+        settings=_settings(),
+        kind=kind,
+        headers={},
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                stream=OneChunk(b"<body/>"),
+                headers={"Content-Location": "http://[bad"},
+            )
+        ),
+    )
+    assert fetched.data == b"<body/>"
+    assert fetched.content_location is None
+    assert fetched.final_url == "https://example.com/body"
