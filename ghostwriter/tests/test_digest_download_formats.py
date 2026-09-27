@@ -50,6 +50,9 @@ def test_download_digest_by_id_epub(client) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/epub+zip"
     assert response.content == b"epub-bytes"
+    filename_response = client.get(f"/api/digests/{filename}")
+    assert filename_response.status_code == 200
+    assert filename_response.content == response.content
 
     digests_response = client.get("/api/digests")
     assert digests_response.status_code == 200
