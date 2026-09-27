@@ -19,7 +19,7 @@ Independent Sol review found four issues in the first commit: decoded gzip bytes
 
 The next Sol review found four compatibility and capacity issues: decoding errors took the URL-validation response path, upstream `Content-Location` was lost, timed-out DNS calls could fill the shared worker pool, and HTTPX environment proxy/CA settings were disabled. The current revision corrects these with offline fallback, base-URL, worker saturation/recovery, and environment-option tests.
 
-The final compatibility review identified eager DNS-capacity rejection and malformed optional Content-Location. Admission now waits inside the deadline with the same bounded worker count; invalid header syntax falls back to the final URL. Eight simultaneous healthy fetches, timed-out saturation/recovery, and malformed feed/HTML headers have regression coverage.
+The final compatibility review identified eager DNS-capacity rejection and malformed optional Content-Location. Admission now waits on worker-completion notifications inside the deadline with the same bounded worker count, without periodic polling; invalid header syntax falls back to the final URL. Eight simultaneous healthy fetches, timed-out saturation/recovery, and malformed feed/HTML headers have regression coverage.
 
 ## Limits and next action
 

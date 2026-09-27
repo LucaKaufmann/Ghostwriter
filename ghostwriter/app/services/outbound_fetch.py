@@ -24,6 +24,39 @@ REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 MAX_DNS_VALIDATIONS = 4
 _dns_executor = ThreadPoolExecutor(max_workers=MAX_DNS_VALIDATIONS)
 _dns_slots = threading.BoundedSemaphore(MAX_DNS_VALIDATIONS)
+_dns_waiters: set[asyncio.Future] = set()
+_dns_waiters_lock = threading.Lock()
+
+
+def _wake_dns_waiter(waiter: asyncio.Future) -> None:
+    if not waiter.done():
+        waiter.set_result(None)
+
+
+def _release_dns_slot(_future) -> None:
+    with _dns_waiters_lock:
+        _dns_slots.release()
+        waiters = tuple(_dns_waiters)
+    for waiter in waiters:
+        try:
+            waiter.get_loop().call_soon_threadsafe(_wake_dns_waiter, waiter)
+        except RuntimeError:
+            pass  # An expired caller's loop may have closed while DNS continued.
+
+
+async def _acquire_dns_slot() -> None:
+    while True:
+        waiter = asyncio.get_running_loop().create_future()
+        with _dns_waiters_lock:
+            if _dns_slots.acquire(blocking=False):
+                return
+            # Register under the same lock as release to avoid a missed wakeup.
+            _dns_waiters.add(waiter)
+        try:
+            await waiter
+        finally:
+            with _dns_waiters_lock:
+                _dns_waiters.discard(waiter)
 
 
 class NonHtmlContentError(RuntimeError):
@@ -49,18 +82,16 @@ class FetchedResource:
 
 async def _validate_url(url: str, settings: Settings) -> None:
     """Validate off-loop with a fixed bound on queued and live DNS work."""
-    # Wait without blocking the loop, within the total deadline. Admission must
-    # not turn ordinary concurrency into an immediate upstream failure.
-    while not _dns_slots.acquire(blocking=False):
-        await asyncio.sleep(0.01)
+    # Event-driven admission waits within the existing total fetch deadline.
+    await _acquire_dns_slot()
     try:
         future = _dns_executor.submit(validate_public_url, url, settings)
     except BaseException:
-        _dns_slots.release()
+        _release_dns_slot(None)
         raise
     # Cancellation can stop waiting, but an active getaddrinfo call keeps its
     # slot until the OS returns. A queued, cancelled future releases it here too.
-    future.add_done_callback(lambda _future: _dns_slots.release())
+    future.add_done_callback(_release_dns_slot)
     await asyncio.wrap_future(future)
 
 
