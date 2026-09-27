@@ -127,9 +127,8 @@ class DailyDigestWorker @AssistedInject constructor(
                 val explicit = inputData.getString(KEY_OCCURRENCE_DATE)
                     ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
                 val anchor = inputData.getLong(KEY_PERIODIC_ANCHOR, 0L)
-                // Unanchored legacy work is cancelled when schedules register.
-                // A worker already starting during that transition keeps the
-                // previous due-window interpretation for this last attempt.
+                // A legacy attempt may finish before its periodic request is
+                // updated with an anchor; retain its prior due-window rule.
                 val now = ZonedDateTime.now()
                 val occurrence = (explicit ?: if (anchor > 0) periodicOccurrenceDate(now, anchor)
                     else if (now.hour < period.hour) now.toLocalDate().minusDays(1)
