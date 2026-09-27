@@ -17,6 +17,7 @@ Base: accepted server `ad7fd3e5b05b14c72c4f413e28343b71e1e1fa8d` on `codex/sync-
 - `./gradlew :shared:assembleEpilogueSharedXCFramework --no-daemon`: passed, debug and release frameworks exported.
 - Fresh `tuist install` and `tuist generate --no-open` in `EpilogueIOS`: passed. `xcodebuildmcp simulator build --workspace-path .../Epilogue.xcworkspace --scheme Epilogue --simulator-id 3B168BD4-853C-4709-B0BB-DA65DA0B534F --extra-args CODE_SIGNING_ALLOWED=NO`: passed. Existing Swift 6 sendability/deprecation warnings remain. The final serializer/validation edits did not alter exported signatures after this bridge compile.
 - `git diff --check`: passed.
+- Independent Sol full review found the UUID receipt issue; the correction at `0d18fb4` passed a second Sol review with no actionable findings.
 
 ## Tests and remaining integration obligations
 
@@ -24,4 +25,4 @@ MockEngine tests assert exact route/query/body and FastAPI error parsing. Statef
 
 Independent review identified an uppercase UUID response mismatch: FastAPI canonicalizes result op IDs to lowercase while hashing the original item, so changing a frozen payload on retry would produce `op_id_reused`. The correction compares UUIDs canonically for duplicate detection, result lookup, and server-instance checks while preserving the exact stored mutation payload and passing the original op ID/revision to native acknowledgement. Tests cover an uppercase frozen request with lowercase receipt, byte-identical timeout replay, case-variant duplicate operations/results, and uppercase instance equivalence.
 
-The in-memory store fake models the native transaction contract but does not prove Room or SwiftData persistence, migrations, process-restart replay, cross-context serialization, or UI conflict resolution. Android/iOS stages must implement the semantic transactions and generation checks, disable all legacy feed write/pull bypasses, and verify real on-disk upgrade/restart behavior before integrated native sync is safe. No server, native, schema, CI, lockfile, generated project, provider, production content, PR, or deployment changes were made in this stage.
+The in-memory store fake models the native transaction contract but does not prove Room or SwiftData persistence, migrations, process-restart replay, cross-context serialization, or UI conflict resolution. Android/iOS stages must implement the semantic transactions and generation checks, disable all legacy feed write/pull bypasses, and verify real on-disk upgrade/restart behavior before integrated native sync is safe. No server, native, schema, CI, lockfile, generated project, provider, production-content or deployment changes were made in this stage. This shared prerequisite is published separately from native activation.
