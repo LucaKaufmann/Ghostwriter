@@ -36,6 +36,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             fonts-dejavu-core \
+            ffmpeg \
             libgdk-pixbuf-2.0-0 \
             libharfbuzz-subset0 \
             libpango-1.0-0 \
