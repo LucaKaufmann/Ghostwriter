@@ -1,6 +1,6 @@
 # JOURNEY-01 result
 
-Status: implementation and local checks passed; awaiting orchestrator review and PR publication.
+Status: implementation and local checks passed; independent Sol review corrections accepted; awaiting hosted CI.
 
 - Base: `df28f112ce14a2f1030173cbbcf05314c0f11453` (`codex/sync-server-verified-base`).
 - Branch/worktree: `codex/journey-01-fixture-flow` at `/private/tmp/epilogue-backlog-20260927/journey-01`.
@@ -10,4 +10,4 @@ Status: implementation and local checks passed; awaiting orchestrator review and
 - Render review: worker and root inspected reader, failure, and ready screenshots at `ghostwriter/docs/fixture-journey-assets/`; layout is readable and no credentials or private feed URLs are visible. Playwright keeps the full synthetic trace under `ghostwriter/frontend/test-results/` for local inspection.
 - Mocked boundaries: RSS transport (the real XML parser and Bindery selection run), extraction, cover generation, script provider, audio provider. MP3 is real silent media produced by local `ffmpeg`; real EPUB/PDF renderer and file endpoints are exercised. No real audio quality, offline/native behavior, or device scheduler is claimed.
 - Production code/schema changes: none. No migration.
-- Review: root inspected all screenshots. Initial independent Sol review found default Playwright discovery would run the backend-dependent spec in the Node-only browser job. Root added explicit discovery exclusion, a separately provisioned live-journey workflow, and ffmpeg in backend CI. Default test listing remains21; dedicated listing is1. Correction review and hosted execution pending.
+- Review: root inspected all screenshots. Initial independent Sol review found default Playwright discovery would run the backend-dependent spec in the Node-only browser job. Root added explicit discovery exclusion, a separately provisioned live-journey workflow, and ffmpeg in backend CI. Default test listing remains21; dedicated listing is1. Correction Sol review is clean (82a62d4); hosted execution pending. Combined server/recovery/journey/readiness candidate ec340d5 passed all401 backend tests.
