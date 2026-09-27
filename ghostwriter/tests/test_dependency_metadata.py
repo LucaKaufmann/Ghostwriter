@@ -1,5 +1,6 @@
 """Installation manifest and test isolation regression checks."""
 
+import os
 import socket
 import subprocess
 import sys
@@ -64,6 +65,18 @@ def test_network_requires_explicit_fixtures():
                 connection.sendmsg([b"test"], [], 0, ("93.184.215.14", 53))
 
 
+def test_host_case_variant_settings_are_isolated():
+    assert not app_settings.allow_private_hosts
+    assert app_settings.openai_api_key == ""
+    assert not app_settings.schedule_enabled
+    assert all(name.casefold() != "allow_private_hosts" for name in os.environ)
+    controlled = {"openai_api_key", "wallabag_password"}
+    assert all(
+        name.isupper() or name.casefold() not in controlled
+        for name in os.environ
+    )
+
+
 def test_embedded_pytest_restores_host_process(tmp_path):
     """Running pytest.main must not leave its host's env or sockets patched."""
     (tmp_path / ".env").write_text("OPENAI_API_KEY=sentinel-dotenv\n")
@@ -73,8 +86,10 @@ import socket
 import pytest
 from app.core.config import Settings, get_settings
 
-os.environ["OPENAI_API_KEY"] = "sentinel-host-key"
 os.environ["SCHEDULE_ENABLED"] = "true"
+os.environ["allow_private_hosts"] = "true"
+os.environ["oPeNaI_aPi_KeY"] = "sentinel-mixed-provider"
+os.environ["wAlLaBaG_pAsSwOrD"] = "sentinel-mixed-wallabag"
 original_env = dict(os.environ)
 original_model_config = Settings.model_config
 original_socket = {{name: getattr(socket, name) for name in (
@@ -85,15 +100,16 @@ original_methods = {{name: getattr(socket.socket, name, None) for name in (
 )}}
 assert pytest.main(["-q", "-c", {str(ROOT / 'pyproject.toml')!r},
                     {str(ROOT / 'tests/test_dependency_metadata.py')!r} +
-                    "::test_network_requires_explicit_fixtures"]) == 0
+                    "::test_host_case_variant_settings_are_isolated"]) == 0
 assert os.environ == original_env
 assert Settings.model_config is original_model_config
 for name, function in original_socket.items():
     assert getattr(socket, name) is function
 for name, function in original_methods.items():
     assert getattr(socket.socket, name, None) is function
-assert get_settings().openai_api_key == "sentinel-host-key"
+assert get_settings().openai_api_key == "sentinel-mixed-provider"
 assert get_settings().schedule_enabled
+assert get_settings().allow_private_hosts
 """
     result = subprocess.run(
         [sys.executable, "-c", code],

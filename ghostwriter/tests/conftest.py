@@ -17,10 +17,11 @@ from app.core.config import Settings, get_settings
 _original_environment = dict(os.environ)
 _original_model_config = Settings.model_config
 Settings.model_config = {**Settings.model_config, "env_file": None}
-for field in Settings.model_fields:
-    os.environ.pop(field.upper(), None)
+_setting_names = {field.upper() for field in Settings.model_fields}
+_provider_prefixes = ("OPENAI_", "ANTHROPIC_", "GEMINI_", "ELEVENLABS_", "LITELLM_")
 for name in tuple(os.environ):
-    if name.startswith(("OPENAI_", "ANTHROPIC_", "GEMINI_", "ELEVENLABS_", "LITELLM_")):
+    upper_name = name.upper()
+    if upper_name in _setting_names or upper_name.startswith(_provider_prefixes):
         os.environ.pop(name, None)
 
 _BASE_DIR = tempfile.mkdtemp(prefix="ghostwriter_test_")
