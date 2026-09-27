@@ -18,6 +18,21 @@ def mock_fetch(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_parse_feed_preserves_feed_content_negotiation(monkeypatch):
+    async def _fetch(url, **kwargs):
+        assert kwargs["headers"]["User-Agent"] == "Ghostwriter/1.0"
+        accept = kwargs["headers"]["Accept"]
+        assert "application/rss+xml" in accept
+        assert "application/atom+xml" in accept
+        return FetchedResource(url, "application/rss+xml", "utf-8", b"<rss/>")
+
+    monkeypatch.setattr("app.services.content_processor.fetch_resource", _fetch)
+    await ContentProcessor(Settings(allow_private_hosts=True)).parse_feed(
+        "https://example.com/feed"
+    )
+
+
+@pytest.mark.asyncio
 async def test_parse_feed_prefers_media_content(monkeypatch):
     settings = Settings(allow_private_hosts=True)
     processor = ContentProcessor(settings=settings)

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import socket
+import threading
 
 import httpx
 import pytest
@@ -27,6 +29,14 @@ def _settings(**kwargs):
     return Settings(allow_private_hosts=False, **kwargs)
 
 
+class OneChunk(httpx.AsyncByteStream):
+    def __init__(self, data: bytes):
+        self.data = data
+
+    async def __aiter__(self):
+        yield self.data
+
+
 @pytest.mark.asyncio
 async def test_public_relative_redirect_chain_and_feed_xml(public_dns):
     requested = []
@@ -39,7 +49,7 @@ async def test_public_relative_redirect_chain_and_feed_xml(public_dns):
             return httpx.Response(301, headers={"location": "next.xml"})
         return httpx.Response(
             200,
-            content=b"<rss version='2.0'/>",
+            stream=OneChunk(b"<rss version='2.0'/>"),
             headers={"content-type": "application/rss+xml; charset=utf-8"},
         )
 
@@ -202,7 +212,7 @@ async def test_total_timeout(public_dns):
         await asyncio.sleep(2)
         return httpx.Response(200, content=b"ok")
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(httpx.TimeoutException):
         await fetch_resource(
             "https://example.com/article",
             settings=_settings(fetch_timeout_seconds=1),
@@ -210,6 +220,102 @@ async def test_total_timeout(public_dns):
             headers={},
             transport=httpx.MockTransport(handler),
         )
+
+
+@pytest.mark.asyncio
+async def test_gzip_output_limit_precedes_expansion(public_dns):
+    compressed = gzip.compress(b"x" * 10_000)
+    assert len(compressed) < 128
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            stream=OneChunk(compressed),
+            headers={"content-type": "text/html", "content-encoding": "gzip"},
+        )
+    )
+    with pytest.raises(DocumentTooLargeError):
+        await fetch_resource(
+            "https://example.com/article",
+            settings=_settings(),
+            kind="html",
+            headers={},
+            max_bytes=128,
+            transport=transport,
+        )
+
+
+@pytest.mark.asyncio
+async def test_small_gzip_document_decodes_and_unsupported_encoding_rejects(public_dns):
+    compressed = gzip.compress(b"<html>hello</html>")
+
+    def handler(request):
+        assert request.headers["accept-encoding"] == "gzip, identity"
+        return httpx.Response(
+            200,
+            stream=OneChunk(compressed),
+            headers={"content-type": "text/html", "content-encoding": "gzip"},
+        )
+
+    fetched = await fetch_resource(
+        "https://example.com/article",
+        settings=_settings(),
+        kind="html",
+        headers={},
+        transport=httpx.MockTransport(handler),
+    )
+    assert fetched.data == b"<html>hello</html>"
+
+    unsupported = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            stream=OneChunk(b"ignored"),
+            headers={"content-type": "text/html", "content-encoding": "br"},
+        )
+    )
+    with pytest.raises(ValueError, match="Unsupported content encoding"):
+        await fetch_resource(
+            "https://example.com/article",
+            settings=_settings(),
+            kind="html",
+            headers={},
+            transport=unsupported,
+        )
+
+
+@pytest.mark.asyncio
+async def test_dns_validation_is_off_loop_and_inside_total_deadline(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    requested = []
+
+    def stalled_resolver(_hostname):
+        started.set()
+        release.wait(3)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr("app.core.net._resolve_host", stalled_resolver)
+
+    def handler(request):
+        requested.append(str(request.url))
+        return httpx.Response(200, content=b"<html/>")
+
+    task = asyncio.create_task(
+        fetch_resource(
+            "https://example.com/article",
+            settings=_settings(fetch_timeout_seconds=1),
+            kind="html",
+            headers={},
+            transport=httpx.MockTransport(handler),
+        )
+    )
+    try:
+        assert await asyncio.to_thread(started.wait, 0.3)
+        await asyncio.wait_for(asyncio.sleep(0.02), timeout=0.3)
+        with pytest.raises(httpx.TimeoutException):
+            await task
+        assert requested == []
+    finally:
+        release.set()
 
 
 @pytest.mark.asyncio
@@ -252,7 +358,7 @@ async def test_explicit_private_host_opt_in_uses_mock_transport():
 
     def handler(request):
         requested.append(str(request.url))
-        return httpx.Response(200, content=b"<html/>", headers={"content-type": "text/html"})
+        return httpx.Response(200, stream=OneChunk(b"<html/>"), headers={"content-type": "text/html"})
 
     result = await fetch_resource(
         "http://127.0.0.1/article",
