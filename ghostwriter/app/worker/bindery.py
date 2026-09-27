@@ -204,12 +204,7 @@ class BinderyPipeline:
                     seen_articles.append((feed_id, guid, url, title))
 
             if not feeds:
-                logger.warning("No active feeds found")
-                digest_logger.pipeline_no_articles(
-                    str(self.digest_id), "No active feeds configured"
-                )
-                await self._complete(0)
-                return
+                logger.info("No active RSS feeds; checking other enabled sources")
 
             await self._update_progress(total_feeds=len(feeds))
             digest_logger.pipeline_stage(
@@ -275,6 +270,11 @@ class BinderyPipeline:
 
                 wb_cfg = wb_session.exec(select(WallabagConfig)).first()
                 wallabag_enabled = wb_cfg.enabled if wb_cfg else True
+            wallabag_mode = (
+                wallabag_service.settings.wallabag_mode
+                if wallabag_service.is_configured
+                else self.settings.wallabag_mode
+            )
 
             if wallabag_service.is_configured and wallabag_enabled:
                 try:
@@ -411,14 +411,6 @@ class BinderyPipeline:
                         event="newsletters_failed",
                         context={"error": str(e)},
                     )
-
-            if not all_articles and not wallabag_articles and not newsletter_articles:
-                logger.warning("No new articles found")
-                digest_logger.pipeline_no_articles(
-                    str(self.digest_id), "No new articles found across all feeds"
-                )
-                await self._complete(0, seen_articles=seen_articles)
-                return
 
             # Cap total articles
             original_count = len(all_articles)
@@ -613,7 +605,7 @@ class BinderyPipeline:
             )
 
             # Enrich Wallabag articles with AI if configured (parallel)
-            if wallabag_articles and self.settings.wallabag_mode == "summarize":
+            if wallabag_articles and wallabag_mode == "summarize":
                 await self._update_stage("enriching")
                 llm_sem = asyncio.Semaphore(3)
                 enriched_wallabag: list[ExtractedArticle] = []
@@ -775,9 +767,9 @@ class BinderyPipeline:
                 and not newsletter_articles
                 and not media_articles
             ):
-                logger.warning("No articles extracted successfully")
+                logger.info("No eligible articles found across enabled sources")
                 digest_logger.pipeline_no_articles(
-                    str(self.digest_id), "All article extractions failed"
+                    str(self.digest_id), "No eligible articles found across enabled sources"
                 )
                 await self._complete(0, seen_articles=seen_articles)
                 return
