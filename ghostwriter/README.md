@@ -111,6 +111,22 @@ export OPENAI_API_KEY=sk-...
 .venv/bin/python -m uvicorn app.main:app --reload --port 8080
 ```
 
+YouTube audio fallback also needs `yt-dlp` and `ffmpeg` executables on `PATH`.
+Docker installs them separately; for local development, install `ffmpeg`
+with your system package manager, then run these commands before starting
+the development server:
+
+```bash
+.venv/bin/python -m pip install yt-dlp
+export PATH="$PWD/.venv/bin:$PATH"
+yt-dlp --version
+ffmpeg -version
+```
+
+Local Whisper transcription additionally needs the configured `whisper-cli`
+binary and model files. Caption-only YouTube extraction does not need these
+audio tools.
+
 ### Supported Container Platforms
 
 Published Ghostwriter images target:
