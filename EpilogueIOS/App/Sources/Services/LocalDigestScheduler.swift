@@ -71,7 +71,7 @@ public final class LocalDigestScheduler: Sendable {
         settingsRepository: SettingsRepositoryProtocol,
         modelContainer: ModelContainer,
         now: @escaping @Sendable () -> Date = { Date() },
-        calendar: Calendar = .current
+        calendar: Calendar = .autoupdatingCurrent
     ) {
         self.feedRepository = feedRepository
         self.digestRepository = digestRepository
@@ -505,7 +505,7 @@ public final class LocalDigestScheduler: Sendable {
 
     /// Returns the next enabled digest period occurrence from a reference date.
     /// If an enabled period is still ahead today, uses today's window; otherwise tomorrow's earliest.
-    private func nextScheduledDigestTime(from now: Date, periods: Set<DigestPeriod>) -> Date? {
+    func nextScheduledDigestTime(from now: Date, periods: Set<DigestPeriod>) -> Date? {
         guard !periods.isEmpty else { return nil }
 
         let calendar = self.calendar
