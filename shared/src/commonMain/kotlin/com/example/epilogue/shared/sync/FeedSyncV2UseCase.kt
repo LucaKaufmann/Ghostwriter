@@ -4,6 +4,7 @@ import com.example.epilogue.shared.ghostwriter.FeedChangesV2Response
 import com.example.epilogue.shared.ghostwriter.FeedMutationBatchV2
 import com.example.epilogue.shared.ghostwriter.FeedMutationResultV2
 import com.example.epilogue.shared.ghostwriter.isUuidV2
+import com.example.epilogue.shared.ghostwriter.canonicalUuidV2
 import com.example.epilogue.shared.ghostwriter.isValidV2
 import com.example.epilogue.shared.ghostwriter.validVersionV2
 import kotlinx.coroutines.CancellationException
@@ -67,21 +68,22 @@ class FeedSyncV2UseCase(
                 is FeedV2RemoteResult.Success -> result.value
                 else -> return remoteFailure("full_pull", result, token, binding)
             }
-            if (!full.isValidV2(full = true, sinceVersion = null) ||
-                (binding?.serverInstanceId != null && full.serverInstanceId != binding.serverInstanceId)) {
-                if (binding?.serverInstanceId != null && full.serverInstanceId != binding.serverInstanceId) {
-                    val suspended = store.suspendBinding(token, binding, "changed_instance")
-                    if (suspended !is FeedV2StoreResult.Success) return storeFailure("suspend", suspended)
-                    return FeedSyncV2Outcome.ServerChanged
-                }
+            if (!full.isValidV2(full = true, sinceVersion = null)) {
                 return FeedSyncV2Outcome.Failed("full_pull", "Invalid full response")
+            }
+            if (binding?.serverInstanceId != null &&
+                canonicalUuidV2(full.serverInstanceId) != canonicalUuidV2(binding.serverInstanceId ?: "")) {
+                val suspended = store.suspendBinding(token, binding, "changed_instance")
+                if (suspended !is FeedV2StoreResult.Success) return storeFailure("suspend", suspended)
+                return FeedSyncV2Outcome.ServerChanged
             }
             if (configuration.currentDestination() != destination) return changedDestination(token, binding)
             binding = when (val result = store.reconcileAndBindFullSnapshot(token, destination, full)) {
                 is FeedV2StoreResult.Success -> result.value
                 else -> return storeFailure("reconcile", result)
             }
-            if (!binding.firstReconciliationComplete || binding.serverInstanceId != full.serverInstanceId ||
+            if (!binding.firstReconciliationComplete ||
+                canonicalUuidV2(binding.serverInstanceId ?: "") != canonicalUuidV2(full.serverInstanceId) ||
                 binding.cursorVersion != full.serverVersion) {
                 return FeedSyncV2Outcome.Failed("reconcile", "Store returned inconsistent binding")
             }
@@ -98,7 +100,9 @@ class FeedSyncV2UseCase(
             else -> return storeFailure("claim", result)
         }
         if (claimed.size > 100 || claimed.map { it.url }.distinct().size != claimed.size ||
-            claimed.any { it.payload.opId != it.opId || it.payload.url != it.url }) {
+            claimed.map { canonicalUuidV2(it.opId) }.distinct().size != claimed.size ||
+            claimed.any { canonicalUuidV2(it.payload.opId) == null ||
+                canonicalUuidV2(it.payload.opId) != canonicalUuidV2(it.opId) || it.payload.url != it.url }) {
             return FeedSyncV2Outcome.Failed("claim", "Invalid claimed mutations")
         }
         var applied = 0
@@ -110,18 +114,20 @@ class FeedSyncV2UseCase(
             when (result) {
                 is FeedV2RemoteResult.Success -> {
                     val envelope = result.value
-                    if (envelope.serverInstanceId != bound.serverInstanceId) {
+                    if (!isUuidV2(envelope.serverInstanceId)) {
+                        pushFailure = "invalid_response"
+                    } else if (canonicalUuidV2(envelope.serverInstanceId) !=
+                        canonicalUuidV2(bound.serverInstanceId)) {
                         val suspended = store.suspendBinding(token, bound, "changed_instance")
                         if (suspended !is FeedV2StoreResult.Success) return storeFailure("suspend", suspended)
                         return FeedSyncV2Outcome.ServerChanged
-                    }
-                    if (!validResults(envelope.results, claimed)) {
+                    } else if (!validResults(envelope.results, claimed)) {
                         pushFailure = "invalid_response"
                     } else {
                         if (configuration.currentDestination() != destination) return changedDestination(token, bound)
-                        val resultsById = envelope.results.associateBy { it.opId }
+                        val resultsById = envelope.results.associateBy { canonicalUuidV2(it.opId) }
                         for (sent in claimed) {
-                            val outcome = resultsById.getValue(sent.opId)
+                            val outcome = resultsById.getValue(canonicalUuidV2(sent.opId))
                             val stored = when (outcome.status) {
                                 "applied" -> store.acknowledge(token, bound, sent.opId, sent.sentRevision, outcome.current)
                                 "conflict" -> store.recordConflict(token, bound, sent.opId, sent.sentRevision, outcome.current!!)
@@ -154,7 +160,10 @@ class FeedSyncV2UseCase(
                 return partialFromSummary(token, bound, applied, pulled, "pull")
             }
         }
-        if (changes.serverInstanceId != bound.serverInstanceId) {
+        if (!isUuidV2(changes.serverInstanceId)) {
+            return FeedSyncV2Outcome.Failed("pull", "Invalid incremental response")
+        }
+        if (canonicalUuidV2(changes.serverInstanceId) != canonicalUuidV2(bound.serverInstanceId!!)) {
             val suspended = store.suspendBinding(token, bound, "changed_instance")
             if (suspended !is FeedV2StoreResult.Success) return storeFailure("suspend", suspended)
             return FeedSyncV2Outcome.ServerChanged
@@ -179,10 +188,10 @@ class FeedSyncV2UseCase(
 
     private fun validResults(results: List<FeedMutationResultV2>, sent: List<SentFeedMutationV2>): Boolean {
         if (results.size != sent.size) return false
-        val byId = sent.associateBy { it.opId }
-        if (byId.size != sent.size || results.map { it.opId }.toSet().size != results.size) return false
+        val byId = sent.associateBy { canonicalUuidV2(it.opId) }
+        if (byId.size != sent.size || results.map { canonicalUuidV2(it.opId) }.toSet().size != results.size) return false
         return results.all { result ->
-            val item = byId[result.opId] ?: return@all false
+            val item = byId[canonicalUuidV2(result.opId)] ?: return@all false
             when (result.status) {
                 "applied" -> result.current?.let { current ->
                     current.isValidV2() && current.url == item.url &&

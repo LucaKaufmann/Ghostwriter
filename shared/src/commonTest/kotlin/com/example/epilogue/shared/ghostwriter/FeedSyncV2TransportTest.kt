@@ -85,12 +85,33 @@ class FeedSyncV2TransportTest {
     }
 
     @Test
+    fun uppercaseFrozenOpIsSentUnchangedAndCanonicalServerReceiptDecodes() = runTest {
+        var body = ""
+        val client = client { request ->
+            body = (request.body as TextContent).text
+            """{"server_instance_id":"$instance","results":[{"op_id":"$op","status":"applied","current":null}]}""" to
+                HttpStatusCode.OK
+        }
+        val original = FeedMutationV2(op.uppercase(), "https://example.test/rss", "delete", null)
+        val response = client.second.postFeedMutationsV2(destination,
+            FeedMutationBatchV2(instance.uppercase(), listOf(original)))
+        assertEquals(op, assertIs<FeedV2RemoteResult.Success<FeedMutationBatchResultV2>>(response)
+            .value.results.single().opId)
+        assertTrue(body.contains(op.uppercase()))
+        assertTrue(body.contains(instance.uppercase()))
+        assertEquals(body, FeedMutationBatchV2(instance.uppercase(), listOf(original)).toWireJson())
+        client.first.close()
+    }
+
+    @Test
     fun writerRejectsOversizeAndInvalidFieldsBeforeNetwork() {
         val payload = FeedMutationV2(op, "https://example.test/rss", "upsert", 4,
             FeedDirtyFieldsV2(maxArticles = 0))
         assertTrue(FeedMutationBatchV2(instance, listOf(payload)).toWireJson().contains("\"max_articles\":0"))
         assertTrue(runCatching { FeedMutationBatchV2(instance, List(101) { payload }).toWireJson() }.isFailure)
         assertTrue(runCatching { FeedMutationBatchV2(instance, listOf(payload.copy(baseVersion = null))).toWireJson() }.isFailure)
+        assertTrue(runCatching { FeedMutationBatchV2(instance, listOf(payload,
+            payload.copy(opId = op.uppercase(), url = "https://example.test/other"))).toWireJson() }.isFailure)
     }
 
     private fun client(

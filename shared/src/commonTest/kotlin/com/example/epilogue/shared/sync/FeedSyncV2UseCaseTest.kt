@@ -7,6 +7,7 @@ import com.example.epilogue.shared.ghostwriter.FeedMutationBatchV2
 import com.example.epilogue.shared.ghostwriter.FeedMutationResultV2
 import com.example.epilogue.shared.ghostwriter.FeedMutationV2
 import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
+import com.example.epilogue.shared.ghostwriter.toWireJson
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -278,6 +279,57 @@ class FeedSyncV2UseCaseTest {
         val store = FakeStore(bound = true).apply { failLoad = true }
         val outcome = assertIs<FeedSyncV2Outcome.Failed>(useCase(store, FakeRemote()).sync())
         assertEquals("claim", outcome.phase)
+    }
+
+    @Test
+    fun uppercaseSentOpAcceptsCanonicalReceiptAndReplaysOriginalPayload() = runTest {
+        val upper = sent().copy(opId = op.uppercase(),
+            payload = sent().payload.copy(opId = op.uppercase()))
+        val store = FakeStore(bound = true).apply { claims += upper }
+        val remote = FakeRemote().apply { pushFailure = FeedV2RemoteResult.TransportFailure("timeout") }
+        assertIs<FeedSyncV2Outcome.Partial>(useCase(store, remote).sync())
+        assertEquals(op.uppercase(), remote.sentBatches.single().mutations.single().opId)
+        remote.pushFailure = null
+        remote.pushResults = listOf(FeedMutationResultV2(op, "applied", feed(5)))
+        assertIs<FeedSyncV2Outcome.Complete>(useCase(store, remote).sync())
+        assertEquals(remote.sentBatches[0].toWireJson(), remote.sentBatches[1].toWireJson())
+        assertEquals(listOf(op.uppercase() to 1L), store.acks)
+    }
+
+    @Test
+    fun caseVariantClaimOrResultDuplicatesNeverAcknowledge() = runTest {
+        val secondUrl = "https://example.test/other"
+        val second = SentFeedMutationV2(op.uppercase(), secondUrl, 2, 2,
+            FeedMutationV2(op.uppercase(), secondUrl, "delete", 4))
+        val duplicateClaims = FakeStore(bound = true).apply { claims.addAll(listOf(sent(), second)) }
+        val remote = FakeRemote()
+        assertIs<FeedSyncV2Outcome.Failed>(useCase(duplicateClaims, remote).sync())
+        assertTrue(remote.sentBatches.isEmpty())
+        assertTrue(duplicateClaims.acks.isEmpty())
+
+        val otherId = "a61d59d1-d936-4cfb-a20e-97718ddb0ff2"
+        val distinctSecond = second.copy(opId = otherId,
+            payload = second.payload.copy(opId = otherId))
+        val resultStore = FakeStore(bound = true).apply { claims.addAll(listOf(sent(), distinctSecond)) }
+        val resultRemote = FakeRemote().apply {
+            pushResults = listOf(FeedMutationResultV2(op, "applied", feed(5)),
+                FeedMutationResultV2(op.uppercase(), "applied", feed(5)))
+        }
+        assertIs<FeedSyncV2Outcome.Partial>(useCase(resultStore, resultRemote).sync())
+        assertTrue(resultStore.acks.isEmpty())
+        assertEquals(2, resultStore.claims.size)
+    }
+
+    @Test
+    fun uppercaseInstanceIsSameServerOnPushAndPull() = runTest {
+        val store = FakeStore(bound = true).apply { claims += sent() }
+        val remote = FakeRemote().apply {
+            pushInstance = instance.uppercase()
+            incrementalResponse = FeedChangesV2Response(instance.uppercase(), 4, emptyList())
+        }
+        assertIs<FeedSyncV2Outcome.Complete>(useCase(store, remote).sync())
+        assertEquals(listOf(op to 1L), store.acks)
+        assertTrue(!store.suspended)
     }
 
     @Test
