@@ -88,6 +88,7 @@ end
 local next_digests = {}
 local fail_download = {}
 local requested_cursor
+local after_download
 package.preload.ghostwriter_api = function()
   return {
     get_new_digests = function(_, _, cursor)
@@ -100,7 +101,9 @@ package.preload.ghostwriter_api = function()
       file:write("owned:" .. name)
       file:close()
       assert(os.rename(target .. ".part.mock", target))
-      return true, { created = attributes(target) }
+      local created = attributes(target)
+      if after_download then after_download(target) end
+      return true, { created = created }
     end,
   }
 end
@@ -196,6 +199,20 @@ write(dir .. "/stale.epub.part", "PART")
 next_digests = { digest("8", "stale.epub") }
 ok, result = Sync.run(settings)
 check(ok and result.downloaded == 1 and read(dir .. "/stale.epub.part") == "PART", "partial retry failed")
+-- A foreign replacement between API finalization and sync stamping is unowned.
+after_download = function(target)
+  assert(os.rename(target, target .. ".original"))
+  write(target, "PERSONAL REPLACEMENT")
+end
+next_digests = { digest("9", "postdownload-replaced.epub") }
+ok, result = Sync.run(settings)
+after_download = nil
+check(ok and result.failed == 1 and result.downloaded == 0,
+  "replacement after finalization was adopted")
+check(read(dir .. "/postdownload-replaced.epub") == "PERSONAL REPLACEMENT",
+  "replacement after finalization was removed")
+check(not (settings:getOwnedDownloads(scope) or {})["postdownload-replaced.epub"],
+  "replacement appeared in ownership ledger")
 local real_open = io.open
 io.open = function(path, mode)
   if path == dir .. "/stampfail.epub" and mode == "rb" then return nil, "injected read failure" end

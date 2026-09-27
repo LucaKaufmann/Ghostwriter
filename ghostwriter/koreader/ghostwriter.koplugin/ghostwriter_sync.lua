@@ -237,7 +237,11 @@ function GhostwriterSync.run(settings, progress_cb)
             end
           end
         end
-        if dl_ok and stamp and safe_directory(download_dir) == download_dir
+        -- Never adopt a replacement that appeared after finalization.
+        local created = dl_info and dl_info.created
+        if dl_ok and stamp and created
+            and stamp.dev == created.dev and stamp.ino == created.ino
+            and safe_directory(download_dir) == download_dir
             and ownership_scope(server_url, download_dir) == scope then
           local next_records = copy_records(records)
           next_records[filename] = stamp
