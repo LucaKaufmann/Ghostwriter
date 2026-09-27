@@ -1,6 +1,7 @@
 package com.example.epilogue.data.local
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
@@ -15,7 +16,12 @@ data class FeedEntity(
     val isEnabled: Boolean = true,
     // Sync fields for bi-directional sync with Ghostwriter
     val serverUpdatedAt: Long? = null,    // Server's updated_at timestamp (millis)
-    val locallyModified: Boolean = false   // Needs push to server
+    val locallyModified: Boolean = false,  // Legacy compatibility only
+    val serverId: String? = null,
+    val serverVersion: Long? = null,
+    @ColumnInfo(defaultValue = "0") val mutationRevision: Long = 0,
+    @ColumnInfo(defaultValue = "0") val hiddenDelete: Boolean = false,
+    val serverSnapshotJson: String? = null
 ) {
     fun toDomain(): Feed = Feed(
         url = url,
