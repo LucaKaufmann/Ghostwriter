@@ -38,7 +38,8 @@
 		if (id !== undefined) conflicts = conflicts.map((entry) => entry.id === id ? { ...entry, pending: false } : entry);
 	}
 	function offerConflict(err: Error, action: string, retry: (version: number, conflict: number) => void,
-		restore?: (version: number, conflict: number) => void, id?: number, closeOrigin?: () => void): boolean {
+		restore?: (version: number, conflict: number) => void, id?: number, closeOrigin?: () => void,
+		feedIdentity?: Pick<FeedCreate, 'title' | 'url'>): boolean {
 		if (!(err instanceof ApiError) || (err.status !== 409 && err.status !== 428)) return false;
 		const detail = typeof err.error.detail === 'string' ? null : err.error.detail;
 		const version = detail?.current?.version;
@@ -46,10 +47,11 @@
 		// A dismissed operation cannot be resurrected by an old in-flight response.
 		if (id !== undefined && !conflicts.some((entry) => entry.id === id)) return true;
 		const current = detail?.current;
+		const identity = feedIdentity ? `Feed: ${feedIdentity.title} (${feedIdentity.url}). ` : '';
 		const currentDescription = current?.kind === 'tombstone'
 			? 'The server currently has this feed deleted.'
 			: `Server title: ${current?.title ?? 'unknown'}, mode: ${current?.mode ?? 'unknown'}, active: ${current?.is_active ? 'yes' : 'no'}, max articles: ${current?.max_articles ?? 'unknown'}.`;
-		const message = `This feed changed on the server (version ${version}). ${currentDescription} Review it before ${action}.`;
+		const message = `${identity}This feed changed on the server (version ${version}). ${currentDescription} Review it before ${action}.`;
 		const restoring = current?.kind === 'tombstone' && restore;
 		const conflictId = id ?? ++nextConflictId;
 		const entry: ConflictEntry = {
@@ -92,7 +94,7 @@
 			() => {
 				if (variables.editSession !== undefined && variables.editSession === editSession &&
 					feedToEdit?.id === feed.id) editDialogOpen = false;
-			});
+			}, feed);
 	}
 
 	// Queries
@@ -125,7 +127,8 @@
 				offerConflict(err, 'restoring it', (version, conflict) => createFeedMutation.mutate({ ...variables, existingId: undefined, version, conflict }),
 					(version, conflict) => createFeedMutation.mutate({ ...variables, existingId: undefined, version, conflict }),
 					variables.conflict,
-					() => { if (variables.origin === 'add' && variables.addSession === addSession) addDialogOpen = false; })) return;
+					() => { if (variables.origin === 'add' && variables.addSession === addSession) addDialogOpen = false; },
+					variables.data)) return;
 			if (variables.conflict !== undefined && detail?.current?.kind === 'feed' &&
 				typeof detail.current.id === 'string') {
 				const existingId = detail.current.id;
@@ -135,7 +138,7 @@
 					: variables.data;
 				if (offerConflict(err, 'saving your proposed settings', (version, conflict) =>
 					createFeedMutation.mutate({ ...variables, data, activeSnapshot, existingId, version, conflict }),
-					undefined, variables.conflict)) return;
+					undefined, variables.conflict, undefined, variables.data)) return;
 			}
 			releaseConflict(variables.conflict);
 			toast.error('Failed to create feed', {
@@ -159,7 +162,7 @@
 				() => {
 					if (feed.deleteSession === deleteSession && feedToDelete?.id === feed.id)
 						feedToDelete = null;
-				})) return;
+				}, feed)) return;
 			releaseConflict(feed.conflict);
 			toast.error('Failed to delete feed', {
 				description: err.message ?? 'Unknown error'
@@ -227,6 +230,10 @@
 	let addDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let addSession = 0;
+	function openAddDialog() {
+		addSession += 1;
+		addDialogOpen = true;
+	}
 	let editSession = 0;
 	let deleteSession = 0;
 	let feedToDelete = $state<Feed | null>(null);
@@ -459,7 +466,8 @@
 				results.forEach((result, index) => {
 					if (result.status !== 'rejected') return;
 					offerConflict(result.reason, 'deleting it', (version, conflict) =>
-						deleteFeedMutation.mutate({ ...selected[index], version, conflict }));
+						deleteFeedMutation.mutate({ ...selected[index], version, conflict }),
+						undefined, undefined, undefined, selected[index]);
 				});
 				toast.error(`${failureCount} feed deletion${failureCount === 1 ? '' : 's'} failed`);
 			}
@@ -487,7 +495,7 @@
 			<h1 class="text-2xl font-bold tracking-tight">Feeds</h1>
 			<p class="text-muted-foreground">Manage your RSS and Atom feed subscriptions</p>
 		</div>
-		<Button onclick={() => { addSession += 1; addDialogOpen = true; }}>
+		<Button onclick={openAddDialog}>
 			<Plus class="mr-2 h-4 w-4" />
 			Add Feed
 		</Button>
@@ -613,7 +621,7 @@
 						{searchQuery ? 'Try a different search term' : 'Add your first RSS feed to get started'}
 					</p>
 					{#if !searchQuery}
-						<Button onclick={() => (addDialogOpen = true)} class="mt-4">
+						<Button onclick={openAddDialog} class="mt-4">
 							<Plus class="mr-2 h-4 w-4" />
 							Add Feed
 						</Button>

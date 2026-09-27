@@ -276,6 +276,60 @@ test('concurrent conflicts retain both proposals until each is resolved', async 
 	expect(writes).toMatchObject({ 'feed-1': 2, 'feed-2': 2 });
 });
 
+test('bulk tombstone conflicts identify each feed beside its Restore action', async ({ page }, testInfo) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	await page.route(/\/api\/feeds\/feed-[12]$/, async (route) => route.fulfill({
+		status: 409, contentType: 'application/json', body: JSON.stringify({
+			detail: { code: 'feed_conflict', current: { kind: 'tombstone', version: 9 } }
+		})
+	}));
+	await page.goto('/sources/feeds');
+	await page.getByLabel('Select Example Feed').first().check();
+	await page.getByLabel('Select Daily News').first().check();
+	await page.getByRole('button', { name: 'Pause', exact: true }).click();
+	await expect(page.getByRole('alert')).toHaveCount(2);
+	await expect(page.getByRole('alert').filter({ hasText: 'Example Feed' })).toContainText('https://example.com/feed.xml');
+	await expect(page.getByRole('alert').filter({ hasText: 'Daily News' })).toContainText('https://news.example.org/rss');
+	for (const alert of await page.getByRole('alert').all()) {
+		await expect(alert.getByRole('button', { name: 'Restore feed with my changes' })).toBeVisible();
+	}
+	await page.screenshot({ path: testInfo.outputPath('identified-tombstone-conflicts.png'), fullPage: true });
+});
+
+test('empty-state Add reopening protects its new draft from a delayed submit', async ({ page }) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	let submitted = false;
+	await page.route('**/api/feeds', async (route) => {
+		if (route.request().method() === 'GET') return route.fulfill({
+			status: 200, contentType: 'application/json', body: '[]'
+		});
+		submitted = true;
+		await held;
+		await route.fulfill({ status: 200, contentType: 'application/json',
+			body: JSON.stringify({ id: 'new-feed', version: 1 }) });
+	});
+	await page.goto('/sources/feeds');
+	await expect(page.getByText('No feeds yet')).toBeVisible();
+	await page.getByRole('button', { name: 'Add Feed', exact: true }).last().click();
+	await page.locator('#url').fill('https://example.com/first.xml');
+	await page.locator('#title').fill('First submission');
+	await page.getByRole('dialog').getByRole('button', { name: 'Add Feed', exact: true }).click();
+	await expect.poll(() => submitted).toBe(true);
+	await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+	await page.getByRole('button', { name: 'Add Feed', exact: true }).last().click();
+	await page.locator('#url').fill('https://example.com/new-draft.xml');
+	await page.locator('#title').fill('Keep this new draft');
+	release();
+	await expect(page.getByText('Feed saved successfully')).toBeVisible();
+	await expect(page.getByRole('dialog')).toBeVisible();
+	await expect(page.locator('#url')).toHaveValue('https://example.com/new-draft.xml');
+	await expect(page.locator('#title')).toHaveValue('Keep this new draft');
+});
+
 test('delayed status conflict leaves an unrelated edit form and draft open', async ({ page }) => {
 	await mockGhostwriterApi(page);
 	await setAuthenticatedSession(page);
