@@ -2,6 +2,7 @@ package com.example.epilogue.data.local
 
 import androidx.room.Room
 import com.example.epilogue.data.repository.AndroidFeedV2Store
+import com.example.epilogue.data.repository.FeedCorrectionEdits
 import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.Feed
@@ -526,8 +527,9 @@ class AndroidFeedV2StoreTest {
         assertEquals(ProcessingMode.BRIEFING, form.mode)
         assertFalse(form.enabled)
         assertEquals("7", form.cap)
-        assertTrue(store.correctRejected(sent.opId, form.title, form.mode,
-            form.enabled, form.cap.toInt()))
+        // The UI captured only the title edit before its required pre-submit sync.
+        // Room resolves untouched fields after that pull, in the write transaction.
+        assertTrue(store.correctRejected(sent.opId, FeedCorrectionEdits(title = "Corrected")))
         val corrected = value(store.loadPendingMutations(token, binding, 100)).single()
         assertEquals(6L, corrected.payload.baseVersion)
         assertEquals("Corrected", corrected.payload.fields!!.title)

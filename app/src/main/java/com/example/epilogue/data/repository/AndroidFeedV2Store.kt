@@ -29,6 +29,14 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Null means the correction form left this field untouched. */
+data class FeedCorrectionEdits(
+    val title: String? = null,
+    val mode: ProcessingMode? = null,
+    val enabled: Boolean? = null,
+    val maxArticles: Int? = null
+)
+
 /** Owns the Room transactions behind the shared v2 state machine. */
 @Singleton
 class AndroidFeedV2Store @Inject constructor(
@@ -499,8 +507,10 @@ class AndroidFeedV2Store @Inject constructor(
 
     /** Correct a rejected upsert with fresh values and a new operation identity. */
     suspend fun correctRejected(opId: String, title: String, mode: ProcessingMode,
-        enabled: Boolean, maxArticles: Int): Boolean = database.withTransaction {
-        if (title.isBlank() || maxArticles < 0) return@withTransaction false
+        enabled: Boolean, maxArticles: Int): Boolean = correctRejected(opId,
+            FeedCorrectionEdits(title, mode, enabled, maxArticles))
+
+    suspend fun correctRejected(opId: String, edits: FeedCorrectionEdits): Boolean = database.withTransaction {
         val row = mutations.byId(opId) ?: return@withTransaction false
         if (row.state != "rejected" || row.kind != "upsert") return@withTransaction false
         if (mutations.forUrl(row.url).filter { it.serverKey == row.serverKey }
@@ -513,6 +523,20 @@ class AndroidFeedV2Store @Inject constructor(
         val feedServer = parseSnapshot(feed.serverSnapshotJson)
         val current = if (feedServer != null &&
             (proposalServer == null || feedServer.version > proposalServer.version)) feedServer else proposalServer
+        val proposed = runCatching { decode(row) }.getOrNull() ?: return@withTransaction false
+        val title = edits.title ?: proposed.title ?: current?.title ?: return@withTransaction false
+        val modeName = edits.mode?.let { if (it == ProcessingMode.BRIEFING) "summarize" else "raw" }
+            ?: proposed.mode ?: current?.mode ?: return@withTransaction false
+        val mode = when (modeName) {
+            "summarize" -> ProcessingMode.BRIEFING
+            "raw" -> ProcessingMode.FIDELITY
+            else -> return@withTransaction false
+        }
+        val enabled = edits.enabled ?: proposed.isActive ?: current?.isActive
+            ?: return@withTransaction false
+        val maxArticles = edits.maxArticles ?: proposed.maxArticles ?: current?.maxArticles
+            ?: return@withTransaction false
+        if (title.isBlank() || maxArticles < 0) return@withTransaction false
         val corrected = feed.copy(name = title, mode = mode, isEnabled = enabled,
             maxArticles = maxArticles, hiddenDelete = false, locallyModified = true,
             mutationRevision = feed.mutationRevision + 1)
