@@ -626,11 +626,23 @@ final class IOSFeedV2StoreEngine {
                   let selected = try mutations(context).first(where: { $0.opId == opId }),
                   selected.scopeKey != destinationURL + "\n" + configurationId,
                   selected.scopeKey != "__unbound__" else { throw StoreError.invalidEdit }
-            let preceding = try mutations(context).contains {
-                $0.url == selected.url && $0.scopeKey == selected.scopeKey &&
-                $0.sequence < selected.sequence
+            let related = try mutations(context).filter {
+                $0.url == selected.url && $0.scopeKey == selected.scopeKey
             }
-            guard !preceding else { throw StoreError.invalidEdit }
+            guard !related.contains(where: { $0.sequence < selected.sequence }) else {
+                throw StoreError.invalidEdit
+            }
+            if selected.kind == "upsert", selected.baseVersion == nil,
+               let next = related.first(where: { $0.sequence > selected.sequence }),
+               next.kind == "upsert", next.baseVersion == nil {
+                // Removing the old-scope head promotes a sparse successor to
+                // a standalone create. Keep its dirty fields and inherit only
+                // the unchanged fields from the complete predecessor.
+                next.title = next.title ?? selected.title
+                next.isActive = next.isActive ?? selected.isActive
+                next.mode = next.mode ?? selected.mode
+                next.maxArticles = next.maxArticles ?? selected.maxArticles
+            }
             if action == .discard {
                 context.delete(selected)
                 return
