@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from app.models.feed import Feed
+from app.models.feed import MAX_FEED_ARTICLES, Feed, readable_article_limit
 from app.models.feed_sync import FeedMutationReceipt, FeedSyncClock
 from app.services.outbound_fetch import validate_public_url_bounded
 
@@ -46,7 +46,7 @@ def snapshot(feed: Feed | None) -> dict | None:
             "id": str(feed.id), "url": feed.url, "version": feed.version}
     if feed.deleted_at is None:
         data.update(title=feed.title, is_active=feed.is_active,
-                    mode=feed.mode, max_articles=feed.max_articles)
+                    mode=feed.mode, max_articles=readable_article_limit(feed.max_articles))
     return data
 
 
@@ -67,7 +67,7 @@ def validate_fields(fields: object, *, creating: bool) -> bool:
         (key == "title" and isinstance(value, str))
         or (key == "is_active" and type(value) is bool)
         or (key == "mode" and value in ("raw", "summarize") and isinstance(value, str))
-        or (key == "max_articles" and type(value) is int and value >= 0)
+        or (key == "max_articles" and type(value) is int and 0 <= value <= MAX_FEED_ARTICLES)
         for key, value in fields.items()
     )
 
@@ -144,6 +144,17 @@ def _payload_hash(item: dict) -> str:
                                      ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
+def _read_receipt(value: str) -> dict:
+    """Keep historical receipts immutable while projecting legacy feed caps."""
+    result = json.loads(value)
+    current = result.get("current")
+    if isinstance(current, dict) and current.get("kind") == "feed":
+        cap = current.get("max_articles")
+        if type(cap) is int:
+            current["max_articles"] = readable_article_limit(cap)
+    return result
+
+
 def _valid_url_shape(url: object) -> bool:
     if not isinstance(url, str) or url.startswith("synthetic://"):
         return False
@@ -170,7 +181,7 @@ async def mutate_one(session: Session, instance_id: str, item: dict) -> dict:
     if prior is not None:
         if prior[0] != payload_hash:
             return _reject(op_id, "op_id_reused", "Operation ID was used with a different payload")
-        return json.loads(prior[1])
+        return _read_receipt(prior[1])
     kind = item.get("kind")
     base = item.get("base_version", "missing")
     needs_new_url_admission = url_valid and kind == "upsert" and base is None and not known_url
@@ -191,7 +202,7 @@ async def mutate_one(session: Session, instance_id: str, item: dict) -> dict:
             if receipt.payload_hash != payload_hash:
                 result = _reject(op_id, "op_id_reused", "Operation ID was used with a different payload")
             else:
-                result = json.loads(receipt.result_json)
+                result = _read_receipt(receipt.result_json)
             session.commit()
             return result
         fields = item.get("fields")

@@ -245,7 +245,7 @@ async def sync_feeds(
             feed = existing_feeds.get(feed_data.url)
             if (feed is None or feed.deleted_at is not None or
                 feed_data.url.startswith("synthetic://") or
-                any(getattr(feed, key) != getattr(feed_data, key)
+                any(feed_sync.snapshot(feed)[key] != getattr(feed_data, key)
                     for key in feed_sync.SYNC_FIELDS)):
                 raise HTTPException(409, detail={"code": "legacy_write_requires_upgrade"})
             unchanged += 1
