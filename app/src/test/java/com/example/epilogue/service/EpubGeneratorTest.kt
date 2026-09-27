@@ -11,6 +11,9 @@ import io.mockk.mockkStatic
 import io.mockk.mockkConstructor
 import io.mockk.unmockkAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import org.junit.Assert.assertNull
@@ -89,6 +92,28 @@ class EpubGeneratorTest {
             assertNull(generator.generate(listOf(createArticle("Failed edition", false))))
             assertArrayEquals(before, previous.readBytes())
             assertEquals(listOf(previous.name), previous.parentFile!!.list()!!.toList())
+        } finally {
+            unmockkAll()
+        }
+    }
+
+    @Test
+    fun `media scan failure and cancellation remove unreturned unique artifacts`() = runBlocking {
+        try {
+            val generator = prepareGenerator()
+            every { MediaScannerConnection.scanFile(any(), any(), any(), any()) } throws IOException("fixture scan failure")
+            assertNull(generator.generate(listOf(createArticle("Scan failed", false))))
+            assertTrue(File(output.root, "Epilogue").listFiles()!!.isEmpty())
+            val scanning = CompletableDeferred<Unit>()
+            every { MediaScannerConnection.scanFile(any(), any(), any(), any()) } answers {
+                scanning.complete(Unit)
+                Unit
+            }
+            val generation = async { generator.generate(listOf(createArticle("Cancelled", false))) }
+            scanning.await()
+            generation.cancelAndJoin()
+            assertTrue(generation.isCancelled)
+            assertTrue(File(output.root, "Epilogue").listFiles()!!.isEmpty())
         } finally {
             unmockkAll()
         }

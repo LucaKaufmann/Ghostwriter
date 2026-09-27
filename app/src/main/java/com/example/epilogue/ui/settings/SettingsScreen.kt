@@ -122,6 +122,13 @@ fun SettingsScreen(
         }
     }
 
+    LaunchedEffect(uiState.dataResetError) {
+        uiState.dataResetError?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearDataResetError()
+        }
+    }
+
     LaunchedEffect(uiState.dataReset) {
         if (uiState.dataReset) {
             snackbarHostState.showSnackbar("All digests deleted and feed timestamps reset")
