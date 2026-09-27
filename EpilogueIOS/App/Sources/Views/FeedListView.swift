@@ -65,9 +65,7 @@ struct FeedListView: View {
     @State private var showingOlderServerFeeds = false
 
     private var olderServerNeedsPreview: Bool {
-        if case .some(.upgradeRequired) =
-            ghostwriterCoordinator.lastSyncError as? FeedSyncV2Error { return true }
-        return false
+        ghostwriterCoordinator.requiresOlderServerFeedPreview
     }
 
     var body: some View {
