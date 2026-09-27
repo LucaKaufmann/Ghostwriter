@@ -173,7 +173,8 @@ class AndroidFeedV2Store @Inject constructor(
                     maxArticles = updated.maxArticles.takeIf { it != old.maxArticles }
                 ).let { if (it.isEmpty()) fields(updated) else it }
                 mutations.insert(FeedMutationEntity(uuid(), state.serverKey, feed.url, "upsert", base,
-                    encode(dirty), nextRevision, "queued", createdAt = System.currentTimeMillis(),
+                    encode(dirty), nextRevision, "queued", serverSnapshotJson = old?.serverSnapshotJson,
+                    createdAt = System.currentTimeMillis(),
                     sequence = state.nextSequence, queueOrder = state.nextSequence))
                 states.put(state.copy(nextSequence = state.nextSequence + 1))
             }
@@ -406,7 +407,9 @@ class AndroidFeedV2Store @Inject constructor(
             val row = mutations.byId(opId) ?: return@withTransaction FeedV2StoreResult.StaleSentRevision
             if (row.serverKey != state.serverKey || !row.sent || row.localRevision != sentRevision)
                 return@withTransaction FeedV2StoreResult.StaleSentRevision
-            mutations.update(row.copy(state = "rejected", rejectionCode = code, rejectionMessage = message))
+            val originalBase = row.serverSnapshotJson ?: feeds.getFeedByUrl(row.url)?.serverSnapshotJson
+            mutations.update(row.copy(state = "rejected", serverSnapshotJson = originalBase,
+                rejectionCode = code, rejectionMessage = message))
             FeedV2StoreResult.Success(Unit)
         }
     }
@@ -502,7 +505,10 @@ class AndroidFeedV2Store @Inject constructor(
         val state = states.byKey(row.serverKey) ?: return@withTransaction false
         if (!state.active || state.suspended) return@withTransaction false
         val feed = feeds.getFeedByUrl(row.url) ?: return@withTransaction false
-        val current = parseSnapshot(feed.serverSnapshotJson)
+        val proposalServer = parseSnapshot(row.serverSnapshotJson)
+        val feedServer = parseSnapshot(feed.serverSnapshotJson)
+        val current = if (feedServer != null &&
+            (proposalServer == null || feedServer.version > proposalServer.version)) feedServer else proposalServer
         val corrected = feed.copy(name = title, mode = mode, isEnabled = enabled,
             maxArticles = maxArticles, hiddenDelete = false, locallyModified = true,
             mutationRevision = feed.mutationRevision + 1)
