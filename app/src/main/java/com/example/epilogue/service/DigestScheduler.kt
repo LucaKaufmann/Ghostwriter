@@ -40,6 +40,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -194,18 +196,29 @@ class DigestScheduler @Inject constructor(
         val cancellations = synchronized(registrationLock) {
             pendingCancellations[period]?.toList().orEmpty()
         }
-        try {
-            // Await every outstanding cancellation; a later receipt alone does not
-            // prove an earlier cancellation has finished removing its request.
-            cancellations.forEach { it.awaitPersistence() }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            Log.w(TAG, "Could not confirm ${period.name} cancellation", error)
-            return
+        val settled = mutableListOf<Operation>()
+        // Await every outstanding cancellation; a later receipt alone does not
+        // prove an earlier cancellation has finished removing its request.
+        for (cancellation in cancellations) {
+            try {
+                cancellation.awaitPersistence()
+                settled.add(cancellation)
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                // A completed failed receipt is no longer useful. Leave any later
+                // still-pending cancellations for the next registration to await.
+                settled.add(cancellation)
+                synchronized(registrationLock) {
+                    pendingCancellations[period]?.removeAll(settled.toSet())
+                    if (pendingCancellations[period]?.isEmpty() == true)
+                        pendingCancellations.remove(period)
+                }
+                Log.w(TAG, "Could not confirm ${period.name} cancellation", error)
+                return
+            }
         }
         synchronized(registrationLock) {
-            pendingCancellations[period]?.removeAll(cancellations.toSet())
+            pendingCancellations[period]?.removeAll(settled.toSet())
             if (pendingCancellations[period]?.isEmpty() == true) pendingCancellations.remove(period)
             if (registrationGenerations[period] != generation) return
         }
