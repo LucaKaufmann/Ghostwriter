@@ -193,7 +193,10 @@ final class FeedV2StoreTests: XCTestCase {
                                 isEnabled: false, maxArticles: 2)
                 let before = try orderedMutations(container)
                 XCTAssertEqual(before.map(\.kind), ["delete", "upsert"])
-                XCTAssertEqual(before[1].title, changedTitle ? expectedTitle : nil)
+                XCTAssertEqual(before[1].title, expectedTitle)
+                XCTAssertEqual(before[1].isActive, false)
+                XCTAssertEqual(before[1].mode, "raw")
+                XCTAssertEqual(before[1].maxArticles, 2)
                 let successorId = before[1].opId
                 if trailingDelete { try engine.delete(url: feedURL) }
                 let originalIds = try orderedMutations(container).map(\.opId)
@@ -213,7 +216,7 @@ final class FeedV2StoreTests: XCTestCase {
                 XCTAssertNotEqual(queued[0].opId, opId)
                 XCTAssertEqual(queued[0].baseVersion, 8)
                 XCTAssertEqual(queued[1].opId, successorId)
-                XCTAssertEqual(queued[1].title, changedTitle ? expectedTitle : nil)
+                XCTAssertEqual(queued[1].title, expectedTitle)
             }
             let reopened = try model(at: url)
             XCTAssertEqual(try resolvedRow(reopened).isLocallyDeleted ?? false, trailingDelete)
@@ -221,6 +224,39 @@ final class FeedV2StoreTests: XCTestCase {
                            changedTitle ? "Re-added title" : "Server title")
             XCTAssertEqual(try orderedMutations(reopened).map(\.kind), trailingDelete
                            ? ["delete", "upsert", "delete"] : ["delete", "upsert"])
+            if !trailingDelete {
+                let engine = IOSFeedV2StoreEngine(container: reopened)
+                let deletion = try XCTUnwrap(engine.claimOneForTesting())
+                XCTAssertTrue(deletion.wireJSON.contains("\"kind\":\"delete\""))
+                try engine.acknowledgeForTesting(opId: deletion.opId,
+                                                 revision: deletion.sentRevision, version: 9)
+                let rebased = try XCTUnwrap(orderedMutations(reopened).first)
+                XCTAssertEqual(rebased.kind, "upsert")
+                XCTAssertEqual(rebased.baseVersion, 9)
+
+                let afterDeleteAck = try model(at: url)
+                let nextEngine = IOSFeedV2StoreEngine(container: afterDeleteAck)
+                let readd = try XCTUnwrap(nextEngine.claimOneForTesting())
+                XCTAssertEqual(readd.baseVersion, 9)
+                XCTAssertEqual(readd.title, changedTitle ? "Re-added title" : "Server title")
+                let batch = try XCTUnwrap(JSONSerialization.jsonObject(
+                    with: Data(readd.wireJSON.utf8)) as? [String: Any])
+                let payload = try XCTUnwrap((batch["mutations"] as? [[String: Any]])?.first)
+                XCTAssertEqual(payload["kind"] as? String, "upsert")
+                XCTAssertEqual(payload["base_version"] as? Int, 9)
+                let fields = try XCTUnwrap(payload["fields"] as? [String: Any])
+                XCTAssertEqual(fields["title"] as? String, readd.title)
+                XCTAssertEqual(fields["is_active"] as? Bool, false)
+                XCTAssertEqual(fields["mode"] as? String, "raw")
+                XCTAssertEqual(fields["max_articles"] as? Int, 2)
+                try nextEngine.acknowledgeForTesting(opId: readd.opId,
+                                                     revision: readd.sentRevision, version: 10,
+                                                     title: readd.title)
+                let afterReaddAck = try model(at: url)
+                XCTAssertTrue(try orderedMutations(afterReaddAck).isEmpty)
+                XCTAssertFalse(try resolvedRow(afterReaddAck).isLocallyDeleted ?? true)
+                XCTAssertEqual(try resolvedRow(afterReaddAck).serverVersion, 10)
+            }
         }
     }
 
