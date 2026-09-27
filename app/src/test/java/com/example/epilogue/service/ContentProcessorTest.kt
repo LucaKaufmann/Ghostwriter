@@ -1,6 +1,7 @@
 package com.example.epilogue.service
 
 import org.jsoup.Jsoup
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -8,6 +9,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.util.concurrent.atomic.AtomicInteger
 
 class ContentProcessorTest {
 
@@ -18,6 +24,92 @@ class ContentProcessorTest {
     fun setup() {
         contentAnalyzer = ContentAnalyzer()
         processor = ContentProcessor(contentAnalyzer)
+    }
+
+    private suspend fun withArticleServer(
+        status: Int, words: Int, check: suspend (String, AtomicInteger) -> Unit
+    ) {
+        val server = ServerSocket(0, 5, InetAddress.getByName("127.0.0.1"))
+        server.soTimeout = 1_000
+        val requests = AtomicInteger()
+        val body = """<html><head><title>Fixture</title></head><body><article>
+            <h1>Fixture</h1><p>""" + (1..words).joinToString(" ") { "word$it" } +
+            "</p></article></body></html>"
+        val responder = Thread {
+            try {
+                repeat(2) {
+                    server.accept().use { socket ->
+                        requests.incrementAndGet()
+                        val request = socket.getInputStream().bufferedReader()
+                        while (request.readLine()?.isNotEmpty() == true) Unit
+                        val bytes = body.toByteArray()
+                        socket.getOutputStream().write(
+                            "HTTP/1.1 $status Fixture\r\nContent-Type: text/html\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                        socket.getOutputStream().write(bytes)
+                        socket.getOutputStream().flush()
+                    }
+                }
+            } catch (_: SocketException) { /* Closed by test. */ }
+            catch (_: SocketTimeoutException) { /* One request was sufficient. */ }
+        }.apply { isDaemon = true; start() }
+        try {
+            val url = "http://127.0.0.1:" + server.localPort + "/article"
+            check(url, requests)
+        } finally {
+            server.close()
+            responder.join(1_000)
+        }
+    }
+
+    private fun shortRss() = "<p>" + (1..180).joinToString(" ") { "word$it" } + "</p>"
+
+    @Test
+    fun `failed article fetch remains retryable with one request`() = runBlocking {
+        withArticleServer(503, 120) { url, requests ->
+            val result = processor.processForGeneration(url, shortRss(), null, "Fixture", null, 300)
+            assertEquals(ContentProcessor.GenerationResult.Failed, result)
+            assertEquals(1, requests.get())
+        }
+    }
+
+    @Test
+    fun `successfully extracted short article excludes after one request`() = runBlocking {
+        withArticleServer(200, 120) { url, requests ->
+            val result = processor.processForGeneration(url, shortRss(), null, "Fixture", null, 300)
+            assertEquals(ContentProcessor.GenerationResult.TooShort, result)
+            assertEquals(1, requests.get())
+        }
+    }
+
+    @Test
+    fun `successfully extracted full article delivers after one request`() = runBlocking {
+        withArticleServer(200, 400) { url, requests ->
+            val result = processor.processForGeneration(url, shortRss(), null, "Fixture", null, 300)
+            assertTrue(result is ContentProcessor.GenerationResult.Ready)
+            assertEquals(1, requests.get())
+        }
+    }
+
+    @Test
+    fun `failed source fetch retains usable RSS fallback after one request`() = runBlocking {
+        withArticleServer(503, 120) { url, requests ->
+            val rss = shortRss() + "<a href=\"$url\">Read more</a>"
+            val result = processor.processForGeneration(url, rss, null, "Fixture", null, 100)
+            assertTrue(result is ContentProcessor.GenerationResult.Ready)
+            assertEquals(1, requests.get())
+        }
+    }
+
+    @Test
+    fun `blank content uses full description without fetching source`() = runBlocking {
+        withArticleServer(503, 120) { url, requests ->
+            val paragraph = (1..100).joinToString(" ") { "word$it" } + "."
+            val description = "<p>$paragraph</p><p>$paragraph</p><p>$paragraph</p>"
+            val result = processor.processForGeneration(url, "   ", description,
+                "Fixture", null, 200)
+            assertTrue(result is ContentProcessor.GenerationResult.Ready)
+            assertEquals(0, requests.get())
+        }
     }
 
     @Test

@@ -9,6 +9,8 @@ import com.example.epilogue.data.local.EpilogueDatabase
 import com.example.epilogue.data.local.FeedDao
 import com.example.epilogue.data.local.FeedMutationDao
 import com.example.epilogue.data.local.FeedSyncStateDao
+import com.example.epilogue.data.local.ArticleDeliveryDao
+import com.example.epilogue.data.local.GenerationRunDao
 import org.json.JSONObject
 import java.util.UUID
 import dagger.Module
@@ -163,6 +165,26 @@ object DatabaseModule {
         }
     }
 
+    /** Prior associations have no provable feed URL; preserve them without guessed claims. */
+    val MIGRATION_9_10 = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE digest_articles ADD COLUMN feedUrl TEXT")
+            db.execSQL("""CREATE TABLE IF NOT EXISTS article_delivery (
+                feedUrl TEXT NOT NULL, articleKey TEXT NOT NULL, state TEXT NOT NULL,
+                reason TEXT, filterSignature TEXT, lastAttemptSequence INTEGER NOT NULL,
+                firstDigestId INTEGER, committedAt INTEGER NOT NULL,
+                PRIMARY KEY(feedUrl, articleKey),
+                CHECK(state IN ('retryable','delivered','excluded'))
+            )""".trimIndent())
+            db.execSQL("""CREATE TABLE IF NOT EXISTS generation_runs (
+                runId INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                startedAt INTEGER NOT NULL, finishedAt INTEGER, outcome TEXT NOT NULL,
+                digestId INTEGER, diagnosticsJson TEXT NOT NULL,
+                regeneration INTEGER NOT NULL
+            )""".trimIndent())
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): EpilogueDatabase {
@@ -179,7 +201,8 @@ object DatabaseModule {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
-                MIGRATION_8_9
+                MIGRATION_8_9,
+                MIGRATION_9_10
             )
             .build()
     }
@@ -199,4 +222,10 @@ object DatabaseModule {
 
     @Provides
     fun provideFeedSyncStateDao(database: EpilogueDatabase): FeedSyncStateDao = database.feedSyncStateDao()
+
+    @Provides
+    fun provideArticleDeliveryDao(database: EpilogueDatabase): ArticleDeliveryDao = database.articleDeliveryDao()
+
+    @Provides
+    fun provideGenerationRunDao(database: EpilogueDatabase): GenerationRunDao = database.generationRunDao()
 }

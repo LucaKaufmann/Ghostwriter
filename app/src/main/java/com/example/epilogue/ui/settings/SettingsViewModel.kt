@@ -18,6 +18,7 @@ import com.example.epilogue.data.repository.AndroidFeedV2Store
 import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
 import com.example.epilogue.data.repository.SettingsRepository
+import com.example.epilogue.data.local.GenerationRunDao
 import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.service.ConfigSyncManager
 import com.example.epilogue.service.DigestScheduler
@@ -29,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -43,7 +45,8 @@ class SettingsViewModel @Inject constructor(
     private val ghostwriterRepository: GhostwriterRepository,
     private val configSyncManager: ConfigSyncManager,
     private val feedSyncV2UseCase: FeedSyncV2UseCase,
-    private val feedV2Store: AndroidFeedV2Store
+    private val feedV2Store: AndroidFeedV2Store,
+    private val generationRunDao: GenerationRunDao
 ) : ViewModel() {
 
     companion object {
@@ -60,6 +63,11 @@ class SettingsViewModel @Inject constructor(
 
     init {
         loadSettings()
+        viewModelScope.launch {
+            generationRunDao.observeLatestFinished().collect { row ->
+                _uiState.update { it.copy(localRunSummary = row?.let(LocalRunSummary::from)) }
+            }
+        }
         if (settingsRepository.isGhostwriterConfigured()) {
             fetchIntegrationStatus()
             refreshMediaOverview()
@@ -159,6 +167,7 @@ class SettingsViewModel @Inject constructor(
                 digestTriggered = true,
                 digestCompleted = false,
                 digestFailed = false,
+                digestResultMessage = null,
                 ghostwriterProgress = null,
                 ghostwriterError = null
             )
@@ -168,19 +177,36 @@ class SettingsViewModel @Inject constructor(
             runDigestViaGhostwriter()
         } else {
             // Use local generation
-            runDigestLocally()
+            runDigestLocally(regeneration = false)
         }
     }
 
-    private fun runDigestLocally() {
-        val id = digestScheduler.runNow(fetchAll = false)
+    /** Explicitly repeat local articles, including identities already delivered. */
+    fun regenerateDigestLocally() {
+        if (_uiState.value.ghostwriterEnabled && _uiState.value.ghostwriterUrl.isNotBlank()) return
+        clearImmediateWorkObserver()
+        digestPollingJob?.cancel()
+        _uiState.update { it.copy(isGenerating = true, digestTriggered = true,
+            digestCompleted = false, digestFailed = false, digestResultMessage = null) }
+        runDigestLocally(regeneration = true)
+    }
+
+    private fun runDigestLocally(regeneration: Boolean) {
+        val id = digestScheduler.runNow(fetchAll = regeneration)
         immediateWorkId = id
         val workInfoLiveData = digestScheduler.getImmediateWorkInfo(id)
         val observer = Observer<WorkInfo?> { workInfo ->
             if (workInfo == null || immediateWorkId != id || workInfo.id != id) return@Observer
             when (workInfo.state) {
                 WorkInfo.State.SUCCEEDED -> {
-                    _uiState.update { it.copy(isGenerating = false, digestCompleted = true) }
+                    val message = when (workInfo.outputData.getString("generation_outcome")) {
+                        "partial" -> "Digest saved with some articles still pending"
+                        "deferred" -> "No articles included; more remain for the next edition"
+                        "empty" -> "No eligible articles found"
+                        else -> "Digest generated successfully"
+                    }
+                    _uiState.update { it.copy(isGenerating = false, digestCompleted = true,
+                        digestResultMessage = message) }
                     clearImmediateWorkObserver()
                 }
                 WorkInfo.State.FAILED -> {
@@ -1650,6 +1676,8 @@ data class SettingsUiState(
     val digestTriggered: Boolean = false,
     val digestCompleted: Boolean = false,
     val digestFailed: Boolean = false,
+    val digestResultMessage: String? = null,
+    val localRunSummary: LocalRunSummary? = null,
     val dataReset: Boolean = false,
     val dataResetError: String? = null,
     val customExportUri: String? = null,
