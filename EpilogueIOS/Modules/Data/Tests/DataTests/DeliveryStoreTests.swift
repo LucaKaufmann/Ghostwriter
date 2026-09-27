@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import Testing
 import Domain
+import GhostwriterClient
 @testable import Data
 
 @Suite("Durable local delivery store")
@@ -19,8 +20,18 @@ struct DeliveryStoreTests {
     }
 
     private let feed = "https://feed.test/rss"
-    private let key = "article-key"
+    private var key: String {
+        ArticleDeliveryIdentityBridge.identify("https://example.test/article")!.articleKey
+    }
     private let diagnostics = GenerationDiagnostics(feeds: [FeedIngestionResult(feedUrl: "https://feed.test/rss")])
+
+    private func reopened(_ directory: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
+        let configuration = ModelConfiguration(schema: schema,
+                                               url: directory.appendingPathComponent("Epilogue.sqlite"))
+        return try ModelContainer(for: schema, migrationPlan: EpilogueMigrationPlan.self,
+                                  configurations: [configuration])
+    }
 
     private func article() -> ProcessedArticle {
         ProcessedArticle(title: "Article", content: "<p>Body</p>",
@@ -88,7 +99,7 @@ struct DeliveryStoreTests {
                              articles: [article()], claims: [claim],
                              triggerType: .manual, period: nil)
         }
-        let reopened = ModelContext(container)
+        let reopened = ModelContext(try self.reopened(directory))
         #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 0)
         #expect(try reopened.fetchCount(FetchDescriptor<DigestArticle>()) == 0)
         let ledger = try #require(reopened.fetch(FetchDescriptor<ArticleDelivery>()).first)
@@ -101,23 +112,51 @@ struct DeliveryStoreTests {
     func testPreCommitTransactionRollback() throws {
         let (container, directory) = try model()
         let store = DeliveryStore(container: container)
-        let run = try store.start(trigger: "MANUAL", period: nil)
+        let run = try store.start(trigger: "MANUAL", period: nil, mode: .regenerate)
         let claim = DeliveryClaim(feedUrl: feed, articleKey: key, state: "delivered")
         try store.markAttempts([claim], run: run)
+        #expect(throws: DeliveryStoreError.invalidClaim) {
+            try store.finish(run, outcome: .failed, diagnostics: diagnostics,
+                             mode: .normal, artifactPath: nil, articles: [], claims: [],
+                             triggerType: .manual, period: nil)
+        }
         store.failBeforeTransactionCommitForTesting = true
         #expect(throws: DeliveryStoreError.injectedSaveFailure) {
             try store.finish(run, outcome: .complete, diagnostics: diagnostics,
-                             mode: .normal, artifactPath: artifact(directory),
+                             mode: .regenerate, artifactPath: artifact(directory),
                              articles: [article()], claims: [claim],
                              triggerType: .manual, period: nil)
         }
-        let reopened = ModelContext(container)
+        let reopened = ModelContext(try self.reopened(directory))
         #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 0)
         #expect(try reopened.fetchCount(FetchDescriptor<DigestArticle>()) == 0)
         let ledger = try #require(reopened.fetch(FetchDescriptor<ArticleDelivery>()).first)
         #expect(ledger.state == "retryable")
         #expect(ledger.firstDigestId == nil)
-        #expect(try #require(reopened.fetch(FetchDescriptor<GenerationRun>()).first).outcome == "running")
+        let persistedRun = try #require(reopened.fetch(FetchDescriptor<GenerationRun>()).first)
+        #expect(persistedRun.outcome == "running")
+        let persisted = try JSONDecoder().decode(
+            GenerationDiagnostics.self, from: Data(persistedRun.diagnosticsJSON.utf8))
+        #expect(persisted.mode == .regenerate)
+    }
+
+    @Test("Terminal failure and cancellation keep the mode recorded at run start")
+    func testTerminalDiagnosticsKeepMode() throws {
+        let (container, directory) = try model()
+        let store = DeliveryStore(container: container)
+        for outcome in [LocalGenerationOutcome.failed, .cancelled] {
+            let handle = try store.start(trigger: "MANUAL", period: nil, mode: .regenerate)
+            _ = try store.finish(handle, outcome: outcome,
+                                 diagnostics: GenerationDiagnostics(feeds: [], runError: "test"),
+                                 mode: .regenerate, artifactPath: nil, articles: [], claims: [],
+                                 triggerType: .manual, period: nil)
+            let saved = try #require(ModelContext(try reopened(directory))
+                .fetch(FetchDescriptor<GenerationRun>())
+                .first(where: { $0.runId == handle.id }))
+            #expect(saved.outcome == outcome.rawValue)
+            #expect(try JSONDecoder().decode(GenerationDiagnostics.self,
+                from: Data(saved.diagnosticsJSON.utf8)).mode == .regenerate)
+        }
     }
 
     @Test("Failed run cannot commit a terminal exclusion")
@@ -166,7 +205,7 @@ struct DeliveryStoreTests {
                                                     triggerType: .manual, period: nil))
         let repository = DigestRepository(modelContext: ModelContext(container))
         try await repository.deleteDigest(id: firstDigest.id)
-        let regenerate = try store.start(trigger: "MANUAL", period: nil)
+        let regenerate = try store.start(trigger: "MANUAL", period: nil, mode: .regenerate)
         try store.markAttempts([changed], run: regenerate)
         _ = try store.finish(regenerate, outcome: .complete, diagnostics: diagnostics,
                              mode: .regenerate, artifactPath: artifact(directory),
@@ -177,5 +216,168 @@ struct DeliveryStoreTests {
         #expect(ledger.state == "delivered")
         #expect(ledger.firstDigestId == firstDigest.id)
         #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 1)
+    }
+
+    @Test("An interrupted run becomes retryable on reopen, once, without touching remote jobs")
+    func testInterruptedRecoveryAndSecondRestart() throws {
+        let (container, directory) = try model()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let store = DeliveryStore(container: container)
+        let run = try store.start(trigger: TriggerType.scheduled.rawValue,
+                                  period: "MORNING", at: now)
+        try store.markAttempts([DeliveryClaim(feedUrl: feed, articleKey: key,
+                                               state: "retryable")], run: run)
+        let context = ModelContext(container)
+        let local = Digest(generatedAt: now, epubFilePath: "/tmp/legacy-pending.epub",
+                           triggerType: .scheduled, period: "MORNING")
+        let remote = Digest(generatedAt: now, epubFilePath: "/tmp/remote-pending.epub",
+                            triggerType: .ghostwriter)
+        let remoteRun = GenerationRun(attemptSequence: 2, startedAt: now,
+                                      trigger: TriggerType.ghostwriter.rawValue,
+                                      period: "MORNING")
+        context.insert(local)
+        context.insert(remote)
+        context.insert(remoteRun)
+        try context.save()
+
+        let recovered = DeliveryStore(container: try reopened(directory))
+        try recovered.reconcileInterruptedLocalRuns(now: now.addingTimeInterval(30))
+        let after = ModelContext(try reopened(directory))
+        let rows = try after.fetch(FetchDescriptor<GenerationRun>())
+        let localRun = try #require(rows.first(where: { $0.runId == run.id }))
+        #expect(localRun.outcome == "failed")
+        #expect(localRun.finishedAt != nil)
+        #expect(rows.first(where: { $0.runId == remoteRun.runId })?.outcome == "running")
+        let recoveredDiagnostics = try JSONDecoder().decode(
+            GenerationDiagnostics.self, from: Data(localRun.diagnosticsJSON.utf8))
+        #expect(recoveredDiagnostics.runError == "interrupted")
+        #expect(try #require(after.fetch(FetchDescriptor<ArticleDelivery>()).first).state == "retryable")
+        let digests = try after.fetch(FetchDescriptor<Digest>())
+        #expect(digests.first(where: { $0.id == local.id })?.errorMessage == "Interrupted local generation")
+        #expect(digests.first(where: { $0.id == remote.id })?.errorMessage == nil)
+        try DeliveryStore(container: try reopened(directory)).reconcileInterruptedLocalRuns(
+            now: now.addingTimeInterval(60))
+        let second = try ModelContext(try reopened(directory)).fetch(FetchDescriptor<GenerationRun>())
+        #expect(second.first(where: { $0.runId == run.id })?.outcome == "failed")
+        #expect(second.first(where: { $0.runId == run.id })?.finishedAt == now.addingTimeInterval(30))
+    }
+
+    @Test("A running row with a provable committed local artifact retains its claim")
+    func testPostCommitRecovery() throws {
+        let (container, directory) = try model()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let path = try artifact(directory)
+        let digest = Digest(generatedAt: now, epubFilePath: path, articleCount: 1,
+                            triggerType: .scheduled, isComplete: true, period: "MORNING")
+        let run = GenerationRun(attemptSequence: 1, startedAt: now,
+                                trigger: TriggerType.scheduled.rawValue,
+                                period: "MORNING", digestId: digest.id)
+        let claim = ArticleDelivery(feedUrl: feed, articleKey: key, state: "delivered",
+                                    firstDigestId: digest.id, committedAt: now)
+        let association = article().toDigestArticle(contentType: .deepDive, orderIndex: 0)
+        association.digest = digest
+        let context = ModelContext(container)
+        context.insert(digest)
+        context.insert(association)
+        context.insert(run)
+        context.insert(claim)
+        try context.save()
+        let store = DeliveryStore(container: try reopened(directory))
+        try store.reconcileInterruptedLocalRuns(now: now.addingTimeInterval(20))
+        let after = ModelContext(try reopened(directory))
+        #expect(try #require(after.fetch(FetchDescriptor<GenerationRun>()).first).outcome == "complete")
+        #expect(try #require(after.fetch(FetchDescriptor<ArticleDelivery>()).first).firstDigestId == digest.id)
+        #expect(try #require(after.fetch(FetchDescriptor<Digest>()).first).isComplete)
+        #expect(FileManager.default.fileExists(atPath: path))
+    }
+
+    @Test("Scheduled admission allows one retry, not a third, and resets next day")
+    func testScheduledAdmissionBudgetAndCoverage() throws {
+        let (container, directory) = try model()
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+        let next = day.addingTimeInterval(86_400)
+        let store = DeliveryStore(container: container)
+        #expect(try store.mayStartScheduled(period: "MORNING", occurrenceStart: day,
+                                            occurrenceEnd: next, legacyCovered: false))
+        let first = try store.start(trigger: "SCHEDULED", period: "MORNING", at: day)
+        _ = try store.finish(first, outcome: .failed, diagnostics: diagnostics,
+                             mode: .normal, artifactPath: nil, articles: [], claims: [],
+                             triggerType: .scheduled, period: "MORNING")
+        #expect(try store.mayStartScheduled(period: "MORNING", occurrenceStart: day,
+                                            occurrenceEnd: next, legacyCovered: false))
+        let retry = try store.start(trigger: "SCHEDULED", period: "MORNING",
+                                    at: day.addingTimeInterval(60))
+        _ = try store.finish(retry, outcome: .failed, diagnostics: diagnostics,
+                             mode: .normal, artifactPath: nil, articles: [], claims: [],
+                             triggerType: .scheduled, period: "MORNING")
+        let second = DeliveryStore(container: try reopened(directory))
+        #expect(try !second.mayStartScheduled(period: "MORNING", occurrenceStart: day,
+                                              occurrenceEnd: next, legacyCovered: false))
+        #expect(try second.mayStartScheduled(period: "MORNING", occurrenceStart: next,
+                                             occurrenceEnd: next.addingTimeInterval(86_400),
+                                             legacyCovered: false))
+        #expect(try !second.mayStartScheduled(period: "MORNING", occurrenceStart: next,
+                                              occurrenceEnd: next.addingTimeInterval(86_400),
+                                              legacyCovered: true))
+    }
+
+    @Test("Empty and deferred scheduled runs cover a window; manual runs do not spend its budget")
+    func testSettledCoverageAndManualIndependence() throws {
+        for outcome in [LocalGenerationOutcome.empty, .deferred, .partial, .complete] {
+            let (container, _) = try model()
+            let day = Date(timeIntervalSince1970: 1_800_000_000)
+            let store = DeliveryStore(container: container)
+            let manual = try store.start(trigger: "MANUAL", period: "manual", at: day)
+            _ = try store.finish(manual, outcome: .empty, diagnostics: diagnostics,
+                                 mode: .normal, artifactPath: nil, articles: [], claims: [],
+                                 triggerType: .manual, period: "manual")
+            #expect(try store.mayStartScheduled(period: "MORNING", occurrenceStart: day,
+                                                occurrenceEnd: day.addingTimeInterval(86_400),
+                                                legacyCovered: false))
+            // The admission query reads persisted outcomes, regardless of
+            // whether a downloadable digest exists for this fixture.
+            let context = ModelContext(container)
+            context.insert(GenerationRun(attemptSequence: 2, startedAt: day,
+                                         trigger: "SCHEDULED", period: "MORNING",
+                                         outcome: outcome.rawValue))
+            try context.save()
+            #expect(try !store.mayStartScheduled(period: "MORNING", occurrenceStart: day,
+                                                 occurrenceEnd: day.addingTimeInterval(86_400),
+                                                 legacyCovered: false))
+        }
+    }
+
+    @Test("Provable standalone legacy failures spend one retry and linked history is counted once")
+    func testLegacyAttemptCounting() throws {
+        let (container, _) = try model()
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+        let store = DeliveryStore(container: container)
+        let context = ModelContext(container)
+        let legacy = Digest(generatedAt: day, epubFilePath: "/tmp/old.epub",
+                            triggerType: .scheduled, isComplete: false,
+                            errorMessage: "Interrupted local generation", period: "MORNING")
+        context.insert(legacy)
+        context.insert(Digest(generatedAt: day, epubFilePath: "/tmp/ambiguous.epub",
+                              triggerType: .scheduled, isComplete: false,
+                              errorMessage: "Interrupted local generation", period: nil))
+        try context.save()
+        #expect(try store.mayStartScheduled(period: "MORNING", occurrenceStart: day,
+                                            occurrenceEnd: day.addingTimeInterval(86_400),
+                                            legacyCovered: false))
+        let run = try store.start(trigger: "SCHEDULED", period: "MORNING", at: day)
+        _ = try store.finish(run, outcome: .failed, diagnostics: diagnostics,
+                             mode: .normal, artifactPath: nil, articles: [], claims: [],
+                             triggerType: .scheduled, period: "MORNING")
+        #expect(try !store.mayStartScheduled(period: "MORNING", occurrenceStart: day,
+                                             occurrenceEnd: day.addingTimeInterval(86_400),
+                                             legacyCovered: false))
+        // When a journal row explicitly references the same digest it is one
+        // attempt, never two.
+        let row = try #require(context.fetch(FetchDescriptor<GenerationRun>()).first)
+        row.digestId = legacy.id
+        try context.save()
+        #expect(try store.mayStartScheduled(period: "MORNING", occurrenceStart: day,
+                                            occurrenceEnd: day.addingTimeInterval(86_400),
+                                            legacyCovered: false))
     }
 }

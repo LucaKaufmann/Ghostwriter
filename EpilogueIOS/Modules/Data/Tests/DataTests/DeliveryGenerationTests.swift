@@ -81,6 +81,142 @@ struct DeliveryGenerationTests {
         #expect(try ModelContext(container).fetchCount(FetchDescriptor<ArticleDelivery>()) == 5)
     }
 
+    @Test("Missing EPUB retains deliver-once claim; automatic retry is empty until explicit regeneration")
+    func testMissingArtifactDoesNotAutomaticallyRepeatDeliveredArticle() async throws {
+        let link = "https://example.test/article"
+        let (generator, articles, container, _) = try setup(maxArticles: 0, links: [link])
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = try await generator.generateDigest(triggerType: .scheduled,
+                                                       period: "MORNING", now: start)
+        let firstDigest = try #require(first.digest)
+        #expect(first.outcome == .complete)
+        let firstID = firstDigest.id
+        let firstPath = firstDigest.epubFilePath
+        try FileManager.default.removeItem(atPath: firstPath)
+        let context = ModelContext(container)
+        let original = try #require(context.fetch(FetchDescriptor<GenerationRun>()).first)
+        original.outcome = "running"
+        original.finishedAt = nil
+        try context.save()
+
+        let store = DeliveryStore(container: container)
+        try store.reconcileInterruptedLocalRuns(now: start.addingTimeInterval(30))
+        let end = start.addingTimeInterval(86_400)
+        #expect(try store.mayStartScheduled(period: "MORNING", occurrenceStart: start,
+                                            occurrenceEnd: end, legacyCovered: false))
+        let retry = try #require(try await generator.generateScheduledIfEligible(
+            period: "MORNING", occurrenceStart: start, occurrenceEnd: end,
+            now: start.addingTimeInterval(60)) { false })
+        #expect(retry.outcome == .empty)
+        #expect(retry.digest == nil)
+        #expect(await articles.calls == [link])
+        #expect(try !store.mayStartScheduled(period: "MORNING", occurrenceStart: start,
+                                             occurrenceEnd: end, legacyCovered: false))
+        let afterRetry = ModelContext(container)
+        let claim = try #require(afterRetry.fetch(FetchDescriptor<ArticleDelivery>()).first)
+        let missingDigest = try #require(afterRetry.fetch(FetchDescriptor<Digest>())
+            .first(where: { $0.id == firstID }))
+        #expect(claim.state == "delivered")
+        #expect(claim.firstDigestId == firstID)
+        #expect(!missingDigest.isComplete)
+        #expect(!FileManager.default.fileExists(atPath: firstPath))
+
+        let explicit = try await generator.generateDigest(triggerType: .manual,
+                                                           mode: .regenerate,
+                                                           now: start.addingTimeInterval(120))
+        #expect(explicit.outcome == .complete)
+        #expect(explicit.digest?.articleCount == 1)
+        #expect(await articles.calls == [link, link])
+        #expect(try ModelContext(container).fetch(FetchDescriptor<ArticleDelivery>())
+            .first?.firstDigestId == firstID)
+    }
+
+    @Test("A committed regeneration with an interrupted run marker recovers without changing first delivery")
+    func testRegenerationInterruptedMarkerRecovery() async throws {
+        let (generator, _, container, directory) = try setup(
+            maxArticles: 0, links: ["https://example.test/article"])
+        let normal = try await generator.generateDigest(triggerType: .manual)
+        let firstID = try #require(normal.digest?.id)
+        let repeatResult = try await generator.generateDigest(triggerType: .manual,
+                                                             mode: .regenerate)
+        let repeatID = try #require(repeatResult.digest?.id)
+        #expect(repeatID != firstID)
+        let before = ModelContext(container)
+        let originalClaim = try #require(before.fetch(FetchDescriptor<ArticleDelivery>()).first)
+        #expect(originalClaim.firstDigestId == firstID)
+        let repeatRun = try #require(before.fetch(FetchDescriptor<GenerationRun>())
+            .first(where: { $0.digestId == repeatID }))
+        #expect(try JSONDecoder().decode(GenerationDiagnostics.self,
+            from: Data(repeatRun.diagnosticsJSON.utf8)).mode == .regenerate)
+        // A normally completed run is untouched. Simulate the post-commit
+        // interrupted marker that launch recovery exists to reconcile.
+        try DeliveryStore(container: container).reconcileInterruptedLocalRuns(now: Date())
+        #expect(repeatRun.outcome == "complete")
+        repeatRun.outcome = "running"
+        repeatRun.finishedAt = nil
+        try before.save()
+
+        let reopened = try diskContainer(at: directory)
+        try DeliveryStore(container: reopened).reconcileInterruptedLocalRuns(now: Date())
+        let after = ModelContext(try diskContainer(at: directory))
+        let recovered = try #require(after.fetch(FetchDescriptor<GenerationRun>())
+            .first(where: { $0.runId == repeatRun.runId }))
+        let digest = try #require(after.fetch(FetchDescriptor<Digest>())
+            .first(where: { $0.id == repeatID }))
+        #expect(recovered.outcome == "complete")
+        #expect(try JSONDecoder().decode(GenerationDiagnostics.self,
+            from: Data(recovered.diagnosticsJSON.utf8)).mode == .regenerate)
+        #expect(digest.isComplete)
+        #expect(try #require(after.fetch(FetchDescriptor<ArticleDelivery>()).first).firstDigestId == firstID)
+    }
+
+    @Test("Interrupted regeneration rejects missing, empty, or mismatched artifacts")
+    func testBrokenRegenerationArtifactRecovery() async throws {
+        for breakage in 0..<3 {
+            let (generator, _, container, directory) = try setup(
+                maxArticles: 0, links: ["https://example.test/article"])
+            let normal = try await generator.generateDigest(triggerType: .manual)
+            let firstID = try #require(normal.digest?.id)
+            let repeatResult = try await generator.generateDigest(triggerType: .manual,
+                                                                 mode: .regenerate)
+            let repeatID = try #require(repeatResult.digest?.id)
+            let context = ModelContext(container)
+            let run = try #require(context.fetch(FetchDescriptor<GenerationRun>())
+                .first(where: { $0.digestId == repeatID }))
+            let digest = try #require(context.fetch(FetchDescriptor<Digest>())
+                .first(where: { $0.id == repeatID }))
+            run.outcome = "running"
+            run.finishedAt = nil
+            if breakage == 0 {
+                try FileManager.default.removeItem(atPath: digest.epubFilePath)
+            } else if breakage == 1 {
+                try Data().write(to: URL(fileURLWithPath: digest.epubFilePath))
+            } else {
+                let association = try #require(digest.articles.first)
+                association.originalUrl = "https://example.test/unclaimed"
+            }
+            try context.save()
+            try DeliveryStore(container: try diskContainer(at: directory))
+                .reconcileInterruptedLocalRuns(now: Date())
+            let after = ModelContext(try diskContainer(at: directory))
+            let recovered = try #require(after.fetch(FetchDescriptor<GenerationRun>())
+                .first(where: { $0.runId == run.runId }))
+            #expect(recovered.outcome == "failed")
+            #expect(try JSONDecoder().decode(GenerationDiagnostics.self,
+                from: Data(recovered.diagnosticsJSON.utf8)).mode == .regenerate)
+            #expect(try after.fetch(FetchDescriptor<Digest>())
+                .first(where: { $0.id == repeatID })?.isComplete == false)
+            #expect(try #require(after.fetch(FetchDescriptor<ArticleDelivery>()).first).firstDigestId == firstID)
+        }
+    }
+
+    private func diskContainer(at directory: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
+        return try ModelContainer(for: schema, migrationPlan: EpilogueMigrationPlan.self,
+                                  configurations: [ModelConfiguration(
+                                    schema: schema, url: directory.appendingPathComponent("Epilogue.sqlite"))])
+    }
+
     @Test("Capped regeneration advances attempt order without replacing first claims")
     func testRegenerationFairness() async throws {
         let source = links(5)

@@ -70,13 +70,53 @@ public final class DigestGenerator {
         let lastAttempt: Int64
     }
 
+    /// Launch recovery does not require a feed or provider configuration.
+    /// If an active generator holds the lease, its running row is not stale.
+    @discardableResult
+    public static func recoverInterruptedRuns(store: DeliveryStore, now: Date = Date())
+        async throws -> Bool {
+        guard await LocalGenerationGate.shared.enter() else { return false }
+        do {
+            try store.reconcileInterruptedLocalRuns(now: now)
+            await LocalGenerationGate.shared.leave()
+            return true
+        } catch {
+            await LocalGenerationGate.shared.leave()
+            throw error
+        }
+    }
+
     public func generateDigest(triggerType: TriggerType, period: String? = nil,
-                               mode: LocalGenerationMode = .normal) async throws -> LocalGenerationResult {
+                               mode: LocalGenerationMode = .normal,
+                               now: Date = Date()) async throws -> LocalGenerationResult {
+        try await withLease {
+            try deliveryStore.reconcileInterruptedLocalRuns(now: now)
+            return try await generate(triggerType: triggerType, period: period, mode: mode, now: now)
+        }
+    }
+
+    /// Coverage, attempt budget and the new run start happen within one lease.
+    /// A nil result means another accepted outcome already covers this window.
+    public func generateScheduledIfEligible(period: String, occurrenceStart: Date,
+                                            occurrenceEnd: Date, now: Date,
+                                            legacyCovered: @MainActor () async throws -> Bool)
+        async throws -> LocalGenerationResult? {
+        try await withLease {
+            try deliveryStore.reconcileInterruptedLocalRuns(now: now)
+            let covered = try await legacyCovered()
+            guard try deliveryStore.mayStartScheduled(
+                period: period, occurrenceStart: occurrenceStart,
+                occurrenceEnd: occurrenceEnd, legacyCovered: covered) else { return nil }
+            return try await generate(triggerType: .scheduled, period: period, mode: .normal, now: now)
+        }
+    }
+
+    private func withLease<T>(_ operation: () async throws -> T) async throws -> T {
         guard await LocalGenerationGate.shared.enter() else {
             throw DigestGeneratorError.alreadyGenerating
         }
         do {
-            let result = try await generate(triggerType: triggerType, period: period, mode: mode)
+            let result = try await operation()
             await LocalGenerationGate.shared.leave()
             return result
         } catch {
@@ -86,9 +126,10 @@ public final class DigestGenerator {
     }
 
     private func generate(triggerType: TriggerType, period: String?,
-                          mode: LocalGenerationMode) async throws -> LocalGenerationResult {
-        let handle = try deliveryStore.start(trigger: triggerType.rawValue, period: period)
-        var diagnostics = GenerationDiagnostics(feeds: [])
+                          mode: LocalGenerationMode, now: Date) async throws -> LocalGenerationResult {
+        let handle = try deliveryStore.start(trigger: triggerType.rawValue, period: period,
+                                             mode: mode, at: now)
+        var diagnostics = GenerationDiagnostics(feeds: [], mode: mode)
         var included: [ProcessedArticle] = []
         var claims: [DeliveryClaim] = []
         var artifact: URL?
@@ -186,7 +227,18 @@ public final class DigestGenerator {
                 outcome = .empty
             }
             if !included.isEmpty {
-                artifact = try makeDurableEPUB(articles: included, period: period)
+                let builder = epubBuilder
+                let directory = documentsDirectory
+                let snapshot = included
+                let task = Task.detached(priority: .utility) {
+                    try Self.makeDurableEPUB(articles: snapshot, period: period,
+                                             builder: builder, directory: directory)
+                }
+                artifact = try await withTaskCancellationHandler {
+                    try await task.value
+                } onCancel: {
+                    task.cancel()
+                }
             }
             try Task.checkCancellation()
             let terminalClaims = outcome == .failed ? [] : claims
@@ -254,25 +306,29 @@ public final class DigestGenerator {
         }
     }
 
-    private func makeDurableEPUB(articles: [ProcessedArticle], period: String?) throws -> URL {
-        try FileManager.default.createDirectory(at: documentsDirectory,
+    nonisolated private static func makeDurableEPUB(articles: [ProcessedArticle], period: String?,
+                                                    builder: EPUBBuilderProtocol, directory: URL) throws -> URL {
+        try Task.checkCancellation()
+        try FileManager.default.createDirectory(at: directory,
                                                 withIntermediateDirectories: true)
         let token = UUID().uuidString.lowercased()
         let name = "Epilogue_\(token)" + (period.map { "_\($0.lowercased())" } ?? "") + ".epub"
-        let temporary = documentsDirectory.appendingPathComponent(".\(name).pending")
-        let final = documentsDirectory.appendingPathComponent(name)
+        let temporary = directory.appendingPathComponent(".\(name).pending")
+        let final = directory.appendingPathComponent(name)
         do {
-            _ = try epubBuilder.generateEPUB(articles: articles, outputPath: temporary.path,
+            _ = try builder.generateEPUB(articles: articles, outputPath: temporary.path,
                                              date: Date())
+            try Task.checkCancellation()
             let descriptor = open(temporary.path, O_RDONLY)
             guard descriptor >= 0 else { throw DigestGeneratorError.artifactNotDurable }
             defer { close(descriptor) }
             guard fsync(descriptor) == 0 else { throw DigestGeneratorError.artifactNotDurable }
             try FileManager.default.moveItem(at: temporary, to: final)
-            let directory = open(documentsDirectory.path, O_RDONLY)
-            guard directory >= 0 else { throw DigestGeneratorError.artifactNotDurable }
-            defer { close(directory) }
-            guard fsync(directory) == 0 else { throw DigestGeneratorError.artifactNotDurable }
+            let directoryDescriptor = open(directory.path, O_RDONLY)
+            guard directoryDescriptor >= 0 else { throw DigestGeneratorError.artifactNotDurable }
+            defer { close(directoryDescriptor) }
+            guard fsync(directoryDescriptor) == 0 else { throw DigestGeneratorError.artifactNotDurable }
+            try Task.checkCancellation()
             return final
         } catch {
             try? FileManager.default.removeItem(at: temporary)

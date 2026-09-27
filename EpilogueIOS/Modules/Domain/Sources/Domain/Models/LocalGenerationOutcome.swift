@@ -54,10 +54,32 @@ public struct FeedIngestionResult: Codable, Sendable {
 public struct GenerationDiagnostics: Codable, Sendable {
     public var feeds: [FeedIngestionResult]
     public var runError: String?
+    /// Explicit generation intent. Missing on V3 rows written before this field.
+    public var mode: LocalGenerationMode?
 
-    public init(feeds: [FeedIngestionResult], runError: String? = nil) {
+    public init(feeds: [FeedIngestionResult], runError: String? = nil,
+                mode: LocalGenerationMode? = nil) {
         self.feeds = feeds
         self.runError = runError
+        self.mode = mode
+    }
+
+    private enum CodingKeys: String, CodingKey { case feeds, runError, mode }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        feeds = try values.decode([FeedIngestionResult].self, forKey: .feeds)
+        runError = try values.decodeIfPresent(String.self, forKey: .runError)
+        // A future mode must not discard otherwise valid feed diagnostics.
+        // Unknown intent remains nil and recovery requires an own claim.
+        mode = try? values.decode(LocalGenerationMode.self, forKey: .mode)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(feeds, forKey: .feeds)
+        try values.encodeIfPresent(runError, forKey: .runError)
+        try values.encodeIfPresent(mode, forKey: .mode)
     }
 
     public var deliveredCount: Int { feeds.reduce(0) { $0 + $1.deliveredCount } }
