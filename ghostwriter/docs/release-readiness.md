@@ -1,6 +1,6 @@
 # Disposable release-readiness checks
 
-Status: candidate preparation, 2026-09-27. The 026 feed-sync and 027 source-acknowledgement migrations have been checked together on the candidate integration tree; dependency acceptance remains pending. No release, image publication, production backup or deployment is authorized by this document.
+Status: disposable verification passed, 2026-09-27. The accepted 026 feed-sync and 027 source-acknowledgement changes passed together in integration158302c (407 backend tests), including current and tagged021 backup/restore fixtures. No release, image publication, production backup or deployment is authorized by this document.
 
 ## Repeatable verification
 
