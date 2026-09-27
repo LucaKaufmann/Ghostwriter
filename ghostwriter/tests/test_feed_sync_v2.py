@@ -1,5 +1,6 @@
 """Versioned feed sync, durable replay, and legacy safety fixtures."""
 
+import asyncio
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +12,7 @@ from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.database import engine
+from app.models.client_settings import ClientSettings
 from app.models.feed import Feed
 from app.models.feed_sync import FeedMutationReceipt
 from app.services.content_processor import ContentProcessor
@@ -40,6 +42,170 @@ def binding(client):
     response = client.get("/api/feeds/changes-v2")
     assert response.status_code == 200
     return response.json()
+
+
+def test_incremental_pull_requires_matching_identity_and_records_activity(client):
+    initial = binding(client)
+    with Session(engine) as session:
+        recorded = session.exec(select(ClientSettings)).one().last_feed_sync_at
+    assert recorded is not None
+    missing = client.get("/api/feeds/changes-v2", params={"since_version": 0})
+    assert missing.status_code == 422
+    rotated = client.get("/api/feeds/changes-v2", params={
+        "since_version": 0, "server_instance_id": str(uuid4()),
+    })
+    assert rotated.status_code == 409
+    with Session(engine) as session:
+        assert session.exec(select(ClientSettings)).one().last_feed_sync_at == recorded
+    valid = client.get("/api/feeds/changes-v2", params={
+        "since_version": initial["server_version"],
+        "server_instance_id": initial["server_instance_id"],
+    })
+    assert valid.status_code == 200
+    with Session(engine) as session:
+        assert session.exec(select(ClientSettings)).one().last_feed_sync_at >= recorded
+
+
+def test_duplicate_web_create_returns_conflict_before_dns(client, public_dns, monkeypatch):
+    value = url()
+    create(client, value)
+
+    async def no_dns(_url):
+        raise AssertionError("duplicate feed must not resolve DNS")
+
+    monkeypatch.setattr("app.api.feeds.validate_public_url_bounded", no_dns)
+    duplicate = client.post("/api/feeds", json={"url": value, "title": "Again"})
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "feed_conflict"
+
+
+@pytest.mark.parametrize("change", ["update", "delete"])
+def test_legacy_snapshot_rechecks_after_dns_wait(client, public_dns, monkeypatch, change):
+    value = url()
+    feed = create(client, value)
+    entered = threading.Event()
+    release = threading.Event()
+    validations = 0
+    lock = threading.Lock()
+
+    async def gated_validation(_url):
+        nonlocal validations
+        with lock:
+            validations += 1
+            first = validations == 1
+        if first:
+            entered.set()
+            assert await asyncio.to_thread(release.wait, 3)
+
+    monkeypatch.setattr("app.api.feeds._validate_feed_url", gated_validation)
+    snapshot = {"url": value, "title": "One", "mode": "raw",
+                "is_active": True, "max_articles": 5}
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(client.post, "/api/feeds/sync", json=[snapshot])
+            assert entered.wait(2)
+            headers = {"If-Match": f'"{feed["version"]}"'}
+            if change == "update":
+                changed = client.put(f"/api/feeds/{feed['id']}", json={"title": "New"},
+                                     headers=headers)
+            else:
+                changed = client.delete(f"/api/feeds/{feed['id']}", headers=headers)
+            assert changed.status_code == 200
+            release.set()
+            result = pending.result(timeout=3)
+            assert result.status_code == 409
+            assert result.json()["detail"]["code"] == "legacy_write_requires_upgrade"
+    finally:
+        release.set()
+
+
+def test_concurrent_creates_return_success_and_active_conflict(client, monkeypatch):
+    value = url()
+    both_ready = threading.Event()
+    release = threading.Event()
+    lock = threading.Lock()
+    validations = 0
+
+    async def gated_validation(_url):
+        nonlocal validations
+        with lock:
+            validations += 1
+            if validations == 2:
+                both_ready.set()
+        assert await asyncio.to_thread(release.wait, 3)
+
+    monkeypatch.setattr("app.api.feeds._validate_feed_url", gated_validation)
+    body = {"url": value, "title": "Concurrent", "mode": "raw",
+            "is_active": True, "max_articles": 5}
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(client.post, "/api/feeds", json=body)
+            second = pool.submit(client.post, "/api/feeds", json=body)
+            assert both_ready.wait(2)
+            release.set()
+            responses = [first.result(timeout=3), second.result(timeout=3)]
+    finally:
+        release.set()
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    conflict = next(response for response in responses if response.status_code == 409)
+    assert conflict.json()["detail"]["code"] == "feed_conflict"
+
+
+def test_web_create_dns_does_not_block_other_requests(client, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def resolve(host, port, *args, **kwargs):
+        if host == "slow.example.com":
+            started.set()
+            assert release.wait(5)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            slow = pool.submit(client.post, "/api/feeds", json={
+                "url": "https://slow.example.com/web-rss", "title": "Slow",
+            })
+            assert started.wait(2)
+            fast = pool.submit(client.post, "/api/feeds", json={
+                "url": "https://fast.example.com/web-rss", "title": "Fast",
+            })
+            assert fast.result(timeout=2).status_code == 200
+            assert client.get("/api/health").status_code == 200
+            assert not slow.done()
+            release.set()
+            assert slow.result(timeout=3).status_code == 200
+    finally:
+        release.set()
+
+
+def test_web_create_dns_deadline_returns_without_persisting(client, monkeypatch):
+    from app.services import outbound_fetch
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def resolve(host, port, *args, **kwargs):
+        started.set()
+        assert release.wait(3)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    settings = get_settings().model_copy(update={"fetch_timeout_seconds": 0.1})
+    monkeypatch.setattr(outbound_fetch, "get_settings", lambda: settings)
+    value = f"https://timeout.example.com/{uuid4()}.xml"
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            request = pool.submit(client.post, "/api/feeds", json={
+                "url": value, "title": "Timed out",
+            })
+            assert started.wait(1)
+            assert request.result(timeout=1).status_code == 504
+    finally:
+        release.set()
+    with Session(engine) as session:
+        assert session.exec(select(Feed).where(Feed.url == value)).first() is None
 
 
 def push(client, identity, items):

@@ -171,10 +171,9 @@ async def get_current_user(
 
     For JWT tokens, returns the associated user.
     For API tokens, returns the user who owns the token.
-    For legacy API_KEY, returns None (no user context).
+    For legacy API_KEY, returns the first user or rejects account-only access.
     """
     from app.core.auth import decode_access_token, get_token_prefix, verify_api_token
-    from app.core.config import get_settings
     from app.models.api_token import APIToken
     from app.models.user import User
 
@@ -242,9 +241,8 @@ async def get_current_user(
             return user
         # No users exist, can't return a user
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="User account required for this endpoint. Please set up an admin account.",
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
     raise HTTPException(

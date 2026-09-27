@@ -536,6 +536,94 @@ async def test_healthy_concurrency_waits_for_dns_admission(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dns_admission_wakes_one_waiter_in_fifo_order(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.services import outbound_fetch
+
+    started = {host: threading.Event() for host in ("first.example", "second.example", "third.example")}
+    release = {host: threading.Event() for host in started}
+    order = []
+
+    def resolve(host):
+        order.append(host)
+        started[host].set()
+        assert release[host].wait(3)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr("app.core.net._resolve_host", resolve)
+    monkeypatch.setattr(outbound_fetch, "_dns_slots", threading.BoundedSemaphore(1))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        monkeypatch.setattr(outbound_fetch, "_dns_executor", executor)
+        tasks = []
+        try:
+            for host in started:
+                tasks.append(asyncio.create_task(outbound_fetch.validate_public_url_bounded(
+                    f"https://{host}/rss", _settings(fetch_timeout_seconds=3),
+                )))
+                if host == "first.example":
+                    assert await asyncio.to_thread(started[host].wait, 1)
+                else:
+                    await asyncio.sleep(0)
+            assert not started["second.example"].is_set()
+            release["first.example"].set()
+            assert await asyncio.to_thread(started["second.example"].wait, 1)
+            assert not started["third.example"].is_set()
+            release["second.example"].set()
+            assert await asyncio.to_thread(started["third.example"].wait, 1)
+            release["third.example"].set()
+            await asyncio.gather(*tasks)
+            assert order == list(started)
+        finally:
+            for event in release.values():
+                event.set()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_dns_waiter_passes_slot_to_next_caller(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.services import outbound_fetch
+
+    started = threading.Event()
+    release = threading.Event()
+    called = []
+
+    def resolve(host):
+        called.append(host)
+        if host == "first.example":
+            started.set()
+            assert release.wait(3)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr("app.core.net._resolve_host", resolve)
+    monkeypatch.setattr(outbound_fetch, "_dns_slots", threading.BoundedSemaphore(1))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        monkeypatch.setattr(outbound_fetch, "_dns_executor", executor)
+        first = asyncio.create_task(outbound_fetch.validate_public_url_bounded(
+            "https://first.example/rss", _settings(fetch_timeout_seconds=3),
+        ))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            cancelled = asyncio.create_task(outbound_fetch.validate_public_url_bounded(
+                "https://cancelled.example/rss", _settings(fetch_timeout_seconds=3),
+            ))
+            await asyncio.sleep(0)
+            last = asyncio.create_task(outbound_fetch.validate_public_url_bounded(
+                "https://last.example/rss", _settings(fetch_timeout_seconds=3),
+            ))
+            await asyncio.sleep(0)
+            cancelled.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await cancelled
+            release.set()
+            await asyncio.gather(first, last)
+            assert called == ["first.example", "last.example"]
+        finally:
+            release.set()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["html", "feed"])
 async def test_malformed_content_location_does_not_invalidate_body(public_dns, kind):
     fetched = await fetch_resource(

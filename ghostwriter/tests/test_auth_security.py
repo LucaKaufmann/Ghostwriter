@@ -59,6 +59,10 @@ def auth_harness(tmp_path, monkeypatch):
     def guarded():
         return {"ok": True}
 
+    @app.get("/account")
+    async def account(user: Annotated[User, Depends(security.get_current_user)]):
+        return {"username": user.username}
+
     @app.get("/podcast-guard")
     async def podcast_guard(
         request: Request, session: Annotated[Session, Depends(get_session)]
@@ -152,6 +156,17 @@ def test_api_token_last_use_revocation_and_legacy_key(auth_harness):
         session.add(persisted)
         session.commit()
     assert client.get("/guarded", headers={"X-API-Key": raw}).status_code == 401
+    assert engine.pool.checkedout() == 0
+
+
+def test_valid_legacy_key_without_account_is_forbidden_not_expired(auth_harness):
+    client, engine, settings = auth_harness
+    settings.api_key = "synthetic-legacy-key"
+    valid = client.get("/account", headers={"X-API-Key": settings.api_key})
+    assert valid.status_code == 403, valid.text
+    assert "WWW-Authenticate" not in valid.headers
+    assert client.get("/account", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert client.get("/account").status_code == 401
     assert engine.pool.checkedout() == 0
 
     settings.api_key = "synthetic-legacy-key"
