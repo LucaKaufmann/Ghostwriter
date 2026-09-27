@@ -7,6 +7,10 @@ import androidx.room.Query
 import androidx.room.Transaction
 import com.example.epilogue.domain.model.TriggerType
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 /**
  * Data access object for digest operations.
@@ -140,6 +144,22 @@ interface DigestDao {
 
     @Query("SELECT * FROM digests")
     suspend fun getAllDigestsList(): List<DigestEntity>
+
+    /** Clear the current snapshot; editions created later remain in history. */
+    suspend fun deleteAllWithArtifacts(removeFile: (String) -> Boolean): Boolean {
+        val snapshot = getAllDigestsList()
+        var allDeleted = true
+        for (digest in snapshot) {
+            currentCoroutineContext().ensureActive()
+            // Each completed unlink/row deletion commits before the next one.
+            // Cancellation cannot roll back earlier rows after their files are gone.
+            val deleted = withContext(NonCancellable) {
+                deleteWithArtifact(digest.id, removeFile)
+            }
+            if (!deleted) allDeleted = false
+        }
+        return allDeleted
+    }
 
     @Query("DELETE FROM digests")
     suspend fun deleteAllDigests()

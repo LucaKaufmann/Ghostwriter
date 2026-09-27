@@ -55,6 +55,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.data.local.FeedMutationEntity
+import com.example.epilogue.data.repository.FeedCorrectionEdits
 import com.example.epilogue.ui.LocalEinkMode
 import com.example.epilogue.ui.components.SyncStatusIndicator
 import com.example.epilogue.service.DigestSyncWorker
@@ -173,8 +174,8 @@ fun FeedManagerScreen(
                 items(unresolved, key = { "proposal-${it.opId}" }) { proposal ->
                     FeedResolutionCard(proposal,
                         onResolve = { action -> viewModel.resolve(proposal.opId, action) },
-                        onCorrect = { title, mode, enabled, cap ->
-                            viewModel.correctRejected(proposal.opId, title, mode, enabled, cap)
+                        onCorrect = { edits ->
+                            viewModel.correctRejected(proposal.opId, edits)
                         })
                 }
                 items(feeds, key = { it.url }) { feed ->
@@ -210,12 +211,68 @@ fun FeedManagerScreen(
     }
 }
 
+internal data class FeedCorrectionDraft(
+    val title: String,
+    val mode: ProcessingMode,
+    val enabled: Boolean,
+    val maxArticles: Int
+)
+
+internal data class FeedCorrectionForm(
+    val title: String,
+    val cap: String,
+    val mode: ProcessingMode,
+    val enabled: Boolean
+)
+
+/** Only edited fields override the latest rejected-head and server values. */
+internal fun correctionForm(draft: FeedCorrectionDraft, titleEdit: String?, capEdit: String?,
+    briefingEdit: Boolean?, enabledEdit: Boolean?): FeedCorrectionForm = FeedCorrectionForm(
+    titleEdit ?: draft.title,
+    capEdit ?: draft.maxArticles.toString(),
+    briefingEdit?.let { if (it) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY } ?: draft.mode,
+    enabledEdit ?: draft.enabled
+)
+
+/** A correction may use the rejected head and its server snapshot, never a later optimistic row. */
+internal fun correctionDraft(proposal: FeedMutationEntity): FeedCorrectionDraft? {
+    val fields = runCatching { JSONObject(proposal.fieldsJson) }.getOrNull() ?: return null
+    val server = proposal.serverSnapshotJson?.let { runCatching { JSONObject(it) }.getOrNull() }
+        ?.takeIf { it.optString("kind") == "feed" }
+    val title = when {
+        fields.has("title") -> fields.optString("title")
+        server?.has("title") == true -> server.optString("title")
+        else -> return null
+    }
+    val modeValue = when {
+        fields.has("mode") -> fields.optString("mode")
+        server?.has("mode") == true -> server.optString("mode")
+        else -> return null
+    }
+    val enabled = when {
+        fields.has("is_active") -> fields.optBoolean("is_active")
+        server?.has("is_active") == true -> server.optBoolean("is_active")
+        else -> return null
+    }
+    val cap = when {
+        fields.has("max_articles") -> fields.optInt("max_articles")
+        server?.has("max_articles") == true -> server.optInt("max_articles")
+        else -> return null
+    }
+    if (modeValue !in setOf("raw", "summarize")) return null
+    return FeedCorrectionDraft(title, if (modeValue == "summarize") ProcessingMode.BRIEFING else ProcessingMode.FIDELITY,
+        enabled, cap)
+}
+
 @Composable
 private fun FeedResolutionCard(
     proposal: FeedMutationEntity,
     onResolve: (String) -> Unit,
-    onCorrect: (String, ProcessingMode, Boolean, Int) -> Unit
+    onCorrect: (FeedCorrectionEdits) -> Unit
 ) {
+    val draft = remember(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+        correctionDraft(proposal)
+    }
     val local = remember(proposal.fieldsJson) { runCatching { JSONObject(proposal.fieldsJson) }.getOrDefault(JSONObject()) }
     val server = remember(proposal.serverSnapshotJson) {
         proposal.serverSnapshotJson?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -242,7 +299,8 @@ private fun FeedResolutionCard(
                 when {
                     proposal.state == "rejected" -> {
                         TextButton(onClick = { onResolve("discard") }) { Text("Discard") }
-                        TextButton(onClick = { if (proposal.kind == "delete") onResolve("correct") else correcting = true }) {
+                        TextButton(onClick = { if (proposal.kind == "delete") onResolve("correct") else correcting = true },
+                            enabled = proposal.kind == "delete" || draft != null) {
                             Text("Correct")
                         }
                     }
@@ -260,38 +318,51 @@ private fun FeedResolutionCard(
                     }
                 }
             }
+            if (proposal.state == "rejected" && proposal.kind != "delete" && draft == null) {
+                Text("This proposal lacks the server values needed for a safe correction. Discard it and edit the feed again.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
-    if (correcting) {
-        var title by rememberSaveable(proposal.opId) { mutableStateOf(local.optString("title")) }
-        var cap by rememberSaveable(proposal.opId) { mutableStateOf(local.optString("max_articles", "0")) }
-        var mode by rememberSaveable(proposal.opId) {
-            mutableStateOf(if (local.optString("mode") == "summarize") ProcessingMode.BRIEFING else ProcessingMode.FIDELITY)
+    if (correcting && draft != null) {
+        var titleEdit by rememberSaveable(proposal.opId) {
+            mutableStateOf<String?>(null)
         }
-        var enabled by rememberSaveable(proposal.opId) { mutableStateOf(local.optBoolean("is_active", true)) }
+        var capEdit by rememberSaveable(proposal.opId) {
+            mutableStateOf<String?>(null)
+        }
+        var briefingEdit by rememberSaveable(proposal.opId) {
+            mutableStateOf<Boolean?>(null)
+        }
+        var enabledEdit by rememberSaveable(proposal.opId) {
+            mutableStateOf<Boolean?>(null)
+        }
+        val form = correctionForm(draft, titleEdit, capEdit, briefingEdit, enabledEdit)
         AlertDialog(
             onDismissRequest = { correcting = false },
             title = { Text("Correct feed proposal") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(title, { title = it }, label = { Text("Title") })
-                    OutlinedTextField(cap, { cap = it }, label = { Text("Max articles (0 = unlimited)") })
+                    OutlinedTextField(form.title, { titleEdit = it }, label = { Text("Title") })
+                    OutlinedTextField(form.cap, { capEdit = it }, label = { Text("Max articles (0 = unlimited)") })
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Summarize")
-                        Switch(checked = mode == ProcessingMode.BRIEFING,
-                            onCheckedChange = { mode = if (it) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY })
+                        Switch(checked = form.mode == ProcessingMode.BRIEFING,
+                            onCheckedChange = { briefingEdit = it })
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Enabled")
-                        Switch(checked = enabled, onCheckedChange = { enabled = it })
+                        Switch(checked = form.enabled, onCheckedChange = { enabledEdit = it })
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val number = cap.toIntOrNull()
-                    if (title.isNotBlank() && number != null && number >= 0) {
-                        onCorrect(title, mode, enabled, number)
+                    val number = form.cap.toIntOrNull()
+                    if (form.title.isNotBlank() && number != null && number >= 0) {
+                        onCorrect(FeedCorrectionEdits(titleEdit, briefingEdit?.let {
+                            if (it) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY
+                        }, enabledEdit, capEdit?.toIntOrNull()))
                         correcting = false
                     }
                 }) { Text("Save correction") }

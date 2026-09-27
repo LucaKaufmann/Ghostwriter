@@ -21,6 +21,16 @@ interface FeedDao {
         "AND serverKey = (SELECT serverKey FROM feed_sync_state WHERE active = 1 LIMIT 1)) ORDER BY name ASC")
     suspend fun getEnabledFeedsList(): List<FeedEntity>
 
+    @Query("SELECT * FROM feeds AS feed WHERE feed.isEnabled = 1 AND (feed.hiddenDelete = 0 OR " +
+        "EXISTS (SELECT 1 FROM feed_mutations AS latest WHERE latest.url = feed.url " +
+        "AND latest.serverKey = (SELECT serverKey FROM feed_sync_state WHERE active = 1 LIMIT 1) " +
+        "AND latest.kind = 'upsert' AND latest.state IN ('queued','needs_resolution','rejected','legacy_unresolved') " +
+        "AND NOT EXISTS (SELECT 1 FROM feed_mutations AS newer WHERE newer.url = latest.url " +
+        "AND newer.serverKey = latest.serverKey AND (newer.queueOrder > latest.queueOrder OR " +
+        "(newer.queueOrder = latest.queueOrder AND newer.sequence > latest.sequence))))) " +
+        "ORDER BY feed.name ASC")
+    suspend fun getEnabledLocalFeedsList(): List<FeedEntity>
+
     @Query("SELECT * FROM feeds WHERE url = :url")
     suspend fun getFeedByUrl(url: String): FeedEntity?
 

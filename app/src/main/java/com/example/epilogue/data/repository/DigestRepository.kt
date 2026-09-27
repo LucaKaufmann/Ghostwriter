@@ -351,13 +351,9 @@ class DigestRepository @Inject constructor(
      * Used for development/testing purposes.
      */
     suspend fun deleteAllDigests(): Boolean {
-        var allDeleted = true
-        // Delete each row through the same reference-aware path. An unlink
-        // failure retains that row so the caller can retry it later.
-        digestDao.getAllDigestsList().forEach { digest ->
-            if (!digestDao.deleteWithArtifact(digest.id, ::removeArtifact)) allDeleted = false
-        }
-        return allDeleted
+        // The action clears a snapshot of current history. Concurrently created
+        // editions remain, and completed per-row deletions cannot be rolled back as a batch.
+        return digestDao.deleteAllWithArtifacts(::removeArtifact)
     }
 
     /**
