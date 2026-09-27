@@ -1,0 +1,57 @@
+name: Ghostwriter Browser Checks
+
+on:
+  pull_request:
+    paths:
+      - "ghostwriter/frontend/**"
+      - ".github/workflows/ghostwriter-browser.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ghostwriter-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Fixture browser behavior and visuals
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ghostwriter/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ghostwriter/frontend/package-lock.json
+      - name: Install exact frontend dependencies
+        run: npm ci
+      - name: Install lockfile Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Check frontend
+        run: npm run check
+      - name: Build frontend
+        run: npm run build
+      - name: Run fixture browser behavior
+        run: npm run test:e2e -- --project=behavior
+      - name: Run reviewed Linux visual snapshots
+        run: npm run test:e2e -- --project=visual
+      - name: Capture Linux snapshot candidates for review
+        if: failure()
+        continue-on-error: true
+        run: npm run test:e2e -- --project=visual --update-snapshots --output=test-results-linux-candidates --reporter=line
+      - name: Upload browser failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostwriter-browser-failures
+          path: |
+            ghostwriter/frontend/test-results/
+            ghostwriter/frontend/test-results-linux-candidates/
+            ghostwriter/frontend/playwright-report/
+            ghostwriter/frontend/tests/e2e/navigation-theme.spec.ts-snapshots/*-linux.png
+          retention-days: 14

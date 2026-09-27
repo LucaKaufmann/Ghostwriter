@@ -7,9 +7,20 @@ export default defineConfig({
 		timeout: 10_000
 	},
 	fullyParallel: true,
+	projects: [
+		{ name: 'behavior', grepInvert: /reviewed light and dark route snapshots/ },
+		{
+			name: 'visual',
+			grep: /reviewed light and dark route snapshots/,
+			snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}-{platform}{ext}'
+		}
+	],
 	reporter: [['list'], ['html', { open: 'never' }]],
 	use: {
 		baseURL: 'http://127.0.0.1:4173',
+		timezoneId: 'UTC',
+		locale: 'en-US',
+		colorScheme: 'light',
 		trace: 'retain-on-failure',
 		screenshot: 'only-on-failure',
 		video: 'retain-on-failure',
