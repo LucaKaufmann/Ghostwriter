@@ -55,6 +55,38 @@ final class FeedV2StoreTests: XCTestCase {
         try FeedV2TestHarness(model()).legacyHeadThenPrebindEditAssertion()
     }
 
+    func testPrebindingDeleteStaysHidden() async throws {
+        try await FeedV2TestHarness(model()).prebindingDeleteStaysHiddenAssertion()
+    }
+
+    func testRejectedCreateDiscardRemovesLocalFeed() throws {
+        try FeedV2TestHarness(model()).rejectedCreateDiscardAssertion()
+    }
+
+    func testRejectedEditDiscardRestoresServer() throws {
+        try FeedV2TestHarness(model()).rejectedEditDiscardAssertion()
+    }
+
+    func testKeepServerCarriesSnapshotToSuccessor() throws {
+        try FeedV2TestHarness(model()).keepServerSuccessorSnapshotAssertion()
+    }
+
+    func testCorrectedRejectedEditKeepsBase() throws {
+        try FeedV2TestHarness(model()).correctedRejectedEditKeepsBaseAssertion()
+    }
+
+    func testOldScopeCannotResolve() throws {
+        try FeedV2TestHarness(model()).resolutionScopeAssertion()
+    }
+
+    func testResolutionIgnoresOtherScopeSuccessors() throws {
+        try FeedV2TestHarness(model()).resolutionIgnoresOtherScopeSuccessorsAssertion()
+    }
+
+    func testInvalidInputDoesNotPersist() throws {
+        try FeedV2TestHarness(model()).invalidInputRollsBackAssertion()
+    }
+
     func testCursorSaveFailure() throws {
         try FeedV2TestHarness(model()).cursorFailureAssertion()
     }
