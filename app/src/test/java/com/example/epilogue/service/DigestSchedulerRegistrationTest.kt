@@ -9,6 +9,7 @@ import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.data.repository.SettingsRepository
 import com.google.common.util.concurrent.SettableFuture
 import io.mockk.every
+import io.mockk.coEvery
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
@@ -79,9 +80,8 @@ class DigestSchedulerRegistrationTest {
 
             val nextDue = before + TimeUnit.HOURS.toMillis(10)
             val oldId = UUID.randomUUID()
-            // The published PR118 v1 marker has no zone; preserve due time and ID.
-            rows.value = listOf(info(WorkInfo.State.ENQUEUED, nextDue, oldId,
-                tags = setOf("daily_digest_anchor_v1")))
+            // Unmarked legacy work gains an anchor and zone without changing due time or ID.
+            rows.value = listOf(info(WorkInfo.State.ENQUEUED, nextDue, oldId))
             scheduler.schedulePeriod(DigestPeriod.MORNING)
             verify(timeout = 3000, exactly = 1) { manager.enqueueUniquePeriodicWork(
                 workName, ExistingPeriodicWorkPolicy.UPDATE, any()) }
@@ -127,6 +127,48 @@ class DigestSchedulerRegistrationTest {
             registration.await()
             verify(exactly = 1) { manager.enqueueUniquePeriodicWork(
                 workName, ExistingPeriodicWorkPolicy.KEEP, any()) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
+    @Test fun `period enabled during boot persistence wait remains scheduled`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        var selected = setOf(DigestPeriod.MORNING)
+        every { settings.getSchedulePeriods() } answers { selected }
+        coEvery { settings.toggleSchedulePeriod(DigestPeriod.NOON, true) } coAnswers {
+            selected = selected + DigestPeriod.NOON
+        }
+        val receipt = SettableFuture.create<Operation.State.SUCCESS>()
+        val morning = mockk<Operation> { every { result } returns receipt }
+        val morningSubmitted = CountDownLatch(1)
+        val noonSubmitted = CountDownLatch(1)
+        val noonName = "daily_digest_NOON"
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.getWorkInfosForUniqueWorkFlow(any()) } returns
+                MutableStateFlow(emptyList())
+            every { manager.enqueueUniquePeriodicWork(any(), any(), any()) } answers {
+                if (firstArg<String>() == workName) {
+                    morningSubmitted.countDown()
+                    morning
+                } else {
+                    noonSubmitted.countDown()
+                    mockk(relaxed = true)
+                }
+            }
+            val scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            val boot = async(Dispatchers.IO) { scheduler.scheduleAllPeriodsAwaitPersistence() }
+            assertTrue(morningSubmitted.await(3, TimeUnit.SECONDS))
+            scheduler.updatePeriod(DigestPeriod.NOON, true)
+            assertTrue(noonSubmitted.await(3, TimeUnit.SECONDS))
+            receipt.set(Operation.SUCCESS)
+            boot.await()
+            verify(exactly = 1) { manager.cancelUniqueWork(noonName) }
+            verify(exactly = 1) { manager.enqueueUniquePeriodicWork(noonName, any(), any()) }
         } finally {
             unmockkStatic(WorkManager::class)
         }
