@@ -366,10 +366,12 @@ final class IOSFeedV2StoreEngine {
     struct ClaimedPayloadForTesting: Equatable {
         let opId: String
         let sentRevision: Int64
+        let baseVersion: Int64?
         let title: String?
         let isActive: Bool?
         let mode: String?
         let maxArticles: Int?
+        let wireJSON: String
     }
 
     /// Keep Kotlin payload objects inside the app image: the hosted XCTest
@@ -383,12 +385,41 @@ final class IOSFeedV2StoreEngine {
         defer { end(token) }
         guard let expected = try identity(token) else { throw StoreError.staleBinding }
         guard let operation = try claim(token, expected, maxItems: 10).first else { return nil }
+        let wireJSON = FeedMutationBatchV2(
+            serverInstanceId: "00000000-0000-4000-8000-000000000001",
+            mutations: [operation.payload]).toWireJson()
         return ClaimedPayloadForTesting(
             opId: operation.opId, sentRevision: operation.sentRevision,
+            baseVersion: operation.payload.baseVersion?.int64Value,
             title: operation.payload.fields?.title,
             isActive: operation.payload.fields?.isActive?.boolValue,
             mode: operation.payload.fields?.mode,
-            maxArticles: operation.payload.fields?.maxArticles.map { Int($0.intValue) })
+            maxArticles: operation.payload.fields?.maxArticles.map { Int($0.intValue) },
+            wireJSON: wireJSON)
+    }
+
+    func acknowledgeForTesting(opId: String, revision: Int64, version: Int64,
+                               title: String? = nil) throws {
+        let destination = try transaction { context -> FeedV2Destination in
+            guard let value = binding(try state(context)) else { throw StoreError.staleBinding }
+            return value.destination
+        }
+        let token = try begin(destination)
+        defer { end(token) }
+        guard let expected = try identity(token) else { throw StoreError.staleBinding }
+        let url = try transaction { context -> String in
+            guard let mutation = try mutations(context).first(where: { $0.opId == opId }) else {
+                throw StoreError.invalidEdit
+            }
+            return mutation.url
+        }
+        let current = FeedSnapshotV2(
+            kind: title == nil ? "tombstone" : "feed", id: "server-id", url: url,
+            version: version, title: title,
+            isActive: title.map { _ in KotlinBoolean(bool: false) },
+            mode: title.map { _ in "raw" },
+            maxArticles: title.map { _ in KotlinInt(int: 2) })
+        try acknowledge(token, expected, opId: opId, revision: revision, current: current)
     }
     #endif
 
@@ -545,11 +576,11 @@ final class IOSFeedV2StoreEngine {
             let scopeKey = value.destinationURL.flatMap { url in
                 value.configurationId.map { url + "\n" + $0 }
             } ?? "__unbound__"
-            // A first null-base create needs all fields. Later upserts for
-            // the same queued create carry only what the user changed; copied
-            // fields would otherwise replay an obsolete rejected value over a
-            // corrected head. A successor after a delete starts a new create.
-            let full = existing == nil ||
+            // A first create or re-add of a locally deleted feed needs all
+            // fields, including when the user keeps its displayed values.
+            // Later upserts for the same queued create carry only changes;
+            // copied fields could replay an obsolete rejected value.
+            let full = existing == nil || existing?.isLocallyDeleted == true ||
                 (originalVersion == nil &&
                  !(prior?.scopeKey == scopeKey && prior?.kind == "upsert"))
             let revision = (existing?.mutationRevision ?? 0) + (existing == nil ? 0 : 1)
