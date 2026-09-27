@@ -24,11 +24,15 @@ import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import com.example.epilogue.shared.sync.FeedSyncV2UseCase
 import com.example.epilogue.shared.sync.SentFeedMutationV2
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 
 /** Null means the correction form left this field untouched. */
 data class FeedCorrectionEdits(
@@ -57,10 +61,22 @@ class AndroidFeedV2Store @Inject constructor(
         settings.getGhostwriterUrl()?.let(::normalizedUrl) == state.bindingUrl
 
     override suspend fun currentDestination(): FeedV2Destination? {
+        val outcomeCapture = currentCoroutineContext()[OutcomeCapture]
         return database.withTransaction {
-            if (!settings.isGhostwriterConfigured()) return@withTransaction null
+            if (!settings.isGhostwriterConfigured()) {
+                val configuredUrl = settings.getGhostwriterUrl()?.let(::normalizedUrl)
+                outcomeCapture?.noRunTicket = states.active()?.let {
+                    outcomeTicket(it, configuredUrl, false)
+                }
+                return@withTransaction null
+            }
             val url = settings.getGhostwriterUrl()?.let(::normalizedUrl)
-                ?.takeIf { it.isNotBlank() } ?: return@withTransaction null
+                ?.takeIf { it.isNotBlank() } ?: run {
+                    outcomeCapture?.noRunTicket = states.active()?.let {
+                        outcomeTicket(it, null, false)
+                    }
+                    return@withTransaction null
+                }
             val active = states.active()
             if (active != null) {
                 if (active.bindingUrl != url && !active.suspended) {
@@ -218,19 +234,21 @@ class AndroidFeedV2Store @Inject constructor(
         val enabled: Boolean
     )
 
+    private class OutcomeCapture : AbstractCoroutineContextElement(Key) {
+        companion object Key : CoroutineContext.Key<OutcomeCapture>
+        var runTicket: OutcomeTicket? = null
+        var noRunTicket: OutcomeTicket? = null
+    }
+
+    private fun outcomeTicket(state: FeedSyncStateEntity, configuredUrl: String?, enabled: Boolean) =
+        OutcomeTicket(state.serverKey, state.generation, configuredUrl, enabled)
+
     /** Persist only the result of the binding that actually started this sync. */
     suspend fun syncAndRecord(useCase: FeedSyncV2UseCase): FeedSyncV2Outcome {
-        // This prepares the same local destination that sync() will select; it makes
-        // the first configured run recordable without any remote request here.
-        currentDestination()
-        val ticket = database.withTransaction {
-            states.active()?.let { state ->
-                OutcomeTicket(state.serverKey, state.generation,
-                    settings.getGhostwriterUrl()?.let(::normalizedUrl),
-                    settings.isGhostwriterConfigured())
-            }
-        }
-        val outcome = useCase.sync()
+        val capture = OutcomeCapture()
+        val outcome = withContext(capture) { useCase.sync() }
+        val ticket = if (outcome == FeedSyncV2Outcome.NotConfigured) capture.noRunTicket
+            else capture.runTicket
         if (ticket != null) recordOutcome(ticket, outcome)
         return outcome
     }
@@ -288,21 +306,25 @@ class AndroidFeedV2Store @Inject constructor(
     }
 
     override suspend fun beginSyncRun(destination: FeedV2Destination): FeedV2StoreResult<FeedV2RunToken> {
-        val generation = database.withTransaction {
+        val outcomeCapture = currentCoroutineContext()[OutcomeCapture]
+        val ticket = database.withTransaction {
             val state = states.active() ?: return@withTransaction null
+            val configured = settings.isGhostwriterConfigured()
+            val configuredUrl = settings.getGhostwriterUrl()?.let(::normalizedUrl)
             if (state.bindingUrl != destination.normalizedBaseUrl ||
                 state.configurationId != destination.configurationId ||
-                (!state.suspended && (!settings.isGhostwriterConfigured() || !configuredUrlMatches(state))))
+                (!state.suspended && (!configured || configuredUrl != state.bindingUrl)))
                 return@withTransaction null
-            state.generation
+            outcomeTicket(state, configuredUrl, configured)
         }
-        if (generation == null) return FeedV2StoreResult.StaleBinding
+        if (ticket == null) return FeedV2StoreResult.StaleBinding
         // No suspension point after assigning a token: cancellation cannot leak Busy.
         return synchronized(gate) {
             if (activeToken != null) FeedV2StoreResult.Busy
             else {
                 activeToken = uuid()
-                activeRun = destination to generation
+                activeRun = destination to ticket.generation
+                outcomeCapture?.runTicket = ticket
                 FeedV2StoreResult.Success(FeedV2RunToken(activeToken!!))
             }
         }

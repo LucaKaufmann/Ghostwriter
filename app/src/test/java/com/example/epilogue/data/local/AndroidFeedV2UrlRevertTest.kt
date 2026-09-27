@@ -11,7 +11,10 @@ import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.shared.ghostwriter.FeedChangesV2Response
 import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import com.example.epilogue.shared.sync.FeedSyncV2UseCase
+import com.example.epilogue.shared.sync.FeedV2ConfigurationPort
+import com.example.epilogue.shared.sync.FeedV2Destination
 import com.example.epilogue.shared.sync.FeedV2RemotePort
+import com.example.epilogue.shared.sync.FeedV2RemoteResult
 import com.example.epilogue.shared.sync.FeedV2StoreResult
 import io.mockk.mockk
 import io.mockk.mockkConstructor
@@ -76,21 +79,56 @@ class AndroidFeedV2UrlRevertTest {
             Triple(destination, token, binding)
         }
 
-    @Test fun `held A result cannot overwrite status after B to A generation roundtrip`() = runBlocking {
+    private fun immediateRemote() = mockk<FeedV2RemotePort> {
+        coEvery { getFeedChangesV2(any(), any(), any()) } returns
+            FeedV2RemoteResult.Success(FeedChangesV2Response(
+                "11111111-1111-4111-8111-111111111111", 0, emptyList()))
+    }
+
+    @Test fun `actual run generation records success when URL roundtrips before token acquisition`() = runBlocking {
         val database = db()
         val settings = SettingsRepository(context, database)
         settings.setGhostwriterEnabled(true)
         settings.setGhostwriterUrl(a)
         val store = AndroidFeedV2Store(database, settings)
+        var switched = false
+        val configuration = object : FeedV2ConfigurationPort {
+            override suspend fun currentDestination(): FeedV2Destination? {
+                val destination = store.currentDestination()
+                if (!switched) {
+                    switched = true
+                    settings.setGhostwriterUrl(b)
+                    settings.setGhostwriterUrl(a)
+                }
+                return destination
+            }
+        }
+        val result = store.syncAndRecord(FeedSyncV2UseCase(configuration, store, immediateRemote()))
+        assertTrue(result is FeedSyncV2Outcome.Complete)
+        assertEquals(2L, database.feedSyncStateDao().active()!!.generation)
+        assertEquals("complete", database.feedSyncStateDao().active()!!.lastOutcome)
+        database.close()
+    }
+
+    @Test fun `held A result cannot overwrite prior complete status after B to A generation roundtrip`() = runBlocking {
+        val database = db()
+        val settings = SettingsRepository(context, database)
+        settings.setGhostwriterEnabled(true)
+        settings.setGhostwriterUrl(a)
+        val store = AndroidFeedV2Store(database, settings)
+        assertTrue(store.syncAndRecord(FeedSyncV2UseCase(store, store,
+            immediateRemote())) is FeedSyncV2Outcome.Complete)
+        assertEquals("complete", database.feedSyncStateDao().active()!!.lastOutcome)
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        val held = mockk<FeedSyncV2UseCase>()
-        coEvery { held.sync() } coAnswers {
+        val heldRemote = mockk<FeedV2RemotePort>()
+        coEvery { heldRemote.getFeedChangesV2(any(), any(), any()) } coAnswers {
             entered.complete(Unit)
             release.await()
-            FeedSyncV2Outcome.Failed("pull", "stale binding")
+            FeedV2RemoteResult.Success(FeedChangesV2Response(
+                "11111111-1111-4111-8111-111111111111", 0, emptyList()))
         }
-        val oldRun = async { store.syncAndRecord(held) }
+        val oldRun = async { store.syncAndRecord(FeedSyncV2UseCase(store, store, heldRemote)) }
         entered.await()
         val originalGeneration = database.feedSyncStateDao().active()!!.generation
         settings.setGhostwriterUrl(b)
@@ -99,12 +137,8 @@ class AndroidFeedV2UrlRevertTest {
         assertEquals(originalGeneration + 2, restored.generation)
         assertFalse(restored.suspended)
 
-        val current = mockk<FeedSyncV2UseCase>()
-        coEvery { current.sync() } returns FeedSyncV2Outcome.Complete(2, 3)
-        assertEquals(FeedSyncV2Outcome.Complete(2, 3), store.syncAndRecord(current))
-        assertEquals("complete", database.feedSyncStateDao().active()!!.lastOutcome)
         release.complete(Unit)
-        assertTrue(oldRun.await() is FeedSyncV2Outcome.Failed)
+        assertFalse(oldRun.await() is FeedSyncV2Outcome.Complete)
         assertEquals("complete", database.feedSyncStateDao().active()!!.lastOutcome)
         database.close()
     }
@@ -116,14 +150,38 @@ class AndroidFeedV2UrlRevertTest {
         settings.setGhostwriterUrl(a)
         val store = AndroidFeedV2Store(database, settings)
         assertNull(database.feedSyncStateDao().active())
-        val configured = mockk<FeedSyncV2UseCase>()
-        coEvery { configured.sync() } returns FeedSyncV2Outcome.Complete(0, 0)
-        store.syncAndRecord(configured)
+        assertTrue(store.syncAndRecord(FeedSyncV2UseCase(store, store,
+            immediateRemote())) is FeedSyncV2Outcome.Complete)
         assertEquals("complete", database.feedSyncStateDao().active()!!.lastOutcome)
         settings.setGhostwriterEnabled(false)
-        val disabled = mockk<FeedSyncV2UseCase>()
-        coEvery { disabled.sync() } returns FeedSyncV2Outcome.NotConfigured
-        store.syncAndRecord(disabled)
+        assertEquals(FeedSyncV2Outcome.NotConfigured,
+            store.syncAndRecord(FeedSyncV2UseCase(store, store, immediateRemote())))
+        assertEquals("not_configured", database.feedSyncStateDao().active()!!.lastOutcome)
+        database.close()
+    }
+
+    @Test fun `disable observed during held run records NotConfigured`() = runBlocking {
+        val database = db()
+        val settings = SettingsRepository(context, database)
+        settings.setGhostwriterEnabled(true)
+        settings.setGhostwriterUrl(a)
+        val store = AndroidFeedV2Store(database, settings)
+        assertTrue(store.syncAndRecord(FeedSyncV2UseCase(store, store,
+            immediateRemote())) is FeedSyncV2Outcome.Complete)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val heldRemote = mockk<FeedV2RemotePort>()
+        coEvery { heldRemote.getFeedChangesV2(any(), any(), any()) } coAnswers {
+            entered.complete(Unit)
+            release.await()
+            FeedV2RemoteResult.Success(FeedChangesV2Response(
+                "11111111-1111-4111-8111-111111111111", 0, emptyList()))
+        }
+        val run = async { store.syncAndRecord(FeedSyncV2UseCase(store, store, heldRemote)) }
+        entered.await()
+        settings.setGhostwriterEnabled(false)
+        release.complete(Unit)
+        assertEquals(FeedSyncV2Outcome.NotConfigured, run.await())
         assertEquals("not_configured", database.feedSyncStateDao().active()!!.lastOutcome)
         database.close()
     }
