@@ -11,6 +11,9 @@ public final class FeedSyncService {
     private let bridge: SharedFeedV2Bridge
     private let settingsRepository: SettingsRepositoryProtocol
     private let logger = Logger(subsystem: "com.epilogue", category: "FeedSync")
+#if DEBUG
+    var configuredURLReadForTesting: (() async throws -> String?)?
+#endif
 
     public init(settingsRepository: SettingsRepositoryProtocol,
                 modelContainer: ModelContainer) {
@@ -56,8 +59,25 @@ public final class FeedSyncService {
         try bridge.store.engine.delete(url: url)
     }
 
+    private func requireCurrentResolutionDestination() async throws {
+        let generation = try bridge.store.engine.resolutionGeneration()
+        let url: String?
+#if DEBUG
+        if let configuredURLReadForTesting {
+            url = try await configuredURLReadForTesting()
+        } else {
+            url = try await settingsRepository.getGhostwriterURL()
+        }
+#else
+        url = try await settingsRepository.getGhostwriterURL()
+#endif
+        try Task.checkCancellation()
+        try bridge.store.engine.requireResolutionDestination(url, generation: generation)
+    }
+
     func resolve(opId: String, action: IOSFeedV2StoreEngine.Resolution,
-                        correctedTitle: String? = nil) throws {
+                 correctedTitle: String? = nil) async throws {
+        try await requireCurrentResolutionDestination()
         try bridge.store.engine.resolve(opId: opId, action: action,
                                         correctedTitle: correctedTitle)
     }
@@ -67,7 +87,8 @@ public final class FeedSyncService {
     }
 
     func resolvePrevious(opId: String,
-                         action: IOSFeedV2StoreEngine.PreviousProposalAction) throws {
+                         action: IOSFeedV2StoreEngine.PreviousProposalAction) async throws {
+        try await requireCurrentResolutionDestination()
         try bridge.store.engine.resolvePrevious(opId: opId, action: action)
     }
 

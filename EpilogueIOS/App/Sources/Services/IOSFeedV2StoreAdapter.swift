@@ -68,10 +68,14 @@ final class IOSFeedV2StoreEngine {
             !authority.contains(where: \.isWhitespace)
     }
 
-    func destination(for rawURL: String) throws -> FeedV2Destination {
-        let normalized = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func normalizedDestination(_ rawURL: String?) -> String? {
+        let value = rawURL?.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !normalized.isEmpty else { throw StoreError.invalidEdit }
+        return value?.isEmpty == false ? value : nil
+    }
+
+    func destination(for rawURL: String) throws -> FeedV2Destination {
+        guard let normalized = normalizedDestination(rawURL) else { throw StoreError.invalidEdit }
         return try transaction { context in
             let value = try state(context)
             if value.destinationURL == nil {
@@ -91,6 +95,27 @@ final class IOSFeedV2StoreEngine {
             return FeedV2Destination(normalizedBaseUrl: normalized,
                                      configurationId: value.configurationId!)
         }
+    }
+
+    /// Capture before an asynchronous settings read. A later URL edit changes
+    /// generation, so a stale read cannot authorize a resolution decision.
+    func resolutionGeneration() throws -> Int64 {
+        let context = ModelContext(container)
+        guard let value = try context.fetch(FetchDescriptor<FeedSyncState>()).first else {
+            throw StoreError.staleBinding
+        }
+        return value.generation
+    }
+
+    func requireResolutionDestination(_ configuredURL: String?, generation: Int64) throws {
+        guard let normalized = normalizedDestination(configuredURL) else {
+            throw StoreError.staleBinding
+        }
+        let context = ModelContext(container)
+        guard let value = try context.fetch(FetchDescriptor<FeedSyncState>()).first,
+              value.destinationURL == normalized,
+              value.generation == generation,
+              !value.suspended else { throw StoreError.staleBinding }
     }
 
     func startNewBinding() throws {

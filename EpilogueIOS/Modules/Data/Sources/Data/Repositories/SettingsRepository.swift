@@ -16,7 +16,7 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
     private let keychainService: KeychainService
     private let modelContainer: ModelContainer?
 #if DEBUG
-    var beforeGhostwriterURLStateSaveForTesting: (() throws -> Void)?
+    @MainActor var beforeGhostwriterURLStateSaveForTesting: (() throws -> Void)?
 #endif
 
     // Keychain keys
@@ -248,13 +248,13 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     public func setGhostwriterURL(_ url: String?) async throws {
         if let modelContainer {
-            let oldURL = userDefaults.string(forKey: DefaultsKeys.ghostwriterURL)
             let normalize: (String?) -> String? = {
                 $0?.trimmingCharacters(in: .whitespacesAndNewlines)
                     .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             }
-            if normalize(oldURL) != normalize(url) {
-                try await MainActor.run {
+            try await MainActor.run {
+                let oldURL = userDefaults.string(forKey: DefaultsKeys.ghostwriterURL)
+                if normalize(oldURL) != normalize(url) {
                     let context = ModelContext(modelContainer)
                     context.autosaveEnabled = false
                     do {
@@ -274,9 +274,15 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
                         throw error
                     }
                 }
+                // Publish the preference in the same actor turn as the binding
+                // generation change, so resolution cannot observe half the edit.
+                if let url {
+                    userDefaults.set(url, forKey: DefaultsKeys.ghostwriterURL)
+                } else {
+                    userDefaults.removeObject(forKey: DefaultsKeys.ghostwriterURL)
+                }
             }
-        }
-        if let url = url {
+        } else if let url {
             userDefaults.set(url, forKey: DefaultsKeys.ghostwriterURL)
         } else {
             userDefaults.removeObject(forKey: DefaultsKeys.ghostwriterURL)

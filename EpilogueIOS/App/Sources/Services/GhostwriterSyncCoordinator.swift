@@ -497,8 +497,8 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     }
 
     func resolvePreviousFeedProposal(opId: String,
-                                     action: IOSFeedV2StoreEngine.PreviousProposalAction) throws {
-        try feedSyncService.resolvePrevious(opId: opId, action: action)
+                                     action: IOSFeedV2StoreEngine.PreviousProposalAction) async throws {
+        try await feedSyncService.resolvePrevious(opId: opId, action: action)
     }
 
     public func suspendFeedBindingForDestinationChange(_ url: String?) throws {
@@ -506,9 +506,9 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     }
 
     func resolveFeed(opId: String, action: IOSFeedV2StoreEngine.Resolution,
-                     correctedTitle: String? = nil) throws {
-        try feedSyncService.resolve(opId: opId, action: action,
-                                    correctedTitle: correctedTitle)
+                     correctedTitle: String? = nil) async throws {
+        try await feedSyncService.resolve(opId: opId, action: action,
+                                          correctedTitle: correctedTitle)
     }
 
     /// Push schedule enable/disable state to the server.

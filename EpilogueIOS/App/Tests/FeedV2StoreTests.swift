@@ -473,6 +473,92 @@ final class FeedV2StoreTests: XCTestCase {
         XCTAssertGreaterThan(try XCTUnwrap(successful), prior)
     }
 
+    func testConfiguredDestinationGuardsEveryResolutionUntilURLReverts() async throws {
+        for action in 0..<3 {
+            let (container, _, opId) = try resolutionFixture(
+                status: action == 1 ? "rejected" : "conflict")
+            if action == 2 {
+                let context = ModelContext(container)
+                let previous = try XCTUnwrap(context.fetch(FetchDescriptor<FeedMutation>()).first)
+                previous.scopeKey = "https://older.test\nolder-configuration"
+                try context.save()
+            }
+            let defaults = UserDefaults(suiteName: "feed-resolution-url-\(UUID().uuidString)")!
+            defaults.set("https://server.test", forKey: "ghostwriter_url")
+            let settings = SettingsRepository(userDefaults: defaults, modelContainer: container)
+            let service = FeedSyncService(settingsRepository: settings, modelContainer: container)
+            try await settings.setGhostwriterURL("https://temporary.test")
+
+            do {
+                switch action {
+                case 0: try await service.resolve(opId: opId, action: .keepServer)
+                case 1: try await service.resolve(opId: opId, action: .discard)
+                default: try await service.resolvePrevious(opId: opId, action: .transfer)
+                }
+                XCTFail("A proposal from A must not resolve while B is configured")
+            } catch IOSFeedV2StoreEngine.StoreError.staleBinding {}
+            XCTAssertEqual(try orderedMutations(container).map(\.opId), [opId])
+            XCTAssertEqual(try resolvedRow(container).name, "Server title")
+
+            try await settings.setGhostwriterURL(" https://server.test/ ")
+            switch action {
+            case 0: try await service.resolve(opId: opId, action: .keepServer)
+            case 1: try await service.resolve(opId: opId, action: .discard)
+            default: try await service.resolvePrevious(opId: opId, action: .transfer)
+            }
+            XCTAssertFalse(try orderedMutations(container).contains { $0.opId == opId })
+            let state = try XCTUnwrap(ModelContext(container).fetch(FetchDescriptor<FeedSyncState>()).first)
+            XCTAssertEqual(state.destinationURL, "https://server.test")
+            XCTAssertFalse(state.suspended)
+        }
+    }
+
+    func testConfiguredDestinationGuardKeepsIntegritySuspension() async throws {
+        let (container, _, opId) = try resolutionFixture()
+        let context = ModelContext(container)
+        let state = try XCTUnwrap(context.fetch(FetchDescriptor<FeedSyncState>()).first)
+        state.suspended = true
+        try context.save()
+        let defaults = UserDefaults(suiteName: "feed-resolution-suspended-\(UUID().uuidString)")!
+        defaults.set("https://server.test", forKey: "ghostwriter_url")
+        let settings = SettingsRepository(userDefaults: defaults, modelContainer: container)
+        let service = FeedSyncService(settingsRepository: settings, modelContainer: container)
+        try await settings.setGhostwriterURL("https://temporary.test")
+        try await settings.setGhostwriterURL("https://server.test")
+        do {
+            try await service.resolve(opId: opId, action: .keepServer)
+            XCTFail("A destination revert must not clear an integrity suspension")
+        } catch IOSFeedV2StoreEngine.StoreError.staleBinding {}
+        XCTAssertEqual(try orderedMutations(container).map(\.opId), [opId])
+    }
+
+    func testStaleAsyncURLReadCannotResolveAfterSettingChanges() async throws {
+        let (container, _, opId) = try resolutionFixture()
+        let defaults = UserDefaults(suiteName: "feed-resolution-race-\(UUID().uuidString)")!
+        defaults.set("https://server.test", forKey: "ghostwriter_url")
+        let settings = SettingsRepository(userDefaults: defaults, modelContainer: container)
+        let service = FeedSyncService(settingsRepository: settings, modelContainer: container)
+        let entered = expectation(description: "resolution URL read started")
+        var held: CheckedContinuation<String?, Never>?
+        service.configuredURLReadForTesting = {
+            entered.fulfill()
+            return await withCheckedContinuation { held = $0 }
+        }
+        let resolve = Task { try await service.resolve(opId: opId, action: .keepServer) }
+        await fulfillment(of: [entered], timeout: 5)
+        try await settings.setGhostwriterURL("https://temporary.test")
+        try XCTUnwrap(held).resume(returning: "https://server.test")
+        do {
+            try await resolve.value
+            XCTFail("A stale URL read must not authorize an old resolution")
+        } catch IOSFeedV2StoreEngine.StoreError.staleBinding {}
+        XCTAssertEqual(try orderedMutations(container).map(\.opId), [opId])
+        service.configuredURLReadForTesting = nil
+        try await settings.setGhostwriterURL("https://server.test")
+        try await service.resolve(opId: opId, action: .keepServer)
+        XCTAssertTrue(try orderedMutations(container).isEmpty)
+    }
+
     func testEditAndSaveFailureRollback() throws {
         let container = try model()
         let engine = IOSFeedV2StoreEngine(container: container)

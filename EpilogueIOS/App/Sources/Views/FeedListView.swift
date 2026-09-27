@@ -279,11 +279,13 @@ private struct PreviousFeedProposalView: View {
     }
 
     private func resolve(_ action: IOSFeedV2StoreEngine.PreviousProposalAction) {
-        do {
-            try coordinator.resolvePreviousFeedProposal(opId: mutation.opId, action: action)
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
+        Task { @MainActor in
+            do {
+                try await coordinator.resolvePreviousFeedProposal(opId: mutation.opId, action: action)
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
@@ -570,12 +572,14 @@ struct FeedResolutionView: View {
     }
 
     private func resolve(_ action: IOSFeedV2StoreEngine.Resolution, title: String? = nil) {
-        do {
-            try coordinator.resolveFeed(opId: mutation.opId, action: action,
-                                        correctedTitle: title)
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
+        Task { @MainActor in
+            do {
+                try await coordinator.resolveFeed(opId: mutation.opId, action: action,
+                                                  correctedTitle: title)
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
