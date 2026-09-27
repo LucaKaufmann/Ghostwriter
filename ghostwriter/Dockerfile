@@ -2,7 +2,7 @@
 # Multi-stage build for minimal final image
 
 # Stage 1: Frontend Builder
-FROM node:22-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 
 WORKDIR /frontend
 
@@ -16,7 +16,7 @@ RUN npm run build
 
 
 # Stage 2: Python Builder
-FROM python:3.11-slim AS python-builder
+FROM python:3.12-slim AS python-builder
 
 WORKDIR /build
 
@@ -37,9 +37,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 
 # Stage 2.5: whisper.cpp Builder
-FROM python:3.11-slim AS whisper-builder
+FROM python:3.12-slim AS whisper-builder
 
 ARG TARGETARCH
+ARG WHISPER_CPP_COMMIT=48f628a84833905ee4a0658ee6d4a5c915ce1997
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
@@ -47,19 +48,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth=1 https://github.com/ggml-org/whisper.cpp /opt/whisper && \
+RUN set -eu; \
+    git init /opt/whisper; \
+    git -C /opt/whisper remote add origin https://github.com/ggml-org/whisper.cpp.git; \
+    git -C /opt/whisper fetch --depth=1 origin "$WHISPER_CPP_COMMIT"; \
+    git -C /opt/whisper checkout --detach FETCH_HEAD; \
+    test "$(git -C /opt/whisper rev-parse HEAD)" = "$WHISPER_CPP_COMMIT"; \
     if [ "${TARGETARCH:-}" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
         CMAKE_FLAGS="-DCMAKE_C_FLAGS=-march=armv8-a -DCMAKE_CXX_FLAGS=-march=armv8-a"; \
     else \
         CMAKE_FLAGS=""; \
-    fi && \
-    cmake -S /opt/whisper -B /opt/whisper/build ${CMAKE_FLAGS} && \
-    cmake --build /opt/whisper/build -j && \
-    strip -s /opt/whisper/build/bin/whisper-cli || true
+    fi; \
+    cmake -S /opt/whisper -B /opt/whisper/build -DGGML_NATIVE=OFF ${CMAKE_FLAGS}; \
+    cmake --build /opt/whisper/build -j; \
+    strip -s /opt/whisper/build/bin/whisper-cli
 
 
 # Stage 3: Runtime
-FROM python:3.11-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 ARG VERSION=dev
 ARG VCS_REF=unknown
@@ -96,14 +102,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=python-builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Media download for YouTube/podcast audio
-RUN pip install --no-cache-dir yt-dlp
+# Media download for YouTube/podcast audio. The committed wheel hash is checked.
+COPY build-constraints.txt ./build-constraints.txt
+RUN pip install --no-cache-dir --only-binary=:all: --no-deps --require-hashes \
+    -r build-constraints.txt && yt-dlp --version
 
 # Copy whisper.cpp binary + shared libs
 COPY --from=whisper-builder /opt/whisper/build/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper-builder /opt/whisper/build/src/libwhisper.so* /usr/local/lib/
 COPY --from=whisper-builder /opt/whisper/build/ggml/src/libggml*.so* /usr/local/lib/
-RUN ldconfig
+RUN ldconfig && whisper-cli --help > /dev/null
 
 # Copy application code
 COPY --chown=ghostwriter:ghostwriter app/ ./app/
