@@ -12,20 +12,25 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.codable.epilogue.R
-import com.example.epilogue.shared.sync.FeedSyncOutcome
-import com.example.epilogue.shared.sync.FeedSyncUseCase
+import com.example.epilogue.shared.sync.FeedSyncV2Outcome
+import com.example.epilogue.shared.sync.FeedSyncV2UseCase
+import com.example.epilogue.data.repository.AndroidFeedV2Store
+import com.example.epilogue.data.repository.SettingsRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 
 /**
  * WorkManager worker that performs bi-directional feed sync with Ghostwriter.
- * Core sync logic is implemented in shared KMP FeedSyncUseCase.
+ * Core sync logic is implemented in shared KMP FeedSyncV2UseCase.
  */
 @HiltWorker
 class FeedSyncWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val feedSyncUseCase: FeedSyncUseCase
+    private val feedSyncUseCase: FeedSyncV2UseCase,
+    private val feedV2Store: AndroidFeedV2Store,
+    private val settingsRepository: SettingsRepository
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -49,27 +54,37 @@ class FeedSyncWorker @AssistedInject constructor(
         }
 
         return try {
-            when (val outcome = feedSyncUseCase.sync()) {
-                is FeedSyncOutcome.Success -> {
+            when (val outcome = feedSyncUseCase.sync().also { feedV2Store.recordOutcome(it) }) {
+                is FeedSyncV2Outcome.Complete -> {
+                    settingsRepository.setLastFeedSyncTime(System.currentTimeMillis())
                     Log.i(
                         TAG,
-                        "Feed sync completed: pushed=${outcome.pushed}, " +
-                            "updated=${outcome.updatedFeeds}, deleted=${outcome.deletedFeeds}"
+                        "Feed sync completed: applied=${outcome.applied}, pulled=${outcome.pulled}"
                     )
                     Result.success()
                 }
 
-                is FeedSyncOutcome.NotConfigured -> {
+                is FeedSyncV2Outcome.NotConfigured -> {
                     Log.i(TAG, "Ghostwriter not configured, skipping sync")
                     Result.success()
                 }
 
-                is FeedSyncOutcome.Error -> {
+                is FeedSyncV2Outcome.Partial -> {
+                    Log.w(TAG, "Feed sync partial: pending=${outcome.pending}, conflicts=${outcome.conflicts}, rejected=${outcome.rejected}")
+                    Result.success()
+                }
+
+                is FeedSyncV2Outcome.Failed -> {
                     Log.e(TAG, "Feed sync failed: ${outcome.message}")
                     retryOrFail()
                 }
+                FeedSyncV2Outcome.ServerChanged, FeedSyncV2Outcome.ServerUpgradeRequired -> {
+                    Log.w(TAG, "Feed sync requires attention: $outcome")
+                    Result.success()
+                }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "Error syncing feeds", e)
             retryOrFail()
         }

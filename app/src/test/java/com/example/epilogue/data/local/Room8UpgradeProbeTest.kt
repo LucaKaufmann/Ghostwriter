@@ -3,6 +3,17 @@ package com.example.epilogue.data.local
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteConstraintException
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.epilogue.di.DatabaseModule
+import com.example.epilogue.data.repository.AndroidFeedV2Store
+import com.example.epilogue.data.repository.SettingsRepository
+import com.example.epilogue.shared.ghostwriter.FeedChangesV2Response
+import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
+import com.example.epilogue.shared.sync.FeedV2StoreResult
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
@@ -64,6 +75,107 @@ class Room8UpgradeProbeTest {
         if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null
     }
 
+    private fun room9(migration: Migration = DatabaseModule.MIGRATION_8_9): EpilogueDatabase =
+        Room.databaseBuilder(context, EpilogueDatabase::class.java, name)
+            .addMigrations(migration)
+            .allowMainThreadQueries()
+            .build()
+
+    private fun configuredSettings(): SettingsRepository = mockk {
+        every { isGhostwriterConfigured() } returns true
+        every { getGhostwriterUrl() } returns "https://fixture.invalid"
+    }
+
+    @Test fun `migrated dirty false exact match adopts while tombstone retains dirty true proposal`() = runBlocking {
+        createFixture()
+        val db = room9()
+        val store = AndroidFeedV2Store(db, configuredSettings())
+        val destination = store.currentDestination()!!
+        val token = (store.beginSyncRun(destination) as FeedV2StoreResult.Success).value
+        val binding = (store.reconcileAndBindFullSnapshot(token, destination, FeedChangesV2Response(
+            "11111111-1111-4111-8111-111111111111", 2,
+            listOf(
+                FeedSnapshotV2("feed", "22222222-2222-4222-8222-222222222222",
+                    "https://example.org/unchanged", 1, "Local title", true, "raw", 0),
+                FeedSnapshotV2("tombstone", "33333333-3333-4333-8333-333333333333",
+                    "https://example.org/dirty", 2)
+            )
+        )) as FeedV2StoreResult.Success).value
+        assertEquals(2L, binding.cursorVersion)
+        assertTrue(binding.firstReconciliationComplete)
+        assertEquals(1L, db.feedDao().getFeedByUrl("https://example.org/unchanged")!!.serverVersion)
+        assertFalse(db.feedDao().getFeedByUrl("https://example.org/unchanged")!!.locallyModified)
+        assertTrue(db.feedMutationDao().forUrl("https://example.org/unchanged").isEmpty())
+        assertEquals("needs_resolution", db.feedMutationDao().forUrl("https://example.org/dirty").single().state)
+        assertTrue(db.feedMutationDao().forUrl("https://example.org/dirty").single().fieldsJson.contains("Edited title"))
+        assertTrue(db.feedDao().getFeedByUrl("https://example.org/dirty")!!.hiddenDelete)
+        assertEquals(2, db.feedDao().getAllRealFeedsIncludingHidden().size)
+        assertEquals(1, db.feedDao().getAllFeedsList().count { !it.url.startsWith("synthetic://") })
+        store.endSyncRun(token)
+        db.close()
+    }
+
+    @Test fun `migrated absence remains unresolved with no automatic upload`() = runBlocking {
+        createFixture()
+        val db = room9()
+        val store = AndroidFeedV2Store(db, configuredSettings())
+        val destination = store.currentDestination()!!
+        val token = (store.beginSyncRun(destination) as FeedV2StoreResult.Success).value
+        val binding = (store.reconcileAndBindFullSnapshot(token, destination,
+            FeedChangesV2Response("11111111-1111-4111-8111-111111111111", 0, emptyList()))
+            as FeedV2StoreResult.Success).value
+        assertEquals(2, db.feedMutationDao().forScope(binding.destination.configurationId).size)
+        assertTrue(db.feedMutationDao().forScope(binding.destination.configurationId)
+            .all { it.state == "needs_resolution" && !it.sent })
+        assertTrue(db.feedDao().getAllRealFeedsIncludingHidden().all { it.hiddenDelete })
+        assertTrue((store.loadPendingMutations(token, binding, 100) as FeedV2StoreResult.Success).value.isEmpty())
+        store.endSyncRun(token)
+        db.close()
+    }
+
+    @Test fun `production Room 9 migration upgrades frozen Room 8 and reopens`() {
+        createFixture()
+        val upgraded = room9()
+        assertEquals(9, upgraded.openHelper.readableDatabase.version)
+        upgraded.close()
+        val reopened = room9()
+        assertEquals(2, runBlocking { reopened.feedDao().getAllRealFeedsIncludingHidden() }.size)
+        assertEquals(2, runBlocking { reopened.feedMutationDao().forScope("unbound") }.size)
+        reopened.close()
+        SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { sql ->
+            assertEquals("2", sql.scalar("SELECT COUNT(*) FROM feed_mutations"))
+            assertEquals("0", sql.scalar("SELECT COUNT(*) FROM feed_mutations WHERE url LIKE 'synthetic://%'"))
+            assertEquals("summarize", JSONObject(sql.scalar("SELECT fieldsJson FROM feed_mutations WHERE url='https://example.org/dirty'")!!).getString("mode"))
+            assertEquals("0", sql.scalar("SELECT locallyModified FROM feeds WHERE url='https://example.org/unchanged'"))
+            assertNull(sql.scalar("SELECT serverVersion FROM feeds WHERE url='https://example.org/dirty'"))
+            assertEquals("3", sql.scalar("SELECT nextSequence FROM feed_sync_state WHERE serverKey='unbound'"))
+            assertEquals("1", sql.scalar("SELECT COUNT(*) FROM digests"))
+            assertEquals("1", sql.scalar("SELECT COUNT(*) FROM digest_articles"))
+        }
+    }
+
+    @Test fun `production migration failure leaves Room 8 store intact`() {
+        createFixture()
+        val failing = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                DatabaseModule.MIGRATION_8_9.migrate(db)
+                throw IllegalStateException("synthetic failure after migration")
+            }
+        }
+        assertThrows(IllegalStateException::class.java) {
+            val upgrade = room9(failing)
+            try { upgrade.openHelper.writableDatabase } finally { upgrade.close() }
+        }
+        val reopened = room8()
+        assertEquals(8, reopened.openHelper.readableDatabase.version)
+        reopened.close()
+        SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { sql ->
+            assertDeployedRoom8Shape(sql)
+            assertEquals("0", sql.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name='feed_mutations'"))
+            assertEquals("3", sql.scalar("SELECT COUNT(*) FROM feeds"))
+        }
+    }
+
     @Test fun `frozen Room 8 file matches deployed identity and reopens intact`() {
         createFixture()
         assertTrue(path.isFile)
@@ -113,7 +225,7 @@ class Room8UpgradeProbeTest {
                 assertEquals(1L, rows.getLong(4))
                 val dirty = JSONObject(rows.getString(1))
                 assertEquals("Edited title", dirty.getString("title"))
-                assertEquals("briefing", dirty.getString("mode"))
+                assertEquals("summarize", dirty.getString("mode"))
                 assertEquals(4, dirty.getInt("max_articles"))
                 assertFalse(dirty.getBoolean("is_active"))
                 assertTrue(rows.moveToNext())
@@ -213,7 +325,7 @@ class Room8UpgradeProbeTest {
                 while (rows.moveToNext()) {
                     val proposal = JSONObject()
                         .put("title", rows.getString(1))
-                        .put("mode", if (rows.getString(2) == "BRIEFING") "briefing" else "raw")
+                        .put("mode", if (rows.getString(2) == "BRIEFING") "summarize" else "raw")
                         .put("max_articles", rows.getInt(3))
                         .put("is_active", rows.getInt(4) != 0)
                     db.execSQL("""INSERT INTO feed_mutations

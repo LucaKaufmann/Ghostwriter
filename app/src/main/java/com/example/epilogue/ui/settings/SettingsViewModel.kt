@@ -14,12 +14,15 @@ import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
+import com.example.epilogue.data.repository.AndroidFeedV2Store
 import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.service.ConfigSyncManager
 import com.example.epilogue.service.DigestScheduler
+import com.example.epilogue.shared.sync.FeedSyncV2UseCase
+import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -38,7 +41,9 @@ class SettingsViewModel @Inject constructor(
     private val digestRepository: DigestRepository,
     private val feedRepository: FeedRepository,
     private val ghostwriterRepository: GhostwriterRepository,
-    private val configSyncManager: ConfigSyncManager
+    private val configSyncManager: ConfigSyncManager,
+    private val feedSyncV2UseCase: FeedSyncV2UseCase,
+    private val feedV2Store: AndroidFeedV2Store
 ) : ViewModel() {
 
     companion object {
@@ -214,23 +219,22 @@ class SettingsViewModel @Inject constructor(
             }
 
             // First, sync feeds to Ghostwriter
-            val feeds = feedRepository.getAllFeedsList()
-            val syncResult = ghostwriterRepository.syncFeeds(feeds)
+            val syncResult = feedSyncV2UseCase.sync().also { feedV2Store.recordOutcome(it) }
 
             when (syncResult) {
-                is GhostwriterResult.Success -> {
-                    Log.i(TAG, "Synced ${syncResult.data.synced} feeds to Ghostwriter")
+                is FeedSyncV2Outcome.Complete -> {
+                    settingsRepository.setLastFeedSyncTime(System.currentTimeMillis())
+                    Log.i(TAG, "Feed sync applied=${syncResult.applied}, pulled=${syncResult.pulled}")
                 }
-                is GhostwriterResult.Error -> {
-                    Log.w(TAG, "Feed sync warning: ${syncResult.message}")
-                    // Continue anyway - feeds may already be synced
+                is FeedSyncV2Outcome.Partial -> {
+                    _uiState.update { it.copy(ghostwriterError = "Feed sync partial: ${syncResult.pending} pending") }
                 }
-                is GhostwriterResult.NotConfigured -> {
+                else -> {
                     _uiState.update {
                         it.copy(
                             isGenerating = false,
                             digestFailed = true,
-                            ghostwriterError = "Ghostwriter not configured"
+                            ghostwriterError = "Feed sync requires attention: $syncResult"
                         )
                     }
                     return@launch
@@ -1557,25 +1561,22 @@ class SettingsViewModel @Inject constructor(
             var hasError = false
 
             // 1. Sync feeds
-            val feeds = feedRepository.getAllFeedsList()
-            if (feeds.isNotEmpty()) {
-                val feedResult = ghostwriterRepository.syncFeeds(feeds)
+            run {
+                val feedResult = feedSyncV2UseCase.sync().also { feedV2Store.recordOutcome(it) }
                 when (feedResult) {
-                    is GhostwriterResult.Success -> {
-                        syncStatus.add("${feedResult.data.synced} feeds synced")
-                        Log.i(TAG, "Initial sync: ${feedResult.data.synced} feeds synced")
+                    is FeedSyncV2Outcome.Complete -> {
+                        settingsRepository.setLastFeedSyncTime(System.currentTimeMillis())
+                        syncStatus.add("Feed sync complete")
                     }
-                    is GhostwriterResult.Error -> {
-                        syncStatus.add("Feed sync failed")
+                    is FeedSyncV2Outcome.Partial -> {
+                        syncStatus.add("Feed sync partial: ${feedResult.pending} pending")
                         hasError = true
-                        Log.e(TAG, "Initial sync: feed sync failed: ${feedResult.message}")
                     }
-                    is GhostwriterResult.NotConfigured -> {
+                    else -> {
+                        syncStatus.add("Feed sync requires attention: $feedResult")
                         hasError = true
                     }
                 }
-            } else {
-                syncStatus.add("No feeds to sync")
             }
 
             // 2. Sync schedule preferences
