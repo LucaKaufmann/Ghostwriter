@@ -47,7 +47,7 @@ class GhostwriterApiClientTest {
         val bytes = client.downloadDigest("digest.epub")
         assertEquals("/api/digests/digest.epub", capturedPath())
         assertEquals("Bearer abc123", capturedAuth())
-        assertContentEquals("epub-bytes".toByteArray(), bytes)
+        assertContentEquals("epub-bytes".encodeToByteArray(), bytes)
     }
 
     @Test
@@ -60,7 +60,7 @@ class GhostwriterApiClientTest {
         assertEquals("/api/digests/digest-123/download", capturedPath())
         assertEquals("Bearer abc123", capturedAuth())
         assertEquals("pdf", capturedFormat())
-        assertContentEquals("pdf-bytes".toByteArray(), bytes)
+        assertContentEquals("pdf-bytes".encodeToByteArray(), bytes)
     }
 
     @Test
