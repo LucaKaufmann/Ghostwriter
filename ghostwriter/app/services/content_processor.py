@@ -10,6 +10,7 @@ from urllib.parse import urljoin
 
 import feedparser
 import trafilatura
+from feedparser.http import ACCEPT_HEADER as FEED_ACCEPT_HEADER
 from trafilatura.settings import use_config
 
 from app.core.config import Settings, get_settings
@@ -89,7 +90,10 @@ class ContentProcessor:
                 feed_url,
                 settings=self.settings,
                 kind="feed",
-                headers={"User-Agent": "Ghostwriter/1.0"},
+                headers={
+                    "User-Agent": "Ghostwriter/1.0",
+                    "Accept": FEED_ACCEPT_HEADER,
+                },
             )
             loop = asyncio.get_event_loop()
             feed = await loop.run_in_executor(

@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
-import pytest
+import asyncio
+from types import SimpleNamespace
+from uuid import uuid4
 
+import httpx
+import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
+
+from app.api.digests import get_digest_article_source
 from app.core.config import Settings
 from app.services.outbound_fetch import FetchedResource
 from app.services.reader_service import fetch_html_document
@@ -79,3 +87,40 @@ async def test_fetch_html_document_decodes_response_charset(monkeypatch):
     assert document.html == "<p>café</p>"
     assert document.final_url == "https://example.com/final"
     assert document.size_bytes == len(b"<p>caf\xe9</p>")
+
+
+@pytest.mark.asyncio
+async def test_total_fetch_deadline_maps_to_reader_504(monkeypatch):
+    async def slow_response(_request):
+        await asyncio.sleep(2)
+        return httpx.Response(200, content=b"<html/>")
+
+    original_client = httpx.AsyncClient
+
+    def client_with_mock_transport(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(slow_response)
+        return original_client(*args, **kwargs)
+
+    async def allow_access(**_kwargs):
+        return None
+
+    class FakeSession:
+        def exec(self, _statement):
+            return SimpleNamespace(
+                first=lambda: SimpleNamespace(
+                    url="https://example.com/story", content_type="article", content=""
+                )
+            )
+
+    monkeypatch.setattr("app.services.outbound_fetch.httpx.AsyncClient", client_with_mock_transport)
+    monkeypatch.setattr("app.api.digests._ensure_digest_access", allow_access)
+    with pytest.raises(HTTPException) as error:
+        await get_digest_article_source(
+            digest_id=uuid4(),
+            article_id=uuid4(),
+            request=Request({"type": "http", "method": "GET", "path": "/"}),
+            credentials=None,
+            session=FakeSession(),
+            settings=Settings(allow_private_hosts=True, fetch_timeout_seconds=1),
+        )
+    assert error.value.status_code == 504
