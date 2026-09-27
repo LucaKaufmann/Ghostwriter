@@ -31,7 +31,7 @@ public struct DeliveryClaim: Sendable {
 }
 
 public enum DeliveryStoreError: Error {
-    case alreadyDelivered, missingRun, invalidClaim, injectedSaveFailure
+    case alreadyDelivered, missingRun, invalidClaim, injectedSaveFailure, injectedRetentionFailure
 }
 
 /// Uses short, synchronous MainActor transactions. Independent instances and
@@ -42,6 +42,7 @@ public final class DeliveryStore {
     private let container: ModelContainer
     public var failNextFinalSaveForTesting = false
     public var failBeforeTransactionCommitForTesting = false
+    public var failNextRetentionForTesting = false
 
     public init(container: ModelContainer) { self.container = container }
 
@@ -235,5 +236,16 @@ public final class DeliveryStore {
             $0.startedAt >= start &&
             ["complete", "partial", "empty", "deferred"].contains($0.outcome)
         }
+    }
+
+    /// Reuse the existing history/file retention policy after a successful
+    /// delivery transaction. A cleanup failure cannot revoke that delivery.
+    public func enforceRetentionPolicy() async throws {
+        if failNextRetentionForTesting {
+            failNextRetentionForTesting = false
+            throw DeliveryStoreError.injectedRetentionFailure
+        }
+        let repository = DigestRepository(modelContext: context())
+        try await repository.enforceRetentionPolicy(maxDigests: 30)
     }
 }

@@ -285,7 +285,7 @@ struct SettingsView: View {
                         Button {
                             Task { await localDigestService.generateDigest(mode: .regenerate) }
                         } label: {
-                            Label("Regenerate from all feeds", systemImage: "arrow.clockwise")
+                            Label("Regenerate delivered articles", systemImage: "arrow.clockwise")
                         }
                         .disabled(isGenerating || localDigestService.isGenerating || ghostwriterCoordinator.isSyncing)
                         LocalGenerationDiagnosticsView(service: localDigestService)
