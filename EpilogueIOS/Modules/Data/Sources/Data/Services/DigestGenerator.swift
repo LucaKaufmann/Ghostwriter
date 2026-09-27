@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import OSLog
 import Domain
 import GhostwriterClient
 
@@ -44,6 +45,7 @@ public final class DigestGenerator {
     private let deliveryStore: DeliveryStore
     private let documentsDirectory: URL
     private let filterSignature: String
+    private let logger = Logger(subsystem: "com.epilogue", category: "LocalGeneration")
     public var failAfterCommitForTesting = false
 
     public init(feedRepository: FeedRepositoryProtocol,
@@ -99,6 +101,8 @@ public final class DigestGenerator {
             }
             for feed in feeds {
                 try Task.checkCancellation()
+                let feedFilterSignature = DeliveryFilterSignature.forFeed(
+                    base: filterSignature, mode: feed.mode)
                 var result = FeedIngestionResult(feedUrl: feed.url)
                 let raw: [RawArticle]
                 do {
@@ -124,7 +128,7 @@ public final class DigestGenerator {
                     let previous = ledger[identity.articleKey]
                     if mode == .normal && previous?.state == "delivered" { continue }
                     if mode == .normal && previous?.state == "excluded" &&
-                        previous?.filterSignature == filterSignature { continue }
+                        previous?.filterSignature == feedFilterSignature { continue }
                     candidates.append(Candidate(
                         article: RawArticle(title: source.title, link: source.link,
                                             author: source.author, publishedAt: source.publishedAt,
@@ -152,14 +156,14 @@ public final class DigestGenerator {
                         included.append(processed)
                         claims.append(DeliveryClaim(feedUrl: feed.url, articleKey: candidate.key,
                                                     state: "delivered",
-                                                    filterSignature: filterSignature))
+                                                    filterSignature: feedFilterSignature))
                         result.deliveredCount += 1
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch ArticleProcessingError.contentTooShort {
                         claims.append(DeliveryClaim(feedUrl: feed.url, articleKey: candidate.key,
                                                     state: "excluded", reason: "content_too_short",
-                                                    filterSignature: filterSignature))
+                                                    filterSignature: feedFilterSignature))
                         result.filteredCount += 1
                     } catch {
                         let classification = Self.classify(error)
@@ -192,6 +196,15 @@ public final class DigestGenerator {
                                                   articles: included,
                                                   claims: terminalClaims,
                                                   triggerType: triggerType, period: period)
+            if digest != nil {
+                do {
+                    try await deliveryStore.enforceRetentionPolicy()
+                } catch {
+                    // Retention is post-commit housekeeping; the edition and
+                    // its claim have already completed successfully.
+                    logger.error("Edition retention failed: \(error.localizedDescription)")
+                }
+            }
             if failAfterCommitForTesting {
                 failAfterCommitForTesting = false
                 throw DigestGeneratorError.artifactNotDurable

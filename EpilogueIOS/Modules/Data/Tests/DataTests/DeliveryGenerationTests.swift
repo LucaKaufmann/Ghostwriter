@@ -7,17 +7,21 @@ import Domain
 @Suite("Incremental local generation")
 @MainActor
 struct DeliveryGenerationTests {
-    private func setup(maxArticles: Int, links: [String],
-                       failed: Set<String> = [], filtered: Set<String> = [],
-                       fetchFails: Bool = false) throws -> (DigestGenerator, FixtureArticles, ModelContainer, URL) {
+    private func diskModel() throws -> (ModelContainer, URL) {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("delivery-generator-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
         let configuration = ModelConfiguration(schema: schema,
                                                url: directory.appendingPathComponent("Epilogue.sqlite"))
-        let container = try ModelContainer(for: schema, migrationPlan: EpilogueMigrationPlan.self,
-                                           configurations: [configuration])
+        return (try ModelContainer(for: schema, migrationPlan: EpilogueMigrationPlan.self,
+                                   configurations: [configuration]), directory)
+    }
+
+    private func setup(maxArticles: Int, links: [String],
+                       failed: Set<String> = [], filtered: Set<String> = [],
+                       fetchFails: Bool = false) throws -> (DigestGenerator, FixtureArticles, ModelContainer, URL) {
+        let (container, directory) = try diskModel()
         let feed = Feed(url: "https://feed.test/rss", name: "Feed", mode: .fidelity,
                         maxArticles: maxArticles)
         let articles = FixtureArticles(links: links, failed: failed,
@@ -102,6 +106,62 @@ struct DeliveryGenerationTests {
         #expect(rows.filter { $0.state == "delivered" }.count == 1)
     }
 
+    @Test("Changing a feed from Fidelity to Briefing retries its earlier short-content exclusion")
+    func testModeChangeReconsidersExclusion() async throws {
+        let link = "https://example.test/short"
+        let (fidelityGenerator, articles, container, directory) = try setup(
+            maxArticles: 0, links: [link], filtered: [link])
+        let first = try await fidelityGenerator.generateDigest(triggerType: .manual)
+        #expect(first.outcome == .empty)
+        let original = try #require(try ModelContext(container)
+            .fetch(FetchDescriptor<ArticleDelivery>()).first)
+        #expect(original.state == "excluded")
+        let firstSignature = try #require(original.filterSignature)
+
+        let briefing = Feed(url: "https://feed.test/rss", name: "Feed", mode: .briefing)
+        let briefingGenerator = DigestGenerator(
+            feedRepository: FixtureFeeds(briefing), articleRepository: articles,
+            epubBuilder: FixtureEPUB(), deliveryStore: DeliveryStore(container: container),
+            filterSignature: DeliveryFilterSignature.make(minWordCount: 300),
+            documentsDirectory: directory)
+        let second = try await briefingGenerator.generateDigest(triggerType: .manual)
+        #expect(second.outcome == .complete)
+        #expect(second.digest?.articleCount == 1)
+        let delivered = try #require(try ModelContext(container)
+            .fetch(FetchDescriptor<ArticleDelivery>()).first)
+        #expect(delivered.state == "delivered")
+        #expect(delivered.filterSignature == nil)
+        #expect(firstSignature != DeliveryFilterSignature.forFeed(
+            base: DeliveryFilterSignature.make(minWordCount: 300), mode: .briefing))
+        let third = try await fidelityGenerator.generateDigest(triggerType: .manual)
+        #expect(third.outcome == .empty)
+        #expect(await articles.calls == [link, link])
+    }
+
+    @Test("Retention prunes older local history and files without erasing delivery claims")
+    func testRetentionPreservesLedger() async throws {
+        let (generator, _, container, _) = try setup(maxArticles: 1, links: links(31))
+        var firstDigestId: UUID?
+        var firstPath: String?
+        for index in 0..<31 {
+            let result = try await generator.generateDigest(triggerType: .manual)
+            let digest = try #require(result.digest)
+            if index == 0 {
+                firstDigestId = digest.id
+                firstPath = digest.epubFilePath
+            }
+        }
+        let reopened = ModelContext(container)
+        #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 30)
+        #expect(try reopened.fetchCount(FetchDescriptor<ArticleDelivery>()) == 31)
+        #expect(try reopened.fetch(FetchDescriptor<Digest>()).allSatisfy {
+            FileManager.default.fileExists(atPath: $0.epubFilePath)
+        })
+        #expect(firstPath.map { !FileManager.default.fileExists(atPath: $0) } == true)
+        #expect(try reopened.fetch(FetchDescriptor<ArticleDelivery>())
+            .contains { $0.firstDigestId == firstDigestId })
+    }
+
     @Test("Fetch failure, valid empty page and cancellation retain distinct diagnostics")
     func testFailedEmptyCancelled() async throws {
         let (failedGenerator, _, failedStore, _) = try setup(maxArticles: 0, links: [], fetchFails: true)
@@ -178,6 +238,30 @@ struct DeliveryGenerationTests {
         #expect(try reopened.fetch(FetchDescriptor<GenerationRun>()).first?.outcome == "complete")
         #expect(try reopened.fetch(FetchDescriptor<ArticleDelivery>()).first?.state == "delivered")
     }
+
+    @Test("Retention failure after commit leaves completed history, claim and artifact usable")
+    func testRetentionFailureDoesNotDemote() async throws {
+        let (container, directory) = try diskModel()
+        let store = DeliveryStore(container: container)
+        store.failNextRetentionForTesting = true
+        let link = "https://example.test/article"
+        let generator = DigestGenerator(
+            feedRepository: FixtureFeeds(Feed(url: "https://feed.test/rss", name: "Feed",
+                                            mode: .fidelity)),
+            articleRepository: FixtureArticles(links: [link], failed: [], filtered: [],
+                                               fetchFails: false),
+            epubBuilder: FixtureEPUB(), deliveryStore: store,
+            filterSignature: DeliveryFilterSignature.make(minWordCount: 300),
+            documentsDirectory: directory)
+        let result = try await generator.generateDigest(triggerType: .manual)
+        let digest = try #require(result.digest)
+        #expect(result.outcome == .complete)
+        #expect(FileManager.default.fileExists(atPath: digest.epubFilePath))
+        let reopened = ModelContext(container)
+        #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 1)
+        #expect(try reopened.fetch(FetchDescriptor<GenerationRun>()).first?.outcome == "complete")
+        #expect(try reopened.fetch(FetchDescriptor<ArticleDelivery>()).first?.state == "delivered")
+    }
 }
 
 private struct FixtureFeeds: FeedRepositoryProtocol, @unchecked Sendable {
@@ -227,7 +311,9 @@ private actor FixtureArticles: ArticleRepositoryProtocol {
         calls.append(article.link)
         if failed.contains(article.link + "#cancel") { throw CancellationError() }
         if failed.contains(article.link) { throw FixtureError.failure }
-        if filtered.contains(article.link) { throw ArticleProcessingError.contentTooShort }
+        if filtered.contains(article.link) && mode == .fidelity {
+            throw ArticleProcessingError.contentTooShort
+        }
         return ProcessedArticle(title: "Article", content: "<p>Body</p>",
                                 originalUrl: article.link, feedUrl: article.feedUrl,
                                 feedName: article.feedName, isSummary: false)
