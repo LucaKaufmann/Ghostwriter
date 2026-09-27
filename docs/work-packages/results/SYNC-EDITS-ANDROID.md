@@ -23,9 +23,11 @@ Run with JDK 17 and Android SDK platform 35/build-tools 34:
 
 The actual debug APK was installed on an isolated emulator with a synthetic Room 9 fixture. Conflict/rejection/absence/hidden-delete cards and actions rendered. The root UI check selected **Keep server** and verified the proposal disappeared while the server title remained after force-stop/reopen. It selected **Delete anyway** on a hidden-delete conflict and verified a fresh queued delete UUID with base version 7 and hidden feed state after force-stop/reopen. No network/server outcome is implied by those UI checks. The fixture marks ambiguous absence and delete rows hidden, matching production reconciliation.
 
-Final offline gate: **122 Android tests and 46 shared tests passed** with zero failures,
+Final offline gate after review corrections: **128 Android tests and 46 shared tests passed** with zero failures,
 errors, or skips; `:app:assembleDebug` passed. Log:
-`/private/tmp/epilogue-backlog-20260927/sync-android-final-gate.log`. The refreshed
+`/private/tmp/epilogue-backlog-20260927/android-sync-review-full.log`. The independent
+Sol correction review reported no actionable findings
+(`/private/tmp/epilogue-backlog-20260927/android-sync-correction-review.log`). The refreshed
 synthetic Room 9 UI fixture is
 `/private/tmp/epilogue-backlog-20260927/sync-android-ui-fixture.db`; the debug APK is
 `app/build/outputs/apk/debug/app-debug.apk`.
@@ -34,6 +36,17 @@ The A-to-B destination test covers an empty B snapshot: the old cached feed is h
 until explicit review, old-scope operations remain stored, and **Add to server** creates
 a new complete four-field payload with no base version. A separate A-to-B test shows
 old-scope legacy proposals cannot suppress generation from a reconciled B feed.
+
+## Rendered evidence
+
+Root inspected the final tested APK with synthetic production-Room9 fixtures. The [conflict and rejection screen](assets/SYNC-EDITS-ANDROID-conflicts.png) shows server and proposed title, mode, enabled state and unlimited cap. The [absence and delete screen](assets/SYNC-EDITS-ANDROID-deletion.png) shows explicit keep/add/delete choices while hidden feeds stay outside the ordinary list. Screenshots were captured on the isolated API35 arm64 emulator; no user account or source material was used.
+
+The [Add Feed validation screen](assets/SYNC-EDITS-ANDROID-validation.png) was captured on
+`emulator-5580` after installing the corrected debug APK and submitting the synthetic
+scheme-less URL `example.org/rss`. The dialog remained open with the URL and nickname
+`Synthetic test` preserved, displayed “Enter a valid HTTP or HTTPS feed URL and
+nickname,” and the app process remained running. This is UI validation evidence, not
+a network or server test.
 
 ## Boundaries
 
