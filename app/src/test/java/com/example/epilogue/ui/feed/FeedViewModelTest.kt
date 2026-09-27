@@ -27,9 +27,11 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
 class FeedViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val feeds = mockk<FeedRepository>(relaxed = true)
