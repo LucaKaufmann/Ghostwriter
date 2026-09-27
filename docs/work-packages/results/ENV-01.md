@@ -1,6 +1,6 @@
 # ENV-01 result
 
-Status: implementation verified locally; pending orchestrator review and PR.
+Status: verified and independently reviewed; ready for PR.
 
 - Base: `e6e62677fe4f5b8f516e226a48080008cafc04e0` (`origin/main`).
 - Head: the scoped commits carrying this result (SHAs in the PR and final handoff).
@@ -20,9 +20,10 @@ Python 3.11.16, separate disposable virtual environments:
 - In a second clean environment, `python -m pip install -r requirements.txt`: passed; `pip check`: passed; `pytest --collect-only -q`: 251 tests collected before the added case-variant regression, including podcast and YouTube boundary tests. YouTube API 1.2.4 resolved. Environment removed afterward.
 - `.venv/bin/ruff check tests/conftest.py tests/test_feeds.py tests/test_dependency_metadata.py tests/test_youtube_dependency_contract.py app/services/youtube_service.py --ignore UP041`: passed. `UP041` is an existing `asyncio.TimeoutError` alias outside this change.
 - `git diff --check`: passed.
+- Root's combined integration checkout: 264 backend tests passed with 3 baseline warnings, and 15 helper tests passed. Final independent Sol review of the implementation commit `3724701fcf893ad25169aa162199192d3ff9f439` exited cleanly with no findings.
 
 The two listed warnings are an upstream Starlette deprecation and a Pydantic typed-dict warning. An existing AsyncMock test intermittently emits an additional unraisable-coroutine warning after the progress line. WeasyPrint host libraries and optional local media executables are documented in `ghostwriter/README.md`. `ffmpeg -version` reported 8.1 locally; `yt-dlp` and `whisper-cli` were absent, so no audio end-to-end call or Docker image build was run. No schema migration was needed.
 
 ## Review and next action
 
-Independent Sol review identified host-state restoration, UDP `sendmsg`, dependency API, and case-insensitive environment gaps; all were fixed and regression-tested. Pending root's review rerun/integration check, then publish the scoped PR. No deployment, merge, or provider calls performed.
+Independent Sol review identified host-state restoration, UDP `sendmsg`, dependency API, and case-insensitive environment gaps; all were fixed and regression-tested. The final review and combined checks passed. Publish the scoped PR; no deployment, merge, or provider calls performed.
