@@ -428,6 +428,95 @@ test('an older delayed conflict cannot replace a newer edit proposal', async ({ 
 	await expect(page.getByRole('alert').last()).toContainText('feed-1 server');
 });
 
+test('a delayed edit conflict preserves typing after submission and retries the submitted proposal', async ({ page }) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	const writes: { title: string; version: string }[] = [];
+	await page.route('**/api/feeds/feed-1', async (route) => {
+		writes.push({ title: route.request().postDataJSON().title, version: route.request().headers()['if-match'] });
+		if (writes.length === 1) {
+			await held;
+			await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({
+				detail: { code: 'feed_conflict', current: { kind: 'feed', id: 'feed-1', version: 4,
+					title: 'Server title', mode: 'raw', is_active: true, max_articles: 8 } }
+			}) });
+		} else {
+			await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'feed-1', version: 5 }) });
+		}
+	});
+	await page.goto('/sources/feeds');
+	await page.getByRole('row').filter({ hasText: 'Example Feed' }).getByRole('button').last().click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.locator('#edit-title').fill('Submitted edit');
+	await page.getByRole('button', { name: 'Save Changes' }).click();
+	await expect.poll(() => writes.length).toBe(1);
+	await page.locator('#edit-title').fill('Later unsent edit');
+	release();
+	await expect(page.getByRole('alert')).toContainText('Server title');
+	await expect(page.getByRole('dialog')).toBeVisible();
+	await expect(page.locator('#edit-title')).toHaveValue('Later unsent edit');
+	await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+	await page.getByRole('button', { name: 'Retry with current server version' }).click();
+	await expect.poll(() => writes.length).toBe(2);
+	expect(writes).toEqual([
+		{ title: 'Submitted edit', version: '"1"' },
+		{ title: 'Submitted edit', version: '"4"' }
+	]);
+});
+
+test('a delayed successful edit does not close a newer draft in the same session', async ({ page }) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	let received = false;
+	await page.route('**/api/feeds/feed-1', async (route) => {
+		received = true;
+		await held;
+		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'feed-1', version: 2 }) });
+	});
+	await page.goto('/sources/feeds');
+	await page.getByRole('row').filter({ hasText: 'Example Feed' }).getByRole('button').last().click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.locator('#edit-title').fill('Submitted edit');
+	await page.getByRole('button', { name: 'Save Changes' }).click();
+	await expect.poll(() => received).toBe(true);
+	await page.locator('#edit-title').fill('Later unsent edit');
+	release();
+	await expect(page.getByText('Feed updated successfully')).toBeVisible();
+	await expect(page.getByRole('dialog')).toBeVisible();
+	await expect(page.locator('#edit-title')).toHaveValue('Later unsent edit');
+});
+
+test('a late completion for edit A leaves an unrelated edit B open', async ({ page }) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	let received = false;
+	await page.route('**/api/feeds/feed-1', async (route) => {
+		received = true;
+		await held;
+		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'feed-1', version: 2 }) });
+	});
+	await page.goto('/sources/feeds');
+	await page.getByRole('row').filter({ hasText: 'Example Feed' }).getByRole('button').last().click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.locator('#edit-title').fill('Edit A');
+	await page.getByRole('button', { name: 'Save Changes' }).click();
+	await expect.poll(() => received).toBe(true);
+	await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+	await page.getByRole('row').filter({ hasText: 'Daily News' }).getByRole('button').last().click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.locator('#edit-title').fill('Unsent edit B');
+	release();
+	await expect(page.getByText('Feed updated successfully')).toBeVisible();
+	await expect(page.getByRole('dialog')).toBeVisible();
+	await expect(page.locator('#edit-title')).toHaveValue('Unsent edit B');
+});
+
 test('delayed restore keeps an unrelated Add submission actionable', async ({ page }) => {
 	await mockGhostwriterApi(page);
 	await setAuthenticatedSession(page);

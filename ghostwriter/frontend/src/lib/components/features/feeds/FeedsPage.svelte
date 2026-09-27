@@ -70,7 +70,12 @@
 		return true;
 	}
 
-	type EditVariables = { feed: Feed; data: FeedUpdate; conflict?: number; editSession?: number; activeSnapshot?: Partial<Feed> };
+	type EditVariables = { feed: Feed; data: FeedUpdate; conflict?: number; editSession?: number;
+		editDraftRevision?: number; activeSnapshot?: Partial<Feed> };
+	function submittedEditIsCurrent(variables: EditVariables): boolean {
+		return variables.editSession !== undefined && variables.editSession === editSession &&
+			variables.editDraftRevision === editDraftRevision && feedToEdit?.id === variables.feed.id;
+	}
 	function mergedProposal(base: FeedCreate, proposed: FeedUpdate, current?: Partial<Feed>): FeedCreate {
 		return {
 			url: base.url, title: proposed.title ?? current?.title ?? base.title,
@@ -92,8 +97,7 @@
 				origin: 'restore', partialData: data, activeSnapshot }),
 			variables.conflict,
 			() => {
-				if (variables.editSession !== undefined && variables.editSession === editSession &&
-					feedToEdit?.id === feed.id) editDialogOpen = false;
+				if (submittedEditIsCurrent(variables)) editDialogOpen = false;
 			}, feed);
 	}
 
@@ -190,8 +194,7 @@
 		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success('Feed updated successfully');
-			if (variables.editSession !== undefined && variables.editSession === editSession &&
-				feedToEdit?.id === variables.feed.id) {
+			if (submittedEditIsCurrent(variables)) {
 				editDialogOpen = false;
 				feedToEdit = null;
 			}
@@ -250,6 +253,7 @@
 		addDialogOpen = true;
 	}
 	let editSession = 0;
+	let editDraftRevision = 0;
 	let deleteSession = 0;
 	let feedToDelete = $state<Feed | null>(null);
 	let feedToEdit = $state<Feed | null>(null);
@@ -355,6 +359,7 @@
 
 	function handleEditFeed(feed: Feed) {
 		editSession += 1;
+		editDraftRevision = 0;
 		feedToEdit = feed;
 		editTitle = feed.title;
 		editMode = feed.mode as 'raw' | 'summarize';
@@ -375,6 +380,7 @@
 		updateFeedMutation.mutate({
 			feed: feedToEdit,
 			editSession,
+			editDraftRevision,
 			data: {
 				title,
 				mode: editMode,
@@ -984,12 +990,15 @@
 			</div>
 			<div class="space-y-2">
 				<Label for="edit-title">Title</Label>
-				<Input id="edit-title" placeholder="Feed title" bind:value={editTitle} required />
+				<Input id="edit-title" placeholder="Feed title" bind:value={editTitle} oninput={() => editDraftRevision += 1} required />
 			</div>
 			<div class="grid grid-cols-2 gap-4">
 				<div class="space-y-2">
 					<Label>Mode</Label>
-					<Select.Root type="single" name="edit-mode" value={editMode} onValueChange={(v) => (editMode = v as 'raw' | 'summarize')}>
+					<Select.Root type="single" name="edit-mode" value={editMode} onValueChange={(v) => {
+						if (v !== editMode) editDraftRevision += 1;
+						editMode = v as 'raw' | 'summarize';
+					}}>
 						<Select.Trigger>
 							<span class="capitalize">{editMode}</span>
 						</Select.Trigger>
@@ -1007,6 +1016,7 @@
 						min={0}
 						max={50}
 						bind:value={editMaxArticles}
+						oninput={() => editDraftRevision += 1}
 					/>
 				</div>
 			</div>
@@ -1015,7 +1025,7 @@
 					<Label for="edit-active">Active</Label>
 					<p class="text-xs text-muted-foreground">Include this feed in digests</p>
 				</div>
-				<Switch id="edit-active" bind:checked={editIsActive} />
+				<Switch id="edit-active" bind:checked={editIsActive} onCheckedChange={() => editDraftRevision += 1} />
 			</div>
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (editDialogOpen = false)}>
