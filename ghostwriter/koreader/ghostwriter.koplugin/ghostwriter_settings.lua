@@ -81,17 +81,15 @@ function GhostwriterSettings:new()
   end
 
   local path = obj.settings.file
-  if lfs.symlinkattributes(path) then
-    local chunk = loadfile(path)
-    local valid, primary = chunk and pcall(chunk)
-    if not valid or type(primary) ~= "table" or type(primary[ROOT_KEY]) ~= "table" then
-      -- LuaSettings.open silently falls back to .old. Preserve connection
-      -- details, but never adopt ownership/cursor state from that backup.
-      obj.data.owned_downloads = nil
-      obj.data.cursors = nil
-      obj.data.last_known_id = nil
-      logger.err("[Ghostwriter] Primary settings file is invalid; ownership reset")
-    end
+  local chunk = lfs.symlinkattributes(path) and loadfile(path)
+  local valid, primary = chunk and pcall(chunk)
+  if not valid or type(primary) ~= "table" or type(primary[ROOT_KEY]) ~= "table" then
+    -- LuaSettings.open silently falls back to .old, including when the
+    -- primary is absent. Never adopt ownership/cursors from that backup.
+    obj.data.owned_downloads = nil
+    obj.data.cursors = nil
+    obj.data.last_known_id = nil
+    logger.err("[Ghostwriter] Primary settings file is missing or invalid; ownership reset")
   end
 
   return obj

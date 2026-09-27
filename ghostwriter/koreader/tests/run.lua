@@ -15,8 +15,9 @@ local function command_output(command)
 end
 local forced_mtime = {}
 local primary_corrupt = false
+local primary_file_present = false
 local function attributes(path, follow)
-  if path == "/private/tmp/ghostwriter.lua" and primary_corrupt then
+  if path == "/private/tmp/ghostwriter.lua" and (primary_corrupt or primary_file_present) then
     return { mode = "file" }
   end
   local output = command_output("stat " .. (follow and "-L " or "")
@@ -59,12 +60,17 @@ package.preload.luasettings = function()
   return { open = function(_, path)
     return {
       file = path,
-      readSetting = function() return copy(primary_corrupt and backup_data or disk_data) end,
+      readSetting = function()
+        return copy((primary_corrupt or not primary_file_present) and backup_data or disk_data)
+      end,
       saveSetting = function(_, _, value) pending_data = copy(value) end,
       flush = function()
         flush_count = flush_count + 1
         -- Match KOReader: return self even when the disk write silently fails.
-        if not fail_flush and flush_count ~= fail_on_flush then disk_data = copy(pending_data) end
+        if not fail_flush and flush_count ~= fail_on_flush then
+          disk_data = copy(pending_data)
+          primary_file_present = true
+        end
         if after_flush then after_flush() end
         return {}
       end,
@@ -74,7 +80,7 @@ end
 local real_loadfile = loadfile
 loadfile = function(path)
   if path == "/private/tmp/ghostwriter.lua" then
-    if primary_corrupt then return nil, "corrupt primary" end
+    if primary_corrupt or not primary_file_present then return nil, "missing or corrupt primary" end
     return function() return { ghostwriter = copy(disk_data) } end
   end
   return real_loadfile(path)
@@ -202,6 +208,24 @@ check(ok and result.failed == 1 and not attributes(dir .. "/stampfail.epub"),
 io.open = real_open
 ok, result = Sync.run(settings)
 check(ok and result.downloaded == 1, "stamp failure retry")
+local read_count = 0
+io.open = function(path, mode)
+  if path == dir .. "/readerror.epub" and mode == "rb" then
+    return { read = function()
+      read_count = read_count + 1
+      if read_count == 1 then return "prefix" end
+      return nil, "injected I/O error"
+    end, close = function() end }
+  end
+  return real_open(path, mode)
+end
+next_digests = { digest("10", "readerror.epub") }
+ok, result = Sync.run(settings)
+check(ok and result.failed == 1 and not attributes(dir .. "/readerror.epub"),
+  "mid-file hash read error blocked retry")
+io.open = real_open
+ok, result = Sync.run(settings)
+check(ok and result.downloaded == 1, "read error retry")
 check(settings:setConnection("https://two.example", "synthetic-token"), "new server")
 next_digests = {}
 ok, result = Sync.run(settings)
@@ -233,6 +257,13 @@ ok, result = Sync.run(recovered)
 check(ok and result.pruned == 0 and read(dir .. "/personal.epub") == "PERSONAL",
   "corrupt primary enabled pruning")
 primary_corrupt = false
+primary_file_present = false
+local missing_primary = Settings:new()
+check(missing_primary.data.owned_downloads == nil and missing_primary.data.cursors == nil,
+  "missing primary adopted backup ownership")
+ok, result = Sync.run(missing_primary)
+check(ok and result.pruned == 0, "missing primary enabled pruning")
+primary_file_present = true
 
 -- Exercise the actual dialog callbacks; Lua scoping is the regression here.
 local shown, closed
@@ -407,6 +438,22 @@ if pcall(require, "ffi") then
     replacement_target, attributes(dir), copy_fault)
   check(not dl_ok and read(replacement_target) == "PERSONAL REPLACEMENT",
     "failed fallback cleanup deleted replacement")
+  check(settings:setDownloadDir(dir) and settings:setConnection("https://test.example", "synthetic")
+      and settings:setKeepLastN(0), "integration fixture settings")
+  package.loaded.ghostwriter_api = {
+    get_new_digests = function() return true, { digests = { digest("12", "integrated.epub") } } end,
+    download_digest = real_api.download_digest,
+  }
+  package.loaded.ghostwriter_sync = nil
+  local integrated_sync = require("ghostwriter_sync")
+  fail_flush = true
+  ok, result = integrated_sync.run(settings)
+  check(ok and result.failed == 1 and not attributes(dir .. "/integrated.epub"),
+    "real API failed-save cleanup left unowned final file")
+  fail_flush = false
+  ok, result = integrated_sync.run(settings)
+  check(ok and result.downloaded == 1 and attributes(dir .. "/integrated.epub"),
+    "real API failed-save retry")
   local moved = dir .. "-moved"
   local outside_dir = tmp .. "/other-books"
   assert(os.execute("mkdir " .. quote(outside_dir)))
