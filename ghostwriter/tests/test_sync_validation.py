@@ -3,6 +3,34 @@
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlmodel import SQLModel, create_engine
+
+from app.api.sync import router
+from app.core import database, security
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    """Exercise the real route/auth against an empty, test-owned database."""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'sync.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(database, "engine", engine)
+    # AUTH-01 owns a separate reference after fixing auth session lifetimes.
+    if hasattr(security, "engine"):
+        monkeypatch.setattr(security, "engine", engine)
+    monkeypatch.setattr("app.api.sync.scheduler_module.get_all_schedules", lambda: [])
+    app = FastAPI()
+    app.include_router(router, prefix="/api/sync")
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.parametrize("value", ["not-a-uuid", f"{uuid4()},not-a-uuid"])
