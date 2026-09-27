@@ -16,7 +16,7 @@ final class DeliveryUITests: XCTestCase {
             XCTAssertTrue(settings.waitForExistence(timeout: 10))
             settings.tap()
             XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
-            let regenerate = app.buttons["Regenerate delivered articles"]
+            let regenerate = app.buttons["Regenerate including delivered articles"]
             for _ in 0..<6 where !regenerate.exists {
                 app.collectionViews.firstMatch.swipeUp()
             }
