@@ -4,7 +4,7 @@ Updated 2026-09-28 (Europe/Zurich). Historical audit baseline: `cdb776d1d544bc6d
 
 ## Outcome and authority
 
-**All 29 approved reliability packages are complete, merged and verified.** All 11 headline audit findings have remedies. Original PRs 74–119 and late iOS review fixes 120–121 are merged. Verified product source on main is `c894fb8072c3919f367722782dbde25b12b6760c`; the final closeout checkpoint changes documentation and the DEBUG UI fixture/test only.
+**All 29 approved reliability packages are complete, merged and verified.** All 11 headline audit findings have remedies. Original PRs 74–119 and late iOS review fixes 120–121 are merged. Verified main is `68a797ed497310a836c854294edd65ca7327cf88`, including the reviewed fixture correction and all merged histories. Its final affected UI check passed1/1 with no failures/skips; this subsequent evidence checkpoint changes documentation only.
 
 The user authorized implementation, PRs, review corrections, merging all scoped work and verification on main. All workers/reviewers use Sol (`gpt-6-sol`). No release, deployment, tag, branch deletion, production-content inspection or paid-provider invocation occurred. No recurring automation exists.
 
@@ -27,7 +27,7 @@ The [merge plan](work-packages/merge-plan.md), [PR index](work-packages/results/
 | Late iOS review fixes | Sol ios_sync_closeout; complete | PR120 fixes invalid-URL recovery guidance; PR121 handles remaining queued proposals. Both independently reviewed and visually inspected. Store/wire contracts unchanged. |
 | Durable closeout | Root; complete | This documentation and test-fixture checkpoint records exact evidence and the release checklist through migration 028. No implementation worker remains active. |
 
-Temporary worktrees/evidence: `/private/tmp/epilogue-backlog-20260927/`. Final documentation branch: `codex/reliability-main-closeout`, worktree `main-closeout-docs`, based on verified main c894fb80. Root alone owns shared planning documents.
+Temporary worktrees/evidence: `/private/tmp/epilogue-backlog-20260927/`. Final documentation branch: `codex/reliability-verification-record`, worktree `main-closeout-docs`, based on verified main68a797ed. Root alone owns shared planning documents.
 
 ## Verification and review
 
@@ -47,6 +47,6 @@ A future rollout must back up first, migrate the server before enabling native v
 
 ## Exact next action and open decisions
 
-No reliability production implementation or source verification remains. After publishing this checkpoint, verify the final remote ref/tree and repeat the affected fixture case once on that exact main; record the result in the task closeout. Choose the next bounded product/release outcome with the user. Audience, preferred reading/listening/native surface, release target, generated-podcast native UI, durable native configuration outbox, distributed scheduling and personal deployment helper DEPLOY-01 remain outside this scope. Do not deploy or restart old packages without a new outcome.
+No reliability implementation or required verification remains. Final remote ref/tree and all49 PR dispositions were verified at main68a797ed, and the affected fixture case passed1/1 on that exact revision. Do not rerun completed checks merely to reconstruct this checkpoint. Choose the next bounded product/release outcome with the user. Audience, preferred reading/listening/native surface, release target, generated-podcast native UI, durable native configuration outbox, distributed scheduling and personal deployment helper DEPLOY-01 remain outside this scope. Do not deploy or restart old packages without a new outcome.
 
 Protected work remains intact: original `/Users/luca/git/Epilogue` stays on main cdb776d with local audit/planning files; `/Users/luca/git/Epilogue-secondary` stays on gitbutler/workspace14a753e with staged CLAUDE.md, Android SettingsScreen.kt and deployment-example changes. Do not absorb, reset or publish those changes.
