@@ -22,3 +22,5 @@ Verification on 2026-09-27:
 - `git diff --check`: passed.
 
 Existing native manual setting edits do not have durable offline change tracking; this change reports incomplete sync and protects in-flight local values but does not introduce a settings outbox. Historical already-incomplete digest rows are not repaired by retrying the sync.
+
+Independent Sol review completed against final correction `2e83bea`. Its sole remaining finding requested automatic download backfill for already indexed nonempty editions. Root verified that known IDs intentionally survive file eviction and that History provides manual downloads; automatically omitting missing-file IDs would undo the existing 30-day retention policy. The proposed behavior expansion was not accepted. The repeated-payload fixture proves defensive ingestion when a digest is supplied again, not normal automatic backfill after changing preferences. Production comments and the fixture name clarify that distinction; no executable behavior changed after the recorded tests. All earlier actionable status findings were fixed and verified. Root also inspected the committed history screenshot.
