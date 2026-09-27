@@ -137,7 +137,7 @@ class DigestRepository @Inject constructor(
     }
 
     suspend fun deleteDigestById(digestId: Long) {
-        digestDao.deleteDigestById(digestId)
+        digestDao.deleteWithArtifact(digestId, ::removeArtifact)
     }
 
     /**
@@ -225,14 +225,13 @@ class DigestRepository @Inject constructor(
      * @return true if the file was successfully deleted (or didn't exist)
      */
     suspend fun deleteDigest(digest: Digest): Boolean {
-        // Delete EPUB file first
-        val file = File(digest.epubFilePath)
-        val fileDeleted = if (file.exists()) file.delete() else true
+        // Re-read the persisted path: the caller may hold an older UI snapshot.
+        return digestDao.deleteWithArtifact(digest.id, ::removeArtifact)
+    }
 
-        // Delete from database (cascade will remove articles)
-        digestDao.deleteDigestById(digest.id)
-
-        return fileDeleted
+    private fun removeArtifact(path: String): Boolean {
+        val file = File(path)
+        return !file.exists() || (file.isFile && file.delete())
     }
 
     /**
@@ -244,10 +243,7 @@ class DigestRepository @Inject constructor(
             val excess = count - MAX_RETAINED_DIGESTS
             val oldDigests = digestDao.getOldestDigests(excess)
             oldDigests.forEach { digest ->
-                // Delete file
-                File(digest.epubFilePath).delete()
-                // Delete from database
-                digestDao.deleteDigest(digest)
+                digestDao.deleteWithArtifact(digest.id, ::removeArtifact)
             }
         }
     }
@@ -257,13 +253,11 @@ class DigestRepository @Inject constructor(
      * Used for development/testing purposes.
      */
     suspend fun deleteAllDigests() {
-        // Delete all EPUB files first
-        val digests = digestDao.getAllDigestsList()
-        digests.forEach { digest ->
-            File(digest.epubFilePath).delete()
+        // Delete each row through the same reference-aware path. An unlink
+        // failure retains that row so the caller can retry it later.
+        digestDao.getAllDigestsList().forEach { digest ->
+            digestDao.deleteWithArtifact(digest.id, ::removeArtifact)
         }
-        // Delete all from database (cascade will remove articles)
-        digestDao.deleteAllDigests()
     }
 
     /**
@@ -313,7 +307,10 @@ class DigestRepository @Inject constructor(
             if (!file.exists()) return@forEach
 
             if (file.lastModified() < cutoff) {
-                if (file.delete()) {
+                if (digestDao.removeUnsharedArtifact(digest.id) { currentPath ->
+                    val currentFile = File(currentPath)
+                    currentFile.isFile && currentFile.lastModified() < cutoff && currentFile.delete()
+                }) {
                     deletedCount++
                 }
             }

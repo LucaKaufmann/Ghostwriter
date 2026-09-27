@@ -18,6 +18,8 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Entities
 import java.io.File
 import java.io.FileOutputStream
+import java.io.FilterOutputStream
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,9 +49,6 @@ class EpubGenerator @Inject constructor(
         private const val MEDIA_TYPE_HTML = "application/xhtml+xml"
         private const val MEDIA_TYPE_CSS = "text/css"
     }
-
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    private val displayDateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.US)
 
     /**
      * Generates an EPUB file from a list of processed articles.
@@ -81,7 +80,7 @@ class EpubGenerator @Inject constructor(
      */
     private fun createBook(articles: List<ProcessedArticle>, date: Date, period: DigestPeriod?): Book {
         val book = Book()
-        val formattedDate = displayDateFormat.format(date)
+        val formattedDate = SimpleDateFormat("MMMM d, yyyy", Locale.US).format(date)
         val periodText = period?.name?.lowercase()?.replaceFirstChar { it.uppercase() }
         val titleSuffix = periodText?.let { " - $it" } ?: ""
         val descriptionSuffix = periodText?.let { " ($it digest)" } ?: ""
@@ -340,18 +339,33 @@ class EpubGenerator @Inject constructor(
 
     /**
      * Writes the EPUB book to a file.
-     * If a period is provided, includes it in the filename (e.g., "Epilogue_2024-01-11_morning.epub").
+     * Atomically reserves a unique path, including for repeated runs in one period.
      */
     private fun writeEpub(book: Book, date: Date, period: DigestPeriod?): File {
         val outputDir = getOutputDirectory()
-        outputDir.mkdirs()
+        if (!outputDir.isDirectory && !outputDir.mkdirs() && !outputDir.isDirectory) {
+            throw IOException("Cannot create EPUB output directory")
+        }
 
-        val periodSuffix = period?.let { "_${it.name.lowercase()}" } ?: ""
-        val filename = "Epilogue_${dateFormat.format(date)}${periodSuffix}.epub"
-        val outputFile = File(outputDir, filename)
-
-        FileOutputStream(outputFile).use { fos ->
-            EpubWriter().write(book, fos)
+        val periodSuffix = period?.let { "_${it.name.lowercase(Locale.ROOT)}" } ?: ""
+        val dateText = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(date)
+        val outputFile = File.createTempFile("Epilogue_${dateText}${periodSuffix}_", ".epub", outputDir)
+        try {
+            FileOutputStream(outputFile).use { fos ->
+                // epub4j closes its ZIP stream. Keep the underlying descriptor
+                // open until we have flushed the completed archive to storage.
+                val stream = object : FilterOutputStream(fos) {
+                    override fun close() = flush()
+                    override fun write(bytes: ByteArray, offset: Int, length: Int) {
+                        out.write(bytes, offset, length)
+                    }
+                }
+                EpubWriter().write(book, stream)
+                fos.fd.sync()
+            }
+        } catch (failure: Exception) {
+            outputFile.delete()
+            throw failure
         }
 
         return outputFile
