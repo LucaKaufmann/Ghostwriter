@@ -101,6 +101,18 @@ class ContentProcessorTest {
     }
 
     @Test
+    fun `blank content uses full description without fetching source`() = runBlocking {
+        withArticleServer(503, 120) { url, requests ->
+            val paragraph = (1..100).joinToString(" ") { "word$it" } + "."
+            val description = "<p>$paragraph</p><p>$paragraph</p><p>$paragraph</p>"
+            val result = processor.processForGeneration(url, "   ", description,
+                "Fixture", null, 200)
+            assertTrue(result is ContentProcessor.GenerationResult.Ready)
+            assertEquals(0, requests.get())
+        }
+    }
+
+    @Test
     fun `processDocument extracts title and content from valid article`() {
         val html = """
             <!DOCTYPE html>

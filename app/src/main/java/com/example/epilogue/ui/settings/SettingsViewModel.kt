@@ -183,7 +183,7 @@ class SettingsViewModel @Inject constructor(
 
     /** Explicitly repeat local articles, including identities already delivered. */
     fun regenerateDigestLocally() {
-        if (_uiState.value.ghostwriterEnabled) return
+        if (_uiState.value.ghostwriterEnabled && _uiState.value.ghostwriterUrl.isNotBlank()) return
         clearImmediateWorkObserver()
         digestPollingJob?.cancel()
         _uiState.update { it.copy(isGenerating = true, digestTriggered = true,
