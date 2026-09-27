@@ -148,6 +148,47 @@ def test_legacy_zero_to_ten_mapping_cannot_overwrite(client, public_dns):
     assert client.get(f"/api/feeds/{feed['id']}").json()["max_articles"] == 0
 
 
+def test_existing_dead_domain_can_update_and_delete_without_dns(client, public_dns, monkeypatch):
+    value = url()
+    feed = create(client, value)
+    identity = binding(client)["server_instance_id"]
+
+    async def no_dns(_url):
+        raise AssertionError("stored feed identity must not require DNS")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr("app.services.feed_sync.validate_public_url_bounded", no_dns)
+        edit = {"op_id": str(uuid4()), "url": value, "kind": "upsert",
+                "base_version": feed["version"], "fields": {"title": "Still mine"}}
+        updated = push(client, identity, [edit]).json()["results"][0]
+        assert updated["status"] == "applied"
+        assert updated["current"]["title"] == "Still mine"
+        delete = {"op_id": str(uuid4()), "url": value, "kind": "delete",
+                  "base_version": updated["current"]["version"]}
+        removed = push(client, identity, [delete]).json()["results"][0]
+        assert removed["status"] == "applied"
+        assert removed["current"]["kind"] == "tombstone"
+        never_seen = {"op_id": str(uuid4()), "url": "https://dead.example.com/rss",
+                      "kind": "delete", "base_version": None}
+        assert push(client, identity, [never_seen]).json()["results"][0] == {
+            "op_id": never_seen["op_id"], "status": "applied", "current": None,
+        }
+
+
+def test_web_put_cannot_implicitly_restore_tombstone(client, public_dns):
+    value = url()
+    feed = create(client, value)
+    deleted = client.delete(f"/api/feeds/{feed['id']}",
+                            headers={"If-Match": f'"{feed["version"]}"'})
+    assert deleted.status_code == 200
+    tombstone = next(row for row in binding(client)["changes"] if row["url"] == value)
+    retry = client.put(f"/api/feeds/{feed['id']}", json={"title": "Accidental restore"},
+                       headers={"If-Match": f'"{tombstone["version"]}"'})
+    assert retry.status_code == 409
+    assert retry.json()["detail"]["current"] == tombstone
+    assert next(row for row in binding(client)["changes"] if row["url"] == value) == tombstone
+
+
 def test_synthetic_rows_stay_internal_and_unversioned(client, public_dns):
     synthetic = f"synthetic://test-{uuid4()}"
     with Session(engine) as session:
