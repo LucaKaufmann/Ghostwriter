@@ -48,6 +48,22 @@ local function open_settings_handle()
   return LuaSettings:open(path)
 end
 
+local function same_value(a, b, seen)
+  if type(a) ~= type(b) then return false end
+  if type(a) ~= "table" then return a == b end
+  seen = seen or {}
+  if seen[a] then return false end
+  seen[a] = true
+  for key, value in pairs(a) do
+    if not same_value(value, b[key], seen) then return false end
+  end
+  for key in pairs(b) do
+    if a[key] == nil then return false end
+  end
+  seen[a] = nil
+  return true
+end
+
 function GhostwriterSettings:new()
   local obj = setmetatable({}, self)
   obj.settings = open_settings_handle()
@@ -69,9 +85,14 @@ end
 function GhostwriterSettings:save()
   local ok, err = pcall(function()
     self.settings:saveSetting(ROOT_KEY, self.data)
-    local flushed = self.settings:flush()
-    if flushed == false then
-      error("settings flush failed")
+    self.settings:flush()
+    -- KOReader's LuaSettings.flush returns `self` even if writeToFile fails.
+    -- Read the primary file, not LuaSettings.open's backup fallback, before
+    -- treating ownership or cursor updates as durable.
+    local chunk = assert(loadfile(self.settings.file))
+    local written = chunk()
+    if type(written) ~= "table" or not same_value(written[ROOT_KEY], self.data) then
+      error("settings write did not persist")
     end
   end)
 
@@ -139,6 +160,8 @@ function GhostwriterSettings:getOwnedDownloads(scope)
           or filename:find("[/\\%c]") or type(stamp) ~= "table"
           or type(stamp.size) ~= "number" or type(stamp.modification) ~= "number"
           or type(stamp.ino) ~= "number" or type(stamp.dev) ~= "number"
+          or type(stamp.hash) ~= "string" or not stamp.hash:match("^[0-9a-f]+$")
+          or #stamp.hash ~= 64
           or stamp.size < 0 or stamp.ino < 0 then
         return nil
       end

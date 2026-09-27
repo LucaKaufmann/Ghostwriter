@@ -13,32 +13,60 @@ local function command_output(command)
   if ok then return output end
   return nil
 end
+local forced_mtime = {}
 local function attributes(path)
   local output = command_output("stat -f '%HT|%z|%m|%i|%d' " .. quote(path) .. " 2>/dev/null")
   if not output then return nil end
   local kind, size, mtime, ino, dev = output:match("([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)")
+  if not kind then return nil end
   local mode = ({ Directory = "directory", ["Regular File"] = "file", ["Symbolic Link"] = "link" })[kind]
-  return { mode = mode, size = tonumber(size), modification = tonumber(mtime), ino = tonumber(ino), dev = tonumber(dev) }
+  return { mode = mode, size = tonumber(size), modification = forced_mtime[path] or tonumber(mtime),
+    ino = tonumber(ino), dev = tonumber(dev) }
 end
 package.preload["libs/libkoreader-lfs"] = function() return { symlinkattributes = attributes } end
 package.preload.logger = function() return { err = function() end } end
-local settings_data = {}
+package.preload["ffi/sha2"] = function()
+  return { sha256 = function()
+    local value = 0
+    return function(chunk)
+      if not chunk then return string.format("%064x", value) end
+      for i = 1, #chunk do value = (value * 257 + chunk:byte(i)) % 4294967296 end
+    end
+  end }
+end
+local pending_data = {}
+local disk_data = {}
+local function copy(value)
+  if type(value) ~= "table" then return value end
+  local result = {}
+  for key, child in pairs(value) do result[key] = copy(child) end
+  return result
+end
 local fail_flush = false
 local flush_count = 0
 local fail_on_flush
 package.preload.datastorage = function() return { getSettingsDir = function() return "/private/tmp" end } end
 package.preload.luasettings = function()
-  return { open = function()
+  return { open = function(_, path)
     return {
-      readSetting = function() return settings_data end,
-      saveSetting = function(_, _, value) settings_data = value end,
+      file = path,
+      readSetting = function() return copy(disk_data) end,
+      saveSetting = function(_, _, value) pending_data = copy(value) end,
       flush = function()
         flush_count = flush_count + 1
-        if fail_flush or flush_count == fail_on_flush then return false end
-        return true
+        -- Match KOReader: return self even when the disk write silently fails.
+        if not fail_flush and flush_count ~= fail_on_flush then disk_data = copy(pending_data) end
+        return {}
       end,
     }
   end }
+end
+local real_loadfile = loadfile
+loadfile = function(path)
+  if path == "/private/tmp/ghostwriter.lua" then
+    return function() return { ghostwriter = copy(disk_data) } end
+  end
+  return real_loadfile(path)
 end
 local next_digests = {}
 local fail_download = {}
@@ -51,10 +79,10 @@ package.preload.ghostwriter_api = function()
     end,
     download_digest = function(_, _, name, target)
       if fail_download[name] then return false end
-      local file = assert(io.open(target .. ".part", "wb"))
+      local file = assert(io.open(target .. ".part.mock", "wb"))
       file:write("owned:" .. name)
       file:close()
-      assert(os.rename(target .. ".part", target))
+      assert(os.rename(target .. ".part.mock", target))
       return true
     end,
   }
@@ -94,10 +122,14 @@ ok, result = Sync.run(settings)
 check(ok and result.pruned == 1, "owned pruning")
 check(read(dir .. "/personal.epub") == "PERSONAL", "unrelated book changed")
 check(not attributes(dir .. "/one.epub") and attributes(dir .. "/two.epub"), "wrong prune")
-write(dir .. "/two.epub", "REPLACED BY USER")
+local original = read(dir .. "/two.epub")
+forced_mtime[dir .. "/two.epub"] = attributes(dir .. "/two.epub").modification
+write(dir .. "/two.epub", string.rep("X", #original))
 next_digests = { digest("3", "two.epub") }
 ok, result = Sync.run(settings)
-check(ok and result.failed == 1 and read(dir .. "/two.epub") == "REPLACED BY USER", "replaced owned file changed")
+check(ok and result.failed == 1 and read(dir .. "/two.epub") == string.rep("X", #original),
+  "same-size in-place edit was adopted")
+forced_mtime[dir .. "/two.epub"] = nil
 next_digests = { digest("3", "three.epub") }
 settings.data.owned_downloads = nil
 ok, result = Sync.run(settings)
@@ -146,7 +178,7 @@ check(ok and result.failed == 1 and read(tmp .. "/outside.epub") == "OUTSIDE", "
 write(dir .. "/stale.epub.part", "PART")
 next_digests = { digest("8", "stale.epub") }
 ok, result = Sync.run(settings)
-check(ok and result.failed == 1 and read(dir .. "/stale.epub.part") == "PART", "partial collision changed")
+check(ok and result.downloaded == 1 and read(dir .. "/stale.epub.part") == "PART", "partial retry failed")
 check(settings:setConnection("https://two.example", "synthetic-token"), "new server")
 next_digests = {}
 ok, result = Sync.run(settings)
@@ -171,6 +203,7 @@ check(ok and requested_cursor == "", "legacy cursor leaked to new server")
 
 -- Exercise the actual dialog callbacks; Lua scoping is the regression here.
 local shown, closed
+local dialog_values = { "https://dialog.example/api", "dialog-token" }
 package.preload.gettext = function() return function(value) return value end end
 package.preload.dispatcher = function() return { registerAction = function() end } end
 package.preload["ui/widget/infomessage"] = function()
@@ -178,7 +211,7 @@ package.preload["ui/widget/infomessage"] = function()
 end
 package.preload["ui/widget/multiinputdialog"] = function()
   return { new = function(_, spec)
-    spec.getFields = function() return { "https://dialog.example/api", "dialog-token" } end
+    spec.getFields = function() return dialog_values end
     spec.onShowKeyboard = function() end
     return spec
   end }
@@ -207,8 +240,40 @@ plugin:editConnectionSettings()
 dialog = shown
 closed = nil
 fail_flush = true
+dialog_values = { "https://unsaved.example", "unsaved-token" }
 dialog.buttons[1][2].callback()
 check(closed == nil and settings:getServerURL() == "https://dialog.example", "failed save closed dialog")
 fail_flush = false
+
+-- Run the real transport finalization with LuaJIT FFI and a fake HTTP server.
+-- The server creates a racing destination after the request begins.
+if pcall(require, "ffi") then
+  local race_target
+  package.preload.json = function() return { decode = function() return {} end } end
+  package.preload.ltn12 = function() return { sink = { table = function() return function() end end } } end
+  package.preload.socket = function()
+    return { skip = function(n, ...) return select(n + 1, ...) end }
+  end
+  package.preload.socketutil = function()
+    return { set_timeout = function() end, reset_timeout = function() end }
+  end
+  package.preload["socket.url"] = function() return { escape = function(value) return value end } end
+  package.preload["socket.http"] = function()
+    return { request = function(request)
+      request.sink("network-content")
+      if race_target then write(race_target, "PERSONAL RACE") end
+      return 1, 200, {}, "OK"
+    end }
+  end
+  local real_api = dofile(base .. "/ghostwriter_api.lua")
+  local target = dir .. "/transport.epub"
+  write(target .. ".part", "OLD PART")
+  local dl_ok = real_api.download_digest("https://test.example", "synthetic", "transport.epub", target)
+  check(dl_ok and read(target) == "network-content" and read(target .. ".part") == "OLD PART",
+    "real transport failed exclusive partial retry")
+  race_target = dir .. "/race.epub"
+  dl_ok = real_api.download_digest("https://test.example", "synthetic", "race.epub", race_target)
+  check(not dl_ok and read(race_target) == "PERSONAL RACE", "real transport overwrote racing book")
+end
 assert(os.execute("rm -rf " .. quote(tmp)))
 print("KO-01 host Lua checks passed")

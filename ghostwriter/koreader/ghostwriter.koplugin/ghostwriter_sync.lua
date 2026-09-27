@@ -1,6 +1,7 @@
 local api = require("ghostwriter_api")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
+local sha256 = require("ffi/sha2").sha256
 
 local GhostwriterSync = {}
 
@@ -51,17 +52,34 @@ local function regular_file(path)
   return nil
 end
 
-local function same_file(attr, stamp)
-  return attr and attr.size == stamp.size and attr.modification == stamp.modification
-      and attr.ino == stamp.ino and attr.dev == stamp.dev
+local function file_hash(path)
+  local file = io.open(path, "rb")
+  if not file then return nil end
+  local update = sha256()
+  while true do
+    local chunk = file:read(65536)
+    if not chunk then break end
+    update(chunk)
+  end
+  file:close()
+  return update()
 end
 
-local function stamp_for(attr)
+local function same_file(path, attr, stamp)
+  return attr and attr.size == stamp.size and attr.modification == stamp.modification
+      and attr.ino == stamp.ino and attr.dev == stamp.dev
+      and file_hash(path) == stamp.hash
+end
+
+local function stamp_for(path, attr)
   if not attr or type(attr.size) ~= "number" or type(attr.modification) ~= "number"
       or type(attr.ino) ~= "number" or type(attr.dev) ~= "number" then
     return nil
   end
-  return { size = attr.size, modification = attr.modification, ino = attr.ino, dev = attr.dev }
+  local hash = file_hash(path)
+  if not hash then return nil end
+  return { size = attr.size, modification = attr.modification, ino = attr.ino,
+    dev = attr.dev, hash = hash }
 end
 
 local function copy_records(records)
@@ -93,7 +111,7 @@ local function prune_owned(settings, server_url, scope, download_dir, keep_last_
     end
     local path = join_path(download_dir, name)
     local attr = regular_file(path)
-    if same_file(attr, stamp) then
+    if same_file(path, attr, stamp) then
       table.insert(files, { name = name, path = path, mtime = attr.modification })
     end
   end
@@ -108,7 +126,7 @@ local function prune_owned(settings, server_url, scope, download_dir, keep_last_
     local file = files[i]
     local fresh_dir = safe_directory(download_dir)
     if fresh_dir ~= download_dir or ownership_scope(server_url, download_dir) ~= scope
-        or not same_file(regular_file(file.path), records[file.name]) then
+        or not same_file(file.path, regular_file(file.path), records[file.name]) then
       break
     end
     -- Forget ownership durably first. A failed unlink leaves the book intact.
@@ -182,7 +200,6 @@ function GhostwriterSync.run(settings, progress_cb)
     else
       local target_path = join_path(download_dir, filename)
       local target_attr = lfs.symlinkattributes(target_path)
-      local part_attr = lfs.symlinkattributes(target_path .. ".part")
       if safe_directory(download_dir) ~= download_dir
           or ownership_scope(server_url, download_dir) ~= scope then
         failed = failed + 1
@@ -190,19 +207,16 @@ function GhostwriterSync.run(settings, progress_cb)
       elseif target_attr then
         -- An existing file is never adopted. It can satisfy the cursor only
         -- when it is still the exact file previously recorded by this plugin.
-        if same_file(regular_file(target_path), records[filename] or {}) then
+        if same_file(target_path, regular_file(target_path), records[filename] or {}) then
           skipped_existing = skipped_existing + 1
           if can_advance_cursor then newest_contiguous_success_id = digest_id end
         else
           failed = failed + 1
           can_advance_cursor = false
         end
-      elseif part_attr then
-        failed = failed + 1
-        can_advance_cursor = false
       else
         local dl_ok = api.download_digest(server_url, api_token, filename, target_path)
-        local stamp = stamp_for(regular_file(target_path))
+        local stamp = stamp_for(target_path, regular_file(target_path))
         if dl_ok and stamp and safe_directory(download_dir) == download_dir
             and ownership_scope(server_url, download_dir) == scope then
           local next_records = copy_records(records)
@@ -216,7 +230,7 @@ function GhostwriterSync.run(settings, progress_cb)
             -- retry. Remove only the file just created, after rechecking it.
             if safe_directory(download_dir) == download_dir
                 and ownership_scope(server_url, download_dir) == scope
-                and same_file(regular_file(target_path), stamp) then
+                and same_file(target_path, regular_file(target_path), stamp) then
               os.remove(target_path)
             end
             failed = failed + 1
