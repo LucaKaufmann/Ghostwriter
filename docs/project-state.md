@@ -27,7 +27,7 @@ The [merge plan](work-packages/merge-plan.md), [PR index](work-packages/results/
 | Late iOS review fixes | Sol ios_sync_closeout; complete | PR120 fixes invalid-URL recovery guidance; PR121 handles remaining queued proposals. Both independently reviewed and visually inspected. Store/wire contracts unchanged. |
 | Durable closeout | Root; complete | This documentation and test-fixture checkpoint records exact evidence and the release checklist through migration 028. No implementation worker remains active. |
 
-Temporary worktrees/evidence: `/private/tmp/epilogue-backlog-20260927/`. Final documentation branch: `codex/reliability-main-closeout`, worktree `main-closeout-docs`, based on verified main68a797ed. Root alone owns shared planning documents.
+Temporary worktrees/evidence: `/private/tmp/epilogue-backlog-20260927/`. Final documentation branch: `codex/reliability-verification-record`, worktree `main-closeout-docs`, based on verified main68a797ed. Root alone owns shared planning documents.
 
 ## Verification and review
 
