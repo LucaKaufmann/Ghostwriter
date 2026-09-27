@@ -8,6 +8,7 @@
 
 import Testing
 import Foundation
+import SwiftData
 @testable import Data
 @testable import Domain
 
@@ -158,5 +159,123 @@ struct SettingsRepositoryTests {
 
         try await repository.setGhostwriterDownloadEpubsOnSync(true)
         #expect(try await repository.getGhostwriterDownloadEpubsOnSync() == true)
+    }
+}
+
+@Suite("Ghostwriter URL binding changes")
+@MainActor
+struct GhostwriterURLBindingTests {
+    private let original = "https://server.test"
+    private let temporary = "https://temporary.test"
+
+    private enum SaveFailure: Error { case injected }
+
+    private func container(at directory: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
+        return try ModelContainer(for: schema, migrationPlan: EpilogueMigrationPlan.self,
+                                  configurations: [ModelConfiguration(
+                                    schema: schema, url: directory.appendingPathComponent("Epilogue.sqlite"))])
+    }
+
+    private func fixture(suspended: Bool = false) throws ->
+        (directory: URL, defaults: UserDefaults, repository: SettingsRepository) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("settings-url-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let defaults = UserDefaults(suiteName: "settings-url-\(UUID().uuidString)")!
+        defaults.set(original, forKey: "ghostwriter_url")
+        let context = ModelContext(try container(at: directory))
+        context.insert(FeedSyncState(destinationURL: original, configurationId: "config-a",
+                                     serverInstanceId: "instance-a", cursorVersion: 7,
+                                     firstReconciliationComplete: true,
+                                     suspended: suspended, generation: 4, nextSequence: 2))
+        context.insert(FeedMutation(url: "https://feed.test/rss",
+                                    scopeKey: original + "\nconfig-a", kind: "upsert",
+                                    title: "Local proposal", sequence: 1, localRevision: 1))
+        try context.save()
+        return (directory, defaults, SettingsRepository(
+            userDefaults: defaults, keychainService: KeychainService(
+                serviceName: "settings-url-\(UUID().uuidString)"),
+            modelContainer: try container(at: directory)))
+    }
+
+    private func state(at directory: URL) throws -> (FeedSyncState, FeedMutation) {
+        let context = ModelContext(try container(at: directory))
+        return (try #require(context.fetch(FetchDescriptor<FeedSyncState>()).first),
+                try #require(context.fetch(FetchDescriptor<FeedMutation>()).first))
+    }
+
+    @Test("A temporary URL edit and revert retain the original binding across reopen")
+    func transientEditAndRevert() async throws {
+        let value = try fixture()
+        try await value.repository.setGhostwriterURL(temporary)
+        let interim = try state(at: value.directory)
+        #expect(interim.0.destinationURL == original)
+        #expect(interim.0.generation == 5)
+        #expect(!interim.0.suspended)
+        let reopened = SettingsRepository(userDefaults: value.defaults,
+                                          modelContainer: try container(at: value.directory))
+        try await reopened.setGhostwriterURL("  https://server.test/  ")
+        let final = try state(at: value.directory)
+        #expect(final.0.destinationURL == original)
+        #expect(final.0.configurationId == "config-a")
+        #expect(final.0.serverInstanceId == "instance-a")
+        #expect(final.0.cursorVersion == 7)
+        #expect(final.0.firstReconciliationComplete)
+        #expect(final.0.generation == 6)
+        #expect(!final.0.suspended)
+        #expect(final.1.title == "Local proposal")
+        #expect(final.1.scopeKey == original + "\nconfig-a")
+    }
+
+    @Test("A selected different destination stays suspended after the setting reverts")
+    func selectedDestinationRemainsSuspended() async throws {
+        let value = try fixture()
+        try await value.repository.setGhostwriterURL(temporary)
+        // The feed store selected B between settings writes. Its scope is no
+        // longer A, so reverting the preference cannot resume A's binding.
+        let context = ModelContext(try container(at: value.directory))
+        let selected = try #require(context.fetch(FetchDescriptor<FeedSyncState>()).first)
+        selected.destinationURL = temporary
+        selected.configurationId = "config-b"
+        selected.serverInstanceId = nil
+        selected.cursorVersion = nil
+        selected.suspended = true
+        selected.generation += 1
+        try context.save()
+        try await value.repository.setGhostwriterURL(original)
+        let after = try state(at: value.directory)
+        #expect(after.0.destinationURL == temporary)
+        #expect(after.0.configurationId == "config-b")
+        #expect(after.0.suspended)
+        #expect(after.0.generation == 7)
+        #expect(after.1.scopeKey == original + "\nconfig-a")
+    }
+
+    @Test("Instance-change suspension is never cleared by URL edits")
+    func integritySuspensionRemains() async throws {
+        let value = try fixture(suspended: true)
+        try await value.repository.setGhostwriterURL(temporary)
+        try await value.repository.setGhostwriterURL(original)
+        let after = try state(at: value.directory)
+        #expect(after.0.suspended)
+        #expect(after.0.destinationURL == original)
+        #expect(after.0.generation == 6)
+        #expect(after.1.title == "Local proposal")
+    }
+
+    @Test("A failed state save leaves both the URL and binding unchanged")
+    func failedSaveRollsBackBeforeDefaults() async throws {
+        let value = try fixture()
+        value.repository.beforeGhostwriterURLStateSaveForTesting = { throw SaveFailure.injected }
+        await #expect(throws: SaveFailure.self) {
+            try await value.repository.setGhostwriterURL(temporary)
+        }
+        #expect(try await value.repository.getGhostwriterURL() == original)
+        let after = try state(at: value.directory)
+        #expect(after.0.generation == 4)
+        #expect(!after.0.suspended)
+        #expect(after.0.destinationURL == original)
+        #expect(after.1.title == "Local proposal")
     }
 }

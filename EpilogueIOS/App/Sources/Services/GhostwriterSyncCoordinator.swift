@@ -11,11 +11,73 @@ import Domain
 import Data
 import GhostwriterClient
 import OSLog
+import SwiftData
+
+enum SyncComponent: String {
+    case configuration, feed, digest, schedule, combined, settings
+}
+
+struct SyncIssue {
+    let component: SyncComponent
+    let phase: String
+    let error: Error
+}
+
+struct SyncRunError: LocalizedError {
+    let issues: [SyncIssue]
+
+    var errorDescription: String? {
+        issues.map { "\($0.component.rawValue) \($0.phase): \($0.error.localizedDescription)" }
+            .joined(separator: "; ")
+    }
+
+    var hasFeedUpgrade: Bool {
+        issues.contains { issue in
+            if case .some(.upgradeRequired) = issue.error as? FeedSyncV2Error { return true }
+            return false
+        }
+    }
+
+    var hasFeedServerChange: Bool {
+        issues.contains { issue in
+            if case .some(.serverChanged) = issue.error as? FeedSyncV2Error { return true }
+            return false
+        }
+    }
+}
+
+/// Internal seam for the coordinator's asynchronous effects. Production uses the existing services.
+struct SyncOperations {
+    var configured: @MainActor () async throws -> Bool
+    var lastDigestSync: @MainActor () async throws -> Date?
+    var heartbeat: @MainActor () async throws -> Void
+    var feed: @MainActor (SyncPerformanceTracker?) async throws -> Void
+    var fetchCombined: @MainActor (Date?, [String]) async throws -> SyncResponse
+    var fetchSchedules: @MainActor () async throws -> [ScheduleResponse]
+    var applyConfig: @MainActor (ClientConfigResponse) async throws -> Void
+    var syncConfig: @MainActor () async throws -> Bool
+    var knownDigestIDs: @MainActor () async throws -> [String]
+    var applyDigests: @MainActor ([SyncDigest], SyncPerformanceTracker?) async throws -> Void
+    var syncDigests: @MainActor (SyncPerformanceTracker?) async throws -> Void
+    var saveEnabledPeriods: @MainActor (Set<DigestPeriod>) async throws -> Void
+    var saveScheduleTimes: @MainActor (ScheduleTimeValues) async throws -> Void
+}
+
+struct ScheduleTimeValues {
+    let morningHour: Int
+    let morningMinute: Int
+    let noonHour: Int
+    let noonMinute: Int
+    let eveningHour: Int
+    let eveningMinute: Int
+    let timezone: String
+}
 
 /// Coordinates all Ghostwriter sync operations
 ///
 /// This is the main entry point for syncing with Ghostwriter.
-/// Call `performFullSync()` on app launch or when the user triggers a sync.
+/// Call `performFullSync()` for background sync and `performFullSyncIncludingDigests()`
+/// for an explicit user-requested sync.
 @MainActor
 public final class GhostwriterSyncCoordinator: ObservableObject {
     private let feedSyncService: FeedSyncService
@@ -23,22 +85,41 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     private let configSyncManager: ConfigSyncManager
     private let heartbeatService: HeartbeatService
     private let settingsRepository: SettingsRepositoryProtocol
+    var operations: SyncOperations
+    var now: () -> Date
+    private var combinedFeedDestination: String?
+    private var combinedFeedTimestamp: Date?
     private let logger = Logger(subsystem: "com.epilogue", category: "GhostwriterSync")
 
     @Published public private(set) var isSyncing = false
     @Published public private(set) var lastSyncError: Error?
     @Published public private(set) var lastSyncTime: Date?
 
-    public init(
+    public convenience init(
         settingsRepository: SettingsRepositoryProtocol,
         feedRepository: FeedRepositoryProtocol,
-        digestRepository: DigestRepositoryProtocol
+        digestRepository: DigestRepositoryProtocol,
+        modelContainer: ModelContainer
+    ) {
+        self.init(settingsRepository: settingsRepository, feedRepository: feedRepository,
+                  digestRepository: digestRepository, modelContainer: modelContainer,
+                  operations: nil, now: Date.init)
+    }
+
+    init(
+        settingsRepository: SettingsRepositoryProtocol,
+        feedRepository: FeedRepositoryProtocol,
+        digestRepository: DigestRepositoryProtocol,
+        modelContainer: ModelContainer,
+        operations injectedOperations: SyncOperations?,
+        now: @escaping () -> Date
     ) {
         self.settingsRepository = settingsRepository
+        self.now = now
 
         self.feedSyncService = FeedSyncService(
             settingsRepository: settingsRepository,
-            feedRepository: feedRepository
+            modelContainer: modelContainer
         )
 
         self.digestSyncService = DigestSyncService(
@@ -52,6 +133,46 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
 
         self.heartbeatService = HeartbeatService(
             settingsRepository: settingsRepository
+        )
+
+        let feed = self.feedSyncService
+        let digest = self.digestSyncService
+        let config = self.configSyncManager
+        let heartbeat = self.heartbeatService
+        let makeClient: @MainActor () async throws -> GhostwriterClient = {
+            guard let url = try await settingsRepository.getGhostwriterURL() else {
+                throw GhostwriterError.notConfigured
+            }
+            let apiKey = try await settingsRepository.getGhostwriterAPIKey()
+            return try GhostwriterClient(baseURLString: url, apiKey: apiKey)
+        }
+        self.operations = injectedOperations ?? SyncOperations(
+            configured: { try await settingsRepository.isGhostwriterConfigured() },
+            lastDigestSync: { try await settingsRepository.getLastDigestSyncTime() },
+            heartbeat: { _ = try await heartbeat.sendHeartbeat() },
+            feed: { try await feed.sync(tracker: $0) },
+            fetchCombined: { since, ids in
+                let client = try await makeClient()
+                return try await client.performSync(feedSince: since, knownDigestIds: ids)
+            },
+            fetchSchedules: {
+                let client = try await makeClient()
+                return try await client.listSchedules()
+            },
+            applyConfig: { try await config.applyPreFetchedConfig($0) },
+            syncConfig: { try await config.sync() },
+            knownDigestIDs: { try await digest.getKnownRemoteIds() },
+            applyDigests: { try await digest.processDigestsFromSync($0, tracker: $1) },
+            syncDigests: { try await digest.sync(tracker: $0) },
+            saveEnabledPeriods: { try await settingsRepository.setEnabledPeriods($0) },
+            saveScheduleTimes: { times in
+                try await settingsRepository.setGhostwriterSchedule(
+                    morningHour: times.morningHour, morningMinute: times.morningMinute,
+                    noonHour: times.noonHour, noonMinute: times.noonMinute,
+                    eveningHour: times.eveningHour, eveningMinute: times.eveningMinute,
+                    timezone: times.timezone
+                )
+            }
         )
     }
 
@@ -69,208 +190,265 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     /// Minimum interval between digest syncs (1 hour)
     private static let digestSyncInterval: TimeInterval = 3600
 
-    /// Perform a full sync with Ghostwriter
-    /// Tries the combined /sync endpoint first, falls back to individual calls.
+    /// Perform a full sync with Ghostwriter.
     public func performFullSync() async {
-        guard await isConfigured() else {
-            logger.debug("Ghostwriter not configured, skipping sync")
-            return
-        }
-
-        guard !isSyncing else {
-            logger.debug("Sync already in progress")
-            return
-        }
-
-        isSyncing = true
-        lastSyncError = nil
-        let tracker = SyncPerformanceTracker()
-
-        do {
-            logger.info("Starting Ghostwriter sync")
-
-            // 1. Send heartbeat + push feeds concurrently (independent operations)
-            await sendHeartbeatAndPushFeeds(tracker: tracker)
-
-            // 3. Try combined sync
-            let s = tracker.beginInterval("Combined Sync")
-            let combinedSyncSucceeded = await tryCombinedSync(tracker: tracker)
-            tracker.endInterval("Combined Sync", state: s)
-
-            if !combinedSyncSucceeded {
-                // Fall back to individual calls
-                logger.warning("Combined sync failed, falling back to individual calls")
-
-                do {
-                    let cs = tracker.beginInterval("Config Sync")
-                    _ = try await configSyncManager.sync()
-                    tracker.endInterval("Config Sync", state: cs)
-                } catch {
-                    logger.warning("Config sync failed: \(error.localizedDescription)")
-                }
-
-                let fs = tracker.beginInterval("Feed Sync (fallback)")
-                try await feedSyncService.sync(tracker: tracker)
-                tracker.endInterval("Feed Sync (fallback)", state: fs)
-
-                let shouldSyncDigests = await shouldRunDigestSync()
-                if shouldSyncDigests {
-                    let ds = tracker.beginInterval("Digest Sync (fallback)")
-                    try await digestSyncService.sync(tracker: tracker)
-                    tracker.endInterval("Digest Sync (fallback)", state: ds)
-                }
-            }
-
-            lastSyncTime = Date()
-            logger.info("Ghostwriter sync completed successfully")
-        } catch {
-            logger.error("Ghostwriter sync failed: \(error.localizedDescription)")
-            lastSyncError = error
-        }
-
-        tracker.logSummary()
-        isSyncing = false
+        await run(forceDigests: false)
     }
 
-    /// Send heartbeat and push feeds concurrently since they're independent operations.
-    private func sendHeartbeatAndPushFeeds(tracker: SyncPerformanceTracker) async {
-        async let heartbeatResult: Void = {
-            do {
-                let s = tracker.beginInterval("Heartbeat")
-                _ = try await self.heartbeatService.sendHeartbeat()
-                tracker.endInterval("Heartbeat", state: s)
-            } catch {
-                self.logger.warning("Heartbeat failed: \(error.localizedDescription)")
-            }
-        }()
-
-        async let feedPushResult: Void = {
-            do {
-                let s = tracker.beginInterval("Feed Push")
-                try await self.feedSyncService.pushLocalFeeds(tracker: tracker)
-                tracker.endInterval("Feed Push", state: s)
-            } catch {
-                self.logger.warning("Feed push failed: \(error.localizedDescription)")
-            }
-        }()
-
-        _ = await (heartbeatResult, feedPushResult)
-    }
-
-    /// Try combined sync endpoint. Returns true if successful.
-    private func tryCombinedSync(tracker: SyncPerformanceTracker? = nil) async -> Bool {
-        do {
-            guard let url = try await settingsRepository.getGhostwriterURL() else { return false }
-            let apiKey = try await settingsRepository.getGhostwriterAPIKey()
-            let client = try GhostwriterClient(baseURLString: url, apiKey: apiKey)
-
-            let feedSince = try await settingsRepository.getLastFeedSyncTime()
-            let knownDigestIds = try await digestSyncService.getKnownRemoteIds()
-
-            let s = tracker?.beginInterval("Sync Endpoint Request")
-            let syncResponse = try await client.performSync(
-                feedSince: feedSince,
-                knownDigestIds: knownDigestIds
-            )
-            if let s { tracker?.endInterval("Sync Endpoint Request", state: s) }
-
-            // Dispatch response to individual handlers
-            do {
-                try await configSyncManager.applyPreFetchedConfig(syncResponse.config)
-            } catch {
-                logger.warning("Failed to apply synced config: \(error.localizedDescription)")
-            }
-
-            do {
-                try await feedSyncService.applyFeedChanges(syncResponse.feeds)
-            } catch {
-                logger.warning("Failed to apply synced feeds: \(error.localizedDescription)")
-            }
-
-            do {
-                let ds = tracker?.beginInterval("Process Synced Digests")
-                try await digestSyncService.processDigestsFromSync(syncResponse.digests.newDigests, tracker: tracker)
-                if let ds { tracker?.endInterval("Process Synced Digests", state: ds) }
-            } catch {
-                logger.warning("Failed to process synced digests: \(error.localizedDescription)")
-            }
-
-            // Apply schedule enabled states and times from server
-            do {
-                try await applySchedulesFromSync(syncResponse.schedules)
-            } catch {
-                logger.warning("Failed to apply synced schedules: \(error.localizedDescription)")
-            }
-
-            logger.info("Combined sync completed: \(syncResponse.digests.newDigests.count) new digests")
-            return true
-        } catch {
-            logger.warning("Combined sync endpoint failed: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    /// Force a full sync including digests regardless of timing
+    /// Force a full sync including digests regardless of timing.
     public func performFullSyncIncludingDigests() async {
-        guard await isConfigured() else { return }
-        guard !isSyncing else { return }
+        await run(forceDigests: true)
+    }
 
+    var requiresOlderServerFeedPreview: Bool {
+        if let error = lastSyncError as? SyncRunError { return error.hasFeedUpgrade }
+        if case .some(.upgradeRequired) = lastSyncError as? FeedSyncV2Error { return true }
+        return false
+    }
+
+    var requiresNewFeedBinding: Bool {
+        if let error = lastSyncError as? SyncRunError { return error.hasFeedServerChange }
+        if case .some(.serverChanged) = lastSyncError as? FeedSyncV2Error { return true }
+        return false
+    }
+
+    private func run(forceDigests: Bool) async {
+        guard !isSyncing else { return }
         isSyncing = true
         lastSyncError = nil
         let tracker = SyncPerformanceTracker()
-
-        do {
-            logger.info("Starting forced full Ghostwriter sync (including digests)")
-
-            // Send heartbeat + push feeds concurrently (independent operations)
-            await sendHeartbeatAndPushFeeds(tracker: tracker)
-
-            // Try combined sync
-            let s = tracker.beginInterval("Combined Sync")
-            let combinedSyncSucceeded = await tryCombinedSync(tracker: tracker)
-            tracker.endInterval("Combined Sync", state: s)
-
-            if !combinedSyncSucceeded {
-                do {
-                    let cs = tracker.beginInterval("Config Sync")
-                    _ = try await configSyncManager.sync()
-                    tracker.endInterval("Config Sync", state: cs)
-                } catch {}
-                let fs = tracker.beginInterval("Feed Sync (fallback)")
-                try await feedSyncService.sync(tracker: tracker)
-                tracker.endInterval("Feed Sync (fallback)", state: fs)
-                let ds = tracker.beginInterval("Digest Sync (fallback)")
-                try await digestSyncService.sync(tracker: tracker)
-                tracker.endInterval("Digest Sync (fallback)", state: ds)
-            }
-
-            lastSyncTime = Date()
-            logger.info("Forced full sync completed")
-        } catch {
-            logger.error("Forced full sync failed: \(error.localizedDescription)")
-            lastSyncError = error
+        defer {
+            tracker.logSummary()
+            isSyncing = false
         }
 
-        tracker.logSummary()
-        isSyncing = false
+        do {
+            let configured: Bool
+            do {
+                configured = try await operations.configured()
+                try Task.checkCancellation()
+            } catch {
+                try rethrowCancellation(error)
+                lastSyncError = SyncRunError(issues: [SyncIssue(component: .settings,
+                                                                phase: "configuration read", error: error)])
+                return
+            }
+            guard configured else {
+                logger.debug("Ghostwriter not configured, skipping sync")
+                return
+            }
+
+            var issues: [SyncIssue] = []
+            do {
+                try await operations.heartbeat()
+                try Task.checkCancellation()
+            } catch {
+                try rethrowCancellation(error)
+                logger.warning("Heartbeat failed: \(error.localizedDescription)")
+            }
+            do {
+                try await operations.feed(tracker)
+                try Task.checkCancellation()
+            } catch {
+                try record(error, component: .feed, phase: "v2", into: &issues)
+            }
+
+            let shouldSyncDigests: Bool
+            if forceDigests {
+                shouldSyncDigests = true
+            } else {
+                do {
+                    let lastDigestSync = try await operations.lastDigestSync()
+                    try Task.checkCancellation()
+                    shouldSyncDigests = lastDigestSync.map {
+                        now().timeIntervalSince($0) >= Self.digestSyncInterval
+                    } ?? true
+                } catch {
+                    try record(error, component: .settings, phase: "digest cadence read", into: &issues)
+                    shouldSyncDigests = false
+                }
+            }
+
+            var knownDigestIDs: [String] = []
+            do {
+                knownDigestIDs = try await operations.knownDigestIDs()
+                try Task.checkCancellation()
+            } catch {
+                try record(error, component: .digest, phase: "known IDs read", into: &issues)
+            }
+
+            // This cursor only reduces the unused v1 feed payload in the combined response.
+            // It is not the feed-v2 apply cursor or a user-visible feed success timestamp.
+            let destination = try? await settingsRepository.getGhostwriterURL()
+            try Task.checkCancellation()
+            if destination != combinedFeedDestination {
+                combinedFeedDestination = destination
+                combinedFeedTimestamp = nil
+            }
+
+            let response: SyncResponse
+            do {
+                // The combined feed section is ignored; this cursor only limits its payload.
+                response = try await operations.fetchCombined(combinedFeedTimestamp, knownDigestIDs)
+                try Task.checkCancellation()
+            } catch {
+                try rethrowCancellation(error)
+                logger.warning("Combined sync fetch failed: \(error.localizedDescription)")
+                let fallbackIssues = try await runFallback(syncDigests: shouldSyncDigests,
+                                                           tracker: tracker)
+                if !fallbackIssues.isEmpty {
+                    issues.append(SyncIssue(component: .combined,
+                                            phase: combinedFetchPhase(error), error: error))
+                    issues.append(contentsOf: fallbackIssues)
+                }
+                finish(issues)
+                return
+            }
+
+            if let timestamp = response.feeds.serverTimestamp.toISO8601Date() {
+                combinedFeedTimestamp = timestamp
+            }
+
+            issues.append(contentsOf: try await applyCombined(response,
+                                                               syncDigests: shouldSyncDigests,
+                                                               tracker: tracker))
+            finish(issues)
+        } catch {
+            logger.warning("Ghostwriter sync stopped: \(error.localizedDescription)")
+            lastSyncError = error
+        }
     }
 
-    /// Check if enough time has passed since the last digest sync
-    private func shouldRunDigestSync() async -> Bool {
+    private func finish(_ issues: [SyncIssue]) {
+        if issues.isEmpty {
+            lastSyncTime = now()
+            logger.info("Ghostwriter sync completed successfully")
+        } else {
+            lastSyncError = SyncRunError(issues: issues)
+            logger.warning("Ghostwriter sync completed with \(issues.count) issue(s)")
+        }
+    }
+
+    private func record(_ error: Error, component: SyncComponent, phase: String,
+                        into issues: inout [SyncIssue]) throws {
+        try rethrowCancellation(error)
+        issues.append(SyncIssue(component: component, phase: phase, error: error))
+    }
+
+    private func rethrowCancellation(_ error: Error) throws {
+        try Task.checkCancellation()
+        if error is CancellationError { throw error }
+    }
+
+    private func combinedFetchPhase(_ error: Error) -> String {
+        if case let .httpError(statusCode, _) = error as? GhostwriterError,
+           statusCode == 404 || statusCode == 405 {
+            return "unsupported endpoint"
+        }
+        return "transport"
+    }
+
+    private func applyCombined(_ response: SyncResponse, syncDigests: Bool,
+                               tracker: SyncPerformanceTracker) async throws -> [SyncIssue] {
+        var issues: [SyncIssue] = []
+        var configSucceeded = false
         do {
-            guard let lastDigestSync = try await settingsRepository.getLastDigestSyncTime() else {
-                return true // Never synced
-            }
-            let elapsed = Date().timeIntervalSince(lastDigestSync)
-            return elapsed >= Self.digestSyncInterval
+            try await operations.applyConfig(response.config)
+            try Task.checkCancellation()
+            configSucceeded = true
         } catch {
-            return true // On error, sync to be safe
+            try record(error, component: .configuration, phase: "apply", into: &issues)
+        }
+
+        // The combined feed section is v1 and must never enter feed v2 state.
+        if syncDigests || !response.digests.newDigests.isEmpty {
+            do {
+                try await operations.applyDigests(response.digests.newDigests, tracker)
+                try Task.checkCancellation()
+            } catch {
+                try record(error, component: .digest, phase: "ingest", into: &issues)
+            }
+        }
+
+        if configSucceeded {
+            do {
+                let schedules = try await operations.fetchSchedules()
+                try Task.checkCancellation()
+                try await applyScheduleParts(schedules, includeTimes: true, issues: &issues)
+            } catch {
+                try record(error, component: .schedule, phase: "fetch", into: &issues)
+            }
+        } else {
+            // The combined schedule times predate a pending local config upload.
+            try await applyScheduleParts(response.schedules, includeTimes: false, issues: &issues)
+        }
+        return issues
+    }
+
+    private func runFallback(syncDigests: Bool,
+                             tracker: SyncPerformanceTracker) async throws -> [SyncIssue] {
+        var issues: [SyncIssue] = []
+        var configSucceeded = false
+        do {
+            configSucceeded = try await operations.syncConfig()
+            try Task.checkCancellation()
+            if !configSucceeded {
+                issues.append(SyncIssue(component: .configuration, phase: "fallback",
+                                        error: ConfigSyncIncomplete.sync))
+            }
+        } catch {
+            try record(error, component: .configuration, phase: "fallback", into: &issues)
+        }
+
+        do {
+            let schedules = try await operations.fetchSchedules()
+            try Task.checkCancellation()
+            try await applyScheduleParts(schedules, includeTimes: configSucceeded, issues: &issues)
+        } catch {
+            try record(error, component: .schedule, phase: "fallback fetch", into: &issues)
+        }
+
+        if syncDigests {
+            do {
+                try await operations.syncDigests(tracker)
+                try Task.checkCancellation()
+            } catch {
+                try record(error, component: .digest, phase: "fallback", into: &issues)
+            }
+        }
+        return issues
+    }
+
+    private func applyScheduleParts(_ schedules: [ScheduleResponse], includeTimes: Bool,
+                                    issues: inout [SyncIssue]) async throws {
+        do {
+            try await applyEnabledPeriods(schedules)
+            try Task.checkCancellation()
+        } catch {
+            try record(error, component: .schedule, phase: "enabled states", into: &issues)
+        }
+        if includeTimes {
+            do {
+                try await applyScheduleTimes(schedules)
+                try Task.checkCancellation()
+            } catch {
+                try record(error, component: .schedule, phase: "times", into: &issues)
+            }
         }
     }
 
     /// Sync only feeds
     public func syncFeeds() async throws {
         try await feedSyncService.sync()
+    }
+
+    /// Read-only compatibility view for servers that do not support feed v2.
+    /// These rows never enter SwiftData, the v2 cursor, or the mutation queue.
+    public func previewOlderServerFeeds() async throws -> [FeedResponse] {
+        guard let url = try await settingsRepository.getGhostwriterURL() else { return [] }
+        let key = try await settingsRepository.getGhostwriterAPIKey()
+        let client = try GhostwriterClient(baseURLString: url, apiKey: key)
+        return try await client.listFeeds()
     }
 
     /// Sync only digests
@@ -304,9 +482,33 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         )
     }
 
-    /// Notify server when a feed is deleted locally
-    public func notifyFeedDeleted(url: String) async throws {
-        try await feedSyncService.notifyFeedDeleted(url: url)
+    public func addOrEditFeed(url: String, title: String, mode: ProcessingMode,
+                              isEnabled: Bool, maxArticles: Int) throws {
+        try feedSyncService.addOrEdit(url: url, title: title, mode: mode,
+                                      isEnabled: isEnabled, maxArticles: maxArticles)
+    }
+
+    public func deleteFeed(url: String) throws {
+        try feedSyncService.delete(url: url)
+    }
+
+    public func startNewFeedBinding() throws {
+        try feedSyncService.startNewBinding()
+    }
+
+    func resolvePreviousFeedProposal(opId: String,
+                                     action: IOSFeedV2StoreEngine.PreviousProposalAction) async throws {
+        try await feedSyncService.resolvePrevious(opId: opId, action: action)
+    }
+
+    public func suspendFeedBindingForDestinationChange(_ url: String?) throws {
+        try feedSyncService.suspendForDestinationChange(url)
+    }
+
+    func resolveFeed(opId: String, action: IOSFeedV2StoreEngine.Resolution,
+                     correctedTitle: String? = nil) async throws {
+        try await feedSyncService.resolve(opId: opId, action: action,
+                                          correctedTitle: correctedTitle)
     }
 
     /// Push schedule enable/disable state to the server.
@@ -345,9 +547,20 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
 
     // MARK: - Schedule Sync
 
-    /// Apply schedule times and enabled states from server sync response
-    private func applySchedulesFromSync(_ schedules: [ScheduleResponse]) async throws {
+    private func applyEnabledPeriods(_ schedules: [ScheduleResponse]) async throws {
         var enabledPeriods: Set<DigestPeriod> = []
+        for schedule in schedules where schedule.enabled {
+            switch schedule.period.lowercased() {
+            case "morning": enabledPeriods.insert(.morning)
+            case "noon": enabledPeriods.insert(.noon)
+            case "evening": enabledPeriods.insert(.evening)
+            default: break
+            }
+        }
+        try await operations.saveEnabledPeriods(enabledPeriods)
+    }
+
+    private func applyScheduleTimes(_ schedules: [ScheduleResponse]) async throws {
         var morningHour = 7, morningMinute = 0
         var noonHour = 12, noonMinute = 0
         var eveningHour = 18, eveningMinute = 0
@@ -364,10 +577,6 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
 
             guard let period else { continue }
 
-            if schedule.enabled {
-                enabledPeriods.insert(period)
-            }
-
             switch period {
             case .morning:
                 morningHour = schedule.hour
@@ -382,20 +591,13 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
             timezone = schedule.timezone
         }
 
-        // Save enabled periods
-        try await settingsRepository.setEnabledPeriods(enabledPeriods)
-
-        // Save schedule times for display
-        try await settingsRepository.setGhostwriterSchedule(
-            morningHour: morningHour,
-            morningMinute: morningMinute,
-            noonHour: noonHour,
-            noonMinute: noonMinute,
-            eveningHour: eveningHour,
-            eveningMinute: eveningMinute,
+        try await operations.saveScheduleTimes(ScheduleTimeValues(
+            morningHour: morningHour, morningMinute: morningMinute,
+            noonHour: noonHour, noonMinute: noonMinute,
+            eveningHour: eveningHour, eveningMinute: eveningMinute,
             timezone: timezone
-        )
+        ))
 
-        logger.info("Applied schedules from sync: enabled=\(enabledPeriods.map { $0.rawValue })")
+        logger.info("Applied refreshed schedule times")
     }
 }

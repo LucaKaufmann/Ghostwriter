@@ -83,7 +83,10 @@ def test_embedded_pytest_restores_host_process(tmp_path):
     code = f"""
 import os
 import socket
+import sys
 import pytest
+# Requirements-only installations have no editable-package path hook.
+sys.path.insert(0, {str(ROOT)!r})
 from app.core.config import Settings, get_settings
 
 os.environ["SCHEDULE_ENABLED"] = "true"

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { api, type Feed, type FeedCreate, type FeedUpdate } from '$lib/api';
+	import { api, ApiError, type Feed, type FeedCreate, type FeedUpdate } from '$lib/api';
 	import * as Card from '$lib/components/ui/card';
 	import * as Table from '$lib/components/ui/table';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -28,6 +28,78 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 
 	const queryClient = useQueryClient();
+	type ConflictEntry = { id: number; message: string; action: string; retry: () => void; pending: boolean };
+	let conflicts = $state<ConflictEntry[]>([]);
+	let nextConflictId = 0;
+	function finishConflict(id?: number) {
+		if (id !== undefined) conflicts = conflicts.filter((entry) => entry.id !== id);
+	}
+	function releaseConflict(id?: number) {
+		if (id !== undefined) conflicts = conflicts.map((entry) => entry.id === id ? { ...entry, pending: false } : entry);
+	}
+	function offerConflict(err: Error, action: string, retry: (version: number, conflict: number) => void,
+		restore?: (version: number, conflict: number) => void, id?: number, closeOrigin?: () => void,
+		feedIdentity?: Pick<FeedCreate, 'title' | 'url'>): boolean {
+		if (!(err instanceof ApiError) || (err.status !== 409 && err.status !== 428)) return false;
+		const detail = typeof err.error.detail === 'string' ? null : err.error.detail;
+		const version = detail?.current?.version;
+		if (typeof version !== 'number') return false;
+		// A dismissed operation cannot be resurrected by an old in-flight response.
+		if (id !== undefined && !conflicts.some((entry) => entry.id === id)) return true;
+		const current = detail?.current;
+		const identity = feedIdentity ? `Feed: ${feedIdentity.title} (${feedIdentity.url}). ` : '';
+		const currentDescription = current?.kind === 'tombstone'
+			? 'The server currently has this feed deleted.'
+			: `Server title: ${current?.title ?? 'unknown'}, mode: ${current?.mode ?? 'unknown'}, active: ${current?.is_active ? 'yes' : 'no'}, max articles: ${current?.max_articles ?? 'unknown'}.`;
+		const message = `${identity}This feed changed on the server (version ${version}). ${currentDescription} Review it before ${action}.`;
+		const restoring = current?.kind === 'tombstone' && restore;
+		const conflictId = id ?? ++nextConflictId;
+		const entry: ConflictEntry = {
+			id: conflictId, message,
+			action: restoring ? 'Restore feed with my changes' : 'Retry with current server version',
+			pending: false,
+			retry: () => {
+				conflicts = conflicts.map((item) => item.id === conflictId ? { ...item, pending: true } : item);
+				(restoring || retry)(version, conflictId);
+			}
+		};
+		conflicts = id === undefined ? [...conflicts, entry] :
+			conflicts.map((item) => item.id === conflictId ? entry : item);
+		closeOrigin?.();
+		queryClient.invalidateQueries({ queryKey: ['feeds'] });
+		return true;
+	}
+
+	type EditVariables = { feed: Feed; data: FeedUpdate; conflict?: number; editSession?: number;
+		editDraftRevision?: number; activeSnapshot?: Partial<Feed> };
+	function submittedEditIsCurrent(variables: EditVariables): boolean {
+		return variables.editSession !== undefined && variables.editSession === editSession &&
+			variables.editDraftRevision === editDraftRevision && feedToEdit?.id === variables.feed.id;
+	}
+	function mergedProposal(base: FeedCreate, proposed: FeedUpdate, current?: Partial<Feed>): FeedCreate {
+		return {
+			url: base.url, title: proposed.title ?? current?.title ?? base.title,
+			mode: proposed.mode ?? current?.mode ?? base.mode,
+			is_active: proposed.is_active ?? current?.is_active ?? base.is_active,
+			max_articles: proposed.max_articles ?? current?.max_articles ?? base.max_articles
+		};
+	}
+	function offerEditConflict(err: Error, action: string, variables: EditVariables,
+		retry: (version: number, conflict: number, activeSnapshot?: Partial<Feed>) => void): boolean {
+		const { feed, data } = variables;
+		const detail = err instanceof ApiError && typeof err.error.detail !== 'string' ? err.error.detail : null;
+		const activeSnapshot = detail?.current?.kind === 'feed'
+			? { ...variables.activeSnapshot, ...detail.current } : variables.activeSnapshot;
+		const proposed = mergedProposal(feed, data, activeSnapshot);
+		return offerConflict(err, action,
+			(version, conflict) => retry(version, conflict, activeSnapshot),
+			(version, conflict) => restoreFeedMutation.mutate({ data: proposed, version, conflict,
+				origin: 'restore', partialData: data, activeSnapshot }),
+			variables.conflict,
+			() => {
+				if (submittedEditIsCurrent(variables)) editDialogOpen = false;
+			}, feed);
+	}
 
 	// Queries
 	const feedsQuery = createQuery(() => ({
@@ -36,29 +108,81 @@
 	}));
 
 	// Mutations
-	const createFeedMutation = createMutation(() => ({
-		mutationFn: (data: FeedCreate) => api.createFeed(data),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ['feeds'] });
-			toast.success('Feed created successfully');
+	type SaveFeedVariables = { data: FeedCreate; version?: number; conflict?: number;
+		existingId?: string; origin: 'add' | 'restore'; addSession?: number;
+		partialData?: FeedUpdate; activeSnapshot?: Partial<Feed> };
+	function saveFeed({ data, version, existingId }: SaveFeedVariables) {
+		if (existingId && version !== undefined) {
+			const { url: _url, ...fields } = data;
+			return api.updateFeed(existingId, fields, version);
+		}
+		return api.createFeed(data, version);
+	}
+	function onFeedSaved(_data: Feed, variables: SaveFeedVariables) {
+		queryClient.invalidateQueries({ queryKey: ['feeds'] });
+		toast.success('Feed saved successfully');
+		if (variables.origin === 'add' && variables.addSession === addSession) {
 			addDialogOpen = false;
 			resetForm();
-		},
-		onError: (err: Error) => {
-			toast.error('Failed to create feed', {
-				description: err.message ?? 'Unknown error'
-			});
 		}
+		finishConflict(variables.conflict);
+	}
+	function onFeedSaveError(err: Error, variables: SaveFeedVariables) {
+		const detail = err instanceof ApiError && typeof err.error.detail !== 'string' ? err.error.detail : null;
+		if (detail?.current?.kind === 'tombstone' &&
+			offerConflict(err, 'restoring it', (version, conflict) => restoreFeedMutation.mutate({
+				...variables, existingId: undefined, version, conflict
+			}), (version, conflict) => restoreFeedMutation.mutate({
+				...variables, existingId: undefined, version, conflict
+			}), variables.conflict,
+			() => { if (variables.origin === 'add' && variables.addSession === addSession) addDialogOpen = false; },
+			variables.data)) return;
+		if (variables.conflict !== undefined && detail?.current?.kind === 'feed' &&
+			typeof detail.current.id === 'string') {
+			const existingId = detail.current.id;
+			const activeSnapshot = { ...variables.activeSnapshot, ...detail.current };
+			const data = variables.partialData
+				? mergedProposal(variables.data, variables.partialData, activeSnapshot)
+				: variables.data;
+			if (offerConflict(err, 'saving your proposed settings', (version, conflict) =>
+				restoreFeedMutation.mutate({ ...variables, data, activeSnapshot,
+					existingId, version, conflict }),
+				undefined, variables.conflict, undefined, variables.data)) return;
+		}
+		releaseConflict(variables.conflict);
+		toast.error('Failed to create feed', {
+			description: err.message ?? 'Unknown error'
+		});
+	}
+
+	const createFeedMutation = createMutation(() => ({
+		mutationFn: saveFeed,
+		onSuccess: onFeedSaved,
+		onError: onFeedSaveError
+	}));
+	const restoreFeedMutation = createMutation(() => ({
+		mutationFn: saveFeed,
+		onSuccess: onFeedSaved,
+		onError: onFeedSaveError
 	}));
 
 	const deleteFeedMutation = createMutation(() => ({
-		mutationFn: (id: string) => api.deleteFeed(id),
-		onSuccess: () => {
+		mutationFn: (feed: Feed & { conflict?: number; deleteSession?: number }) => api.deleteFeed(feed.id, feed.version),
+		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success('Feed deleted');
-			feedToDelete = null;
+			if (variables.deleteSession === deleteSession && feedToDelete?.id === variables.id)
+				feedToDelete = null;
+			finishConflict(variables.conflict);
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, feed) => {
+			if (offerConflict(err, 'deleting it', (version, conflict) => deleteFeedMutation.mutate({ ...feed, version, conflict }),
+				undefined, feed.conflict,
+				() => {
+					if (feed.deleteSession === deleteSession && feedToDelete?.id === feed.id)
+						feedToDelete = null;
+				}, feed)) return;
+			releaseConflict(feed.conflict);
 			toast.error('Failed to delete feed', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -66,14 +190,24 @@
 	}));
 
 	const updateFeedMutation = createMutation(() => ({
-		mutationFn: ({ id, data }: { id: string; data: FeedUpdate }) => api.updateFeed(id, data),
-		onSuccess: () => {
+		mutationFn: ({ feed, data }: EditVariables) => api.updateFeed(feed.id, data, feed.version),
+		onSuccess: (updatedFeed, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success('Feed updated successfully');
-			editDialogOpen = false;
-			feedToEdit = null;
+			if (submittedEditIsCurrent(variables)) {
+				editDialogOpen = false;
+				feedToEdit = null;
+			} else if (editDialogOpen && variables.editSession !== undefined &&
+				variables.editSession === editSession && feedToEdit?.id === variables.feed.id) {
+				// The visible fields are a newer unsent draft; only advance its server baseline.
+				feedToEdit = { ...feedToEdit, ...updatedFeed };
+			}
+			finishConflict(variables.conflict);
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables) => {
+			if (offerEditConflict(err, 'saving your edit', variables, (version, conflict, activeSnapshot) =>
+				updateFeedMutation.mutate({ ...variables, conflict, activeSnapshot, feed: { ...variables.feed, version } }))) return;
+			releaseConflict(variables.conflict);
 			toast.error('Failed to update feed', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -81,12 +215,16 @@
 	}));
 
 	const toggleFeedMutation = createMutation(() => ({
-		mutationFn: ({ id, data }: { id: string; data: FeedUpdate }) => api.updateFeed(id, data),
+		mutationFn: ({ feed, data }: EditVariables) => api.updateFeed(feed.id, data, feed.version),
 		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success(variables.data.is_active ? 'Feed activated' : 'Feed paused');
+			finishConflict(variables.conflict);
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables) => {
+			if (offerEditConflict(err, 'changing its status', variables, (version, conflict, activeSnapshot) =>
+				toggleFeedMutation.mutate({ ...variables, conflict, activeSnapshot, feed: { ...variables.feed, version } }))) return;
+			releaseConflict(variables.conflict);
 			toast.error('Failed to update feed status', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -113,6 +251,14 @@
 	let searchQuery = $state('');
 	let addDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
+	let addSession = 0;
+	function openAddDialog() {
+		addSession += 1;
+		addDialogOpen = true;
+	}
+	let editSession = 0;
+	let editDraftRevision = 0;
+	let deleteSession = 0;
 	let feedToDelete = $state<Feed | null>(null);
 	let feedToEdit = $state<Feed | null>(null);
 	let feedToClearSeen = $state<Feed | null>(null);
@@ -185,22 +331,23 @@
 			return;
 		}
 		const maxArticles = clampMaxArticles(formMaxArticles);
-		createFeedMutation.mutate({
+		createFeedMutation.mutate({ origin: 'add', addSession, data: {
 			url: normalizedUrl,
 			title: formTitle.trim() || normalizedUrl,
 			mode: formMode,
 			max_articles: maxArticles,
 			is_active: true
-		});
+		} });
 	}
 
 	function handleDeleteFeed(feed: Feed) {
+		deleteSession += 1;
 		feedToDelete = feed;
 	}
 
 	function confirmDelete() {
 		if (feedToDelete) {
-			deleteFeedMutation.mutate(feedToDelete.id);
+			deleteFeedMutation.mutate({ ...feedToDelete, deleteSession });
 		}
 	}
 
@@ -215,6 +362,8 @@
 	}
 
 	function handleEditFeed(feed: Feed) {
+		editSession += 1;
+		editDraftRevision = 0;
 		feedToEdit = feed;
 		editTitle = feed.title;
 		editMode = feed.mode as 'raw' | 'summarize';
@@ -233,7 +382,9 @@
 		}
 		const maxArticles = clampMaxArticles(editMaxArticles);
 		updateFeedMutation.mutate({
-			id: feedToEdit.id,
+			feed: feedToEdit,
+			editSession,
+			editDraftRevision,
 			data: {
 				title,
 				mode: editMode,
@@ -247,7 +398,7 @@
 		if (toggleFeedMutation.isPending) return;
 		updatingFeedId = feed.id;
 		toggleFeedMutation.mutate({
-			id: feed.id,
+			feed,
 			data: {
 				is_active: !feed.is_active
 			}
@@ -273,7 +424,7 @@
 
 	function clampMaxArticles(value: number): number {
 		const numeric = Number.isFinite(value) ? value : 5;
-		return Math.max(1, Math.min(50, Math.round(numeric)));
+		return Math.max(0, Math.min(50, Math.round(numeric)));
 	}
 
 	function toggleFeedSelection(feedId: string, checked: boolean) {
@@ -296,8 +447,9 @@
 		if (selectedFeedIds.length === 0) return;
 		bulkActionPending = true;
 		try {
+			const selected = (feedsQuery.data ?? []).filter((feed) => selectedFeedIds.includes(feed.id));
 			const results = await Promise.allSettled(
-				selectedFeedIds.map((id) => api.updateFeed(id, { is_active: isActive }))
+				selected.map((feed) => api.updateFeed(feed.id, { is_active: isActive }, feed.version))
 			);
 			const successCount = results.filter((result) => result.status === 'fulfilled').length;
 			if (successCount > 0) {
@@ -306,6 +458,15 @@
 			}
 			const failureCount = results.length - successCount;
 			if (failureCount > 0) {
+				results.forEach((result, index) => {
+					if (result.status !== 'rejected') return;
+					offerEditConflict(result.reason, 'changing its status',
+						{ feed: selected[index], data: { is_active: isActive } },
+						(version, conflict, activeSnapshot) => toggleFeedMutation.mutate({
+							conflict, activeSnapshot, feed: { ...selected[index], version },
+							data: { is_active: isActive }
+						}));
+				});
 				toast.error(`${failureCount} feed update${failureCount === 1 ? '' : 's'} failed`);
 			}
 		} finally {
@@ -317,15 +478,22 @@
 		if (selectedFeedIds.length === 0) return;
 		bulkActionPending = true;
 		try {
-			const results = await Promise.allSettled(selectedFeedIds.map((id) => api.deleteFeed(id)));
+			const selected = (feedsQuery.data ?? []).filter((feed) => selectedFeedIds.includes(feed.id));
+			const results = await Promise.allSettled(selected.map((feed) => api.deleteFeed(feed.id, feed.version)));
 			const successCount = results.filter((result) => result.status === 'fulfilled').length;
 			if (successCount > 0) {
 				toast.success(`${successCount} feed${successCount === 1 ? '' : 's'} deleted`);
 				queryClient.invalidateQueries({ queryKey: ['feeds'] });
-				selectedFeedIds = [];
+				selectedFeedIds = selected.filter((_, index) => results[index].status === 'rejected').map((feed) => feed.id);
 			}
 			const failureCount = results.length - successCount;
 			if (failureCount > 0) {
+				results.forEach((result, index) => {
+					if (result.status !== 'rejected') return;
+					offerConflict(result.reason, 'deleting it', (version, conflict) =>
+						deleteFeedMutation.mutate({ ...selected[index], version, conflict }),
+						undefined, undefined, undefined, selected[index]);
+				});
 				toast.error(`${failureCount} feed deletion${failureCount === 1 ? '' : 's'} failed`);
 			}
 		} finally {
@@ -340,12 +508,19 @@
 </svelte:head>
 
 <div class="space-y-6 min-w-0">
+	{#each conflicts as conflict (conflict.id)}
+		<div role="alert" class="rounded-lg border border-amber-500 p-4 space-y-2">
+			<p>{conflict.message}</p>
+			<Button type="button" variant="outline" disabled={conflict.pending} onclick={conflict.retry}>{conflict.action}</Button>
+			<Button type="button" variant="ghost" onclick={() => finishConflict(conflict.id)}>Dismiss</Button>
+		</div>
+	{/each}
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 		<div>
 			<h1 class="text-2xl font-bold tracking-tight">Feeds</h1>
 			<p class="text-muted-foreground">Manage your RSS and Atom feed subscriptions</p>
 		</div>
-		<Button onclick={() => (addDialogOpen = true)}>
+		<Button onclick={openAddDialog}>
 			<Plus class="mr-2 h-4 w-4" />
 			Add Feed
 		</Button>
@@ -471,7 +646,7 @@
 						{searchQuery ? 'Try a different search term' : 'Add your first RSS feed to get started'}
 					</p>
 					{#if !searchQuery}
-						<Button onclick={() => (addDialogOpen = true)} class="mt-4">
+						<Button onclick={openAddDialog} class="mt-4">
 							<Plus class="mr-2 h-4 w-4" />
 							Add Feed
 						</Button>
@@ -706,7 +881,7 @@
 					<Input
 						id="maxArticles"
 						type="number"
-						min={1}
+						min={0}
 						max={50}
 						bind:value={formMaxArticles}
 					/>
@@ -819,12 +994,15 @@
 			</div>
 			<div class="space-y-2">
 				<Label for="edit-title">Title</Label>
-				<Input id="edit-title" placeholder="Feed title" bind:value={editTitle} required />
+				<Input id="edit-title" placeholder="Feed title" bind:value={editTitle} oninput={() => editDraftRevision += 1} required />
 			</div>
 			<div class="grid grid-cols-2 gap-4">
 				<div class="space-y-2">
 					<Label>Mode</Label>
-					<Select.Root type="single" name="edit-mode" value={editMode} onValueChange={(v) => (editMode = v as 'raw' | 'summarize')}>
+					<Select.Root type="single" name="edit-mode" value={editMode} onValueChange={(v) => {
+						if (v !== editMode) editDraftRevision += 1;
+						editMode = v as 'raw' | 'summarize';
+					}}>
 						<Select.Trigger>
 							<span class="capitalize">{editMode}</span>
 						</Select.Trigger>
@@ -839,9 +1017,10 @@
 					<Input
 						id="edit-maxArticles"
 						type="number"
-						min={1}
+						min={0}
 						max={50}
 						bind:value={editMaxArticles}
+						oninput={() => editDraftRevision += 1}
 					/>
 				</div>
 			</div>
@@ -850,7 +1029,7 @@
 					<Label for="edit-active">Active</Label>
 					<p class="text-xs text-muted-foreground">Include this feed in digests</p>
 				</div>
-				<Switch id="edit-active" bind:checked={editIsActive} />
+				<Switch id="edit-active" bind:checked={editIsActive} onCheckedChange={() => editDraftRevision += 1} />
 			</div>
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (editDialogOpen = false)}>

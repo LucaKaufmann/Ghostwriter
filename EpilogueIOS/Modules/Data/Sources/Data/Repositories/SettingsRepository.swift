@@ -8,11 +8,16 @@
 
 import Foundation
 import Domain
+import SwiftData
 
 /// Implementation of SettingsRepositoryProtocol using UserDefaults and Keychain
 public final class SettingsRepository: SettingsRepositoryProtocol {
     private let userDefaults: UserDefaults
     private let keychainService: KeychainService
+    private let modelContainer: ModelContainer?
+#if DEBUG
+    @MainActor var beforeGhostwriterURLStateSaveForTesting: (() throws -> Void)?
+#endif
 
     // Keychain keys
     private enum KeychainKeys {
@@ -61,10 +66,12 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     public init(
         userDefaults: UserDefaults = .standard,
-        keychainService: KeychainService = KeychainService()
+        keychainService: KeychainService = KeychainService(),
+        modelContainer: ModelContainer? = nil
     ) {
         self.userDefaults = userDefaults
         self.keychainService = keychainService
+        self.modelContainer = modelContainer
     }
 
     // MARK: - API Key Management
@@ -240,7 +247,42 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
     }
 
     public func setGhostwriterURL(_ url: String?) async throws {
-        if let url = url {
+        if let modelContainer {
+            let normalize: (String?) -> String? = {
+                $0?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            }
+            try await MainActor.run {
+                let oldURL = userDefaults.string(forKey: DefaultsKeys.ghostwriterURL)
+                if normalize(oldURL) != normalize(url) {
+                    let context = ModelContext(modelContainer)
+                    context.autosaveEnabled = false
+                    do {
+                        if let state = try context.fetch(FetchDescriptor<FeedSyncState>()).first,
+                           state.destinationURL != nil {
+                            // A settings edit only invalidates in-flight work. The feed
+                            // store suspends and changes scope if sync actually selects
+                            // a different destination; a transient edit can be reverted.
+                            state.generation += 1
+#if DEBUG
+                            try beforeGhostwriterURLStateSaveForTesting?()
+#endif
+                            try context.save()
+                        }
+                    } catch {
+                        context.rollback()
+                        throw error
+                    }
+                }
+                // Publish the preference in the same actor turn as the binding
+                // generation change, so resolution cannot observe half the edit.
+                if let url {
+                    userDefaults.set(url, forKey: DefaultsKeys.ghostwriterURL)
+                } else {
+                    userDefaults.removeObject(forKey: DefaultsKeys.ghostwriterURL)
+                }
+            }
+        } else if let url {
             userDefaults.set(url, forKey: DefaultsKeys.ghostwriterURL)
         } else {
             userDefaults.removeObject(forKey: DefaultsKeys.ghostwriterURL)

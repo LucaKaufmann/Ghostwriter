@@ -15,7 +15,8 @@ let project = Project(
             infoPlist: .default,
             sources: ["Sources/Data/**"],
             dependencies: [
-                .project(target: "Domain", path: "../Domain")
+                .project(target: "Domain", path: "../Domain"),
+                .project(target: "GhostwriterClient", path: "../GhostwriterClient")
             ]
         ),
         .target(

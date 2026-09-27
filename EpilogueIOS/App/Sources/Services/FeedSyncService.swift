@@ -1,171 +1,119 @@
-//
-//  FeedSyncService.swift
-//  Epilogue
-//
-//  Created on 2026-01-26.
-//  Copyright © 2026 Epilogue. All rights reserved.
-//
-
 import Foundation
+import SwiftData
 import Domain
 import Data
 import GhostwriterClient
 import OSLog
 
-/// Service responsible for bi-directional feed sync with Ghostwriter
-/// 
-/// Sync flow:
-/// 1. PUSH: Local feeds → Server (additive merge)
-/// 2. PULL: Server changes → Local (with tombstones)
-/// 3. Clear locallyModified flags
-/// 4. Update sync timestamp
+/// Sole iOS feed sync path. KMP v2 owns network sequencing; SwiftData owns commits.
 @MainActor
 public final class FeedSyncService {
+    private let bridge: SharedFeedV2Bridge
     private let settingsRepository: SettingsRepositoryProtocol
-    private let feedRepository: FeedRepositoryProtocol
-    private let sharedSyncBridge: SharedFeedSyncBridge
     private let logger = Logger(subsystem: "com.epilogue", category: "FeedSync")
+#if DEBUG
+    var configuredURLReadForTesting: (() async throws -> String?)?
+#endif
 
-    public init(
-        settingsRepository: SettingsRepositoryProtocol,
-        feedRepository: FeedRepositoryProtocol
-    ) {
+    public init(settingsRepository: SettingsRepositoryProtocol,
+                modelContainer: ModelContainer) {
         self.settingsRepository = settingsRepository
-        self.feedRepository = feedRepository
-        self.sharedSyncBridge = makeSharedFeedSyncBridge(
-            settingsRepository: settingsRepository,
-            feedRepository: feedRepository
-        )
+        self.bridge = SharedFeedV2Bridge(settings: settingsRepository,
+                                         container: modelContainer)
     }
 
-    /// Perform bi-directional feed sync with Ghostwriter
     public func sync(tracker: SyncPerformanceTracker? = nil) async throws {
-        guard try await settingsRepository.isGhostwriterConfigured() else {
-            logger.debug("Ghostwriter not configured, skipping feed sync")
-            return
-        }
+        let interval = tracker?.beginInterval("Feed Sync v2")
+        let outcome = try await bridge.sync()
+        if let interval { tracker?.endInterval("Feed Sync v2", state: interval) }
+        try await apply(outcome)
+    }
 
-        logger.info("Starting feed sync with Ghostwriter")
-        let syncState = tracker?.beginInterval("Feed Sync (shared)")
-        let outcome = try await sharedSyncBridge.sync()
-        if let syncState { tracker?.endInterval("Feed Sync (shared)", state: syncState) }
-
+    func apply(_ outcome: SharedFeedV2Bridge.Outcome) async throws {
         switch outcome {
-        case let .success(pushed, updatedFeeds, deletedFeeds):
-            logger.info(
-                "Feed sync completed: pushed=\(pushed), updated=\(updatedFeeds), deleted=\(deletedFeeds)"
-            )
-        case let .error(message):
-            throw GhostwriterError.httpError(statusCode: 500, message: message)
-        case .notConfigured:
-            logger.debug("Ghostwriter not configured, skipping feed sync")
-        }
-    }
-
-    /// Push local feeds to the server
-    public func pushLocalFeeds(client: GhostwriterClient? = nil, tracker: SyncPerformanceTracker? = nil) async throws {
-        let ghostwriterClient: GhostwriterClient
-        if let client {
-            ghostwriterClient = client
-        } else {
-            ghostwriterClient = try await createClient()
-        }
-
-        let localFeeds = try await feedRepository.getAllFeeds()
-
-        // Filter out synthetic feeds (wallabag, newsletters) - these are server-side integrations
-        let realFeeds = localFeeds.filter { !$0.url.hasPrefix("synthetic://") }
-
-        guard !realFeeds.isEmpty else {
-            logger.debug("No local feeds to push")
-            return
-        }
-
-        let syncRequests = realFeeds.map { feed -> FeedSyncRequest in
-            FeedSyncRequest(
-                url: feed.url,
-                title: feed.name,
-                isActive: feed.isEnabled,
-                mode: feed.mode == .briefing ? "summarize" : "raw",
-                maxArticles: feed.maxArticles > 0 ? feed.maxArticles : 10
-            )
-        }
-
-        let pushState = tracker?.beginInterval("Feed Push Request")
-        let result = try await ghostwriterClient.syncFeeds(syncRequests)
-        if let pushState { tracker?.endInterval("Feed Push Request", state: pushState) }
-        logger.info("Pushed \(result.synced) feeds to server (created: \(result.created), updated: \(result.updated), count: \(syncRequests.count))")
-    }
-
-    /// Apply feed changes from a pre-fetched sync response (combined sync endpoint).
-    /// Skips the push phase (assumed already done) and the fetch.
-    public func applyFeedChanges(_ changes: FeedChangesResponse) async throws {
-        // Apply server feeds locally
-        if !changes.feeds.isEmpty {
-            let serverFeeds = changes.feeds.map { convertResponseToFeed($0) }
-            logger.info("Applying \(serverFeeds.count) feeds from combined sync")
-            try await feedRepository.upsertAll(serverFeeds)
-        }
-
-        // Apply tombstones
-        if !changes.tombstones.isEmpty {
-            let tombstoneURLs = changes.tombstones.map { $0.url }
-            logger.info("Applying \(tombstoneURLs.count) tombstones from combined sync")
-            try await feedRepository.deleteByURLs(tombstoneURLs)
-        }
-
-        // Clear modified flags and update timestamp
-        try await feedRepository.clearAllLocallyModified()
-
-        if let serverTime = changes.serverTimestamp.toISO8601Date() {
-            try await settingsRepository.setLastFeedSyncTime(serverTime)
-        } else {
+        case let .complete(applied, pulled):
+            try Task.checkCancellation()
             try await settingsRepository.setLastFeedSyncTime(Date())
-        }
-
-        logger.info("Applied feed changes from combined sync")
-    }
-
-    /// Notify server when a feed is deleted locally
-    public func notifyFeedDeleted(url: String) async throws {
-        guard try await settingsRepository.isGhostwriterConfigured() else {
-            return
-        }
-
-        let client = try await createClient()
-
-        do {
-            try await client.deleteFeed(byURL: url)
-            logger.info("Notified server of feed deletion: \(url)")
-        } catch GhostwriterError.notFound {
-            // Feed doesn't exist on server, that's fine
-            logger.debug("Feed not found on server (already deleted?): \(url)")
+            logger.info("Feed sync v2 complete: applied=\(applied), pulled=\(pulled)")
+        case .notConfigured:
+            break
+        case let .partial(pending, conflicts, rejected, phase):
+            throw FeedSyncV2Error.partial(pending: pending, conflicts: conflicts,
+                                          rejected: rejected, phase: phase)
+        case .upgradeRequired:
+            throw FeedSyncV2Error.upgradeRequired
+        case .serverChanged:
+            throw FeedSyncV2Error.serverChanged
+        case let .failed(phase, message):
+            throw FeedSyncV2Error.failed(phase: phase, message: message)
         }
     }
 
-    // MARK: - Private Helpers
-
-    private func createClient() async throws -> GhostwriterClient {
-        guard let url = try await settingsRepository.getGhostwriterURL() else {
-            throw GhostwriterError.notConfigured
-        }
-
-        let apiKey = try await settingsRepository.getGhostwriterAPIKey()
-        return try GhostwriterClient(baseURLString: url, apiKey: apiKey)
+    public func addOrEdit(url: String, title: String, mode: ProcessingMode,
+                          isEnabled: Bool, maxArticles: Int) throws {
+        try bridge.store.engine.edit(url: url, title: title, mode: mode,
+                                     isEnabled: isEnabled, maxArticles: maxArticles)
     }
 
-    private func convertResponseToFeed(_ response: FeedResponse) -> Feed {
-        let mode: ProcessingMode = response.mode == "summarize" ? .briefing : .fidelity
-        let serverUpdatedAt = response.updatedAt.toISO8601Date()
+    public func delete(url: String) throws {
+        try bridge.store.engine.delete(url: url)
+    }
 
-        return Feed(
-            url: response.url,
-            name: response.title,
-            mode: mode,
-            maxArticles: response.maxArticles,
-            isEnabled: response.isActive,
-            serverUpdatedAt: serverUpdatedAt,
-            locallyModified: false
-        )
+    private func requireCurrentResolutionDestination() async throws {
+        let generation = try bridge.store.engine.resolutionGeneration()
+        let url: String?
+#if DEBUG
+        if let configuredURLReadForTesting {
+            url = try await configuredURLReadForTesting()
+        } else {
+            url = try await settingsRepository.getGhostwriterURL()
+        }
+#else
+        url = try await settingsRepository.getGhostwriterURL()
+#endif
+        try Task.checkCancellation()
+        try bridge.store.engine.requireResolutionDestination(url, generation: generation)
+    }
+
+    func resolve(opId: String, action: IOSFeedV2StoreEngine.Resolution,
+                 correctedTitle: String? = nil) async throws {
+        try await requireCurrentResolutionDestination()
+        try bridge.store.engine.resolve(opId: opId, action: action,
+                                        correctedTitle: correctedTitle)
+    }
+
+    public func startNewBinding() throws {
+        try bridge.store.engine.startNewBinding()
+    }
+
+    func resolvePrevious(opId: String,
+                         action: IOSFeedV2StoreEngine.PreviousProposalAction) async throws {
+        try await requireCurrentResolutionDestination()
+        try bridge.store.engine.resolvePrevious(opId: opId, action: action)
+    }
+
+    public func suspendForDestinationChange(_ url: String?) throws {
+        try bridge.store.engine.suspendForDestinationChange(url)
+    }
+}
+
+public enum FeedSyncV2Error: LocalizedError {
+    case partial(pending: Int, conflicts: Int, rejected: Int, phase: String?)
+    case upgradeRequired
+    case serverChanged
+    case failed(phase: String, message: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .partial(pending, conflicts, rejected, phase):
+            return "Feed sync needs attention: \(pending) pending, \(conflicts) conflicts, \(rejected) rejected" +
+                (phase.map { " (\($0))" } ?? "")
+        case .upgradeRequired:
+            return "The server needs feed sync v2 before feeds can be synced."
+        case .serverChanged:
+            return "The server or destination changed. Review pending edits before reconnecting."
+        case let .failed(phase, message):
+            return "Feed sync \(phase) failed: \(message)"
+        }
     }
 }

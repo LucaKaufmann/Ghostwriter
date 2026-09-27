@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from mutagen.id3 import CHAP, CTOC, ID3, TIT2, CTOCFlags, ID3NoHeaderError
-from sqlalchemy import exists, text
+from sqlalchemy import String, case, cast, exists, func, text, true
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
@@ -34,6 +34,7 @@ from app.models.feed import Feed
 from app.models.podcast_episode import PodcastEpisode
 from app.models.podcast_preferences import PodcastPreferences, PodcastPreferencesUpdate
 from app.models.user import User
+from app.services.digest_deletion import immediate_session
 from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -836,6 +837,22 @@ class PodcastDigestService:
         return f"gwpod_{secrets.token_urlsafe(32)}"
 
     def upsert_feedback(
+        self, session: Session, article: DigestArticle,
+        payload: ArticleFeedbackUpsert, user_id: UUID | None = None,
+    ) -> ArticleFeedback:
+        # Drop any earlier read snapshot, then check and write under one
+        # SQLite writer reservation shared with the deletion claim.
+        article_id, digest_id = article.id, article.digest_id
+        session.rollback()
+        with immediate_session() as writer:
+            current = writer.get(DigestArticle, article_id)
+            parent = writer.get(Digest, digest_id)
+            if current is None or parent is None or parent.status == "deleting":
+                from fastapi import HTTPException
+                raise HTTPException(status_code=409, detail="Digest article is unavailable")
+            return self._upsert_feedback_locked(writer, current, payload, user_id)
+
+    def _upsert_feedback_locked(
         self,
         session: Session,
         article: DigestArticle,
@@ -892,6 +909,25 @@ class PodcastDigestService:
         return True
 
     def queue_episode_generation(
+        self, session: Session, digest_id: UUID, *,
+        user_id: UUID | None = None, force: bool = False,
+        trigger: str = "manual",
+        generation_overrides: dict[str, Any] | None = None,
+        title: str | None = None,
+    ) -> PodcastEpisode:
+        session.rollback()
+        pending_tasks: list[UUID] = []
+        with immediate_session() as writer:
+            episode = self._queue_episode_generation_locked(
+                writer, digest_id, user_id=user_id, force=force,
+                trigger=trigger, generation_overrides=generation_overrides,
+                title=title, schedule_task=pending_tasks.append,
+            )
+        for episode_id in pending_tasks:
+            self._schedule_episode_task(episode_id)
+        return episode
+
+    def _queue_episode_generation_locked(
         self,
         session: Session,
         digest_id: UUID,
@@ -901,6 +937,7 @@ class PodcastDigestService:
         trigger: str = "manual",
         generation_overrides: dict[str, Any] | None = None,
         title: str | None = None,
+        schedule_task: Callable[[UUID], None] | None = None,
     ) -> PodcastEpisode:
         """Queue podcast generation for a single digest (manual trigger)."""
         digest = session.get(Digest, digest_id)
@@ -908,6 +945,12 @@ class PodcastDigestService:
             raise ValueError("Digest not found")
         if digest.status != "completed":
             raise ValueError("Digest must be completed before podcast generation")
+        if (
+            trigger == "one_off"
+            and digest.one_off_owner_id is not None
+            and user_id != digest.one_off_owner_id
+        ):
+            raise ValueError("Digest not found")
         cleaned_overrides = self.sanitize_generation_overrides(generation_overrides)
         cleaned_title = self._sanitize_episode_title(title)
 
@@ -988,7 +1031,7 @@ class PodcastDigestService:
                         "Podcast failed episode re-queued",
                         extra={"digest_id": digest_id_str, "episode_id": str(episode.id)},
                     )
-                self._schedule_episode_task(episode.id)
+                (schedule_task or self._schedule_episode_task)(episode.id)
                 return episode
 
             if force:
@@ -1000,7 +1043,7 @@ class PodcastDigestService:
                     "Podcast episode reset for forced regeneration",
                     extra={"digest_id": digest_id_str, "episode_id": str(episode.id)},
                 )
-                self._schedule_episode_task(episode.id)
+                (schedule_task or self._schedule_episode_task)(episode.id)
                 return episode
 
             return episode
@@ -1028,23 +1071,53 @@ class PodcastDigestService:
             "Podcast episode queued",
             extra={"digest_id": digest_id_str, "episode_id": str(episode.id), "force": force},
         )
-        self._schedule_episode_task(episode.id)
+        (schedule_task or self._schedule_episode_task)(episode.id)
         return episode
 
     @staticmethod
     def exclude_one_off_digests(statement):
-        """Exclude digests backed by one-off synthetic-feed articles."""
+        """Keep private one-off digests out of installation-wide digest views."""
         one_off_digest_exists = (
             exists()
             .where(DigestArticle.digest_id == Digest.id)
             .where(DigestArticle.feed_id == Feed.id)
             .where(Feed.url == ONE_OFF_SYNTHETIC_FEED_URL)
         )
-        return statement.where(~one_off_digest_exists)
+        # A legacy zero-article one-off may only have an episode reference.
+        safe_ids = case(
+            (func.json_valid(PodcastEpisode.digest_ids) == 1, PodcastEpisode.digest_ids),
+            else_="[]",
+        )
+        episode_ids = func.json_each(safe_ids).table_valued("value")
+        normalized_reference = func.lower(episode_ids.c.value)
+        # Match UUID()'s accepted legacy text wrappers before comparing hex.
+        # Conservative exclusion of malformed wrappers cannot grant access.
+        for marker in ("urn:", "uuid:", "{", "}", "-"):
+            normalized_reference = func.replace(normalized_reference, marker, "")
+        referenced_by_one_off = (
+            select(1)
+            .select_from(PodcastEpisode)
+            .join(episode_ids, true())
+            .where(PodcastEpisode.trigger == "one_off")
+            .where(
+                normalized_reference == func.lower(cast(Digest.id, String))
+            )
+            .exists()
+        )
+        return statement.where(
+            Digest.one_off_owner_id.is_(None),
+            ~one_off_digest_exists,
+            ~referenced_by_one_off,
+        )
 
     @staticmethod
     def is_one_off_digest(session: Session, digest_id: UUID) -> bool:
-        """Return true when a digest contains one-off synthetic-feed articles."""
+        """Return true for private owner, synthetic article, or legacy episode evidence."""
+        digest = session.get(Digest, digest_id)
+        if digest is None:
+            return False
+        if digest.one_off_owner_id is not None:
+            return True
         statement = (
             select(DigestArticle.id)
             .join(Feed, DigestArticle.feed_id == Feed.id)
@@ -1052,14 +1125,59 @@ class PodcastDigestService:
             .where(Feed.url == ONE_OFF_SYNTHETIC_FEED_URL)
             .limit(1)
         )
-        return session.exec(statement).first() is not None
+        if session.exec(statement).first() is not None:
+            return True
+        return bool(PodcastDigestService.one_off_referencing_episodes(session, digest_id))
+
+    @staticmethod
+    def one_off_referencing_episodes(session: Session, digest_id: UUID) -> list[PodcastEpisode]:
+        """Find legacy one-off references without trusting JSON string formatting."""
+        episodes = session.exec(
+            select(PodcastEpisode).where(PodcastEpisode.trigger == "one_off")
+        ).all()
+        matches = []
+        for episode in episodes:
+            for raw in episode.digest_ids or []:
+                try:
+                    if UUID(str(raw)) == digest_id:
+                        matches.append(episode)
+                        break
+                except (ValueError, TypeError, AttributeError):
+                    continue
+        return matches
+
+    @staticmethod
+    def one_off_owner_id(session: Session, digest: Digest) -> UUID | None:
+        """Use the durable owner, or one unambiguous live pre-migration owner."""
+        if digest.one_off_owner_id is not None:
+            return digest.one_off_owner_id
+        episodes = PodcastDigestService.one_off_referencing_episodes(session, digest.id)
+        owners = {episode.user_id for episode in episodes}
+        return next(iter(owners)) if len(owners) == 1 and None not in owners else None
 
     def queue_multi_digest_episode(
+        self, session: Session, digest_ids: list[UUID], *,
+        user_id: UUID | None = None,
+    ) -> PodcastEpisode:
+        session.rollback()
+        with immediate_session() as writer:
+            for digest_id in digest_ids:
+                digest = writer.get(Digest, digest_id)
+                if digest is None or digest.status != "completed":
+                    raise ValueError("Digest must be completed before podcast generation")
+            episode = self._queue_multi_digest_episode_locked(
+                writer, digest_ids, user_id=user_id, schedule_task=lambda _id: None,
+            )
+        self._schedule_episode_task(episode.id)
+        return episode
+
+    def _queue_multi_digest_episode_locked(
         self,
         session: Session,
         digest_ids: list[UUID],
         *,
         user_id: UUID | None = None,
+        schedule_task: Callable[[UUID], None] | None = None,
     ) -> PodcastEpisode:
         """Create a scheduled podcast episode from multiple digests."""
         now = datetime.utcnow()
@@ -1082,7 +1200,7 @@ class PodcastDigestService:
                 "digest_ids": [str(d) for d in digest_ids],
             },
         )
-        self._schedule_episode_task(episode.id)
+        (schedule_task or self._schedule_episode_task)(episode.id)
         return episode
 
     @staticmethod

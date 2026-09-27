@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SharedGhostwriterAdapterTest {
@@ -624,10 +625,10 @@ class SharedGhostwriterAdapterTest {
     }
 
     @Test
-    fun syncFeeds_mapsResponse() = runTest {
+    fun syncFeeds_isDisabledForV2Cutover() = runTest {
         val payload = """{"synced":1,"created":1,"updated":0,"unchanged":0}"""
         val adapter = adapterWithJson(payload)
-        val result = adapter.syncFeeds(
+        val error = runCatching { adapter.syncFeeds(
             listOf(
                 FeedSyncRequest(
                     url = "https://example.com/feed",
@@ -637,16 +638,16 @@ class SharedGhostwriterAdapterTest {
                     maxArticles = 10
                 )
             )
-        )
-        assertEquals(1, result.synced)
-        assertEquals(1, result.created)
+        ) }.exceptionOrNull()
+        assertTrue(error is IllegalStateException)
         adapter.close()
     }
 
     @Test
-    fun deleteFeedByUrl_completesOnSuccess() = runTest {
+    fun deleteFeedByUrl_isDisabledForV2Cutover() = runTest {
         val adapter = adapterWithJson("""{}""")
-        adapter.deleteFeedByUrl("https://example.com/feed")
+        val error = runCatching { adapter.deleteFeedByUrl("https://example.com/feed") }.exceptionOrNull()
+        assertTrue(error is IllegalStateException)
         adapter.close()
     }
 

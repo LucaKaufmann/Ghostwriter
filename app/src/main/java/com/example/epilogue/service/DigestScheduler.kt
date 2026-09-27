@@ -7,42 +7,64 @@ import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.Operation
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.example.epilogue.data.repository.DigestRepository
+import com.example.epilogue.data.repository.ArticleDeliveryStore
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.DigestPeriod
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
+import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executor
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Manages scheduling of the daily digest generation using WorkManager.
  * Supports multiple time periods (morning, noon, evening) with independent scheduling.
  *
- * When Ghostwriter is configured, scheduled digests are still handled locally
- * (WorkManager triggers at the scheduled time), but the actual generation
- * can be delegated to the backend. Manual triggers from the UI are handled
- * by the ViewModel which decides between local and backend generation.
+ * When Ghostwriter is configured, the scheduled worker exits without local
+ * generation. Manual triggers from the UI are handled by the ViewModel.
  */
 @Singleton
 class DigestScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
-    private val digestRepository: DigestRepository
+    private val digestRepository: DigestRepository,
+    private val deliveryStore: ArticleDeliveryStore
 ) {
 
     companion object {
         private const val TAG = "DigestScheduler"
         private const val WORK_NAME_PREFIX = "daily_digest_"
+        // Existing anchored requests keep their original input and occurrence reference.
+        internal const val ANCHOR_TAG = "daily_digest_anchor_v1"
         private const val CATCH_UP_WORK_NAME_PREFIX = "daily_digest_catchup_"
         private const val CATCH_UP_TAG = "catch_up"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
@@ -55,8 +77,10 @@ class DigestScheduler @Inject constructor(
         internal fun shouldEnqueueCatchUp(
             now: ZonedDateTime,
             periodHour: Int,
-            latestScheduledDigestTimeMillis: Long?
+            latestScheduledDigestTimeMillis: Long?,
+            completedRun: Boolean = false
         ): Boolean {
+            if (completedRun) return false
             val scheduledTimeToday = now.toLocalDate()
                 .atTime(periodHour, 0)
                 .atZone(now.zone)
@@ -76,6 +100,11 @@ class DigestScheduler @Inject constructor(
 
     private val workManager: WorkManager
         get() = WorkManager.getInstance(context)
+    private val registrationLock = Any()
+    private val registrationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val registrationJobs = mutableMapOf<DigestPeriod, Job>()
+    private val registrationGenerations = mutableMapOf<DigestPeriod, Long>()
+    private val pendingCancellations = mutableMapOf<DigestPeriod, MutableList<Operation>>()
 
     /**
      * Constraints for digest generation:
@@ -119,44 +148,164 @@ class DigestScheduler @Inject constructor(
         Log.i(TAG, "Scheduled periods: ${selectedPeriods.joinToString { it.name }}")
     }
 
+    /** Boot keeps its broadcast open until selected enqueues and unselected cancels settle. */
+    suspend fun scheduleAllPeriodsAwaitPersistence() {
+        val selectedPeriods = settingsRepository.getSchedulePeriods()
+        // Cancel from this snapshot before waiting. A later user enable may then
+        // register its own work without a stale boot callback cancelling it.
+        val unselectedPeriods = DigestPeriod.entries.filter { it !in selectedPeriods }
+        unselectedPeriods.forEach(::cancelPeriod)
+        coroutineScope {
+            val cancellations = unselectedPeriods.map { period ->
+                async { awaitPendingCancellations(period, drainAfterFailure = true); Unit }
+            }
+            val registrations = selectedPeriods.map { period ->
+                async {
+                    val generation = synchronized(registrationLock) {
+                        if (period !in settingsRepository.getSchedulePeriods()) return@synchronized null
+                        registrationJobs.remove(period)?.cancel()
+                        ((registrationGenerations[period] ?: 0L) + 1).also {
+                            registrationGenerations[period] = it
+                        }
+                    } ?: return@async
+                    registerPeriod(period, generation, awaitPersistence = true,
+                        waitForRunning = false)
+                }
+            }
+            (cancellations + registrations).awaitAll()
+        }
+    }
+
     /**
      * Schedules a digest for a specific period.
      */
     fun schedulePeriod(period: DigestPeriod) {
+        synchronized(registrationLock) {
+            registrationJobs.remove(period)?.cancel()
+            val generation = (registrationGenerations[period] ?: 0L) + 1
+            registrationGenerations[period] = generation
+            registrationJobs[period] = registrationScope.launch {
+                registerPeriod(period, generation)
+            }
+        }
+    }
+
+    private suspend fun registerPeriod(period: DigestPeriod, generation: Long,
+        awaitPersistence: Boolean = false, waitForRunning: Boolean = true) {
+        val manager = workManager
+        val workName = getWorkName(period)
+        if (!awaitPendingCancellations(period)) return
+        synchronized(registrationLock) {
+            if (registrationGenerations[period] != generation) return
+        }
+        val existing = try {
+            // An already-running legacy worker keeps its original input. Wait for
+            // the next ENQUEUED generation rather than interrupting that run.
+            manager.getWorkInfosForUniqueWorkFlow(workName).first { rows ->
+                val active = rows.firstOrNull { it.state !in setOf(
+                    WorkInfo.State.SUCCEEDED, WorkInfo.State.FAILED, WorkInfo.State.CANCELLED) }
+                active == null || ANCHOR_TAG in active.tags ||
+                    (!waitForRunning && active.state == WorkInfo.State.RUNNING) ||
+                    (active.state == WorkInfo.State.ENQUEUED &&
+                        active.nextScheduleTimeMillis in 1L until Long.MAX_VALUE)
+            }.firstOrNull { it.state !in setOf(
+                WorkInfo.State.SUCCEEDED, WorkInfo.State.FAILED, WorkInfo.State.CANCELLED) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not inspect ${period.name} periodic schedule", error)
+            null // KEEP preserves any existing work if the read failed.
+        }
+        if (!waitForRunning && existing?.state == WorkInfo.State.RUNNING && ANCHOR_TAG !in existing.tags) {
+            // Already persisted. Keep the ordinary callback for its next ENQUEUED iteration.
+            schedulePeriod(period)
+            return
+        }
+        // Its input already carries the original 24-hour reference. Replacing
+        // it with a post-run nextScheduleTime would shift late occurrences.
+        if (existing != null && ANCHOR_TAG in existing.tags) return
+
         val initialDelay = calculateInitialDelay(period.hour, 0)
-
-        val inputData = Data.Builder()
-            .putString(DailyDigestWorker.KEY_PERIOD, period.name)
-            .build()
-
-        val periodicWorkRequest = PeriodicWorkRequestBuilder<DailyDigestWorker>(
-            repeatInterval = 24,
-            repeatIntervalTimeUnit = TimeUnit.HOURS
-        )
+        val anchor = existing?.nextScheduleTimeMillis ?: System.currentTimeMillis() + initialDelay
+        val builder = PeriodicWorkRequestBuilder<DailyDigestWorker>(24, TimeUnit.HOURS)
             .setConstraints(workConstraints)
-            .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
-            .setInputData(inputData)
+            .setInputData(Data.Builder()
+                .putString(DailyDigestWorker.KEY_PERIOD, period.name)
+                .putLong(DailyDigestWorker.KEY_PERIODIC_ANCHOR, anchor)
+                .putString(DailyDigestWorker.KEY_PERIODIC_ZONE, ZoneId.systemDefault().id)
+                .build())
             .addTag(DailyDigestWorker.TAG)
             .addTag(period.name)
-            .build()
+            .addTag(ANCHOR_TAG)
+        if (existing == null) builder.setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
+        else {
+            builder.setId(existing.id)
+            builder.setNextScheduleTimeOverride(anchor)
+        }
+        val request = builder.build()
+        val operation = synchronized(registrationLock) {
+            if (registrationGenerations[period] != generation) return
+            manager.enqueueUniquePeriodicWork(workName,
+                if (existing == null) ExistingPeriodicWorkPolicy.KEEP else ExistingPeriodicWorkPolicy.UPDATE,
+                request)
+        }
+        if (awaitPersistence) operation.awaitPersistence()
+        Log.i(TAG, "Registered ${period.name} digest occurrence at $anchor")
+    }
 
-        workManager.enqueueUniquePeriodicWork(
-            getWorkName(period),
-            ExistingPeriodicWorkPolicy.UPDATE,
-            periodicWorkRequest
-        )
+    private suspend fun awaitPendingCancellations(period: DigestPeriod,
+        drainAfterFailure: Boolean = false): Boolean {
+        val cancellations = synchronized(registrationLock) {
+            pendingCancellations[period]?.toList().orEmpty()
+        }
+        val settled = mutableListOf<Operation>()
+        var allSucceeded = true
+        // Await every outstanding cancellation; a later receipt alone does not
+        // prove an earlier cancellation has finished removing its request.
+        for (cancellation in cancellations) {
+            try {
+                cancellation.awaitPersistence()
+                settled.add(cancellation)
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                // A completed failed receipt is no longer useful. Leave any later
+                // still-pending cancellations for the next registration to await.
+                // Boot must drain them before releasing its broadcast, however.
+                settled.add(cancellation)
+                Log.w(TAG, "Could not confirm ${period.name} cancellation", error)
+                allSucceeded = false
+                if (!drainAfterFailure) break
+            }
+        }
+        synchronized(registrationLock) {
+            pendingCancellations[period]?.removeAll(settled.toSet())
+            if (pendingCancellations[period]?.isEmpty() == true) pendingCancellations.remove(period)
+        }
+        return allSucceeded
+    }
 
-        val delayHours = initialDelay / (1000 * 60 * 60)
-        val delayMinutes = (initialDelay / (1000 * 60)) % 60
-        Log.i(TAG, "Scheduled ${period.name} digest for ${period.hour}:00, " +
-                "initial delay: ${delayHours}h ${delayMinutes}m")
+    private suspend fun Operation.awaitPersistence() = suspendCancellableCoroutine<Unit> { continuation ->
+        val receipt = result
+        receipt.addListener({
+            try {
+                receipt.get()
+                continuation.resume(Unit)
+            } catch (error: Exception) {
+                continuation.resumeWithException(error)
+            }
+        }, Executor { command -> command.run() })
     }
 
     /**
      * Cancels the scheduled digest for a specific period.
      */
     fun cancelPeriod(period: DigestPeriod) {
-        workManager.cancelUniqueWork(getWorkName(period))
+        synchronized(registrationLock) {
+            registrationGenerations[period] = (registrationGenerations[period] ?: 0L) + 1
+            registrationJobs.remove(period)?.cancel()
+            pendingCancellations.getOrPut(period) { mutableListOf() }
+                .add(workManager.cancelUniqueWork(getWorkName(period)))
+        }
         Log.i(TAG, "Cancelled ${period.name} digest")
     }
 
@@ -201,13 +350,15 @@ class DigestScheduler @Inject constructor(
                 continue
             }
 
+            val completedRun = deliveryStore.coversScheduled(period.name, today.toString())
             val latestScheduledDigestTime = digestRepository.getLatestScheduledDigestTimeForPeriod(period)
-            if (!shouldEnqueueCatchUp(now, period.hour, latestScheduledDigestTime)) {
+            if (!shouldEnqueueCatchUp(now, period.hour, latestScheduledDigestTime, completedRun)) {
                 continue
             }
 
             val inputData = Data.Builder()
                 .putString(DailyDigestWorker.KEY_PERIOD, period.name)
+                .putString(DailyDigestWorker.KEY_OCCURRENCE_DATE, today.toString())
                 .build()
 
             val catchUpRequest = OneTimeWorkRequestBuilder<DailyDigestWorker>()
@@ -230,9 +381,9 @@ class DigestScheduler @Inject constructor(
      * Triggers an immediate digest generation.
      * Uses expedited work for higher priority execution.
      *
-     * @param fetchAll If true, fetches all articles regardless of lastFetched timestamp
+     * @param fetchAll Explicit regeneration that may repeat already delivered articles.
      */
-    fun runNow(fetchAll: Boolean = false) {
+    fun runNow(fetchAll: Boolean = false): UUID {
         Log.i(TAG, "Triggering immediate digest generation (fetchAll=$fetchAll)")
 
         val inputData = Data.Builder()
@@ -252,6 +403,7 @@ class DigestScheduler @Inject constructor(
             ExistingWorkPolicy.REPLACE,
             oneTimeWorkRequest
         )
+        return oneTimeWorkRequest.id
     }
 
     /**
@@ -281,7 +433,7 @@ class DigestScheduler @Inject constructor(
     /**
      * Gets the work status for immediate digest generation.
      */
-    fun getImmediateWorkInfo() = workManager.getWorkInfosForUniqueWorkLiveData(IMMEDIATE_WORK_NAME)
+    fun getImmediateWorkInfo(id: UUID) = workManager.getWorkInfoByIdLiveData(id)
 
     /**
      * Checks if Ghostwriter backend should be used for digest generation.

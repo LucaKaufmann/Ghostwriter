@@ -45,7 +45,7 @@ def validate_public_url(url: str, settings: Settings | None = None) -> None:
     if parsed.scheme not in ("http", "https"):
         raise ValueError("Only http/https URLs are allowed")
 
-    if parsed.username or parsed.password:
+    if parsed.username is not None or parsed.password is not None:
         raise ValueError("Userinfo is not allowed in URLs")
 
     hostname = parsed.hostname
@@ -62,14 +62,18 @@ def validate_public_url(url: str, settings: Settings | None = None) -> None:
 
     # If hostname is an IP literal, validate directly
     try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+    if literal is not None:
         if _is_private_ip(hostname):
             raise ValueError("Private or local IPs are not allowed")
         return
-    except ValueError:
-        # Not an IP literal; resolve DNS
-        pass
 
-    ips = _resolve_host(hostname)
+    try:
+        ips = _resolve_host(hostname)
+    except socket.gaierror as exc:
+        raise ValueError("Hostname could not be resolved") from exc
     if not ips:
         raise ValueError("Hostname could not be resolved")
 

@@ -40,7 +40,7 @@ def test_create_feed(client, public_feed_dns):
 
 
 def test_sync_feeds(client, public_feed_dns):
-    """Test syncing feeds."""
+    """Legacy clients can report exact no-ops but cannot create feeds."""
     feeds = [
         {
             "url": "https://example.com/feed1.xml",
@@ -53,7 +53,62 @@ def test_sync_feeds(client, public_feed_dns):
             "mode": "summarize",
         },
     ]
+    assert client.post("/api/feeds/sync", json=feeds).status_code == 409
+    for feed in feeds:
+        assert client.post("/api/feeds", json=feed).status_code == 200
     response = client.post("/api/feeds/sync", json=feeds)
     assert response.status_code == 200
     data = response.json()
     assert data["synced"] == 2
+    assert data["unchanged"] == 2
+
+
+def test_dns_failure_returns_validation_error_and_retry_succeeds(client, monkeypatch):
+    """New URLs require DNS; metadata edits of stored URLs do not."""
+    resolved = set()
+
+    def resolve(host, port, *args, **kwargs):
+        if host not in resolved:
+            raise socket.gaierror(socket.EAI_NONAME, "unresolved")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    create_url = "https://input-create.example/feed.xml"
+    create_data = {"url": create_url, "title": "Initial"}
+
+    failed_create = client.post("/api/feeds", json=create_data)
+    assert failed_create.status_code == 422
+    assert "Hostname could not be resolved" in failed_create.json()["detail"]
+    assert create_url not in {feed["url"] for feed in client.get("/api/feeds").json()}
+
+    resolved.add("input-create.example")
+    created = client.post("/api/feeds", json=create_data)
+    assert created.status_code == 200
+    feed_id = created.json()["id"]
+
+    resolved.remove("input-create.example")
+    missing_version = client.put(f"/api/feeds/{feed_id}", json={"title": "Changed"})
+    assert missing_version.status_code == 428
+    assert client.get(f"/api/feeds/{feed_id}").json()["title"] == "Initial"
+
+    updated = client.put(f"/api/feeds/{feed_id}", json={"title": "Changed"},
+                         headers={"If-Match": f'"{created.json()["version"]}"'})
+    assert updated.status_code == 200
+    assert updated.json()["title"] == "Changed"
+
+    batch = [
+        {"url": "https://input-batch-one.example/feed.xml", "title": "One"},
+        {"url": "https://input-batch-two.example/feed.xml", "title": "Two"},
+    ]
+    resolved.add("input-batch-one.example")
+    failed_sync = client.post("/api/feeds/sync", json=batch)
+    assert failed_sync.status_code == 422
+    assert "Hostname could not be resolved" in failed_sync.json()["detail"]
+    urls = {feed["url"] for feed in client.get("/api/feeds").json()}
+    assert not {item["url"] for item in batch} & urls
+
+    resolved.add("input-batch-two.example")
+    synced = client.post("/api/feeds/sync", json=batch)
+    assert synced.status_code == 409
+    urls = {feed["url"] for feed in client.get("/api/feeds").json()}
+    assert not {item["url"] for item in batch} & urls

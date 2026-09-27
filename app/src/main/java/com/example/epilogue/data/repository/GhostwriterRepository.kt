@@ -177,66 +177,9 @@ class GhostwriterRepository @Inject constructor(
      * Sync local feeds to the Ghostwriter backend.
      * This performs a full sync - feeds not in the list will be deactivated on the server.
      */
-    suspend fun syncFeeds(feeds: List<Feed>): GhostwriterResult<FeedSyncResponse> = withContext(Dispatchers.IO) {
-        if (shouldUseSharedClient()) {
-            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
-            return@withContext try {
-                val realFeeds = feeds.filter { !it.url.startsWith("synthetic://") }
-                val requests = realFeeds.map { feed ->
-                    FeedSyncRequest(
-                        url = feed.url,
-                        title = feed.name,
-                        isActive = feed.isEnabled,
-                        mode = when (feed.mode) {
-                            ProcessingMode.BRIEFING -> "summarize"
-                            ProcessingMode.FIDELITY -> "raw"
-                        },
-                        maxArticles = if (feed.maxArticles > 0) feed.maxArticles else 10
-                    )
-                }
-                GhostwriterResult.Success(shared.syncFeeds(requests))
-            } catch (e: GhostwriterApiException) {
-                sharedApiError("Feed sync failed (shared)", e)
-            } catch (e: Exception) {
-                Log.e(TAG, "Feed sync failed (shared)", e)
-                GhostwriterResult.Error("Sync failed: ${e.message}")
-            }
-        }
-
-        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
-
-        try {
-            // Filter out synthetic feeds (wallabag, newsletters) - these are server-side integrations
-            val realFeeds = feeds.filter { !it.url.startsWith("synthetic://") }
-
-            val syncRequests = realFeeds.map { feed ->
-                FeedSyncRequest(
-                    url = feed.url,
-                    title = feed.name,
-                    isActive = feed.isEnabled,
-                    mode = when (feed.mode) {
-                        ProcessingMode.BRIEFING -> "summarize"
-                        ProcessingMode.FIDELITY -> "raw"
-                    },
-                    maxArticles = if (feed.maxArticles > 0) feed.maxArticles else 10
-                )
-            }
-
-            val response = api.syncFeeds(getAuthHeader(), syncRequests)
-            if (response.isSuccessful && response.body() != null) {
-                Log.i(TAG, "Synced ${response.body()!!.synced} feeds to Ghostwriter")
-                GhostwriterResult.Success(response.body()!!)
-            } else {
-                GhostwriterResult.Error(
-                    message = "Feed sync failed: ${response.message()}",
-                    code = response.code()
-                )
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Feed sync failed", e)
-            GhostwriterResult.Error("Sync failed: ${e.message}")
-        }
-    }
+    @Deprecated("Feed writes use the durable v2 outbox")
+    suspend fun syncFeeds(feeds: List<Feed>): GhostwriterResult<FeedSyncResponse> =
+        GhostwriterResult.Error("Feed sync v1 is disabled; use v2")
 
     /**
      * Get feed changes from the Ghostwriter backend for incremental sync.
@@ -650,50 +593,9 @@ class GhostwriterRepository @Inject constructor(
      * @param feedUrl The URL of the feed to delete
      * @return Success if deleted, Error otherwise
      */
-    suspend fun deleteFeedByUrl(feedUrl: String): GhostwriterResult<Unit> = withContext(Dispatchers.IO) {
-        if (shouldUseSharedClient()) {
-            val shared = getSharedAdapter() ?: return@withContext GhostwriterResult.NotConfigured
-            return@withContext try {
-                shared.deleteFeedByUrl(feedUrl)
-                Log.i(TAG, "Deleted feed via shared client: $feedUrl")
-                GhostwriterResult.Success(Unit)
-            } catch (e: GhostwriterApiException.NotFound) {
-                // Feed doesn't exist on backend - treat as success
-                Log.w(TAG, "Feed not found on backend via shared client: $feedUrl")
-                GhostwriterResult.Success(Unit)
-            } catch (e: GhostwriterApiException) {
-                sharedApiError("Delete feed failed (shared)", e)
-            } catch (e: Exception) {
-                Log.e(TAG, "Delete feed failed (shared)", e)
-                GhostwriterResult.Error("Delete failed: ${e.message}")
-            }
-        }
-
-        val api = getApi() ?: return@withContext GhostwriterResult.NotConfigured
-
-        try {
-            // URL-encode the feed URL for the path
-            val encodedUrl = java.net.URLEncoder.encode(feedUrl, "UTF-8")
-            val response = api.deleteFeedByUrl(getAuthHeader(), encodedUrl)
-
-            if (response.isSuccessful) {
-                Log.i(TAG, "Deleted feed: $feedUrl")
-                GhostwriterResult.Success(Unit)
-            } else if (response.code() == 404) {
-                // Feed doesn't exist on backend - treat as success
-                Log.w(TAG, "Feed not found on backend: $feedUrl")
-                GhostwriterResult.Success(Unit)
-            } else {
-                GhostwriterResult.Error(
-                    message = "Delete failed: ${response.message()}",
-                    code = response.code()
-                )
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Delete feed failed", e)
-            GhostwriterResult.Error("Delete failed: ${e.message}")
-        }
-    }
+    @Deprecated("Feed deletes use the durable v2 outbox")
+    suspend fun deleteFeedByUrl(feedUrl: String): GhostwriterResult<Unit> =
+        GhostwriterResult.Error("Feed delete v1 is disabled; use v2")
 
     /**
      * Get all schedule configurations.

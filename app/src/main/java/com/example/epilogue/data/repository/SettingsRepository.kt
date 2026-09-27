@@ -2,6 +2,8 @@ package com.example.epilogue.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.room.withTransaction
+import com.example.epilogue.data.local.EpilogueDatabase
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.example.epilogue.domain.model.DigestPeriod
@@ -10,6 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -20,8 +24,10 @@ import javax.inject.Singleton
  */
 @Singleton
 class SettingsRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val database: EpilogueDatabase
 ) {
+    private val ghostwriterUrlWriteLock = Mutex()
 
     companion object {
         private const val PREFS_NAME = "epilog_settings"
@@ -331,12 +337,29 @@ class SettingsRepository @Inject constructor(
      * Sets the Ghostwriter server URL.
      */
     suspend fun setGhostwriterUrl(url: String?) = withContext(Dispatchers.IO) {
-        if (url.isNullOrBlank()) {
-            prefs.edit().remove(KEY_GHOSTWRITER_URL).apply()
-        } else {
-            prefs.edit().putString(KEY_GHOSTWRITER_URL, url.trim()).apply()
+        ghostwriterUrlWriteLock.withLock {
+            val saved = url?.trim()?.takeIf { it.isNotBlank() }
+            fun normalized(value: String?) = value?.trim()?.trimEnd('/')
+                ?.removeSuffix("/api")?.takeIf { it.isNotBlank() }
+            // Invalidate in-flight Room work before publishing the new preference.
+            // A failed Room write leaves the configured URL untouched.
+            database.withTransaction {
+                if (normalized(prefs.getString(KEY_GHOSTWRITER_URL, null)) != normalized(saved)) {
+                    database.feedSyncStateDao().active()?.let { state ->
+                        database.feedSyncStateDao().put(state.copy(generation = state.generation + 1))
+                    }
+                }
+            }
+            // The earlier generation commit invalidates old tokens. This Room
+            // boundary keeps an adapter check/write from straddling URL publication.
+            database.withTransaction {
+                val edit = prefs.edit()
+                if (saved == null) edit.remove(KEY_GHOSTWRITER_URL)
+                else edit.putString(KEY_GHOSTWRITER_URL, saved)
+                check(edit.commit()) { "Could not save Ghostwriter URL" }
+                _ghostwriterUrlFlow.value = saved
+            }
         }
-        _ghostwriterUrlFlow.value = url?.trim()
     }
 
     /**

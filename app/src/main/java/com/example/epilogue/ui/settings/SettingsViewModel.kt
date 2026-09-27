@@ -2,6 +2,8 @@ package com.example.epilogue.ui.settings
 
 import android.net.Uri
 import android.util.Log
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -12,20 +14,26 @@ import com.example.epilogue.data.remote.ghostwriter.IntegrationStatus
 import com.example.epilogue.data.remote.ghostwriter.MediaProcessingStatusResponse
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
+import com.example.epilogue.data.repository.AndroidFeedV2Store
 import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
 import com.example.epilogue.data.repository.SettingsRepository
+import com.example.epilogue.data.local.GenerationRunDao
 import com.example.epilogue.domain.model.DigestPeriod
 import com.example.epilogue.service.ConfigSyncManager
 import com.example.epilogue.service.DigestScheduler
+import com.example.epilogue.shared.sync.FeedSyncV2UseCase
+import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
@@ -35,7 +43,10 @@ class SettingsViewModel @Inject constructor(
     private val digestRepository: DigestRepository,
     private val feedRepository: FeedRepository,
     private val ghostwriterRepository: GhostwriterRepository,
-    private val configSyncManager: ConfigSyncManager
+    private val configSyncManager: ConfigSyncManager,
+    private val feedSyncV2UseCase: FeedSyncV2UseCase,
+    private val feedV2Store: AndroidFeedV2Store,
+    private val generationRunDao: GenerationRunDao
 ) : ViewModel() {
 
     companion object {
@@ -46,9 +57,17 @@ class SettingsViewModel @Inject constructor(
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     private var digestPollingJob: Job? = null
+    private var immediateWorkId: UUID? = null
+    private var immediateWorkInfo: LiveData<WorkInfo>? = null
+    private var immediateWorkObserver: Observer<WorkInfo?>? = null
 
     init {
         loadSettings()
+        viewModelScope.launch {
+            generationRunDao.observeLatestFinished().collect { row ->
+                _uiState.update { it.copy(localRunSummary = row?.let(LocalRunSummary::from)) }
+            }
+        }
         if (settingsRepository.isGhostwriterConfigured()) {
             fetchIntegrationStatus()
             refreshMediaOverview()
@@ -140,35 +159,79 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun runDigestNow() {
+        clearImmediateWorkObserver()
+        digestPollingJob?.cancel()
+        _uiState.update {
+            it.copy(
+                isGenerating = true,
+                digestTriggered = true,
+                digestCompleted = false,
+                digestFailed = false,
+                digestResultMessage = null,
+                ghostwriterProgress = null,
+                ghostwriterError = null
+            )
+        }
         if (_uiState.value.ghostwriterEnabled && _uiState.value.ghostwriterUrl.isNotBlank()) {
             // Use Ghostwriter backend
             runDigestViaGhostwriter()
         } else {
             // Use local generation
-            runDigestLocally()
+            runDigestLocally(regeneration = false)
         }
     }
 
-    private fun runDigestLocally() {
-        _uiState.update { it.copy(isGenerating = true, digestTriggered = true) }
-        digestScheduler.runNow(fetchAll = false)
+    /** Explicitly repeat local articles, including identities already delivered. */
+    fun regenerateDigestLocally() {
+        if (_uiState.value.ghostwriterEnabled && _uiState.value.ghostwriterUrl.isNotBlank()) return
+        clearImmediateWorkObserver()
+        digestPollingJob?.cancel()
+        _uiState.update { it.copy(isGenerating = true, digestTriggered = true,
+            digestCompleted = false, digestFailed = false, digestResultMessage = null) }
+        runDigestLocally(regeneration = true)
+    }
 
-        // Observe work completion
-        digestScheduler.getImmediateWorkInfo().observeForever { workInfos ->
-            val workInfo = workInfos?.firstOrNull() ?: return@observeForever
+    private fun runDigestLocally(regeneration: Boolean) {
+        val id = digestScheduler.runNow(fetchAll = regeneration)
+        immediateWorkId = id
+        val workInfoLiveData = digestScheduler.getImmediateWorkInfo(id)
+        val observer = Observer<WorkInfo?> { workInfo ->
+            if (workInfo == null || immediateWorkId != id || workInfo.id != id) return@Observer
             when (workInfo.state) {
                 WorkInfo.State.SUCCEEDED -> {
-                    _uiState.update { it.copy(isGenerating = false, digestCompleted = true) }
+                    val message = when (workInfo.outputData.getString("generation_outcome")) {
+                        "partial" -> "Digest saved with a partial result"
+                        "deferred" -> "No articles included; more remain for the next edition"
+                        "empty" -> "No eligible articles found"
+                        else -> "Digest generated successfully"
+                    }
+                    _uiState.update { it.copy(isGenerating = false, digestCompleted = true,
+                        digestResultMessage = message) }
+                    clearImmediateWorkObserver()
                 }
                 WorkInfo.State.FAILED -> {
                     _uiState.update { it.copy(isGenerating = false, digestFailed = true) }
+                    clearImmediateWorkObserver()
                 }
                 WorkInfo.State.CANCELLED -> {
                     _uiState.update { it.copy(isGenerating = false) }
+                    clearImmediateWorkObserver()
                 }
                 else -> { /* Still running */ }
             }
         }
+        immediateWorkInfo = workInfoLiveData
+        immediateWorkObserver = observer
+        workInfoLiveData.observeForever(observer)
+    }
+
+    private fun clearImmediateWorkObserver() {
+        immediateWorkId = null
+        immediateWorkObserver?.let { observer ->
+            immediateWorkInfo?.removeObserver(observer)
+        }
+        immediateWorkObserver = null
+        immediateWorkInfo = null
     }
 
     private fun runDigestViaGhostwriter() {
@@ -182,23 +245,22 @@ class SettingsViewModel @Inject constructor(
             }
 
             // First, sync feeds to Ghostwriter
-            val feeds = feedRepository.getAllFeedsList()
-            val syncResult = ghostwriterRepository.syncFeeds(feeds)
+            val syncResult = feedV2Store.syncAndRecord(feedSyncV2UseCase)
 
             when (syncResult) {
-                is GhostwriterResult.Success -> {
-                    Log.i(TAG, "Synced ${syncResult.data.synced} feeds to Ghostwriter")
+                is FeedSyncV2Outcome.Complete -> {
+                    settingsRepository.setLastFeedSyncTime(System.currentTimeMillis())
+                    Log.i(TAG, "Feed sync applied=${syncResult.applied}, pulled=${syncResult.pulled}")
                 }
-                is GhostwriterResult.Error -> {
-                    Log.w(TAG, "Feed sync warning: ${syncResult.message}")
-                    // Continue anyway - feeds may already be synced
+                is FeedSyncV2Outcome.Partial -> {
+                    _uiState.update { it.copy(ghostwriterError = "Feed sync partial: ${syncResult.pending} pending") }
                 }
-                is GhostwriterResult.NotConfigured -> {
+                else -> {
                     _uiState.update {
                         it.copy(
                             isGenerating = false,
                             digestFailed = true,
-                            ghostwriterError = "Ghostwriter not configured"
+                            ghostwriterError = "Feed sync requires attention: $syncResult"
                         )
                     }
                     return@launch
@@ -357,10 +419,22 @@ class SettingsViewModel @Inject constructor(
 
     fun resetAllData() {
         viewModelScope.launch {
-            digestRepository.deleteAllDigests()
-            feedRepository.resetAllLastFetched()
-            _uiState.update { it.copy(dataReset = true) }
+            try {
+                if (digestRepository.deleteAllDigests()) {
+                    feedRepository.resetAllLastFetched()
+                    _uiState.update { it.copy(dataReset = true, dataResetError = null) }
+                } else {
+                    _uiState.update { it.copy(dataReset = false, dataResetError = "Some digest files could not be removed. Please retry.") }
+                }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _uiState.update { it.copy(dataReset = false, dataResetError = "Digest data could not be reset. Please retry.") }
+            }
         }
+    }
+
+    fun clearDataResetError() {
+        _uiState.update { it.copy(dataResetError = null) }
     }
 
     fun clearDataResetFlag() {
@@ -1513,25 +1587,22 @@ class SettingsViewModel @Inject constructor(
             var hasError = false
 
             // 1. Sync feeds
-            val feeds = feedRepository.getAllFeedsList()
-            if (feeds.isNotEmpty()) {
-                val feedResult = ghostwriterRepository.syncFeeds(feeds)
+            run {
+                val feedResult = feedV2Store.syncAndRecord(feedSyncV2UseCase)
                 when (feedResult) {
-                    is GhostwriterResult.Success -> {
-                        syncStatus.add("${feedResult.data.synced} feeds synced")
-                        Log.i(TAG, "Initial sync: ${feedResult.data.synced} feeds synced")
+                    is FeedSyncV2Outcome.Complete -> {
+                        settingsRepository.setLastFeedSyncTime(System.currentTimeMillis())
+                        syncStatus.add("Feed sync complete")
                     }
-                    is GhostwriterResult.Error -> {
-                        syncStatus.add("Feed sync failed")
+                    is FeedSyncV2Outcome.Partial -> {
+                        syncStatus.add("Feed sync partial: ${feedResult.pending} pending")
                         hasError = true
-                        Log.e(TAG, "Initial sync: feed sync failed: ${feedResult.message}")
                     }
-                    is GhostwriterResult.NotConfigured -> {
+                    else -> {
+                        syncStatus.add("Feed sync requires attention: $feedResult")
                         hasError = true
                     }
                 }
-            } else {
-                syncStatus.add("No feeds to sync")
             }
 
             // 2. Sync schedule preferences
@@ -1589,6 +1660,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        clearImmediateWorkObserver()
         super.onCleared()
         digestPollingJob?.cancel()
     }
@@ -1604,7 +1676,10 @@ data class SettingsUiState(
     val digestTriggered: Boolean = false,
     val digestCompleted: Boolean = false,
     val digestFailed: Boolean = false,
+    val digestResultMessage: String? = null,
+    val localRunSummary: LocalRunSummary? = null,
     val dataReset: Boolean = false,
+    val dataResetError: String? = null,
     val customExportUri: String? = null,
     val customExportEnabled: Boolean = false,
     val customExportDisplayPath: String? = null,

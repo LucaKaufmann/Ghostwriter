@@ -4,8 +4,16 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, String
+from pydantic import field_validator
+from sqlalchemy import BigInteger, Column, String
 from sqlmodel import Field, SQLModel
+
+MAX_FEED_ARTICLES = 2**31 - 1
+
+
+def readable_article_limit(value: int) -> int:
+    """Project legacy stored caps to the native wire range without rewriting data."""
+    return min(MAX_FEED_ARTICLES, max(0, value))
 
 
 class FeedBase(SQLModel):
@@ -38,6 +46,7 @@ class Feed(FeedBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    version: int = Field(default=0, sa_type=BigInteger)
 
 
 class FeedCreate(SQLModel):
@@ -49,7 +58,7 @@ class FeedCreate(SQLModel):
     mode: Literal["raw", "summarize"] = Field(
         default="raw", description="Processing mode"
     )
-    max_articles: int = Field(default=10, description="Max articles per run")
+    max_articles: int = Field(default=10, ge=0, le=MAX_FEED_ARTICLES, description="Max articles per run")
 
 
 class FeedRead(SQLModel):
@@ -64,6 +73,12 @@ class FeedRead(SQLModel):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    version: int
+
+    @field_validator("max_articles")
+    @classmethod
+    def compatible_article_limit(cls, value: int) -> int:
+        return readable_article_limit(value)
 
 
 class FeedSync(SQLModel):
@@ -75,7 +90,7 @@ class FeedSync(SQLModel):
     mode: Literal["raw", "summarize"] = Field(
         default="raw", description="Processing mode"
     )
-    max_articles: int = Field(default=10, description="Max articles per run")
+    max_articles: int = Field(default=10, ge=0, le=MAX_FEED_ARTICLES, description="Max articles per run")
 
 
 class FeedUpdate(SQLModel):
@@ -86,4 +101,4 @@ class FeedUpdate(SQLModel):
     mode: Literal["raw", "summarize"] | None = Field(
         default=None, description="Processing mode"
     )
-    max_articles: int | None = Field(default=None, description="Max articles per run")
+    max_articles: int | None = Field(default=None, ge=0, le=MAX_FEED_ARTICLES, description="Max articles per run")

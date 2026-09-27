@@ -10,17 +10,32 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface FeedDao {
-    @Query("SELECT * FROM feeds ORDER BY name ASC")
+    @Query("SELECT * FROM feeds WHERE hiddenDelete = 0 ORDER BY name ASC")
     fun getAllFeeds(): Flow<List<FeedEntity>>
 
-    @Query("SELECT * FROM feeds ORDER BY name ASC")
+    @Query("SELECT * FROM feeds WHERE hiddenDelete = 0 ORDER BY name ASC")
     suspend fun getAllFeedsList(): List<FeedEntity>
 
-    @Query("SELECT * FROM feeds WHERE isEnabled = 1 ORDER BY name ASC")
+    @Query("SELECT * FROM feeds WHERE isEnabled = 1 AND hiddenDelete = 0 " +
+        "AND url NOT IN (SELECT url FROM feed_mutations WHERE state = 'legacy_unresolved' " +
+        "AND serverKey = (SELECT serverKey FROM feed_sync_state WHERE active = 1 LIMIT 1)) ORDER BY name ASC")
     suspend fun getEnabledFeedsList(): List<FeedEntity>
+
+    @Query("SELECT * FROM feeds AS feed WHERE feed.isEnabled = 1 AND (feed.hiddenDelete = 0 OR " +
+        "EXISTS (SELECT 1 FROM feed_mutations AS latest WHERE latest.url = feed.url " +
+        "AND latest.serverKey = (SELECT serverKey FROM feed_sync_state WHERE active = 1 LIMIT 1) " +
+        "AND latest.kind = 'upsert' AND latest.state IN ('queued','needs_resolution','rejected','legacy_unresolved') " +
+        "AND NOT EXISTS (SELECT 1 FROM feed_mutations AS newer WHERE newer.url = latest.url " +
+        "AND newer.serverKey = latest.serverKey AND (newer.queueOrder > latest.queueOrder OR " +
+        "(newer.queueOrder = latest.queueOrder AND newer.sequence > latest.sequence))))) " +
+        "ORDER BY feed.name ASC")
+    suspend fun getEnabledLocalFeedsList(): List<FeedEntity>
 
     @Query("SELECT * FROM feeds WHERE url = :url")
     suspend fun getFeedByUrl(url: String): FeedEntity?
+
+    @Query("SELECT * FROM feeds WHERE url NOT LIKE 'synthetic://%' ORDER BY url")
+    suspend fun getAllRealFeedsIncludingHidden(): List<FeedEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFeed(feed: FeedEntity)
@@ -37,25 +52,4 @@ interface FeedDao {
     @Query("UPDATE feeds SET lastFetched = 0")
     suspend fun resetAllLastFetched()
 
-    // ===== Sync Methods =====
-
-    /** Get all feeds that have local modifications pending sync to server. */
-    @Query("SELECT * FROM feeds WHERE locallyModified = 1")
-    suspend fun getLocallyModifiedFeeds(): List<FeedEntity>
-
-    /** Clear the locallyModified flag on all feeds after successful sync. */
-    @Query("UPDATE feeds SET locallyModified = 0")
-    suspend fun clearAllLocallyModified()
-
-    /** Delete feeds by their URLs (used for applying tombstones from server). */
-    @Query("DELETE FROM feeds WHERE url IN (:urls)")
-    suspend fun deleteByUrls(urls: List<String>)
-
-    /** Upsert multiple feeds at once (used for applying server changes). */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(feeds: List<FeedEntity>)
-
-    /** Mark a feed as locally modified (needs sync to server). */
-    @Query("UPDATE feeds SET locallyModified = 1 WHERE url = :url")
-    suspend fun markAsLocallyModified(url: String)
 }

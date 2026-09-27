@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "eligible",
+      "entry": "manual_and_scheduled",
+      "episode_status": null,
+      "epub": "exists",
+      "pdf": "exists",
+      "expect": "remove_owned_rows_and_files_only"
+    },
+    {
+      "id": "episode_pending",
+      "entry": "manual_and_scheduled",
+      "episode_status": "pending",
+      "expect": "conflict_or_skip_without_mutation"
+    },
+    {
+      "id": "episode_processing",
+      "entry": "manual_and_scheduled",
+      "episode_status": "processing",
+      "expect": "conflict_or_skip_without_mutation"
+    },
+    {
+      "id": "episode_failed",
+      "entry": "manual_and_scheduled",
+      "episode_status": "failed",
+      "expect": "conflict_or_skip_without_mutation"
+    },
+    {
+      "id": "episode_ready",
+      "entry": "manual_and_scheduled",
+      "episode_status": "ready",
+      "expect": "conflict_or_skip_without_mutation"
+    },
+    {
+      "id": "article_only_reference",
+      "entry": "manual_and_scheduled",
+      "episode_status": "failed",
+      "reference": "article_ids_only",
+      "expect": "conflict_or_skip_without_mutation"
+    },
+    {
+      "id": "one_off_private",
+      "entry": "manual",
+      "source": "synthetic://one-off",
+      "expect": "owner_access_before_delete_and_no_public_failed_retry"
+    },
+    {
+      "id": "missing_files",
+      "entry": "manual_and_scheduled",
+      "epub": "missing",
+      "pdf": "missing",
+      "expect": "delete_rows_successfully"
+    },
+    {
+      "id": "permission_failure",
+      "entry": "manual_and_scheduled",
+      "fault": "pdf_unlink_raises",
+      "expect": "deleting_row_retained_and_retryable"
+    },
+    {
+      "id": "crash_after_epub",
+      "entry": "manual_and_scheduled",
+      "fault": "interrupt_after_epub_unlink",
+      "expect": "retry_removes_pdf_and_rows"
+    },
+    {
+      "id": "collision",
+      "entry": "manual_and_scheduled",
+      "fault": "second_digest_claims_pdf_path",
+      "expect": "conflict_without_shared_file_unlink"
+    },
+    {
+      "id": "historical_orphan",
+      "entry": "manual",
+      "digest_row": false,
+      "epub": "exists",
+      "expect": "404_and_file_untouched_and_not_downloadable"
+    },
+    {
+      "id": "queue_race",
+      "entry": "concurrent",
+      "fault": "episode_queue_during_claim",
+      "expect": "episode_reference_or_deletion_wins_atomically"
+    },
+    {
+      "id": "pdf_race",
+      "entry": "concurrent",
+      "fault": "pdf_render_during_claim",
+      "expect": "no_pdf_published_after_deletion"
+    },
+    {
+      "id": "download_race",
+      "entry": "concurrent",
+      "fault": "response_open_during_unlink",
+      "expect": "opened_stream_or_clean_retryable_response"
+    },
+    {
+      "id": "feedback_and_media",
+      "entry": "manual_and_scheduled",
+      "expect": "remove_matching_feedback_clear_consumed_pointer_keep_transcript_and_consumed_at"
+    },
+    {
+      "id": "shared_cover_and_unrelated",
+      "entry": "manual_and_scheduled",
+      "expect": "keep_cover_asset_feed_episode_audio_and_unrelated_files"
+    },
+    {
+      "id": "db_commit_failure",
+      "entry": "manual_and_scheduled",
+      "fault": "final_commit_raises",
+      "expect": "deleting_row_and_child_rows_survive_retry_with_missing_files"
+    },
+    {
+      "id": "filename_privacy",
+      "entry": "download",
+      "source": "synthetic://one-off",
+      "fault": "digest_row_missing_or_deleting",
+      "expect": "404_even_when_epub_exists"
+    }
+  ]
+}

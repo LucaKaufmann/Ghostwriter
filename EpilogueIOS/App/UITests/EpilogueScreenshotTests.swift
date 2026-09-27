@@ -43,6 +43,71 @@ final class EpilogueScreenshotTests: XCTestCase {
         capture(name: "04-settings")
     }
 
+    func testFeedResolutionFixture() throws {
+        app.terminate()
+        app.launchArguments += ["-feed-v2-ui-fixture"]
+        app.launch()
+        XCTAssertTrue(waitForExists(app.staticTexts["Web headline"]))
+        XCTAssertTrue(waitForExists(app.staticTexts["Rejected feed"]))
+        XCTAssertTrue(waitForExists(app.staticTexts["Missing feed"]))
+        XCTAssertTrue(waitForExists(app.staticTexts["Removed locally"]))
+        capture(name: "feed-v2-attention")
+
+        app.staticTexts["Web headline"].tap()
+        XCTAssertTrue(waitForExists(app.navigationBars["Resolve feed"]))
+        XCTAssertTrue(waitForExists(app.buttons["Apply mine"]))
+        capture(name: "feed-v2-conflict")
+        app.buttons["Close"].tap()
+
+        app.staticTexts["Rejected feed"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Correct and retry"]))
+        capture(name: "feed-v2-rejected")
+        app.buttons["Close"].tap()
+
+        app.staticTexts["Missing feed"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Add to server"]))
+        capture(name: "feed-v2-absent")
+        app.buttons["Close"].tap()
+
+        app.staticTexts["https://example.test/delete.xml"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Delete anyway"]))
+        capture(name: "feed-v2-delete")
+        app.buttons["Close"].tap()
+
+        app.staticTexts["https://example.test/rejected-delete.xml"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Discard proposal"]))
+        XCTAssertFalse(app.textFields["Corrected title"].exists)
+        XCTAssertFalse(app.buttons["Correct and retry"].exists)
+        capture(name: "feed-v2-rejected-delete")
+    }
+
+    func testRemoteDigestArtifactAvailabilityFixture() throws {
+        app.terminate()
+        app.launchArguments += ["-feed-v2-ui-fixture", "-digest-artifact-ui-fixture"]
+        app.launch()
+        tapTab("History")
+
+        let empty = app.staticTexts["No EPUB for empty digest"]
+        let indexed = app.staticTexts["EPUB not downloaded"]
+        XCTAssertTrue(waitForExists(empty))
+        XCTAssertTrue(waitForExists(indexed))
+        capture(name: "sync-status-history")
+
+        empty.swipeRight()
+        XCTAssertFalse(app.buttons["EPUB"].exists)
+        XCTAssertFalse(app.buttons["PDF"].exists)
+        if !app.staticTexts["No articles in this digest"].exists {
+            empty.tap()
+        }
+        XCTAssertTrue(waitForExists(app.staticTexts["No articles in this digest"]))
+        XCTAssertFalse(app.buttons["Share"].exists)
+        capture(name: "sync-status-empty-detail")
+
+        app.navigationBars.buttons["Digest History"].tap()
+        indexed.swipeRight()
+        XCTAssertTrue(waitForExists(app.buttons["EPUB"]))
+    }
+
     private func tapTab(_ title: String) {
         let button = app.tabBars.buttons[title]
         XCTAssertTrue(waitForExists(button), "Tab \(title) not found")

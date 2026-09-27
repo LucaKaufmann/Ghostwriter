@@ -7,6 +7,10 @@ import androidx.room.Query
 import androidx.room.Transaction
 import com.example.epilogue.domain.model.TriggerType
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 /**
  * Data access object for digest operations.
@@ -100,6 +104,38 @@ interface DigestDao {
     @Query("DELETE FROM digests WHERE id = :id")
     suspend fun deleteDigestById(id: Long)
 
+    @Query("SELECT EXISTS(SELECT 1 FROM digests WHERE epubFilePath = :path AND id != :excludingId)")
+    suspend fun hasOtherArtifactReference(path: String, excludingId: Long): Boolean
+
+    @Query("SELECT EXISTS(SELECT 1 FROM digests WHERE epubFilePath = :path)")
+    suspend fun hasArtifactReference(path: String): Boolean
+
+    /** Serialize the reference check and unlink with history writes. */
+    @Transaction
+    suspend fun removeUnreferencedArtifact(path: String, removeFile: (String) -> Boolean): Boolean {
+        if (hasArtifactReference(path)) return false
+        return removeFile(path)
+    }
+
+    /** Keep reference inspection and row deletion serialized with other Room writers. */
+    @Transaction
+    suspend fun deleteWithArtifact(id: Long, removeFile: (String) -> Boolean): Boolean {
+        val digest = getDigestById(id) ?: return true
+        if (digest.epubFilePath.isNotBlank() &&
+            !hasOtherArtifactReference(digest.epubFilePath, id) &&
+            !removeFile(digest.epubFilePath)
+        ) return false
+        deleteDigestById(id)
+        return true
+    }
+
+    @Transaction
+    suspend fun removeUnsharedArtifact(id: Long, removeFile: (String) -> Boolean): Boolean {
+        val digest = getDigestById(id) ?: return false
+        if (digest.epubFilePath.isBlank() || hasOtherArtifactReference(digest.epubFilePath, id)) return false
+        return removeFile(digest.epubFilePath)
+    }
+
     @Query("SELECT COUNT(*) FROM digests")
     suspend fun getDigestCount(): Int
 
@@ -108,6 +144,22 @@ interface DigestDao {
 
     @Query("SELECT * FROM digests")
     suspend fun getAllDigestsList(): List<DigestEntity>
+
+    /** Clear the current snapshot; editions created later remain in history. */
+    suspend fun deleteAllWithArtifacts(removeFile: (String) -> Boolean): Boolean {
+        val snapshot = getAllDigestsList()
+        var allDeleted = true
+        for (digest in snapshot) {
+            currentCoroutineContext().ensureActive()
+            // Each completed unlink/row deletion commits before the next one.
+            // Cancellation cannot roll back earlier rows after their files are gone.
+            val deleted = withContext(NonCancellable) {
+                deleteWithArtifact(digest.id, removeFile)
+            }
+            if (!deleted) allDeleted = false
+        }
+        return allDeleted
+    }
 
     @Query("DELETE FROM digests")
     suspend fun deleteAllDigests()

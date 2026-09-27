@@ -112,7 +112,7 @@ struct GhostwriterSettingsView: View {
             // MARK: - Sync Actions
             Section("Sync") {
                 Button {
-                    Task { await coordinator.performFullSync() }
+                    Task { await coordinator.performFullSyncIncludingDigests() }
                 } label: {
                     HStack {
                         Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")

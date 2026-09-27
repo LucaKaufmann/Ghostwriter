@@ -6,6 +6,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -16,7 +17,7 @@ from app.core.database import engine
 from app.core.logging import digest_logger
 from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle
-from app.models.feed import Feed
+from app.models.feed import Feed, readable_article_limit
 from app.models.manual_cover import ManualCover
 from app.models.media_item import MediaItem
 from app.models.seen_article import SeenArticle
@@ -30,6 +31,12 @@ from app.services.epub_generator import EpubGenerator
 from app.services.llm_service import LLMService
 from app.services.media_processor import MediaProcessor
 from app.services.newsletter_service import NewsletterService
+from app.services.source_acknowledgement import (
+    add_intent,
+    drain_pending,
+    gmail_binding_for_account,
+    wallabag_binding,
+)
 from app.services.wallabag_service import WallabagService
 
 logger = logging.getLogger(__name__)
@@ -173,22 +180,23 @@ class BinderyPipeline:
     async def run(self) -> None:
         """Execute the full pipeline."""
         self.start_time = time.time()
-
-        # Pre-create synthetic feeds so feed_id is always available
-        self._ensure_synthetic_feeds()
-
-        # Get digest info for logging and current client config
-        digest_filename: str | None = None
-        min_word_count = 0
-        with Session(engine) as session:
-            digest = session.get(Digest, self.digest_id)
-            period = digest.period if digest else "manual"
-            digest_filename = digest.filename if digest else None
-            client_config = session.exec(select(ClientConfig)).first()
-            if client_config:
-                min_word_count = client_config.min_word_count
-
         try:
+            # These reads can fail too; keep them inside the persisted failure boundary.
+            self._ensure_synthetic_feeds()
+            digest_filename: str | None = None
+            min_word_count = 0
+            with Session(engine) as session:
+                digest = session.get(Digest, self.digest_id)
+                period = digest.period if digest else "manual"
+                digest_filename = digest.filename if digest else None
+                client_config = session.exec(select(ClientConfig)).first()
+                if client_config:
+                    min_word_count = client_config.min_word_count
+
+            try:
+                await self._drain_source_acknowledgements(request_follow_up=False)
+            except Exception:
+                logger.exception("Pending source acknowledgement scan failed")
             await self._update_stage("fetching")
             feeds = await self._get_active_feeds()
             seen_articles: list[tuple[UUID, str, str, str]] = []
@@ -204,12 +212,7 @@ class BinderyPipeline:
                     seen_articles.append((feed_id, guid, url, title))
 
             if not feeds:
-                logger.warning("No active feeds found")
-                digest_logger.pipeline_no_articles(
-                    str(self.digest_id), "No active feeds configured"
-                )
-                await self._complete(0)
-                return
+                logger.info("No active RSS feeds; checking other enabled sources")
 
             await self._update_progress(total_feeds=len(feeds))
             digest_logger.pipeline_stage(
@@ -265,7 +268,7 @@ class BinderyPipeline:
 
             # Fetch Wallabag articles (separate from RSS pipeline)
             wallabag_articles: list[ExtractedArticle] = []
-            wallabag_entry_ids: list[int] = []
+            wallabag_ids_by_guid: dict[str, int] = {}
             wallabag_enabled = False
             with Session(engine) as wb_session:
                 wallabag_service = WallabagService.from_db_or_settings(
@@ -275,6 +278,11 @@ class BinderyPipeline:
 
                 wb_cfg = wb_session.exec(select(WallabagConfig)).first()
                 wallabag_enabled = wb_cfg.enabled if wb_cfg else True
+            wallabag_mode = (
+                wallabag_service.settings.wallabag_mode
+                if wallabag_service.is_configured
+                else self.settings.wallabag_mode
+            )
 
             if wallabag_service.is_configured and wallabag_enabled:
                 try:
@@ -334,8 +342,7 @@ class BinderyPipeline:
                                     feed_title="Wallabag",
                                 )
                             )
-                            wallabag_entry_ids.append(wb["id"])
-                            await _queue_seen(wb_feed_id, guid, wb["url"], wb["title"])
+                            wallabag_ids_by_guid[guid] = wb["id"]
                 except Exception as e:
                     logger.warning(
                         f"Wallabag fetch failed, continuing with RSS only: {e!r}",
@@ -351,6 +358,8 @@ class BinderyPipeline:
             # Fetch newsletter emails from Gmail
             newsletter_articles: list[ExtractedArticle] = []
             newsletter_message_ids: list[str] = []
+            newsletter_ids_by_guid: dict[str, str] = {}
+            newsletter_binding: tuple[str, str] | None = None
             newsletter_service = NewsletterService(self.settings)
 
             newsletters_enabled = True
@@ -368,6 +377,16 @@ class BinderyPipeline:
                         nl_raw,
                         newsletter_message_ids,
                     ) = await newsletter_service.fetch_newsletters()
+                    newsletter_binding = gmail_binding_for_account(
+                        newsletter_service.last_fetch_account_id or "",
+                        newsletter_service,
+                    )
+                    newsletter_ids_by_guid = {
+                        article.guid: message_id
+                        for article, message_id in zip(
+                            nl_raw, newsletter_message_ids, strict=True
+                        )
+                    }
                     digest_logger.info(
                         f"Newsletters: fetched {len(nl_raw)} emails",
                         component="feeds",
@@ -402,7 +421,6 @@ class BinderyPipeline:
                                 await _queue_seen(nl_feed_id, nl.guid, nl.url, nl.title)
                                 continue
                             newsletter_articles.append(nl)
-                            await _queue_seen(nl_feed_id, nl.guid, nl.url, nl.title)
                 except Exception as e:
                     logger.warning(f"Newsletter fetch failed, continuing without: {e}")
                     digest_logger.error(
@@ -411,14 +429,6 @@ class BinderyPipeline:
                         event="newsletters_failed",
                         context={"error": str(e)},
                     )
-
-            if not all_articles and not wallabag_articles and not newsletter_articles:
-                logger.warning("No new articles found")
-                digest_logger.pipeline_no_articles(
-                    str(self.digest_id), "No new articles found across all feeds"
-                )
-                await self._complete(0, seen_articles=seen_articles)
-                return
 
             # Cap total articles
             original_count = len(all_articles)
@@ -591,13 +601,6 @@ class BinderyPipeline:
                         url=parsed_article.url,
                     )
 
-                    await _queue_seen(
-                        feed.id,
-                        parsed_article.guid,
-                        parsed_article.url,
-                        parsed_article.title,
-                    )
-
                     self._articles_enriched += 1
                     self._progress_dirty = True
                     await self._flush_progress_if_needed()
@@ -613,13 +616,10 @@ class BinderyPipeline:
             )
 
             # Enrich Wallabag articles with AI if configured (parallel)
-            if wallabag_articles and self.settings.wallabag_mode == "summarize":
+            if wallabag_articles and wallabag_mode == "summarize":
                 await self._update_stage("enriching")
                 llm_sem = asyncio.Semaphore(3)
-                enriched_wallabag: list[ExtractedArticle] = []
-                wb_lock = asyncio.Lock()
-
-                async def _summarize_wb(article: ExtractedArticle) -> None:
+                async def _summarize_wb(article: ExtractedArticle) -> ExtractedArticle | None:
                     async with llm_sem:
                         summary_content, ai_failed = await self.llm_service.summarize(
                             article.content,
@@ -640,6 +640,10 @@ class BinderyPipeline:
                                         confidence=1.0,
                                     ),
                                 )
+                                await _queue_seen(
+                                    self._get_synthetic_feed_id("wallabag"),
+                                    article.guid, article.url, article.title,
+                                )
                                 return
                             result = ExtractedArticle(
                                 guid=article.guid,
@@ -657,23 +661,21 @@ class BinderyPipeline:
                             )
                         else:
                             result = article
-                    async with wb_lock:
-                        enriched_wallabag.append(result)
+                    return result
 
                 logger.info(
                     f"Summarizing {len(wallabag_articles)} Wallabag articles with concurrency=3"
                 )
-                await asyncio.gather(*[_summarize_wb(a) for a in wallabag_articles])
-                wallabag_articles = enriched_wallabag
+                enriched_wallabag = await asyncio.gather(
+                    *[_summarize_wb(a) for a in wallabag_articles]
+                )
+                wallabag_articles = [article for article in enriched_wallabag if article is not None]
 
             # Enrich newsletter articles with AI if configured (parallel)
             if newsletter_articles and newsletter_mode == "summarize":
                 await self._update_stage("enriching")
                 llm_sem = asyncio.Semaphore(3)
-                enriched_newsletters: list[ExtractedArticle] = []
-                nl_lock = asyncio.Lock()
-
-                async def _summarize_nl(article: ExtractedArticle) -> None:
+                async def _summarize_nl(article: ExtractedArticle) -> ExtractedArticle | None:
                     async with llm_sem:
                         summary_content, ai_failed = await self.llm_service.summarize(
                             article.content,
@@ -694,6 +696,10 @@ class BinderyPipeline:
                                         confidence=1.0,
                                     ),
                                 )
+                                await _queue_seen(
+                                    self._get_synthetic_feed_id("newsletter"),
+                                    article.guid, article.url, article.title,
+                                )
                                 return
                             result = ExtractedArticle(
                                 guid=article.guid,
@@ -711,14 +717,15 @@ class BinderyPipeline:
                             )
                         else:
                             result = article
-                    async with nl_lock:
-                        enriched_newsletters.append(result)
+                    return result
 
                 logger.info(
                     f"Summarizing {len(newsletter_articles)} newsletter articles with concurrency=3"
                 )
-                await asyncio.gather(*[_summarize_nl(a) for a in newsletter_articles])
-                newsletter_articles = enriched_newsletters
+                enriched_newsletters = await asyncio.gather(
+                    *[_summarize_nl(a) for a in newsletter_articles]
+                )
+                newsletter_articles = [article for article in enriched_newsletters if article is not None]
 
             # Pull completed media items for inclusion in digest
             media_articles: list[ExtractedArticle] = []
@@ -743,7 +750,7 @@ class BinderyPipeline:
                         .where(MediaItem.status == "completed")
                         .where(MediaItem.consumed_at.is_(None))
                         .where(MediaItem.content_type.in_(types_to_include))
-                        .order_by(MediaItem.created_at)
+                        .order_by(MediaItem.created_at, MediaItem.id)
                     ).all()
 
                     for item in completed_items:
@@ -769,15 +776,46 @@ class BinderyPipeline:
                             f"Including {len(media_articles)} completed media items in digest"
                         )
 
+            # RSS is first, then saved articles, newsletters, and completed media.
+            # Only selected items become seen/acknowledged/consumed at publication.
+            remaining = max(0, self.settings.max_articles_per_digest)
+            eligible_count = sum(map(len, (
+                extracted_articles, wallabag_articles, newsletter_articles, media_articles,
+            )))
+            extracted_articles = extracted_articles[:remaining]
+            remaining -= len(extracted_articles)
+            wallabag_articles = wallabag_articles[:remaining]
+            remaining -= len(wallabag_articles)
+            newsletter_articles = newsletter_articles[:remaining]
+            remaining -= len(newsletter_articles)
+            media_articles = media_articles[:remaining]
+            media_item_ids = media_item_ids[:len(media_articles)]
+            if eligible_count > self.settings.max_articles_per_digest:
+                digest_logger.info(
+                    f"Capped eligible articles from {eligible_count} to {self.settings.max_articles_per_digest}",
+                    component="pipeline", event="capped",
+                    context={"original": eligible_count, "capped": self.settings.max_articles_per_digest},
+                )
+            for feed, article in extracted_articles:
+                await _queue_seen(feed.id, article.guid, article.url, article.title)
+            if wallabag_articles:
+                wb_feed_id = self._get_synthetic_feed_id("wallabag")
+                for article in wallabag_articles:
+                    await _queue_seen(wb_feed_id, article.guid, article.url, article.title)
+            if newsletter_articles:
+                nl_feed_id = self._get_synthetic_feed_id("newsletter")
+                for article in newsletter_articles:
+                    await _queue_seen(nl_feed_id, article.guid, article.url, article.title)
+
             if (
                 not extracted_articles
                 and not wallabag_articles
                 and not newsletter_articles
                 and not media_articles
             ):
-                logger.warning("No articles extracted successfully")
+                logger.info("No eligible articles found across enabled sources")
                 digest_logger.pipeline_no_articles(
-                    str(self.digest_id), "All article extractions failed"
+                    str(self.digest_id), "No eligible articles found across enabled sources"
                 )
                 await self._complete(0, seen_articles=seen_articles)
                 return
@@ -808,7 +846,7 @@ class BinderyPipeline:
             epub_path = self.epub_generator.generate(
                 articles_for_epub,
                 period=period,
-                output_filename=digest_filename,
+                output_filename=f".{self.digest_id.hex}.staging.epub",
                 saved_articles=wallabag_articles if wallabag_articles else None,
                 newsletter_articles=newsletter_articles
                 if newsletter_articles
@@ -816,6 +854,29 @@ class BinderyPipeline:
                 media_articles=media_articles if media_articles else None,
                 cover_image=cover_image,
             )
+
+            # The final filename is visible before the database publication commit.
+            # A crash in this narrow gap may leave an unreferenced file, but can
+            # never leave a completed row pointing at a partial file.
+            if (
+                not digest_filename or Path(digest_filename).name != digest_filename
+                or not digest_filename.endswith(".epub")
+                or digest_filename.startswith(".")
+            ):
+                raise ValueError("Unsafe digest filename")
+            staged = Path(epub_path)
+            final_path = staged.with_name(digest_filename)
+            if os.path.lexists(final_path):
+                raise FileExistsError("Digest artifact already exists")
+            with staged.open("rb") as artifact:
+                os.fsync(artifact.fileno())
+            os.replace(staged, final_path)
+            directory_fd = os.open(final_path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            epub_path = str(final_path)
 
             # Log EPUB file size
             try:
@@ -826,74 +887,26 @@ class BinderyPipeline:
             except OSError:
                 file_size_kb = 0
 
-            # Save DigestArticle records
-            await self._save_article_records(extracted_articles)
-
-            # Save Wallabag article records
-            if wallabag_articles:
-                await self._save_wallabag_article_records(
-                    wallabag_articles, len(extracted_articles)
-                )
-
-            # Save newsletter article records
-            if newsletter_articles:
-                await self._save_newsletter_article_records(
-                    newsletter_articles,
-                    len(extracted_articles) + len(wallabag_articles),
-                )
-
-            # Save media article records
-            if media_articles:
-                await self._save_media_article_records(
-                    media_articles,
-                    len(extracted_articles)
-                    + len(wallabag_articles)
-                    + len(newsletter_articles),
-                )
-
-            # Mark consumed media items
-            if media_item_ids:
-                with Session(engine) as session:
-                    now = datetime.utcnow()
-                    for mid in media_item_ids:
-                        item = session.get(MediaItem, mid)
-                        if item:
-                            item.consumed_at = now
-                            item.consumed_digest_id = self.digest_id
-                            session.add(item)
-                    session.commit()
-                logger.info(f"Marked {len(media_item_ids)} media items as consumed")
-
-            # Mark newsletter emails as read
-            if newsletter_service.is_configured and newsletter_message_ids:
-                try:
-                    await newsletter_service.mark_processed(newsletter_message_ids)
-                except Exception:
-                    logger.warning("Failed to mark newsletter emails as read")
-
-            # Mark Wallabag entries as processed (parallel)
-            if wallabag_service.is_configured and wallabag_entry_ids:
-                wb_sem = asyncio.Semaphore(5)
-
-                async def _mark_wb(eid: int) -> None:
-                    async with wb_sem:
-                        try:
-                            await wallabag_service.mark_processed(eid)
-                        except Exception:
-                            logger.warning(
-                                f"Failed to mark wallabag entry {eid} as processed"
-                            )
-
-                await asyncio.gather(*[_mark_wb(eid) for eid in wallabag_entry_ids])
-
-            await self._complete(
-                len(extracted_articles)
-                + len(wallabag_articles)
-                + len(newsletter_articles)
-                + len(media_articles),
-                epub_path,
-                seen_articles=seen_articles,
+            if newsletter_articles and newsletter_binding is None:
+                raise ValueError("Gmail source identity unavailable")
+            self._publish(
+                extracted_articles, wallabag_articles, newsletter_articles,
+                media_articles, media_item_ids, seen_articles,
+                wallabag_binding(wallabag_service) if wallabag_articles else None,
+                newsletter_binding, wallabag_ids_by_guid, newsletter_ids_by_guid,
             )
+            try:
+                digest_logger.pipeline_completed(
+                    str(self.digest_id), article_count=total_count,
+                    duration_seconds=time.time() - self.start_time,
+                    epub_path=epub_path,
+                )
+            except Exception:
+                logger.exception("Digest completion logging failed after publication")
+            try:
+                await self._drain_source_acknowledgements(digest_id=self.digest_id)
+            except Exception:
+                logger.exception("Source acknowledgement scan failed after publication")
 
         except Exception as e:
             logger.exception(f"Pipeline failed: {e}")
@@ -903,10 +916,16 @@ class BinderyPipeline:
                 digest = session.get(Digest, self.digest_id)
                 if digest:
                     current_stage = digest.stage
-            digest_logger.pipeline_failed(
-                str(self.digest_id), str(e), stage=current_stage
-            )
+            try:
+                digest_logger.pipeline_failed(
+                    str(self.digest_id), str(e), stage=current_stage
+                )
+            except Exception:
+                logger.exception("Digest failure logging failed")
             await self._fail(str(e))
+            raise
+        except asyncio.CancelledError:
+            await self._fail("Cancelled")
             raise
 
     async def _generate_cover_image(
@@ -1001,6 +1020,19 @@ class BinderyPipeline:
             )
         return cover
 
+    async def _drain_source_acknowledgements(
+        self, *, digest_id: UUID | None = None, request_follow_up: bool = True,
+    ) -> None:
+        await drain_pending(
+            engine=engine,
+            digest_id=digest_id,
+            request_follow_up=request_follow_up,
+            newsletter_factory=lambda: NewsletterService(self.settings),
+            wallabag_factory=lambda session: WallabagService.from_db_or_settings(
+                session, self.settings
+            ),
+        )
+
     async def _get_active_feeds(self) -> list[Feed]:
         """Get all active feeds."""
         with Session(engine) as session:
@@ -1026,7 +1058,7 @@ class BinderyPipeline:
             Tuple of (list of (feed, parsed_article) tuples, total article count).
         """
         parsed = await self.content_processor.parse_feed(
-            feed.url, max_entries=feed.max_articles
+            feed.url, max_entries=readable_article_limit(feed.max_articles)
         )
         total_count = len(parsed)
 
@@ -1123,123 +1155,115 @@ class BinderyPipeline:
             session.add(seen)
             session.commit()
 
-    async def _mark_seen_raw(
-        self, feed_id: UUID, guid: str, url: str, title: str
+    def _publish(
+        self,
+        rss_articles: list[tuple[Feed, ExtractedArticle]],
+        wallabag_articles: list[ExtractedArticle],
+        newsletter_articles: list[ExtractedArticle],
+        media_articles: list[ExtractedArticle],
+        media_item_ids: list[UUID],
+        seen_articles: list[tuple[UUID, str, str, str]],
+        wallabag_source: tuple[str, str] | None,
+        newsletter_source: tuple[str, str] | None,
+        wallabag_ids: dict[str, int],
+        newsletter_ids: dict[str, str],
     ) -> None:
-        """Mark an article as seen using raw fields (for non-RSS sources)."""
-        with Session(engine) as session:
-            seen = SeenArticle(
-                feed_id=feed_id,
-                guid=guid,
-                url=url,
-                title=title,
-            )
-            session.add(seen)
-            session.commit()
+        """Commit all local effects of a finished edition as one SQLite write."""
+        groups = [
+            [(feed.id, article, "summarized" if article.is_summary else "raw")
+             for feed, article in rss_articles],
+            [(self._get_synthetic_feed_id("wallabag"), article,
+              "summarized" if article.is_summary else "raw")
+             for article in wallabag_articles],
+            [(self._get_synthetic_feed_id("newsletter"), article, "raw")
+             for article in newsletter_articles],
+            [(self._get_synthetic_feed_id(article.content_type), article,
+              "summarized" if article.is_summary else "raw")
+             for article in media_articles],
+        ]
+        records = [record for group in groups for record in group]
+        if len(media_item_ids) != len(media_articles) or len(set(media_item_ids)) != len(media_item_ids):
+            raise ValueError("Selected media identity mismatch")
+        if wallabag_articles and wallabag_source is None:
+            raise ValueError("Wallabag source identity unavailable")
+        if newsletter_articles and newsletter_source is None:
+            raise ValueError("Gmail source identity unavailable")
 
-    async def _save_wallabag_article_records(
-        self, articles: list[ExtractedArticle], offset: int
-    ) -> None:
-        """Save DigestArticle records for Wallabag articles."""
-        with Session(engine) as session:
-            for sort_order, article in enumerate(articles, offset):
-                record = DigestArticle(
-                    digest_id=self.digest_id,
-                    feed_id=self._get_synthetic_feed_id("wallabag"),
-                    title=article.title,
-                    url=article.url,
-                    mode="summarized" if article.is_summary else "raw",
-                    word_count=article.word_count,
-                    ai_failed=article.ai_failed,
-                    processing_ms=article.processing_ms,
-                    content=article.content,
-                    author=article.author,
-                    feed_title=article.feed_title or "Wallabag",
-                    sort_order=sort_order,
-                    content_type=article.content_type,
-                )
-                session.add(record)
-            session.commit()
-
-    async def _save_newsletter_article_records(
-        self, articles: list[ExtractedArticle], offset: int
-    ) -> None:
-        """Save DigestArticle records for newsletter articles."""
-        with Session(engine) as session:
-            for sort_order, article in enumerate(articles, offset):
-                record = DigestArticle(
-                    digest_id=self.digest_id,
-                    feed_id=self._get_synthetic_feed_id("newsletter"),
-                    title=article.title,
-                    url=article.url,
-                    mode="raw",
-                    word_count=article.word_count,
-                    ai_failed=False,
-                    processing_ms=article.processing_ms,
-                    content=article.content,
-                    author=article.author,
-                    feed_title=article.feed_title or "Newsletter",
-                    sort_order=sort_order,
-                    content_type=article.content_type,
-                )
-                session.add(record)
-            session.commit()
-
-    async def _save_media_article_records(
-        self, articles: list[ExtractedArticle], offset: int
-    ) -> None:
-        """Save DigestArticle records for media (podcast/YouTube) articles."""
-        with Session(engine) as session:
-            for sort_order, article in enumerate(articles, offset):
-                feed_id = self._get_synthetic_feed_id(article.content_type)
-                record = DigestArticle(
-                    digest_id=self.digest_id,
-                    feed_id=feed_id,
-                    title=article.title,
-                    url=article.url,
-                    mode="summarized" if article.is_summary else "raw",
-                    word_count=article.word_count,
-                    ai_failed=article.ai_failed,
-                    processing_ms=article.processing_ms,
-                    content=article.content,
-                    author=article.author,
-                    feed_title=article.feed_title,
-                    sort_order=sort_order,
-                    content_type=article.content_type,
-                )
-                session.add(record)
-            session.commit()
-
-    async def _save_article_records(
-        self, articles: list[tuple[Feed, ExtractedArticle]]
-    ) -> None:
-        """Save DigestArticle records for audit trail and client syncing."""
-        with Session(engine) as session:
-            for sort_order, (feed, article) in enumerate(articles):
-                record = DigestArticle(
-                    digest_id=self.digest_id,
-                    feed_id=feed.id,
-                    title=article.title,
-                    url=article.url,
-                    mode="summarized" if article.is_summary else "raw",
-                    word_count=article.word_count,
-                    ai_failed=article.ai_failed,
-                    processing_ms=article.processing_ms,
-                    # Article content for client syncing
-                    content=article.content,
-                    author=article.author,
-                    feed_title=article.feed_title or feed.title,
-                    sort_order=sort_order,
-                    content_type=article.content_type,
-                )
-                session.add(record)
-            session.commit()
+        with engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                with Session(bind=connection) as session:
+                    digest = session.get(Digest, self.digest_id)
+                    if digest is None or digest.status not in {"queued", "processing"}:
+                        raise RuntimeError("Digest no longer processing")
+                    now = datetime.utcnow()
+                    for selected, media_id in zip(media_articles, media_item_ids, strict=True):
+                        item = session.get(MediaItem, media_id)
+                        if (
+                            item is None or item.status != "completed"
+                            or item.consumed_at is not None
+                            or item.consumed_digest_id is not None
+                            or item.content_type != selected.content_type
+                            or item.guid != selected.guid or item.url != selected.url
+                            or item.title != selected.title or item.content != selected.content
+                            or item.word_count != selected.word_count
+                            or item.is_summary != selected.is_summary
+                            or item.author != selected.author
+                            or item.ai_failed != selected.ai_failed
+                            or item.processing_ms != selected.processing_ms
+                        ):
+                            raise RuntimeError("Selected media changed before publication")
+                        item.consumed_at = now
+                        item.consumed_digest_id = self.digest_id
+                        session.add(item)
+                    for order, (feed_id, article, mode) in enumerate(records):
+                        session.add(DigestArticle(
+                            digest_id=self.digest_id, feed_id=feed_id,
+                            title=article.title, url=article.url, mode=mode,
+                            word_count=article.word_count, ai_failed=article.ai_failed,
+                            processing_ms=article.processing_ms,
+                            content=article.content, author=article.author,
+                            feed_title=article.feed_title or "", sort_order=order,
+                            content_type=article.content_type,
+                        ))
+                    for feed_id, guid, url, title in seen_articles:
+                        session.add(SeenArticle(
+                            feed_id=feed_id, guid=guid, url=url, title=title
+                        ))
+                    for article in wallabag_articles:
+                        external_id = wallabag_ids.get(article.guid)
+                        if external_id is None:
+                            raise ValueError("Wallabag item identity mismatch")
+                        add_intent(
+                            session, self.digest_id, "wallabag", wallabag_source,
+                            str(external_id),
+                        )
+                    for article in newsletter_articles:
+                        external_id = newsletter_ids.get(article.guid)
+                        if external_id is None:
+                            raise ValueError("Gmail item identity mismatch")
+                        add_intent(
+                            session, self.digest_id, "gmail", newsletter_source,
+                            external_id,
+                        )
+                    digest.status = "completed"
+                    digest.stage = "completed"
+                    digest.completed_at = now
+                    digest.article_count = len(records)
+                    digest.locked_at = None
+                    digest.locked_by = None
+                    session.add(digest)
+                    session.commit()
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
 
     async def _update_stage(self, stage: str) -> None:
         """Update the current pipeline stage."""
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
-            if digest:
+            if digest and digest.status in {"queued", "processing"}:
                 digest.stage = stage
                 digest.status = "processing"
                 session.add(digest)
@@ -1250,7 +1274,7 @@ class BinderyPipeline:
         """Update progress counters."""
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
-            if digest:
+            if digest and digest.status in {"queued", "processing"}:
                 for key, value in kwargs.items():
                     setattr(digest, key, value)
                 session.add(digest)
@@ -1299,18 +1323,21 @@ class BinderyPipeline:
                 session.commit()
         logger.info(f"Digest completed with {article_count} articles")
 
-        digest_logger.pipeline_completed(
-            str(self.digest_id),
-            article_count=article_count,
-            duration_seconds=duration,
-            epub_path=epub_path,
-        )
+        try:
+            digest_logger.pipeline_completed(
+                str(self.digest_id),
+                article_count=article_count,
+                duration_seconds=duration,
+                epub_path=epub_path,
+            )
+        except Exception:
+            logger.exception("Digest completion logging failed after publication")
 
     async def _fail(self, error: str) -> None:
         """Mark digest as failed."""
         with Session(engine) as session:
             digest = session.get(Digest, self.digest_id)
-            if digest:
+            if digest and digest.status in {"queued", "processing"}:
                 digest.status = "failed"
                 digest.error_message = error[:500]  # Truncate
                 digest.locked_at = None

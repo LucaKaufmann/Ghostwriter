@@ -10,7 +10,9 @@ import javax.inject.Singleton
 
 @Singleton
 class FeedRepository @Inject constructor(
-    private val feedDao: FeedDao
+    private val feedDao: FeedDao,
+    private val feedV2Store: AndroidFeedV2Store,
+    private val settings: SettingsRepository
 ) {
     fun getAllFeeds(): Flow<List<Feed>> =
         feedDao.getAllFeeds().map { entities ->
@@ -21,21 +23,22 @@ class FeedRepository @Inject constructor(
         feedDao.getAllFeedsList().map { it.toDomain() }
 
     suspend fun getEnabledFeedsList(): List<Feed> =
-        feedDao.getEnabledFeedsList().map { it.toDomain() }
+        (if (settings.isGhostwriterConfigured()) feedDao.getEnabledFeedsList()
+        else feedDao.getEnabledLocalFeedsList()).map { it.toDomain() }
 
     suspend fun getFeedByUrl(url: String): Feed? =
         feedDao.getFeedByUrl(url)?.toDomain()
 
     suspend fun insertFeed(feed: Feed) {
-        feedDao.insertFeed(FeedEntity.fromDomain(feed))
+        feedV2Store.saveLocal(feed)
     }
 
     suspend fun updateFeed(feed: Feed) {
-        feedDao.updateFeed(FeedEntity.fromDomain(feed))
+        feedV2Store.saveLocal(feed)
     }
 
     suspend fun deleteFeed(feed: Feed) {
-        feedDao.deleteFeed(FeedEntity.fromDomain(feed))
+        feedV2Store.deleteLocal(feed.url)
     }
 
     suspend fun updateLastFetched(url: String, timestamp: Long) {
@@ -46,60 +49,17 @@ class FeedRepository @Inject constructor(
         feedDao.resetAllLastFetched()
     }
 
-    // ===== Sync Methods for Bi-Directional Sync =====
-
-    /**
-     * Get all feeds that have local modifications pending sync to server.
-     */
-    suspend fun getLocallyModifiedFeeds(): List<Feed> =
-        feedDao.getLocallyModifiedFeeds().map { it.toDomain() }
-
-    /**
-     * Clear the locallyModified flag on all feeds after successful sync.
-     */
-    suspend fun clearAllLocallyModified() {
-        feedDao.clearAllLocallyModified()
-    }
-
-    /**
-     * Delete feeds by their URLs (used for applying tombstones from server).
-     */
-    suspend fun deleteByUrls(urls: List<String>) {
-        if (urls.isNotEmpty()) {
-            feedDao.deleteByUrls(urls)
-        }
-    }
-
-    /**
-     * Upsert multiple feeds at once (used for applying server changes).
-     * This replaces feeds with matching URLs.
-     */
-    suspend fun upsertAll(feeds: List<Feed>) {
-        if (feeds.isNotEmpty()) {
-            feedDao.upsertAll(feeds.map { FeedEntity.fromDomain(it) })
-        }
-    }
-
-    /**
-     * Mark a feed as locally modified (needs sync to server).
-     */
-    suspend fun markAsLocallyModified(url: String) {
-        feedDao.markAsLocallyModified(url)
-    }
-
     /**
      * Insert a feed and mark it as locally modified for sync.
      */
     suspend fun insertFeedWithSync(feed: Feed) {
-        val entityWithModifiedFlag = FeedEntity.fromDomain(feed.copy(locallyModified = true))
-        feedDao.insertFeed(entityWithModifiedFlag)
+        feedV2Store.saveLocal(feed)
     }
 
     /**
      * Update a feed and mark it as locally modified for sync.
      */
     suspend fun updateFeedWithSync(feed: Feed) {
-        val entityWithModifiedFlag = FeedEntity.fromDomain(feed.copy(locallyModified = true))
-        feedDao.updateFeed(entityWithModifiedFlag)
+        feedV2Store.saveLocal(feed)
     }
 }

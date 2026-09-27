@@ -1,6 +1,27 @@
 package com.example.epilogue.service
 
 import com.example.epilogue.domain.model.ProcessedArticle
+import com.example.epilogue.domain.model.DigestPeriod
+import android.content.Context
+import android.media.MediaScannerConnection
+import android.os.Environment
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.mockkConstructor
+import io.mockk.unmockkAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertArrayEquals
+import java.io.File
+import java.io.IOException
+import java.util.Date
 import io.documentnode.epub4j.domain.Author
 import io.documentnode.epub4j.domain.Book
 import io.documentnode.epub4j.domain.Resource
@@ -23,6 +44,92 @@ import java.io.ByteArrayOutputStream
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
 class EpubGeneratorTest {
+
+    @get:Rule
+    val output = TemporaryFolder()
+
+    private fun prepareGenerator(): EpubGenerator {
+        mockkStatic(Environment::class)
+        every { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS) } returns output.root
+        mockkStatic(MediaScannerConnection::class)
+        every { MediaScannerConnection.scanFile(any(), any(), any(), any()) } answers {
+            arg<MediaScannerConnection.OnScanCompletedListener>(3).onScanCompleted("fixture", null)
+        }
+        return EpubGenerator(mockk<Context>())
+    }
+
+    @Test
+    fun `repeated manual and scheduled generations preserve distinct readable EPUBs`() = runBlocking {
+        try {
+            val generator = prepareGenerator()
+            val date = Date(1_735_776_000_000L)
+            for (period in listOf(null, DigestPeriod.MORNING)) {
+                val first = generator.generate(listOf(createArticle("First edition", false)), date, period)!!
+                val original = first.file.readBytes()
+                val second = generator.generate(listOf(createArticle("Second edition", false)), date, period)!!
+                assertNotEquals(first.file.absolutePath, second.file.absolutePath)
+                assertArrayEquals(original, first.file.readBytes())
+                for ((result, title) in listOf(first to "First edition", second to "Second edition")) {
+                    val book = result.file.inputStream().use { EpubReader().readEpub(it) }
+                    assertTrue(book.resources.all.any { resource ->
+                        resource.href.endsWith(".xhtml") && String(resource.data).contains(title)
+                    })
+                }
+            }
+        } finally {
+            unmockkAll()
+        }
+    }
+
+    @Test
+    fun `serialization failure removes only its new file and preserves previous edition`() = runBlocking {
+        try {
+            val generator = prepareGenerator()
+            val previous = generator.generate(listOf(createArticle("Earlier edition", false)))!!.file
+            val before = previous.readBytes()
+            mockkConstructor(EpubWriter::class)
+            every { anyConstructed<EpubWriter>().write(any(), any()) } throws IOException("fixture disk failure")
+            assertNull(generator.generate(listOf(createArticle("Failed edition", false))))
+            assertArrayEquals(before, previous.readBytes())
+            assertEquals(listOf(previous.name), previous.parentFile!!.list()!!.toList())
+        } finally {
+            unmockkAll()
+        }
+    }
+
+    @Test
+    fun `media scan failure and cancellation remove unreturned unique artifacts`() = runBlocking {
+        try {
+            val generator = prepareGenerator()
+            every { MediaScannerConnection.scanFile(any(), any(), any(), any()) } throws IOException("fixture scan failure")
+            assertNull(generator.generate(listOf(createArticle("Scan failed", false))))
+            assertTrue(File(output.root, "Epilogue").listFiles()!!.isEmpty())
+            val scanning = CompletableDeferred<Unit>()
+            every { MediaScannerConnection.scanFile(any(), any(), any(), any()) } answers {
+                scanning.complete(Unit)
+                Unit
+            }
+            val generation = async { generator.generate(listOf(createArticle("Cancelled", false))) }
+            scanning.await()
+            generation.cancelAndJoin()
+            assertTrue(generation.isCancelled)
+            assertTrue(File(output.root, "Epilogue").listFiles()!!.isEmpty())
+        } finally {
+            unmockkAll()
+        }
+    }
+
+    @Test
+    fun `output directory creation failure does not truncate existing file`() = runBlocking {
+        try {
+            val generator = prepareGenerator()
+            val obstruction = File(output.root, "Epilogue").apply { writeText("keep existing content") }
+            assertNull(generator.generate(listOf(createArticle("Unavailable output", false))))
+            assertEquals("keep existing content", obstruction.readText())
+        } finally {
+            unmockkAll()
+        }
+    }
 
     @Test
     fun `book contains correct title with date`() {

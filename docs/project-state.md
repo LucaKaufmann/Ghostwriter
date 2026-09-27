@@ -1,16 +1,16 @@
 # Project state
 
-Updated 2026-09-27. Audit baseline: `cdb776d1d544bc6db0dd18a98cba1b9e86273f62`. Original execution base: `e6e62677fe4f5b8f516e226a48080008cafc04e0`. Remote main refreshed: `86d3efdaf2506c700b3613dfd0bd9425a05ee8ec`.
+Updated 2026-09-27. Audit baseline: `cdb776d1d544bc6db0dd18a98cba1b9e86273f62`. Original execution base: `e6e62677fe4f5b8f516e226a48080008cafc04e0`. Remote main after continuity merge: `f3eb4b74adf8a97a7db502e5913039f6ec0cdf8b`.
 
 ## Objective and authority
 
-Complete the [reliability backlog](work-packages/backlog.md), integrate and verify its output, inspect every PR's review comments, fix actionable findings, and list all PRs. Every worker/reviewer uses **Sol (`gpt-6-sol`)**. Pushes and scoped/aggregate PRs are authorized. Remote merges, releases, deployments, production-content inspection and paid provider calls are not authorized. No recurring automation exists.
+Complete the [reliability backlog](work-packages/backlog.md), integrate and verify its output, inspect every PR's review comments, fix actionable findings, and list all PRs. Every worker/reviewer uses **Sol (`gpt-6-sol`)**. Pushes and scoped/aggregate PRs are authorized. The user now explicitly authorizes merging all reliability PRs and verifying main. Releases, deployments, production-content inspection and paid provider calls remain unauthorized. No recurring automation exists.
 
 **The 29 approved reliability packages are complete, integrated, verified and published through PRs.** All available review comments across [46 PRs](work-packages/results/PR-INDEX.md) were inspected; actionable findings are fixed and rejected claims are explained in the [review ledger](work-packages/results/PR-REVIEW-FOLLOWUP.md). No implementation or review worker remains active after this checkpoint.
 
 Aggregate product source `2918931994a05c3fb2d0e1f9e812556361fef479` passed **10 hosted checks with one intentional image-publication skip**, zero failed/pending, at 2026-09-27T21:48:49Z. The final all-PR comment sweep at 21:50:43Z found no additional changes:112 inline comments,58 review bodies,47 issue comments;15 PRs externally merged (seven into prerequisite branches),31 open. The final checkpoint adds only documentation and independently reviewed shared wire tests; production-source equality to the hosted-green revision was verified. Later publication-triggered CI reruns are not represented as completed here.
 
-The combined result is [PR119](https://github.com/LucaKaufmann/Ghostwriter/pull/119); [PR106](https://github.com/LucaKaufmann/Ghostwriter/pull/106) preserves portable continuity. The orchestrator has not merged, released or deployed. Broader product/release items remain outside this reliability milestone.
+The combined result is [PR119](https://github.com/LucaKaufmann/Ghostwriter/pull/119); [PR106](https://github.com/LucaKaufmann/Ghostwriter/pull/106) preserves portable continuity. The authorized scoped merges are complete: all 45 scoped PRs74–118 report merged. Their original heads and merge commits are retained in the aggregate history with exact accepted-tree equality. PR119 and actual-main verification remain. No release or deployment. Broader product/release items remain outside this reliability milestone.
 
 ## Confirmed product decisions
 
@@ -64,6 +64,6 @@ Frozen comparison branches: `codex/review-fixes-verified-base`6f9a328; `codex/re
 
 ## Exact next action
 
-Review the combined PR119 for a separately authorized merge/release decision; use the PR index to inspect the scoped history. The approved reliability backlog has no remaining implementation or verification task. Do not restart completed packages from historical todo checkboxes. A fresh scope decision is needed for deferred product/release work. Publication-triggered reruns after the verification/documentation checkpoint can be inspected in GitHub; the verified product-source CI revision is recorded above.
+Authorized merge milestone active: merge the history-reconciled PR119, then verify actual main in an isolated checkout. All 45 scoped PRs are merged; independent Sol graph audit is complete. Root owns mutations and the [merge plan](work-packages/merge-plan.md). PR106/4117156228 stale review status corrected at the merge boundary. Logs/snapshots: `/private/tmp/epilogue-backlog-20260927/merge-closeout/`. Original implementation packages remain complete; do not restart them from historical checkboxes.
 
 Protected work: original `/Users/luca/git/Epilogue` stays maincdb776d with local audit/planning files. `/Users/luca/git/Epilogue-secondary` has staged CLAUDE.md, Android SettingsScreen.kt and deployment-example changes on gitbutler/workspace14a753e. Do not absorb/reset/publish them. Inspect other historical worktrees before reuse.

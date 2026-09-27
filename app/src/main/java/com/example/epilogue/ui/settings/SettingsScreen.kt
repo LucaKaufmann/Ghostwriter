@@ -80,6 +80,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val ghostwriterSettingsEnabled = FeatureFlags.ghostwriterSettingsEnabled
     val showGhostwriterSettings = ghostwriterSettingsEnabled || uiState.ghostwriterEnabled
+    val configuredGhostwriter = uiState.ghostwriterEnabled && uiState.ghostwriterUrl.isNotBlank()
 
     // SAF directory picker launcher
     val directoryPickerLauncher = rememberLauncherForActivityResult(
@@ -110,7 +111,7 @@ fun SettingsScreen(
 
     LaunchedEffect(uiState.digestCompleted) {
         if (uiState.digestCompleted) {
-            snackbarHostState.showSnackbar("Digest generated successfully")
+            snackbarHostState.showSnackbar(uiState.digestResultMessage ?: "Digest generated successfully")
             viewModel.clearDigestCompletedFlag()
         }
     }
@@ -122,9 +123,21 @@ fun SettingsScreen(
         }
     }
 
+    LaunchedEffect(uiState.dataResetError) {
+        uiState.dataResetError?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearDataResetError()
+        }
+    }
+
     LaunchedEffect(uiState.dataReset) {
         if (uiState.dataReset) {
-            snackbarHostState.showSnackbar("All digests deleted and feed timestamps reset")
+            val message = if (configuredGhostwriter) {
+                "Digest history cleared on this device. Local delivery records remain."
+            } else {
+                "Digest history cleared. Delivered articles remain recorded; use Regenerate to repeat them."
+            }
+            snackbarHostState.showSnackbar(message)
             viewModel.clearDataResetFlag()
         }
     }
@@ -337,10 +350,12 @@ fun SettingsScreen(
             SettingsSection(title = "Manual Generation") {
                 ManualGenerationInput(
                     isGenerating = uiState.isGenerating,
-                    ghostwriterEnabled = uiState.ghostwriterEnabled && uiState.ghostwriterUrl.isNotBlank(),
+                    ghostwriterEnabled = configuredGhostwriter,
                     progress = uiState.ghostwriterProgress,
                     error = uiState.ghostwriterError,
-                    onRunNow = viewModel::runDigestNow
+                    localRunSummary = uiState.localRunSummary,
+                    onRunNow = viewModel::runDigestNow,
+                    onRegenerate = viewModel::regenerateDigestLocally
                 )
             }
 
@@ -354,10 +369,10 @@ fun SettingsScreen(
                     onClick = { showConfirmDialog = true },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Reset All Data")
+                    Text("Clear current digest history")
                 }
                 Text(
-                    text = "Deletes all digests and resets feed timestamps (for testing)",
+                    text = "Deletes saved digests and resets feed timestamps. Delivery history remains.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 4.dp)
                 )
@@ -365,8 +380,12 @@ fun SettingsScreen(
                 if (showConfirmDialog) {
                     AlertDialog(
                         onDismissRequest = { showConfirmDialog = false },
-                        title = { Text("Reset All Data?") },
-                        text = { Text("This will delete all digests and reset feed timestamps so all articles will be fetched again. This cannot be undone.") },
+                        title = { Text("Clear current digest history?") },
+                        text = { Text(if (configuredGhostwriter) {
+                            "This deletes the digests currently saved on this device and resets feed timestamps. Editions generated during cleanup remain. Local delivery records remain. This cannot be undone."
+                        } else {
+                            "This deletes the digests currently saved on this device and resets feed timestamps. Editions generated during cleanup remain. Delivered articles remain recorded and will not be included again in ordinary runs. Use Regenerate to repeat them. This cannot be undone."
+                        }) },
                         confirmButton = {
                             TextButton(
                                 onClick = {
@@ -374,7 +393,7 @@ fun SettingsScreen(
                                     showConfirmDialog = false
                                 }
                             ) {
-                                Text("Reset")
+                                Text("Clear current history")
                             }
                         },
                         dismissButton = {
@@ -1416,7 +1435,9 @@ fun ManualGenerationInput(
     ghostwriterEnabled: Boolean,
     progress: DigestStatusResponse?,
     error: String?,
-    onRunNow: () -> Unit
+    localRunSummary: LocalRunSummary?,
+    onRunNow: () -> Unit,
+    onRegenerate: () -> Unit
 ) {
     Column {
         Button(
@@ -1438,6 +1459,23 @@ fun ManualGenerationInput(
                 }
             } else {
                 Text("Run Now")
+            }
+        }
+
+        if (!ghostwriterEnabled) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onRegenerate,
+                enabled = !isGenerating,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Regenerate including previously delivered articles") }
+            localRunSummary?.let { summary ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(summary.title, style = MaterialTheme.typography.titleSmall)
+                Text(summary.counts, style = MaterialTheme.typography.bodySmall)
+                summary.reasons?.let { reasons ->
+                    Text(reasons, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
 

@@ -2,8 +2,33 @@ import asyncio
 import base64
 from email.message import EmailMessage
 
+import httpx
+import pytest
+
 from app.core.config import Settings
 from app.services.newsletter_service import NewsletterService
+
+
+@pytest.mark.asyncio
+async def test_profile_identity_uses_current_oauth_context(monkeypatch, tmp_path):
+    service = NewsletterService(Settings(data_dir=str(tmp_path)))
+
+    async def token():
+        return "synthetic-token"
+
+    service._get_access_token = token
+    real_client = httpx.AsyncClient
+
+    async def respond(request):
+        assert request.url.path == "/gmail/v1/users/me/profile"
+        assert request.headers["Authorization"] == "Bearer synthetic-token"
+        return httpx.Response(200, json={"emailAddress": "Reader@Example.test"})
+
+    monkeypatch.setattr(
+        "app.services.newsletter_service.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    assert await service.get_account_id() == "Reader@Example.test"
 
 
 def _build_raw_email(
@@ -174,6 +199,8 @@ def test_fetch_newsletters_continues_when_one_message_parse_fails(
             return False
 
         async def get(self, url: str, headers=None, params=None) -> _FakeResponse:
+            if url.endswith("/profile"):
+                return _FakeResponse({"emailAddress": "fixture@example.test"})
             if url.endswith("/labels"):
                 return _FakeResponse(
                     {"labels": [{"id": "LBL_1", "name": "Ghostwriter"}]}

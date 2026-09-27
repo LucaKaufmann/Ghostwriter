@@ -4,6 +4,11 @@ import android.util.Log
 import com.example.epilogue.data.local.DigestArticleEntity
 import com.example.epilogue.data.local.DigestDao
 import com.example.epilogue.data.local.DigestEntity
+import com.example.epilogue.data.local.ArticleDeliveryDao
+import com.example.epilogue.data.local.ArticleDeliveryEntity
+import com.example.epilogue.data.local.EpilogueDatabase
+import com.example.epilogue.data.local.GenerationRunDao
+import androidx.room.withTransaction
 import com.example.epilogue.data.remote.ghostwriter.DigestArticleResponse
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.DigestArticle
@@ -13,6 +18,8 @@ import com.example.epilogue.domain.model.ProcessedArticle
 import com.example.epilogue.domain.model.TriggerType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,7 +29,10 @@ import javax.inject.Singleton
  */
 @Singleton
 class DigestRepository @Inject constructor(
-    private val digestDao: DigestDao
+    private val digestDao: DigestDao,
+    private val database: EpilogueDatabase,
+    private val deliveries: ArticleDeliveryDao,
+    private val runs: GenerationRunDao
 ) {
     companion object {
         const val MAX_RETAINED_DIGESTS = 30
@@ -113,7 +123,8 @@ class DigestRepository @Inject constructor(
                 originalUrl = article.originalUrl,
                 isSummary = article.isSummary,
                 feedName = feedName,
-                sortOrder = index
+                sortOrder = index,
+                feedUrl = article.feedUrl.takeIf { it.isNotBlank() }
             )
         }
 
@@ -132,12 +143,98 @@ class DigestRepository @Inject constructor(
         cleanupOldDigests()
     }
 
+    /** An EPUB has already been durably written before this transaction starts. */
+    suspend fun finalizeDeliveryRun(
+        runId: Long, diagnostics: GenerationDiagnostics,
+        epubFilePath: String, triggerType: TriggerType, period: String?,
+        regeneration: Boolean
+    ): Long {
+        require(diagnostics.articles.isNotEmpty() && diagnostics.outcome in setOf("complete", "partial"))
+        val articles = diagnostics.articles
+        val digestId = database.withTransaction {
+            check(runs.get(runId)?.outcome == "running")
+            val feedNames = articles.map { it.article.feedName }.distinct()
+            val digest = DigestEntity(
+                generatedAt = System.currentTimeMillis(), epubFilePath = epubFilePath,
+                articleCount = articles.size,
+                briefingCount = articles.count { it.article.isSummary },
+                fidelityCount = articles.count { !it.article.isSummary },
+                triggerType = triggerType, feedNames = feedNames.joinToString(","),
+                period = period, isComplete = true
+            )
+            val id = digestDao.insertDigest(digest)
+            digestDao.insertArticles(articles.mapIndexed { index, delivered ->
+                val article = delivered.article
+                DigestArticleEntity(
+                    digestId = id, title = article.title, author = article.author,
+                    content = article.content, originalUrl = article.originalUrl,
+                    isSummary = article.isSummary, feedName = article.feedName,
+                    sortOrder = index, feedUrl = delivered.identity.feedUrl)
+            })
+            for (delivered in articles) {
+                val key = delivered.identity
+                val old = deliveries.get(key.feedUrl, key.articleKey)
+                if (old?.state == "delivered") {
+                    if (!regeneration) throw DeliveryClaimConflict()
+                    continue // Regeneration never rewrites an earlier first-delivery claim.
+                }
+                if (old?.state == "excluded" && !regeneration &&
+                    old.filterSignature == delivered.filterSignature) {
+                    throw DeliveryClaimConflict()
+                }
+                deliveries.put((old ?: ArticleDeliveryEntity(key.feedUrl, key.articleKey,
+                    "retryable")).copy(state = "delivered", reason = null,
+                    filterSignature = null, firstDigestId = id,
+                    committedAt = System.currentTimeMillis()))
+            }
+            for (excluded in diagnostics.exclusions) {
+                val key = excluded.identity
+                val old = deliveries.get(key.feedUrl, key.articleKey)
+                if (old?.state == "delivered") continue
+                deliveries.put((old ?: ArticleDeliveryEntity(key.feedUrl, key.articleKey,
+                    "retryable")).copy(state = "excluded", reason = excluded.reason,
+                    filterSignature = excluded.signature,
+                    committedAt = System.currentTimeMillis()))
+            }
+            runs.finish(runId, System.currentTimeMillis(), diagnostics.outcome, id,
+                diagnostics.toJson())
+            id
+        }
+        // Retention is post-commit maintenance; it must not demote a completed digest.
+        try { cleanupOldDigests() } catch (failure: Exception) {
+            Log.w("DigestRepository", "Could not clean old digests", failure)
+        }
+        return digestId
+    }
+
+    /** Keep a newly generated EPUB owned until its history finalization succeeds. */
+    suspend fun <T> withGeneratedArtifact(file: File, action: suspend () -> T): T {
+        var completed = false
+        try {
+            val result = action()
+            completed = true
+            return result
+        } finally {
+            if (!completed) {
+                // Cancellation must not interrupt the reference check and cleanup.
+                // A finalization failure may occur after the history row was committed.
+                withContext(NonCancellable) {
+                    try {
+                        digestDao.removeUnreferencedArtifact(file.absolutePath, ::removeArtifact)
+                    } catch (failure: Exception) {
+                        Log.w("DigestRepository", "Could not clean generated EPUB", failure)
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun markDigestFailed(digestId: Long, errorMessage: String) {
         digestDao.markDigestFailed(digestId, errorMessage)
     }
 
     suspend fun deleteDigestById(digestId: Long) {
-        digestDao.deleteDigestById(digestId)
+        digestDao.deleteWithArtifact(digestId, ::removeArtifact)
     }
 
     /**
@@ -190,7 +287,8 @@ class DigestRepository @Inject constructor(
                 originalUrl = article.originalUrl,
                 isSummary = article.isSummary,
                 feedName = feedName,
-                sortOrder = index
+                sortOrder = index,
+                feedUrl = article.feedUrl.takeIf { it.isNotBlank() }
             )
         }
 
@@ -225,14 +323,13 @@ class DigestRepository @Inject constructor(
      * @return true if the file was successfully deleted (or didn't exist)
      */
     suspend fun deleteDigest(digest: Digest): Boolean {
-        // Delete EPUB file first
-        val file = File(digest.epubFilePath)
-        val fileDeleted = if (file.exists()) file.delete() else true
+        // Re-read the persisted path: the caller may hold an older UI snapshot.
+        return digestDao.deleteWithArtifact(digest.id, ::removeArtifact)
+    }
 
-        // Delete from database (cascade will remove articles)
-        digestDao.deleteDigestById(digest.id)
-
-        return fileDeleted
+    private fun removeArtifact(path: String): Boolean {
+        val file = File(path)
+        return !file.exists() || (file.isFile && file.delete())
     }
 
     /**
@@ -244,10 +341,7 @@ class DigestRepository @Inject constructor(
             val excess = count - MAX_RETAINED_DIGESTS
             val oldDigests = digestDao.getOldestDigests(excess)
             oldDigests.forEach { digest ->
-                // Delete file
-                File(digest.epubFilePath).delete()
-                // Delete from database
-                digestDao.deleteDigest(digest)
+                digestDao.deleteWithArtifact(digest.id, ::removeArtifact)
             }
         }
     }
@@ -256,14 +350,10 @@ class DigestRepository @Inject constructor(
      * Delete all digests and their EPUB files.
      * Used for development/testing purposes.
      */
-    suspend fun deleteAllDigests() {
-        // Delete all EPUB files first
-        val digests = digestDao.getAllDigestsList()
-        digests.forEach { digest ->
-            File(digest.epubFilePath).delete()
-        }
-        // Delete all from database (cascade will remove articles)
-        digestDao.deleteAllDigests()
+    suspend fun deleteAllDigests(): Boolean {
+        // The action clears a snapshot of current history. Concurrently created
+        // editions remain, and completed per-row deletions cannot be rolled back as a batch.
+        return digestDao.deleteAllWithArtifacts(::removeArtifact)
     }
 
     /**
@@ -313,7 +403,10 @@ class DigestRepository @Inject constructor(
             if (!file.exists()) return@forEach
 
             if (file.lastModified() < cutoff) {
-                if (file.delete()) {
+                if (digestDao.removeUnsharedArtifact(digest.id) { currentPath ->
+                    val currentFile = File(currentPath)
+                    currentFile.isFile && currentFile.lastModified() < cutoff && currentFile.delete()
+                }) {
                     deletedCount++
                 }
             }

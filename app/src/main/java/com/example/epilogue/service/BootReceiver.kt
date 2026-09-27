@@ -7,6 +7,10 @@ import android.util.Log
 import com.example.epilogue.data.repository.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 /**
  * Broadcast receiver that reschedules the daily digest after device boot
@@ -33,8 +37,19 @@ class BootReceiver : BroadcastReceiver() {
                     digestScheduler.scheduleFeedSync()
                     digestScheduler.scheduleDigestSync()
                 } else {
-                    // Local digest generation
-                    digestScheduler.scheduleAllPeriods()
+                    // Keep the broadcast alive until selected periodic work is persisted.
+                    val pending = goAsync()
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            withTimeout(8_000) {
+                                digestScheduler.scheduleAllPeriodsAwaitPersistence()
+                            }
+                        } catch (error: Exception) {
+                            Log.w(TAG, "Could not finish boot schedule registration", error)
+                        } finally {
+                            pending.finish()
+                        }
+                    }
                 }
             }
         }
