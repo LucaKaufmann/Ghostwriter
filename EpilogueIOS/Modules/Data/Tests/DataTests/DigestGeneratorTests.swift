@@ -57,6 +57,79 @@ struct DigestGeneratorTests {
         #expect(FileManager.default.fileExists(atPath: first.digest!.epubFilePath))
         #expect(try context.fetchCount(FetchDescriptor<ArticleDelivery>()) == 1)
     }
+
+    @Test("Artifact work leaves MainActor responsive and a second generator cannot enter")
+    func testConcurrentGeneratorLeaseAndArtifactWorker() async throws {
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
+        let container = try ModelContainer(for: schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let feed = MockFeedRepository(enabledFeeds: [
+            Feed(url: "https://example.com/rss", name: "Example", mode: .fidelity, isEnabled: true)
+        ])
+        let builder = BlockingEPUBBuilder()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "epilogue-recovery-gate-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func generator() -> DigestGenerator {
+            DigestGenerator(feedRepository: feed, articleRepository: MockArticleRepository(),
+                            epubBuilder: builder, deliveryStore: DeliveryStore(container: container),
+                            filterSignature: "test", documentsDirectory: directory)
+        }
+        let first = generator()
+        let second = generator()
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+        let task = Task {
+            try await first.generateScheduledIfEligible(
+                period: "MORNING", occurrenceStart: day,
+                occurrenceEnd: day.addingTimeInterval(86_400), now: day,
+                legacyCovered: { false })
+        }
+        let started = await Task.detached { builder.waitUntilStarted() }.value
+        #expect(started)
+        // This assertion runs on MainActor while the builder remains blocked.
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<GenerationRun>()) == 1)
+        let recoveredWhileActive = try await DigestGenerator.recoverInterruptedRuns(
+            store: DeliveryStore(container: container), now: day.addingTimeInterval(10))
+        #expect(!recoveredWhileActive)
+        do {
+            _ = try await second.generateScheduledIfEligible(
+                period: "MORNING", occurrenceStart: day,
+                occurrenceEnd: day.addingTimeInterval(86_400), now: day,
+                legacyCovered: { false })
+            Issue.record("A second generator entered the occupied lease")
+        } catch DigestGeneratorError.alreadyGenerating {
+            // expected
+        }
+        builder.release.signal()
+        let result = try await task.value
+        #expect(result?.outcome == .complete)
+        let covered = try await second.generateScheduledIfEligible(
+            period: "MORNING", occurrenceStart: day,
+            occurrenceEnd: day.addingTimeInterval(86_400), now: day,
+            legacyCovered: { false })
+        #expect(covered == nil)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<GenerationRun>()) == 1)
+    }
+}
+
+private final class BlockingEPUBBuilder: EPUBBuilderProtocol, @unchecked Sendable {
+    let started = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+
+    func waitUntilStarted() -> Bool {
+        started.wait(timeout: .now() + 5) == .success
+    }
+
+    func generateEPUB(articles: [ProcessedArticle], outputPath: String, date: Date) throws -> URL {
+        started.signal()
+        guard release.wait(timeout: .now() + 5) == .success else {
+            throw DigestGeneratorError.artifactNotDurable
+        }
+        let url = URL(fileURLWithPath: outputPath)
+        try Data("EPUB".utf8).write(to: url)
+        return url
+    }
 }
 
 private final class MockFeedRepository: FeedRepositoryProtocol, @unchecked Sendable {
