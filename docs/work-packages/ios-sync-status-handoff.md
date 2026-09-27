@@ -31,7 +31,7 @@ Test both public entry points using injected service closures and fixed time, wi
 - Feed v2 partial/failure/upgrade/server-change leaves pending writes intact while other components run; no v1 feed path.
 - Typed404/405 enters individual fallback; transient fetch failure may recover without being mislabeled unsupported.
 - Every fallback component failure remains visible, successful siblings persist, and no success time advances.
-- Normal cadence skips digest; forced mode invokes it and reports its failure.
+- Normal cadence immediately ingests nonempty combined digest payloads, but may skip empty payloads or separate background polling. Forced mode invokes digest work and reports its failure.
 - Cancellation during feed/fetch/apply/fallback stops subsequent work, clears isSyncing, preserves success time and does not dispatch fallback.
 - Unconfigured versus configuration-read failure have distinct outcomes.
 - Retry the same partial digest payload successfully without duplicate remote IDs; retain explicit limits for historically incomplete rows.
