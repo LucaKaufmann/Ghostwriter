@@ -312,9 +312,44 @@ final class IOSFeedV2StoreEngine {
             let rows = Dictionary(uniqueKeysWithValues: snapshot.changes.map { ($0.url, $0) })
             let scopeKey = scope(destination)
             let oldMutations = try mutations(context)
+            let candidates = oldMutations.filter {
+                ($0.scopeKey == "__unbound__" || $0.scopeKey == scopeKey) &&
+                !$0.url.hasPrefix("synthetic://") && rows[$0.url] == nil
+            }
+            var coalesced = Set<String>()
+            for group in Dictionary(grouping: candidates, by: \.url).values {
+                guard let first = group.first,
+                      first.kind == "upsert", first.baseVersion == nil,
+                      first.title != nil, first.isActive != nil,
+                      first.mode != nil, first.maxArticles != nil else { continue }
+                var lastDelete: Int?
+                for (index, mutation) in group.enumerated() {
+                    // A claimed, blocked, or migrated intent may already be
+                    // meaningful to another server. Only a wholly local
+                    // initial prefix can collapse to its final deletion.
+                    guard mutation.status == "pending", !mutation.sent,
+                          mutation.origin != "legacy", mutation.baseVersion == nil else { break }
+                    if mutation.kind == "delete" { lastDelete = index }
+                }
+                guard let lastDelete else { continue }
+                let remainder = group.dropFirst(lastDelete + 1)
+                if let next = remainder.first {
+                    // A re-add promoted to the head must be a sendable,
+                    // complete create rather than a sparse successor.
+                    guard next.kind == "upsert", next.baseVersion == nil,
+                          next.title != nil, next.isActive != nil,
+                          next.mode != nil, next.maxArticles != nil else { continue }
+                }
+                for mutation in group.prefix(lastDelete + 1) {
+                    coalesced.insert(mutation.opId)
+                    context.delete(mutation)
+                }
+            }
             var unresolvedDeletes = Set<String>()
+            var retainedURLs = Set<String>()
             for mutation in oldMutations where mutation.scopeKey == "__unbound__" ||
                 mutation.scopeKey == scopeKey {
+                guard !coalesced.contains(mutation.opId) else { continue }
                 guard !mutation.url.hasPrefix("synthetic://") else { continue }
                 let row = rows[mutation.url]
                 mutation.scopeKey = scopeKey
@@ -335,10 +370,16 @@ final class IOSFeedV2StoreEngine {
                     mutation.status = "needs_resolution"
                     setSnapshot(row, on: mutation)
                     try setVisible(row, context: context, preserveLocalDelete: mutation.kind == "delete")
-                } else if mutation.kind == "delete" {
-                    // A never-seen delete can be acknowledged locally after binding.
+                } else if mutation.kind == "delete", !retainedURLs.contains(mutation.url),
+                          mutation.status == "pending", !mutation.sent,
+                          mutation.baseVersion == nil {
+                    // An isolated never-sent delete is already satisfied by
+                    // an absent server row. A retained earlier intent needs
+                    // this delete as an ordered barrier after its ACK.
                     context.delete(mutation)
+                    continue
                 }
+                retainedURLs.insert(mutation.url)
                 if mutation.kind == "delete", row != nil,
                    mutation.status == "needs_resolution" {
                     unresolvedDeletes.insert(mutation.url)
@@ -388,6 +429,16 @@ final class IOSFeedV2StoreEngine {
     }
 
     #if DEBUG
+    func reconcileEmptyForTesting() throws {
+        let destination = try destination(for: "https://server.test")
+        let token = try begin(destination)
+        defer { end(token) }
+        _ = try reconcile(token, destination: destination,
+                          snapshot: FeedChangesV2Response(
+                            serverInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                            serverVersion: 0, changes: []))
+    }
+
     struct ClaimedPayloadForTesting: Equatable {
         let opId: String
         let sentRevision: Int64
@@ -519,7 +570,8 @@ final class IOSFeedV2StoreEngine {
                             target.mode = mode == "summarize" ? .briefing : .fidelity
                         }
                         if let maximum = next.maxArticles { target.maxArticles = maximum }
-                        target.isLocallyDeleted = next.kind == "delete"
+                        target.isLocallyDeleted = successors.allSatisfy { $0.status == "pending" }
+                            ? successors.last?.kind == "delete" : next.kind == "delete"
                     }
                 }
             }

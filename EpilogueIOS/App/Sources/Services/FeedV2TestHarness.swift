@@ -498,6 +498,23 @@ final class FeedV2TestHarness {
         adapter.engine.end(token)
     }
 
+    func initialDeleteUseCaseAssertion() async throws {
+        let destination = try adapter.engine.destination(for: "https://server.test")
+        try adapter.engine.edit(url: feedURL, title: "Local", mode: .fidelity,
+                                isEnabled: true, maxArticles: 5)
+        try adapter.engine.delete(url: feedURL)
+        let remote = FakeRemote(instance: instance, feedURL: feedURL, result: .applied)
+        let useCase = FeedSyncV2UseCase(configuration: FixedConfiguration(destination),
+                                       store: adapter, remote: remote)
+        let outcome = try await useCase.sync()
+        let context = ModelContext(model)
+        let feed = try require(context.fetch(FetchDescriptor<Domain.Feed>()).first)
+        try check(outcome is FeedSyncV2Outcome.Complete && remote.postCount == 0 &&
+                  context.fetch(FetchDescriptor<FeedMutation>()).isEmpty &&
+                  feed.isLocallyDeleted == true,
+                  "A deleted initial create reached the exported KMP transport or reappeared")
+    }
+
     func cancellationAssertion() async throws {
         let destination = try adapter.engine.destination(for: "https://server.test")
         let remote = FakeRemote(instance: instance, feedURL: feedURL, result: .applied)
@@ -541,6 +558,7 @@ private final class FakeRemote: NSObject, FeedV2RemotePort {
     let result: Result
     var suspendFull = false
     var fullStarted = false
+    var postCount = 0
     private var pendingFull: (() -> Void)?
     init(instance: String, feedURL: String, result: Result) {
         self.instance = instance
@@ -562,6 +580,7 @@ private final class FakeRemote: NSObject, FeedV2RemotePort {
     func releaseFull() { pendingFull?(); pendingFull = nil }
     func postFeedMutationsV2(destination: FeedV2Destination, batch: FeedMutationBatchV2,
                              completionHandler: @escaping (FeedV2RemoteResult<FeedMutationBatchResultV2>?, Error?) -> Void) {
+        postCount += 1
         let row = FeedSnapshotV2(kind: "feed", id: instance, url: feedURL, version: 1,
                                  title: result == .applied ? "Local" : "Server",
                                  isActive: KotlinBoolean(bool: true), mode: "raw",

@@ -88,6 +88,200 @@ final class FeedV2StoreTests: XCTestCase {
             .sorted { $0.sequence < $1.sequence }
     }
 
+    func testAbsentInitialCreateEditDeleteCoalescesAtomicallyAcrossReopen() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("feed-v2-initial-delete-\(UUID().uuidString)")
+            .appendingPathComponent("Epilogue.sqlite")
+        do {
+            let container = try model(at: url)
+            let engine = IOSFeedV2StoreEngine(container: container)
+            try engine.edit(url: feedURL, title: "First", mode: .fidelity,
+                            isEnabled: true, maxArticles: 2)
+            try engine.edit(url: feedURL, title: "Second", mode: .fidelity,
+                            isEnabled: true, maxArticles: 2)
+            try engine.delete(url: feedURL)
+            let original = try orderedMutations(container).map(\.opId)
+            XCTAssertEqual(original.count, 3)
+            XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+            _ = try engine.destination(for: "https://server.test")
+
+            engine.failNextSaveForTesting = true
+            XCTAssertThrowsError(try engine.reconcileEmptyForTesting())
+            XCTAssertEqual(try orderedMutations(container).map(\.opId), original)
+            let state = try XCTUnwrap(ModelContext(container)
+                .fetch(FetchDescriptor<FeedSyncState>()).first)
+            XCTAssertFalse(state.firstReconciliationComplete)
+            XCTAssertNil(state.cursorVersion)
+            XCTAssertEqual(try orderedMutations(container).map(\.scopeKey),
+                           Array(repeating: "__unbound__", count: 3))
+
+            try engine.reconcileEmptyForTesting()
+            XCTAssertTrue(try orderedMutations(container).isEmpty)
+            XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+            XCTAssertNil(try engine.claimOneForTesting())
+        }
+        let reopened = try model(at: url)
+        XCTAssertTrue(try orderedMutations(reopened).isEmpty)
+        XCTAssertTrue(try resolvedRow(reopened).isLocallyDeleted ?? false)
+    }
+
+    func testAbsentInitialDeleteKeepsCompleteReaddAndLaterEdit() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("feed-v2-initial-readd-\(UUID().uuidString)")
+            .appendingPathComponent("Epilogue.sqlite")
+        do {
+            let container = try model(at: url)
+            let engine = IOSFeedV2StoreEngine(container: container)
+            try engine.edit(url: feedURL, title: "First", mode: .fidelity,
+                            isEnabled: true, maxArticles: 2)
+            try engine.delete(url: feedURL)
+            try engine.edit(url: feedURL, title: "Re-added", mode: .fidelity,
+                            isEnabled: true, maxArticles: 2)
+            try engine.edit(url: feedURL, title: "Latest", mode: .fidelity,
+                            isEnabled: true, maxArticles: 2)
+            try engine.reconcileEmptyForTesting()
+            XCTAssertEqual(try orderedMutations(container).map(\.kind), ["upsert", "upsert"])
+            XCTAssertFalse(try resolvedRow(container).isLocallyDeleted ?? true)
+            XCTAssertEqual(try resolvedRow(container).name, "Latest")
+            let first = try XCTUnwrap(orderedMutations(container).first)
+            XCTAssertNil(first.baseVersion)
+            XCTAssertEqual(first.title, "Re-added")
+            XCTAssertEqual(first.isActive, true)
+            XCTAssertEqual(first.mode, "raw")
+            XCTAssertEqual(first.maxArticles, 2)
+        }
+        let reopened = try model(at: url)
+        let engine = IOSFeedV2StoreEngine(container: reopened)
+        let claimed = try XCTUnwrap(engine.claimOneForTesting())
+        XCTAssertNil(claimed.baseVersion)
+        XCTAssertEqual(claimed.title, "Re-added")
+        XCTAssertTrue(claimed.wireJSON.contains("\"kind\":\"upsert\""))
+        try engine.acknowledgeForTesting(opId: claimed.opId,
+                                         revision: claimed.sentRevision, version: 1,
+                                         title: "Re-added")
+        XCTAssertEqual(try resolvedRow(reopened).name, "Latest")
+        XCTAssertEqual(try orderedMutations(reopened).first?.baseVersion, 1)
+    }
+
+    func testClaimedInitialCreateRetainsLaterDeleteBarrierThroughAckAndReopen() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("feed-v2-claimed-initial-delete-\(UUID().uuidString)")
+            .appendingPathComponent("Epilogue.sqlite")
+        do {
+            let container = try model(at: url)
+            let engine = IOSFeedV2StoreEngine(container: container)
+            _ = try engine.destination(for: "https://server.test")
+            try engine.edit(url: feedURL, title: "Created", mode: .fidelity,
+                            isEnabled: true, maxArticles: 2)
+            try engine.delete(url: feedURL)
+            let initial = try XCTUnwrap(engine.claimOneForTesting())
+            XCTAssertNil(initial.baseVersion)
+            XCTAssertEqual(initial.title, "Created")
+            try engine.reconcileEmptyForTesting()
+            XCTAssertEqual(try orderedMutations(container).map(\.kind), ["upsert", "delete"])
+            XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+            let replay = try XCTUnwrap(engine.claimOneForTesting())
+            XCTAssertEqual(replay.opId, initial.opId)
+            XCTAssertEqual(replay.wireJSON, initial.wireJSON)
+            try engine.acknowledgeForTesting(opId: initial.opId,
+                                             revision: initial.sentRevision, version: 1,
+                                             title: "Created")
+            XCTAssertEqual(try orderedMutations(container).map(\.kind), ["delete"])
+            XCTAssertEqual(try orderedMutations(container).first?.baseVersion, 1)
+            XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+        }
+        let reopened = try model(at: url)
+        let engine = IOSFeedV2StoreEngine(container: reopened)
+        let deletion = try XCTUnwrap(engine.claimOneForTesting())
+        XCTAssertEqual(deletion.baseVersion, 1)
+        XCTAssertTrue(deletion.wireJSON.contains("\"kind\":\"delete\""))
+        try engine.acknowledgeForTesting(opId: deletion.opId,
+                                         revision: deletion.sentRevision, version: 2)
+        XCTAssertTrue(try orderedMutations(reopened).isEmpty)
+        XCTAssertTrue(try resolvedRow(reopened).isLocallyDeleted ?? false)
+    }
+
+    func testClaimedCreateEditDeleteStaysHiddenThroughEveryAck() throws {
+        let container = try model()
+        let engine = IOSFeedV2StoreEngine(container: container)
+        _ = try engine.destination(for: "https://server.test")
+        try engine.edit(url: feedURL, title: "Created", mode: .fidelity,
+                        isEnabled: true, maxArticles: 2)
+        let create = try XCTUnwrap(engine.claimOneForTesting())
+        try engine.edit(url: feedURL, title: "Later", mode: .fidelity,
+                        isEnabled: true, maxArticles: 2)
+        try engine.delete(url: feedURL)
+        try engine.reconcileEmptyForTesting()
+        XCTAssertEqual(try orderedMutations(container).map(\.kind), ["upsert", "upsert", "delete"])
+        try engine.acknowledgeForTesting(opId: create.opId,
+                                         revision: create.sentRevision, version: 1,
+                                         title: "Created")
+        XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+        let edit = try XCTUnwrap(engine.claimOneForTesting())
+        XCTAssertEqual(edit.baseVersion, 1)
+        XCTAssertEqual(edit.title, "Later")
+        try engine.acknowledgeForTesting(opId: edit.opId,
+                                         revision: edit.sentRevision, version: 2,
+                                         title: "Later")
+        XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+        let deletion = try XCTUnwrap(engine.claimOneForTesting())
+        XCTAssertEqual(deletion.baseVersion, 2)
+        try engine.acknowledgeForTesting(opId: deletion.opId,
+                                         revision: deletion.sentRevision, version: 3)
+        XCTAssertTrue(try orderedMutations(container).isEmpty)
+        XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+    }
+
+    func testClaimedCreateDeleteReaddBecomesVisibleAfterAck() throws {
+        let container = try model()
+        let engine = IOSFeedV2StoreEngine(container: container)
+        _ = try engine.destination(for: "https://server.test")
+        try engine.edit(url: feedURL, title: "Created", mode: .fidelity,
+                        isEnabled: true, maxArticles: 2)
+        let create = try XCTUnwrap(engine.claimOneForTesting())
+        try engine.delete(url: feedURL)
+        try engine.edit(url: feedURL, title: "Re-added", mode: .fidelity,
+                        isEnabled: true, maxArticles: 2)
+        try engine.reconcileEmptyForTesting()
+        try engine.acknowledgeForTesting(opId: create.opId,
+                                         revision: create.sentRevision, version: 1,
+                                         title: "Created")
+        XCTAssertFalse(try resolvedRow(container).isLocallyDeleted ?? true)
+        XCTAssertEqual(try orderedMutations(container).map(\.kind), ["delete", "upsert"])
+        let deletion = try XCTUnwrap(engine.claimOneForTesting())
+        try engine.acknowledgeForTesting(opId: deletion.opId,
+                                         revision: deletion.sentRevision, version: 2)
+        XCTAssertFalse(try resolvedRow(container).isLocallyDeleted ?? true)
+        let readd = try XCTUnwrap(engine.claimOneForTesting())
+        XCTAssertEqual(readd.baseVersion, 2)
+        XCTAssertEqual(readd.title, "Re-added")
+    }
+
+    func testAbsentVersionedDeleteAndBlockedHeadRemainForResolution() throws {
+        let container = try model()
+        let context = ModelContext(container)
+        context.insert(Domain.Feed(url: feedURL, name: "Prior server", mode: .fidelity,
+                                   serverId: "old-id", serverVersion: 7,
+                                   isLocallyDeleted: true))
+        context.insert(FeedMutation(url: feedURL, scopeKey: "__unbound__", kind: "delete",
+                                    baseVersion: 7, sequence: 1, localRevision: 1))
+        context.insert(FeedMutation(url: "https://example.test/blocked.xml",
+                                    scopeKey: "__unbound__", kind: "upsert",
+                                    title: "Blocked", isActive: true, mode: "raw",
+                                    maxArticles: 2, sequence: 2, localRevision: 1,
+                                    status: "rejected"))
+        context.insert(FeedMutation(url: "https://example.test/blocked.xml",
+                                    scopeKey: "__unbound__", kind: "delete",
+                                    sequence: 3, localRevision: 2))
+        try context.save()
+        let engine = IOSFeedV2StoreEngine(container: container)
+        try engine.reconcileEmptyForTesting()
+        XCTAssertEqual(try orderedMutations(container).map(\.kind),
+                       ["delete", "upsert", "delete"])
+        XCTAssertEqual(try orderedMutations(container).first?.baseVersion, 7)
+        XCTAssertTrue(try resolvedRow(container).isLocallyDeleted ?? false)
+    }
+
     func testApplyMineRestoresVisibleProposalWithReplacementAndReopen() throws {
         let (container, engine, opId) = try resolutionFixture()
         try engine.resolve(opId: opId, action: .applyMine)
@@ -655,6 +849,10 @@ final class FeedV2StoreTests: XCTestCase {
 
     func testExportedUseCaseConflictThroughRealStorePort() async throws {
         try await FeedV2TestHarness(model()).exportedUseCaseAssertion(true)
+    }
+
+    func testExportedUseCaseDoesNotPostDeletedInitialCreate() async throws {
+        try await FeedV2TestHarness(model()).initialDeleteUseCaseAssertion()
     }
 
     func testSwiftCancellationDoesNotReportComplete() async throws {
