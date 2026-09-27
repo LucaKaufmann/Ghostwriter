@@ -4,7 +4,7 @@ Prepared 2026-09-27 against `main` at `cdb776d1d544bc6db0dd18a98cba1b9e86273f62`
 
 ## Execution agreement
 
-The user requested a work list ready for autonomous subagents to deliver PRs. The user subsequently authorized completing the full backlog through PRs. Implementation proceeds in dependency order. PR creation/push is part of those assignments. Merging, releases, deployments, registry publication, production inspection, and paid provider calls are outside this authority.
+The user requested a work list ready for autonomous subagents to deliver PRs. The user subsequently authorized completing the full backlog through PRs. Implementation proceeds in dependency order. PR creation/push is part of those assignments. The user later explicitly authorized merging all reliability PRs and verifying main; see the current project state and merge plan. Releases, deployments, registry publication, production inspection, and paid provider calls remain outside this authority.
 
 All packages inherit the [worker prompt](worker-prompt.md). The orchestrator owns dispatch, dependency integration, shared planning documents, migration revision allocation, review, and acceptance. The user does not relay agent messages or reconcile changes.
 

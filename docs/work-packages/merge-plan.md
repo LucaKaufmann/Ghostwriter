@@ -58,4 +58,13 @@ Use a fresh isolated checkout of the exact remote main SHA. Dispatch the six exi
 
 Done means all PR states and commit ancestry are accounted for, main checks pass with exact command/run evidence, final documentation records actual results, and the detailed summary explains behavior/platform/migration changes and remaining limits. CI success is not physical-device, real-audio-provider or production-restore validation.
 
-Status at 2026-09-27T22:10Z: all 30 scoped merges in the queue completed; all 45 scoped PRs74–118 report merged. Every original head and merge commit is an ancestor of reconciled aggregate `6c8ab205cd350b4c3c90885f53447e3435fcf9c2`. Its entire tree equals accepted `3c60540a9d11b3ae277818f834b42272607290fe` (tree `b651aa87dbee79d26cdd2e1547ffe7ded3be0505`). This also retains original heads previously squash-merged externally. PR119 remains the final main merge, followed by actual-main verification. Local ledger: `/private/tmp/epilogue-backlog-20260927/merge-closeout/`.
+Status at 2026-09-27T22:10Z: all 30 scoped merges in the queue completed; all 45 scoped PRs74–118 report merged. Every original head and merge commit is an ancestor of reconciled aggregate `6c8ab205cd350b4c3c90885f53447e3435fcf9c2`. Its entire tree equals accepted `3c60540a9d11b3ae277818f834b42272607290fe` (tree `b651aa87dbee79d26cdd2e1547ffe7ded3be0505`). This also retains original heads previously squash-merged externally. PR119 subsequently merged at main5c5cc40 and all six main workflows passed. Local ledger: `/private/tmp/epilogue-backlog-20260927/merge-closeout/`.
+
+
+## Late review follow-up
+
+After the original queue, the final review sweep found an iOS rejected-URL resolution UX issue. The bounded fix was independently reviewed, tested through the simulator UI and visually inspected, then merged as [PR120](https://github.com/LucaKaufmann/Ghostwriter/pull/120) after119. Main174a349 exactly equals accepted PR120 head29dca9b. Only four iOS App files and its evidence changed; backend, web, shared and Android files remain identical to main5c5cc40. The affected iOS surface passed197 workspace unit tests and2 focused UI tests on174a349. The final documentation-only checkpoint records that completed acceptance. The original ordered queue and its evidence remain historical.
+
+Final verification: all required checks passed; no active implementation workers or unresolved accepted review findings. See [the main verification report](results/MAIN-MERGE-VERIFICATION.md).
+
+The final queued-successor guidance correction followed as [PR121](https://github.com/LucaKaufmann/Ghostwriter/pull/121), merged into mainc894fb80 after independent review and UI evidence. All three focused UI cases passed on that exact main revision before the documentation-only checkpoint.
