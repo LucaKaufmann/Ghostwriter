@@ -12,14 +12,13 @@ import SwiftData
 @Suite("DigestGenerator Tests")
 @MainActor
 struct DigestGeneratorTests {
-    @Test("Generate digest uses unique EPUB filenames across repeated same-day runs")
-    func testUniqueFileNamesAcrossRuns() async throws {
-        let schema = Schema([Feed.self, Digest.self, DigestArticle.self])
+    @Test("Normal local generation delivers a link only once")
+    func testNormalGenerationDoesNotRepeat() async throws {
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: config)
         let context = ModelContext(container)
 
-        let digestRepository = DigestRepository(modelContext: context, maxDigests: 30)
         let feedRepository = MockFeedRepository(
             enabledFeeds: [
                 Feed(
@@ -41,18 +40,22 @@ struct DigestGeneratorTests {
 
         let generator = DigestGenerator(
             feedRepository: feedRepository,
-            digestRepository: digestRepository,
             articleRepository: articleRepository,
             epubBuilder: epubBuilder,
+            deliveryStore: DeliveryStore(container: container),
+            filterSignature: DeliveryFilterSignature.make(minWordCount: 0),
             documentsDirectory: tempDir
         )
 
         let first = try await generator.generateDigest(triggerType: .scheduled)
         let second = try await generator.generateDigest(triggerType: .scheduled)
 
-        #expect(first.epubFilePath != second.epubFilePath)
-        #expect(FileManager.default.fileExists(atPath: first.epubFilePath))
-        #expect(FileManager.default.fileExists(atPath: second.epubFilePath))
+        #expect(first.outcome == .complete)
+        #expect(second.outcome == .empty)
+        #expect(first.digest != nil)
+        #expect(second.digest == nil)
+        #expect(FileManager.default.fileExists(atPath: first.digest!.epubFilePath))
+        #expect(try context.fetchCount(FetchDescriptor<ArticleDelivery>()) == 1)
     }
 }
 
@@ -129,7 +132,10 @@ private struct MockArticleRepository: ArticleRepositoryProtocol {
         ]
     }
 
-    func fetchFeedArticles(feedUrl: String) async throws -> [RawArticle] { [] }
+    func fetchFeedArticles(feedUrl: String) async throws -> [RawArticle] {
+        [RawArticle(title: "Sample", link: "https://example.com/sample",
+                    feedUrl: feedUrl, feedName: "Example Feed")]
+    }
 
     func processArticle(_ article: RawArticle, mode: ProcessingMode) async throws -> ProcessedArticle {
         sampleArticle

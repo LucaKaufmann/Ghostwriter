@@ -2,11 +2,12 @@ import Foundation
 import SwiftData
 import Testing
 import Domain
+@testable import Data
 
-@Suite("SwiftData V1 to V2 migration")
+@Suite("SwiftData delivery migration")
 @MainActor
 struct SwiftDataMigrationProbeTests {
-    @Test("Independent captured unversioned store migrates through production V1 to V2 and reopens")
+    @Test("Independent captured unversioned store migrates through V1, V2 and V3 and reopens")
     func testLegacyStoreUpgrade() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("epilogue-legacy-v1-\(UUID().uuidString)", isDirectory: true)
@@ -120,12 +121,72 @@ struct SwiftDataMigrationProbeTests {
         }
 
         for _ in 0..<2 {
-            let schema = Schema(versionedSchema: EpilogueSchemaV2.self)
+            let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
             let config = ModelConfiguration(schema: schema, url: url)
             let container = try ModelContainer(for: schema,
                                                migrationPlan: EpilogueMigrationPlan.self,
                                                configurations: [config])
             try verify(container)
+            #expect(try ModelContext(container).fetch(FetchDescriptor<ArticleDelivery>()).isEmpty)
+        }
+    }
+
+    @Test("Frozen V2 store backfills only provable completed local articles")
+    func testV2Backfill() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("epilogue-delivery-v2-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Epilogue.sqlite")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let localID = UUID()
+        do {
+            let schema = Schema(versionedSchema: EpilogueSchemaV2.self)
+            let config = ModelConfiguration(schema: schema, url: url)
+            let container = try ModelContainer(for: schema, configurations: [config])
+            let context = ModelContext(container)
+            let local = EpilogueSchemaV2.Digest(id: localID, epubFilePath: "/tmp/local.epub",
+                                                articleCount: 2, triggerType: .manual,
+                                                isComplete: true)
+            let valid = EpilogueSchemaV2.DigestArticle(
+                digest: local, title: "Valid", content: "Body",
+                originalUrl: "HTTPS://Example.com:443/Article?q=1#section",
+                feedUrl: "https://feed.test/rss", feedName: "Feed", contentType: .deepDive)
+            let invalid = EpilogueSchemaV2.DigestArticle(
+                digest: local, title: "Missing link", content: "Body", originalUrl: "",
+                feedUrl: "https://feed.test/rss", feedName: "Feed", contentType: .deepDive)
+            let remote = EpilogueSchemaV2.Digest(epubFilePath: "/tmp/remote.epub",
+                                                 articleCount: 1, triggerType: .ghostwriter,
+                                                 isComplete: true, remoteId: "server-id")
+            let remoteArticle = EpilogueSchemaV2.DigestArticle(
+                digest: remote, title: "Remote", content: "Body",
+                originalUrl: "https://example.test/remote",
+                feedUrl: "https://feed.test/rss", feedName: "Feed", contentType: .deepDive)
+            let failed = EpilogueSchemaV2.Digest(epubFilePath: "/tmp/failed.epub",
+                                                 articleCount: 1, triggerType: .manual,
+                                                 isComplete: false)
+            let failedArticle = EpilogueSchemaV2.DigestArticle(
+                digest: failed, title: "Failed", content: "Body",
+                originalUrl: "https://example.test/failed",
+                feedUrl: "https://feed.test/rss", feedName: "Feed", contentType: .deepDive)
+            for digest in [local, remote, failed] { context.insert(digest) }
+            for article in [valid, invalid, remoteArticle, failedArticle] { context.insert(article) }
+            try context.save()
+        }
+        for _ in 0..<2 {
+            let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
+            let config = ModelConfiguration(schema: schema, url: url)
+            let container = try ModelContainer(for: schema,
+                                               migrationPlan: EpilogueMigrationPlan.self,
+                                               configurations: [config])
+            let context = ModelContext(container)
+            let digests = try context.fetch(FetchDescriptor<Digest>())
+            #expect(digests.count == 3)
+            let delivered = try context.fetch(FetchDescriptor<ArticleDelivery>())
+            #expect(delivered.count == 1)
+            let claim = try #require(delivered.first)
+            #expect(claim.feedUrl == "https://feed.test/rss")
+            #expect(claim.state == "delivered")
+            #expect(claim.firstDigestId == localID)
         }
     }
 }
