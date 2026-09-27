@@ -63,8 +63,10 @@ class FeedSyncV2UseCase(
 
         var pulled = 0
         if (binding == null || !binding.firstReconciliationComplete) {
-            if (configuration.currentDestination() != destination) return FeedSyncV2Outcome.ServerChanged
-            val full = when (val result = remote.getFeedChangesV2(destination, null, null)) {
+            configurationChange(destination, token, binding)?.let { return it }
+            val fullResult = remote.getFeedChangesV2(destination, null, null)
+            configurationChange(destination, token, binding)?.let { return it }
+            val full = when (val result = fullResult) {
                 is FeedV2RemoteResult.Success -> result.value
                 else -> return remoteFailure("full_pull", result, token, binding)
             }
@@ -77,7 +79,7 @@ class FeedSyncV2UseCase(
                 if (suspended !is FeedV2StoreResult.Success) return storeFailure("suspend", suspended)
                 return FeedSyncV2Outcome.ServerChanged
             }
-            if (configuration.currentDestination() != destination) return changedDestination(token, binding)
+            configurationChange(destination, token, binding)?.let { return it }
             binding = when (val result = store.reconcileAndBindFullSnapshot(token, destination, full)) {
                 is FeedV2StoreResult.Success -> result.value
                 else -> return storeFailure("reconcile", result)
@@ -93,7 +95,7 @@ class FeedSyncV2UseCase(
         if (!isUuidV2(bound.serverInstanceId ?: "") || !validVersionV2(bound.cursorVersion ?: -1)) {
             return FeedSyncV2Outcome.Failed("binding", "Invalid binding")
         }
-        if (configuration.currentDestination() != destination) return changedDestination(token, bound)
+        configurationChange(destination, token, bound)?.let { return it }
 
         val claimed = when (val result = store.loadPendingMutations(token, bound, 100)) {
             is FeedV2StoreResult.Success -> result.value
@@ -108,9 +110,10 @@ class FeedSyncV2UseCase(
         var applied = 0
         var pushFailure: String? = null
         if (claimed.isNotEmpty()) {
-            if (configuration.currentDestination() != destination) return changedDestination(token, bound)
+            configurationChange(destination, token, bound)?.let { return it }
             val batch = FeedMutationBatchV2(bound.serverInstanceId!!, claimed.map { it.payload })
             val result = remote.postFeedMutationsV2(destination, batch)
+            configurationChange(destination, token, bound)?.let { return it }
             when (result) {
                 is FeedV2RemoteResult.Success -> {
                     val envelope = result.value
@@ -124,7 +127,7 @@ class FeedSyncV2UseCase(
                     } else if (!validResults(envelope.results, claimed)) {
                         pushFailure = "invalid_response"
                     } else {
-                        if (configuration.currentDestination() != destination) return changedDestination(token, bound)
+                        configurationChange(destination, token, bound)?.let { return it }
                         val resultsById = envelope.results.associateBy { canonicalUuidV2(it.opId) }
                         for (sent in claimed) {
                             val outcome = resultsById.getValue(canonicalUuidV2(sent.opId))
@@ -148,16 +151,18 @@ class FeedSyncV2UseCase(
             }
         }
 
-        if (configuration.currentDestination() != destination) return changedDestination(token, bound)
-        val changes = when (val result = remote.getFeedChangesV2(
+        configurationChange(destination, token, bound)?.let { return it }
+        val pullResult = remote.getFeedChangesV2(
             destination, bound.cursorVersion, bound.serverInstanceId
-        )) {
+        )
+        configurationChange(destination, token, bound)?.let { return it }
+        val changes = when (val result = pullResult) {
             is FeedV2RemoteResult.Success -> result.value
             else -> {
                 val failure = remoteFailure("pull", result, token, bound)
                 if (failure is FeedSyncV2Outcome.ServerChanged ||
                     failure is FeedSyncV2Outcome.ServerUpgradeRequired) return failure
-                return partialFromSummary(token, bound, applied, pulled, "pull")
+                return failure
             }
         }
         if (!isUuidV2(changes.serverInstanceId)) {
@@ -172,7 +177,7 @@ class FeedSyncV2UseCase(
             changes.serverVersion < bound.cursorVersion!!) {
             return FeedSyncV2Outcome.Failed("pull", "Invalid incremental response")
         }
-        if (configuration.currentDestination() != destination) return changedDestination(token, bound)
+        configurationChange(destination, token, bound)?.let { return it }
         val appliedPull = store.applyServerChangesAndCursor(token, bound, changes)
         if (appliedPull !is FeedV2StoreResult.Success) return storeFailure("pull_apply", appliedPull)
         pulled += changes.changes.size
@@ -204,6 +209,16 @@ class FeedSyncV2UseCase(
         }
     }
 
+    private suspend fun configurationChange(
+        destination: FeedV2Destination, token: FeedV2RunToken, binding: FeedV2Binding?
+    ): FeedSyncV2Outcome? = when (configuration.currentDestination()) {
+        destination -> null
+        // Disabling integration pauses the same binding and immutable outbox.
+        // Only an actual replacement destination requires explicit reconciliation.
+        null -> FeedSyncV2Outcome.NotConfigured
+        else -> changedDestination(token, binding)
+    }
+
     private suspend fun changedDestination(
         token: FeedV2RunToken, binding: FeedV2Binding?
     ): FeedSyncV2Outcome {
@@ -231,16 +246,6 @@ class FeedSyncV2UseCase(
         }
         return FeedSyncV2Outcome.Failed(phase,
             (result as? FeedV2RemoteResult.TransportFailure)?.message ?: "Remote failure")
-    }
-
-    private suspend fun partialFromSummary(
-        token: FeedV2RunToken, binding: FeedV2Binding, applied: Int, pulled: Int, phase: String
-    ): FeedSyncV2Outcome {
-        return when (val summary = store.pendingSummary(token, binding)) {
-            is FeedV2StoreResult.Success -> FeedSyncV2Outcome.Partial(applied, pulled,
-                summary.value.pending, summary.value.blockedConflicts, summary.value.rejected, phase)
-            else -> storeFailure("summary", summary)
-        }
     }
 
     private fun storeFailure(phase: String, result: FeedV2StoreResult<*>): FeedSyncV2Outcome =

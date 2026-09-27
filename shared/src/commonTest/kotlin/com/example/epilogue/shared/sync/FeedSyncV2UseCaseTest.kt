@@ -36,7 +36,7 @@ class FeedSyncV2UseCaseTest {
         val outcome = useCase(store, remote).sync()
         assertIs<FeedSyncV2Outcome.Complete>(outcome)
         assertEquals(listOf("full", "incremental"), remote.events)
-        assertEquals(4, store.binding?.cursorVersion)
+        assertEquals(4L, store.binding?.cursorVersion)
         assertEquals(1, store.reconciliations)
         assertEquals(0, store.claims.size)
         val brokenStore = FakeStore()
@@ -115,7 +115,7 @@ class FeedSyncV2UseCaseTest {
         val outcome = assertIs<FeedSyncV2Outcome.Partial>(useCase(store, remote).sync())
         assertEquals(1, outcome.rejected)
         assertEquals(listOf(op), store.rejections)
-        assertEquals(4, store.binding?.cursorVersion)
+        assertEquals(4L, store.binding?.cursorVersion)
         val failedStore = FakeStore(bound = true).apply { failPullApply = true }
         assertIs<FeedSyncV2Outcome.Failed>(useCase(failedStore, FakeRemote()).sync())
         assertEquals(4, failedStore.binding?.cursorVersion)
@@ -357,6 +357,53 @@ class FeedSyncV2UseCaseTest {
         assertEquals(0, remote.sentBatches.size)
     }
 
+    @Test
+    fun disablingDuringRemotePhasesPreservesBindingAndResumes() = runTest {
+        for (phase in listOf("full", "push", "incremental")) {
+            var configured: FeedV2Destination? = destination
+            val store = FakeStore(bound = phase != "full").apply {
+                if (phase == "push") claims += sent()
+            }
+            val originalBinding = store.binding
+            val remote = FakeRemote().apply {
+                afterRequest = { if (it == phase) configured = null }
+            }
+            val useCase = FeedSyncV2UseCase(object : FeedV2ConfigurationPort {
+                override suspend fun currentDestination() = configured
+            }, store, remote)
+            assertIs<FeedSyncV2Outcome.NotConfigured>(useCase.sync())
+            assertEquals(originalBinding, store.binding)
+            assertTrue(!store.suspended)
+            assertEquals(0, store.pullApplies)
+            assertTrue(store.acks.isEmpty())
+            if (phase == "push") assertEquals(1, store.claims.size)
+            assertEquals(1, store.endCalls)
+            configured = destination
+            remote.afterRequest = {}
+            assertIs<FeedSyncV2Outcome.Complete>(useCase.sync())
+            assertTrue(!store.suspended)
+        }
+    }
+
+    @Test
+    fun incrementalTransportOrAuthFailureIsFailedEvenWithNoPendingMutations() = runTest {
+        val failures = listOf(FeedV2RemoteResult.TransportFailure("timeout"),
+            FeedV2RemoteResult.HttpFailure(401, null), FeedV2RemoteResult.HttpFailure(500, null))
+        for (failure in failures) for (pending in listOf(false, true)) {
+            val store = FakeStore(bound = true).apply { if (pending) claims += sent() }
+            val remote = FakeRemote().apply {
+                pullFailure = failure
+                if (pending) pushFailure = FeedV2RemoteResult.TransportFailure("timeout")
+            }
+            val outcome = assertIs<FeedSyncV2Outcome.Failed>(useCase(store, remote).sync())
+            assertEquals("pull", outcome.phase)
+            assertEquals(4L, store.binding?.cursorVersion)
+            assertEquals(if (pending) 1 else 0, store.claims.size)
+            assertEquals(0, store.pullApplies)
+            assertTrue(!store.suspended)
+        }
+    }
+
     private fun useCase(store: FakeStore, remote: FakeRemote,
         configured: FeedV2Destination? = destination) = FeedSyncV2UseCase(
         object : FeedV2ConfigurationPort {
@@ -372,6 +419,7 @@ class FeedSyncV2UseCaseTest {
         var pullFailure: FeedV2RemoteResult<FeedChangesV2Response>? = null
         var fullFailure: FeedV2RemoteResult<FeedChangesV2Response>? = null
         var cancelPull = false
+        var afterRequest: (String) -> Unit = {}
         val events = mutableListOf<String>()
         val sentBatches = mutableListOf<FeedMutationBatchV2>()
         override suspend fun getFeedChangesV2(
@@ -379,6 +427,7 @@ class FeedSyncV2UseCaseTest {
         ): FeedV2RemoteResult<FeedChangesV2Response> {
             events += if (sinceVersion == null) "full" else "incremental"
             if (cancelPull) throw CancellationException("cancel")
+            afterRequest(if (sinceVersion == null) "full" else "incremental")
             return if (sinceVersion == null) fullFailure ?: FeedV2RemoteResult.Success(fullResponse)
             else pullFailure ?: FeedV2RemoteResult.Success(incrementalResponse.copy(
                 serverVersion = maxOf(incrementalResponse.serverVersion, sinceVersion)))
@@ -388,6 +437,7 @@ class FeedSyncV2UseCaseTest {
         ): FeedV2RemoteResult<FeedMutationBatchResultV2> {
             events += "push"
             sentBatches += batch
+            afterRequest("push")
             return pushFailure ?: FeedV2RemoteResult.Success(FeedMutationBatchResultV2(pushInstance,
                 pushResults ?: batch.mutations.map { item -> FeedMutationResultV2(item.opId, "applied",
                     feed(5).copy(url = item.url)) }))
