@@ -7,6 +7,7 @@ import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.ui.feed.correctionDraft
+import com.example.epilogue.ui.feed.correctionForm
 import com.example.epilogue.shared.ghostwriter.FeedChangesV2Response
 import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
 import com.example.epilogue.shared.sync.FeedV2Binding
@@ -499,6 +500,41 @@ class AndroidFeedV2StoreTest {
             remote("Corrected", 7).copy(mode = "summarize")) is FeedV2StoreResult.Success)
         assertEquals(ProcessingMode.BRIEFING, database.feedDao().getFeedByUrl(url)!!.mode)
         store.endSyncRun(nextToken)
+        database.close()
+    }
+
+    @Test fun `open title correction submits refreshed server defaults`() = runBlocking {
+        context.deleteDatabase(name)
+        configured = true
+        val database = db()
+        val store = AndroidFeedV2Store(database, settings)
+        val (token, binding) = bind(store, listOf(remote("Server", 5)), 5)
+        store.saveLocal(feed("Rejected"))
+        val sent = value(store.loadPendingMutations(token, binding, 100)).single()
+        assertTrue(store.recordRejection(token, binding, sent.opId, sent.sentRevision,
+            "invalid_fields", "Title invalid") is FeedV2StoreResult.Success)
+        val initial = requireNotNull(correctionDraft(database.feedMutationDao().byId(sent.opId)!!))
+        assertEquals(ProcessingMode.FIDELITY, initial.mode)
+        assertTrue(initial.enabled)
+
+        val remoteChanged = remote("Server", 6).copy(mode = "summarize", isActive = false,
+            maxArticles = 7)
+        assertTrue(store.applyServerChangesAndCursor(token, binding,
+            FeedChangesV2Response(serverId, 6, listOf(remoteChanged))) is FeedV2StoreResult.Success)
+        val refreshed = requireNotNull(correctionDraft(database.feedMutationDao().byId(sent.opId)!!))
+        val form = correctionForm(refreshed, "Corrected", null, null, null)
+        assertEquals(ProcessingMode.BRIEFING, form.mode)
+        assertFalse(form.enabled)
+        assertEquals("7", form.cap)
+        assertTrue(store.correctRejected(sent.opId, form.title, form.mode,
+            form.enabled, form.cap.toInt()))
+        val corrected = value(store.loadPendingMutations(token, binding, 100)).single()
+        assertEquals(6L, corrected.payload.baseVersion)
+        assertEquals("Corrected", corrected.payload.fields!!.title)
+        assertEquals("summarize", corrected.payload.fields!!.mode)
+        assertEquals(false, corrected.payload.fields!!.isActive)
+        assertEquals(7, corrected.payload.fields!!.maxArticles)
+        store.endSyncRun(token)
         database.close()
     }
 
