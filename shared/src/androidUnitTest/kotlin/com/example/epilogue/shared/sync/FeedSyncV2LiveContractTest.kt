@@ -114,11 +114,13 @@ class FeedSyncV2LiveContractTest {
 
             val wrongInstance = UUID.randomUUID().toString()
             val wrongPull = clientB.getFeedChangesV2(destination, restored.version, wrongInstance)
-            assertEquals("server_changed", assertIs<FeedV2RemoteResult.HttpFailure>(wrongPull).code)
+            assertEquals(409, assertIs<FeedV2RemoteResult.HttpFailure>(wrongPull).status)
+            assertEquals("server_changed", wrongPull.code)
             val wrongWrite = clientB.postFeedMutationsV2(destination, FeedMutationBatchV2(
                 wrongInstance, listOf(FeedMutationV2(UUID.randomUUID().toString(), feedUrl,
                     "delete", restored.version))))
-            assertEquals("server_changed", assertIs<FeedV2RemoteResult.HttpFailure>(wrongWrite).code)
+            assertEquals(409, assertIs<FeedV2RemoteResult.HttpFailure>(wrongWrite).status)
+            assertEquals("server_changed", wrongWrite.code)
             val unchanged = success(clientA.getFeedChangesV2(destination, restored.version, instance))
             assertEquals(restored.version, unchanged.serverVersion)
             assertTrue(unchanged.changes.isEmpty())
