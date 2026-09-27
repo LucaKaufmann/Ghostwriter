@@ -67,6 +67,25 @@ const BASE_URL = '/api';
 
 class ApiClient {
 	private token: string | null = null;
+	private unauthorizedHandler: ((token: string) => void) | null = null;
+
+	onUnauthorized(handler: (token: string) => void): () => void {
+		this.unauthorizedHandler = handler;
+		return () => {
+			if (this.unauthorizedHandler === handler) this.unauthorizedHandler = null;
+		};
+	}
+
+	private async responseError(response: Response, token: string | null): Promise<ApiError> {
+		let error: APIError;
+		try {
+			error = await response.json();
+		} catch {
+			error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+		}
+		if (response.status === 401 && token) this.unauthorizedHandler?.(token);
+		return new ApiError(response.status, error);
+	}
 
 	setToken(token: string | null) {
 		this.token = token;
@@ -108,13 +127,7 @@ class ApiClient {
 		});
 
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, token);
 		}
 
 		// Handle empty responses (204 No Content, etc.)
@@ -135,13 +148,7 @@ class ApiClient {
 
 		const response = await fetch(`${BASE_URL}${endpoint}`, { headers });
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, token);
 		}
 
 		const blob = await response.blob();
@@ -170,13 +177,7 @@ class ApiClient {
 			body: JSON.stringify(data)
 		});
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, null);
 		}
 		return response.json();
 	}
@@ -188,13 +189,7 @@ class ApiClient {
 			body: JSON.stringify(data)
 		});
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, null);
 		}
 		return response.json();
 	}
@@ -250,13 +245,7 @@ class ApiClient {
 		});
 
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, token);
 		}
 
 		const blob = await response.blob();
@@ -332,13 +321,7 @@ class ApiClient {
 			body: formData
 		});
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, token);
 		}
 	}
 
@@ -713,13 +696,7 @@ class ApiClient {
 			body: formData
 		});
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, token);
 		}
 
 		return response.json();
@@ -815,7 +792,7 @@ export class ApiError extends Error {
 	}
 
 	get isUnauthorized(): boolean {
-		return this.status === 401 || this.status === 403;
+		return this.status === 401;
 	}
 
 	get isNotFound(): boolean {

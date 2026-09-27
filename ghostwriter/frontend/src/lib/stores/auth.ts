@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { api, ApiError } from '$lib/api';
 import type { HealthResponse, UserResponse, AuthStatus } from '$lib/api';
 
@@ -23,6 +23,20 @@ function createAuthStore() {
 
 		return {
 			subscribe,
+
+			// A late response from an old token must not end a newer session.
+			expireSession(token: string): boolean {
+				if (api.getToken() !== token || !get({ subscribe }).isAuthenticated) return false;
+				api.setToken(null);
+				update((state) => ({
+					...state,
+					isAuthenticated: false,
+					isLoading: false,
+					user: null,
+					error: 'Session expired. Please log in again.'
+				}));
+				return true;
+			},
 
 			// Initialize auth state from localStorage
 			async init() {
@@ -64,6 +78,7 @@ function createAuthStore() {
 						user
 					}));
 					} catch (err) {
+						if (api.getToken() !== token) return;
 						if (err instanceof ApiError && err.isUnauthorized) {
 							// Token is invalid
 							api.setToken(null);
@@ -75,8 +90,8 @@ function createAuthStore() {
 							error: 'Session expired. Please log in again.'
 						}));
 						} else {
-							// Fail closed for unknown auth verification failures.
-							api.setToken(null);
+							// A transient failure cannot establish a session, but the stored
+							// credential may still be valid on the next attempt.
 							update((state) => ({
 								...state,
 								isAuthenticated: false,
