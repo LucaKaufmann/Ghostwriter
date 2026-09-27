@@ -159,11 +159,12 @@ class DigestScheduler @Inject constructor(
             selectedPeriods.map { period ->
                 async {
                     val generation = synchronized(registrationLock) {
+                        if (period !in settingsRepository.getSchedulePeriods()) return@synchronized null
                         registrationJobs.remove(period)?.cancel()
                         ((registrationGenerations[period] ?: 0L) + 1).also {
                             registrationGenerations[period] = it
                         }
-                    }
+                    } ?: return@async
                     registerPeriod(period, generation, awaitPersistence = true,
                         waitForRunning = false)
                 }
