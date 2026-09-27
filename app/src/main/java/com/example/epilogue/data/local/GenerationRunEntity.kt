@@ -12,5 +12,9 @@ data class GenerationRunEntity(
     val outcome: String = "running",
     val digestId: Long? = null,
     val diagnosticsJson: String = "{}",
-    val regeneration: Boolean = false
+    val regeneration: Boolean = false,
+    val triggerType: String? = null,
+    val period: String? = null,
+    val occurrenceDate: String? = null,
+    val workId: String? = null
 )

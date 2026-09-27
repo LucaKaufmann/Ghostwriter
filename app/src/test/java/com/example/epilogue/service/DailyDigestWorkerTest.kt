@@ -23,6 +23,11 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -61,6 +66,78 @@ class DailyDigestWorkerTest {
 
     @After fun tearDown() { db.close() }
 
+    @Test fun `feed ingestion starts at most three in parallel and retains feed order`() = runBlocking {
+        val entered = Channel<Int>(Channel.UNLIMITED)
+        val release = CompletableDeferred<Unit>()
+        val job = async {
+            DailyDigestWorker.ingestInOrder((1..5).toList()) { index ->
+                entered.send(index)
+                release.await()
+                index * 10
+            }
+        }
+        assertEquals(setOf(1, 2, 3), (1..3).map { entered.receive() }.toSet())
+        assertNull(withTimeoutOrNull(50) { entered.receive() })
+        release.complete(Unit)
+        assertEquals(listOf(10, 20, 30, 40, 50), job.await())
+    }
+
+    @Test fun `cancelled ingestion cancels every waiting feed`() = runBlocking {
+        val entered = Channel<Int>(Channel.UNLIMITED)
+        val release = CompletableDeferred<Unit>()
+        val job = async {
+            DailyDigestWorker.ingestInOrder((1..5).toList()) { index ->
+                entered.send(index)
+                release.await()
+                index
+            }
+        }
+        repeat(3) { entered.receive() }
+        job.cancelAndJoin()
+        assertTrue(job.isCancelled)
+        assertNull(withTimeoutOrNull(50) { entered.receive() })
+    }
+
+    @Test fun `periodic and catch up workers share gate and cover empty occurrence once`() = runBlocking {
+        val settings = mockk<SettingsRepository>()
+        every { settings.isGhostwriterConfigured() } returns false
+        val feeds = mockk<FeedRepository>()
+        coEvery { feeds.getEnabledFeedsList() } returns listOf(feed)
+        val source = mockk<ArticleRepository>()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        coEvery { source.ingestForGeneration(feed, any(), false) } coAnswers {
+            entered.complete(Unit)
+            release.await()
+            FeedIngestionResult(feed, 0, 0, emptyList(), emptyList(), emptyList(), 0)
+        }
+        val gate = GenerationGate()
+        fun worker(): DailyDigestWorker {
+            val params = mockk<WorkerParameters>(relaxed = true)
+            val workId = UUID.randomUUID()
+            every { params.id } returns workId
+            every { params.inputData } returns Data.Builder()
+                .putString(DailyDigestWorker.KEY_PERIOD, "MORNING")
+                .putString(DailyDigestWorker.KEY_OCCURRENCE_DATE, "2026-09-27")
+                .build()
+            every { params.runAttemptCount } returns 0
+            val foreground = mockk<ForegroundUpdater>()
+            every { foreground.setForegroundAsync(any(), any(), any()) } throws
+                IllegalStateException("foreground unavailable in fixture")
+            every { params.foregroundUpdater } returns foreground
+            return DailyDigestWorker(RuntimeEnvironment.getApplication(), params, source,
+                feeds, history, settings, mockk(), mockk(), ledger, gate)
+        }
+        val periodic = async { worker().doWork() }
+        entered.await()
+        val catchUp = async { worker().doWork() }
+        release.complete(Unit)
+        periodic.await()
+        catchUp.await()
+        assertTrue(ledger.coversScheduled("MORNING", "2026-09-27"))
+        coVerify(exactly = 1) { source.ingestForGeneration(feed, any(), false) }
+    }
+
     @Test fun `artifact failure remains retryable and next run commits despite export failure`() = runBlocking {
         val params = mockk<WorkerParameters>(relaxed = true)
         every { params.id } returns UUID.randomUUID()
@@ -94,6 +171,7 @@ class DailyDigestWorkerTest {
 
         worker().doWork()
         assertEquals("failed", db.generationRunDao().observeLatestFinished().first()?.outcome)
+        assertEquals("MANUAL", db.generationRunDao().observeLatestFinished().first()?.triggerType)
         assertEquals("retryable", db.articleDeliveryDao().get(feed.url, key)?.state)
         assertEquals(0, db.digestDao().getDigestCount())
 

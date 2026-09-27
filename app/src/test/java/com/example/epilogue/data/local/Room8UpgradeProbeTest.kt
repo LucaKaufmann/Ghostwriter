@@ -7,6 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.epilogue.di.DatabaseModule
 import com.example.epilogue.data.repository.AndroidFeedV2Store
+import com.example.epilogue.data.repository.ArticleDeliveryStore
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.shared.ghostwriter.FeedChangesV2Response
 import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
@@ -75,9 +76,10 @@ class Room8UpgradeProbeTest {
         if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null
     }
 
-    private fun room10(migration: Migration = DatabaseModule.MIGRATION_8_9): EpilogueDatabase =
+    private fun room11(migration: Migration = DatabaseModule.MIGRATION_8_9): EpilogueDatabase =
         Room.databaseBuilder(context, EpilogueDatabase::class.java, name)
-            .addMigrations(migration, DatabaseModule.MIGRATION_9_10)
+            .addMigrations(migration, DatabaseModule.MIGRATION_9_10,
+                DatabaseModule.MIGRATION_10_11)
             .allowMainThreadQueries()
             .build()
 
@@ -88,7 +90,7 @@ class Room8UpgradeProbeTest {
 
     @Test fun `migrated dirty false exact match adopts while tombstone retains dirty true proposal`() = runBlocking {
         createFixture()
-        val db = room10()
+        val db = room11()
         val store = AndroidFeedV2Store(db, configuredSettings())
         val destination = store.currentDestination()!!
         val token = (store.beginSyncRun(destination) as FeedV2StoreResult.Success).value
@@ -117,7 +119,7 @@ class Room8UpgradeProbeTest {
 
     @Test fun `migrated absence remains unresolved with no automatic upload`() = runBlocking {
         createFixture()
-        val db = room10()
+        val db = room11()
         val store = AndroidFeedV2Store(db, configuredSettings())
         val destination = store.currentDestination()!!
         val token = (store.beginSyncRun(destination) as FeedV2StoreResult.Success).value
@@ -133,12 +135,12 @@ class Room8UpgradeProbeTest {
         db.close()
     }
 
-    @Test fun `production Room 10 migration upgrades frozen Room 8 and reopens`() {
+    @Test fun `production Room 11 migration upgrades frozen Room 8 and reopens`() {
         createFixture()
-        val upgraded = room10()
-        assertEquals(10, upgraded.openHelper.readableDatabase.version)
+        val upgraded = room11()
+        assertEquals(11, upgraded.openHelper.readableDatabase.version)
         upgraded.close()
-        val reopened = room10()
+        val reopened = room11()
         assertEquals(2, runBlocking { reopened.feedDao().getAllRealFeedsIncludingHidden() }.size)
         assertEquals(2, runBlocking { reopened.feedMutationDao().forScope("unbound") }.size)
         reopened.close()
@@ -157,7 +159,7 @@ class Room8UpgradeProbeTest {
         }
     }
 
-    @Test fun `production Room 10 migration upgrades installed Room 9 without inferring old delivery claims`() {
+    @Test fun `production Room 11 migration upgrades installed Room 9 without inferring old delivery claims`() {
         createFixture()
         val old = room8()
         old.openHelper.writableDatabase.apply {
@@ -170,9 +172,9 @@ class Room8UpgradeProbeTest {
         }
         old.close()
         val upgraded = Room.databaseBuilder(context, EpilogueDatabase::class.java, name)
-            .addMigrations(DatabaseModule.MIGRATION_9_10)
+            .addMigrations(DatabaseModule.MIGRATION_9_10, DatabaseModule.MIGRATION_10_11)
             .allowMainThreadQueries().build()
-        assertEquals(10, upgraded.openHelper.writableDatabase.version)
+        assertEquals(11, upgraded.openHelper.writableDatabase.version)
         assertEquals(1, runBlocking { upgraded.digestDao().getArticlesForDigest(1) }.size)
         assertTrue(runBlocking { upgraded.articleDeliveryDao().forFeed("https://example.org/unchanged") }.isEmpty())
         upgraded.close()
@@ -180,6 +182,51 @@ class Room8UpgradeProbeTest {
             assertNull(sql.scalar("SELECT feedUrl FROM digest_articles WHERE id=1"))
             assertEquals("0", sql.scalar("SELECT COUNT(*) FROM article_delivery"))
         }
+    }
+
+    @Test fun `Room 10 to 11 preserves ledger and leaves legacy run occurrence unknown`() = runBlocking {
+        createFixture()
+        val old = room8()
+        old.openHelper.writableDatabase.apply {
+            beginTransaction()
+            try {
+                DatabaseModule.MIGRATION_8_9.migrate(this)
+                DatabaseModule.MIGRATION_9_10.migrate(this)
+                execSQL("""INSERT INTO article_delivery
+                    (feedUrl,articleKey,state,reason,filterSignature,lastAttemptSequence,
+                     firstDigestId,committedAt) VALUES
+                    ('https://example.org/unchanged','article-key','delivered',NULL,NULL,3,1,1234)
+                """.trimIndent())
+                execSQL("""INSERT INTO generation_runs
+                    (runId,startedAt,finishedAt,outcome,digestId,diagnosticsJson,regeneration)
+                    VALUES (3,1000,1200,'empty',NULL,'{}',0)
+                """.trimIndent())
+                version = 10
+                setTransactionSuccessful()
+            } finally { endTransaction() }
+        }
+        old.close()
+        val upgraded = room11()
+        assertEquals(11, upgraded.openHelper.readableDatabase.version)
+        assertEquals("delivered", upgraded.articleDeliveryDao()
+            .get("https://example.org/unchanged", "article-key")?.state)
+        val legacy = upgraded.generationRunDao().get(3)!!
+        assertNull(legacy.triggerType)
+        assertNull(legacy.period)
+        assertNull(legacy.occurrenceDate)
+        assertNull(legacy.workId)
+        val store = ArticleDeliveryStore(upgraded, upgraded.articleDeliveryDao(),
+            upgraded.generationRunDao())
+        assertFalse(store.coversScheduled("MORNING", "2026-09-27"))
+        val scheduled = store.startScheduledRun("MORNING", "2026-09-27", "work", false)!!
+        store.finishWithoutDigest(scheduled, "empty", "{}")
+        upgraded.close()
+        val reopened = room11()
+        assertTrue(ArticleDeliveryStore(reopened, reopened.articleDeliveryDao(),
+            reopened.generationRunDao()).coversScheduled("MORNING", "2026-09-27"))
+        assertEquals("delivered", reopened.articleDeliveryDao()
+            .get("https://example.org/unchanged", "article-key")?.state)
+        reopened.close()
     }
 
     @Test fun `production migration failure leaves Room 8 store intact`() {
@@ -191,7 +238,7 @@ class Room8UpgradeProbeTest {
             }
         }
         assertThrows(IllegalStateException::class.java) {
-            val upgrade = room10(failing)
+            val upgrade = room11(failing)
             try { upgrade.openHelper.writableDatabase } finally { upgrade.close() }
         }
         val reopened = room8()

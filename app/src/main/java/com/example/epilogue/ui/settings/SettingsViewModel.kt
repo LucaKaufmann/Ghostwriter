@@ -200,7 +200,7 @@ class SettingsViewModel @Inject constructor(
             when (workInfo.state) {
                 WorkInfo.State.SUCCEEDED -> {
                     val message = when (workInfo.outputData.getString("generation_outcome")) {
-                        "partial" -> "Digest saved with some articles still pending"
+                        "partial" -> "Digest saved with some processing issues"
                         "deferred" -> "No articles included; more remain for the next edition"
                         "empty" -> "No eligible articles found"
                         else -> "Digest generated successfully"
