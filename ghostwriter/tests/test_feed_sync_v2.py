@@ -435,3 +435,43 @@ def test_gated_dns_does_not_hold_writer_lock_or_leave_receipt(client, monkeypatc
     with Session(engine) as session:
         assert session.get(FeedMutationReceipt, slow["op_id"]) is None
         assert session.exec(select(Feed).where(Feed.url == slow["url"])).first() is None
+
+@pytest.mark.parametrize("cap", [-1, 2**31, 2**63])
+def test_feed_cap_outside_native_range_never_changes_feed(client, public_dns, cap):
+    value = url()
+    fields = {"url": value, "title": "Range", "mode": "raw", "is_active": True,
+              "max_articles": cap}
+    assert client.post("/api/feeds", json=fields).status_code == 422
+    assert client.post("/api/feeds/sync", json=[fields]).status_code == 422
+    feed = create(client, value)
+    identity = binding(client)["server_instance_id"]
+    assert client.put(f"/api/feeds/{feed['id']}", json={"max_articles": cap},
+                      headers={"If-Match": f'"{feed["version"]}"'}).status_code == 422
+    rejected = push(client, identity, [{"op_id": str(uuid4()), "url": value,
+        "kind": "upsert", "base_version": feed["version"],
+        "fields": {"max_articles": cap}}])
+    assert rejected.status_code == 200
+    assert rejected.json()["results"][0]["status"] == "rejected"
+    current = client.get(f"/api/feeds/{feed['id']}").json()
+    assert current["max_articles"] == 5
+    assert current["version"] == feed["version"]
+
+
+def test_largest_native_feed_cap_roundtrips_through_web_and_v2(client, public_dns):
+    value = url()
+    maximum = 2**31 - 1
+    created = client.post("/api/feeds", json={"url": value, "title": "Largest", "max_articles": maximum})
+    assert created.status_code == 200
+    feed = created.json()
+    snapshot = binding(client)
+    assert next(item for item in snapshot["changes"] if item["url"] == value)["max_articles"] == maximum
+    changed = push(client, snapshot["server_instance_id"], [{"op_id": str(uuid4()),
+        "url": value, "kind": "upsert", "base_version": feed["version"],
+        "fields": {"max_articles": 0}}])
+    assert changed.status_code == 200
+    current = changed.json()["results"][0]["current"]
+    assert current["max_articles"] == 0
+    changed_again = push(client, snapshot["server_instance_id"], [{"op_id": str(uuid4()),
+        "url": value, "kind": "upsert", "base_version": current["version"],
+        "fields": {"max_articles": maximum}}])
+    assert changed_again.json()["results"][0]["current"]["max_articles"] == maximum
