@@ -99,7 +99,7 @@ struct DeliveryStoreTests {
                              articles: [article()], claims: [claim],
                              triggerType: .manual, period: nil)
         }
-        let reopened = ModelContext(container)
+        let reopened = ModelContext(try self.reopened(directory))
         #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 0)
         #expect(try reopened.fetchCount(FetchDescriptor<DigestArticle>()) == 0)
         let ledger = try #require(reopened.fetch(FetchDescriptor<ArticleDelivery>()).first)
@@ -112,23 +112,51 @@ struct DeliveryStoreTests {
     func testPreCommitTransactionRollback() throws {
         let (container, directory) = try model()
         let store = DeliveryStore(container: container)
-        let run = try store.start(trigger: "MANUAL", period: nil)
+        let run = try store.start(trigger: "MANUAL", period: nil, mode: .regenerate)
         let claim = DeliveryClaim(feedUrl: feed, articleKey: key, state: "delivered")
         try store.markAttempts([claim], run: run)
+        #expect(throws: DeliveryStoreError.invalidClaim) {
+            try store.finish(run, outcome: .failed, diagnostics: diagnostics,
+                             mode: .normal, artifactPath: nil, articles: [], claims: [],
+                             triggerType: .manual, period: nil)
+        }
         store.failBeforeTransactionCommitForTesting = true
         #expect(throws: DeliveryStoreError.injectedSaveFailure) {
             try store.finish(run, outcome: .complete, diagnostics: diagnostics,
-                             mode: .normal, artifactPath: artifact(directory),
+                             mode: .regenerate, artifactPath: artifact(directory),
                              articles: [article()], claims: [claim],
                              triggerType: .manual, period: nil)
         }
-        let reopened = ModelContext(container)
+        let reopened = ModelContext(try self.reopened(directory))
         #expect(try reopened.fetchCount(FetchDescriptor<Digest>()) == 0)
         #expect(try reopened.fetchCount(FetchDescriptor<DigestArticle>()) == 0)
         let ledger = try #require(reopened.fetch(FetchDescriptor<ArticleDelivery>()).first)
         #expect(ledger.state == "retryable")
         #expect(ledger.firstDigestId == nil)
-        #expect(try #require(reopened.fetch(FetchDescriptor<GenerationRun>()).first).outcome == "running")
+        let persistedRun = try #require(reopened.fetch(FetchDescriptor<GenerationRun>()).first)
+        #expect(persistedRun.outcome == "running")
+        let persisted = try JSONDecoder().decode(
+            GenerationDiagnostics.self, from: Data(persistedRun.diagnosticsJSON.utf8))
+        #expect(persisted.mode == .regenerate)
+    }
+
+    @Test("Terminal failure and cancellation keep the mode recorded at run start")
+    func testTerminalDiagnosticsKeepMode() throws {
+        let (container, directory) = try model()
+        let store = DeliveryStore(container: container)
+        for outcome in [LocalGenerationOutcome.failed, .cancelled] {
+            let handle = try store.start(trigger: "MANUAL", period: nil, mode: .regenerate)
+            _ = try store.finish(handle, outcome: outcome,
+                                 diagnostics: GenerationDiagnostics(feeds: [], runError: "test"),
+                                 mode: .regenerate, artifactPath: nil, articles: [], claims: [],
+                                 triggerType: .manual, period: nil)
+            let saved = try #require(ModelContext(try reopened(directory))
+                .fetch(FetchDescriptor<GenerationRun>())
+                .first(where: { $0.runId == handle.id }))
+            #expect(saved.outcome == outcome.rawValue)
+            #expect(try JSONDecoder().decode(GenerationDiagnostics.self,
+                from: Data(saved.diagnosticsJSON.utf8)).mode == .regenerate)
+        }
     }
 
     @Test("Failed run cannot commit a terminal exclusion")
@@ -177,7 +205,7 @@ struct DeliveryStoreTests {
                                                     triggerType: .manual, period: nil))
         let repository = DigestRepository(modelContext: ModelContext(container))
         try await repository.deleteDigest(id: firstDigest.id)
-        let regenerate = try store.start(trigger: "MANUAL", period: nil)
+        let regenerate = try store.start(trigger: "MANUAL", period: nil, mode: .regenerate)
         try store.markAttempts([changed], run: regenerate)
         _ = try store.finish(regenerate, outcome: .complete, diagnostics: diagnostics,
                              mode: .regenerate, artifactPath: artifact(directory),

@@ -166,4 +166,34 @@ struct DeliveryRecoveryTests {
             period: "MORNING", occurrenceStart: value.start,
             occurrenceEnd: value.start.addingTimeInterval(86_400), legacyCovered: covered))
     }
+
+    @Test("Manual normal and legacy runs cannot reuse another digest's delivery claim")
+    func manualNormalAndLegacyRequireOwnClaim() throws {
+        for mode in [nil, LocalGenerationMode.normal] {
+            let value = try fixture(nil)
+            let context = ModelContext(try container(at: value.directory))
+            let run = try #require(context.fetch(FetchDescriptor<GenerationRun>())
+                .first(where: { $0.runId == value.runId }))
+            let claim = try #require(context.fetch(FetchDescriptor<ArticleDelivery>()).first)
+            run.trigger = TriggerType.manual.rawValue
+            run.diagnosticsJSON = String(data: try JSONEncoder().encode(
+                GenerationDiagnostics(feeds: [], mode: mode)), encoding: .utf8)!
+            claim.firstDigestId = UUID()
+            try context.save()
+
+            let reopened = try container(at: value.directory)
+            let saved = try #require(ModelContext(reopened)
+                .fetch(FetchDescriptor<GenerationRun>()).first)
+            let decoded = try JSONDecoder().decode(
+                GenerationDiagnostics.self, from: Data(saved.diagnosticsJSON.utf8))
+            #expect(decoded.mode == mode)
+            try DeliveryStore(container: reopened).reconcileInterruptedLocalRuns(now: Date())
+            let after = ModelContext(try container(at: value.directory))
+            #expect(try #require(after.fetch(FetchDescriptor<GenerationRun>()).first).outcome == "failed")
+            #expect(try #require(after.fetch(FetchDescriptor<Digest>()).first).isComplete == false)
+        }
+        let legacy = try JSONDecoder().decode(
+            GenerationDiagnostics.self, from: Data(#"{"feeds":[]}"#.utf8))
+        #expect(legacy.mode == nil)
+    }
 }

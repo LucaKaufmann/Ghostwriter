@@ -54,10 +54,14 @@ public struct FeedIngestionResult: Codable, Sendable {
 public struct GenerationDiagnostics: Codable, Sendable {
     public var feeds: [FeedIngestionResult]
     public var runError: String?
+    /// Explicit generation intent. Missing on V3 rows written before this field.
+    public var mode: LocalGenerationMode?
 
-    public init(feeds: [FeedIngestionResult], runError: String? = nil) {
+    public init(feeds: [FeedIngestionResult], runError: String? = nil,
+                mode: LocalGenerationMode? = nil) {
         self.feeds = feeds
         self.runError = runError
+        self.mode = mode
     }
 
     public var deliveredCount: Int { feeds.reduce(0) { $0 + $1.deliveredCount } }

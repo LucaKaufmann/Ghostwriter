@@ -146,6 +146,8 @@ struct DeliveryGenerationTests {
         #expect(originalClaim.firstDigestId == firstID)
         let repeatRun = try #require(before.fetch(FetchDescriptor<GenerationRun>())
             .first(where: { $0.digestId == repeatID }))
+        #expect(try JSONDecoder().decode(GenerationDiagnostics.self,
+            from: Data(repeatRun.diagnosticsJSON.utf8)).mode == .regenerate)
         // A normally completed run is untouched. Simulate the post-commit
         // interrupted marker that launch recovery exists to reconcile.
         try DeliveryStore(container: container).reconcileInterruptedLocalRuns(now: Date())
@@ -162,6 +164,8 @@ struct DeliveryGenerationTests {
         let digest = try #require(after.fetch(FetchDescriptor<Digest>())
             .first(where: { $0.id == repeatID }))
         #expect(recovered.outcome == "complete")
+        #expect(try JSONDecoder().decode(GenerationDiagnostics.self,
+            from: Data(recovered.diagnosticsJSON.utf8)).mode == .regenerate)
         #expect(digest.isComplete)
         #expect(try #require(after.fetch(FetchDescriptor<ArticleDelivery>()).first).firstDigestId == firstID)
     }
@@ -195,8 +199,11 @@ struct DeliveryGenerationTests {
             try DeliveryStore(container: try diskContainer(at: directory))
                 .reconcileInterruptedLocalRuns(now: Date())
             let after = ModelContext(try diskContainer(at: directory))
-            #expect(try after.fetch(FetchDescriptor<GenerationRun>())
-                .first(where: { $0.runId == run.runId })?.outcome == "failed")
+            let recovered = try #require(after.fetch(FetchDescriptor<GenerationRun>())
+                .first(where: { $0.runId == run.runId }))
+            #expect(recovered.outcome == "failed")
+            #expect(try JSONDecoder().decode(GenerationDiagnostics.self,
+                from: Data(recovered.diagnosticsJSON.utf8)).mode == .regenerate)
             #expect(try after.fetch(FetchDescriptor<Digest>())
                 .first(where: { $0.id == repeatID })?.isComplete == false)
             #expect(try #require(after.fetch(FetchDescriptor<ArticleDelivery>()).first).firstDigestId == firstID)

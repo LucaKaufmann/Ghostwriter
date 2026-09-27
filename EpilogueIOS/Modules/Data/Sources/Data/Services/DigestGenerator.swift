@@ -127,8 +127,9 @@ public final class DigestGenerator {
 
     private func generate(triggerType: TriggerType, period: String?,
                           mode: LocalGenerationMode, now: Date) async throws -> LocalGenerationResult {
-        let handle = try deliveryStore.start(trigger: triggerType.rawValue, period: period, at: now)
-        var diagnostics = GenerationDiagnostics(feeds: [])
+        let handle = try deliveryStore.start(trigger: triggerType.rawValue, period: period,
+                                             mode: mode, at: now)
+        var diagnostics = GenerationDiagnostics(feeds: [], mode: mode)
         var included: [ProcessedArticle] = []
         var claims: [DeliveryClaim] = []
         var artifact: URL?
