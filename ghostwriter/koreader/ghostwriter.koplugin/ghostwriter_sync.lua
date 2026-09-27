@@ -57,11 +57,14 @@ local function file_hash(path)
   if not file then return nil end
   local update = sha256()
   while true do
-    local chunk = file:read(65536)
-    if not chunk then break end
+    local chunk, read_err = file:read(65536)
+    if not chunk then
+      file:close()
+      if read_err then return nil end
+      break
+    end
     update(chunk)
   end
-  file:close()
   return update()
 end
 

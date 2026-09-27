@@ -150,6 +150,16 @@ function API.download_digest(server_url, token, filename, target_path, expected_
     return same_open_identity(fd_attributes(dirfd), expected_dir)
         and same_identity(lfs.symlinkattributes(dir), expected_dir)
   end
+  local function finalized_identity(open_identity)
+    local current = lfs.symlinkattributes(target_path)
+    if dir_matches() and current and current.mode == "file"
+        and same_open_identity(open_identity, current) then
+      -- Path attributes use the normal device number on macOS, unlike
+      -- /dev/fd attributes. Sync compares this identity during cleanup.
+      return current
+    end
+    return nil
+  end
   local function finish_failure(kind, tmp_name)
     if tmp_name then call("unlinkat", dirfd, tmp_name, 0) end
     call("close", dirfd)
@@ -211,16 +221,20 @@ function API.download_digest(server_url, token, filename, target_path, expected_
   -- support it. Older kernels/libcs may not expose it, so retain safe fallbacks.
   local rename_available, rename_result = pcall(call, "renameat2", dirfd, tmp_name, dirfd, filename, 1)
   if rename_available and rename_result == 0 then
+    local created = finalized_identity(tmp_identity)
     call("close", dirfd)
-    return true, { path = target_path, created = tmp_identity }
+    if not created then return false, { kind = "unsafe_path" } end
+    return true, { path = target_path, created = created }
   end
   if rename_available and ffi.errno() == 17 then
     return finish_failure("collision", tmp_name)
   end
   if call("linkat", dirfd, tmp_name, dirfd, filename, 0) == 0 then
+    local created = finalized_identity(tmp_identity)
     call("unlinkat", dirfd, tmp_name, 0)
     call("close", dirfd)
-    return true, { path = target_path, created = tmp_identity }
+    if not created then return false, { kind = "unsafe_path" } end
+    return true, { path = target_path, created = created }
   end
   if ffi.errno() == 17 then
     return finish_failure("collision", tmp_name)
@@ -266,8 +280,10 @@ function API.download_digest(server_url, token, filename, target_path, expected_
     return finish_failure("io_error", tmp_name)
   end
   call("unlinkat", dirfd, tmp_name, 0)
+  local created = finalized_identity(target_identity)
   call("close", dirfd)
-  return true, { path = target_path, created = target_identity }
+  if not created then return false, { kind = "unsafe_path" } end
+  return true, { path = target_path, created = created }
 end
 
 return API
