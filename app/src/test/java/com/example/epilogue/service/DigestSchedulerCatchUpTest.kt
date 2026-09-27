@@ -82,15 +82,25 @@ class DigestSchedulerCatchUpTest {
         val afterFallBack = beforeFallBack.plusHours(24)
         assertEquals(6, afterFallBack.hour)
         assertEquals(LocalDate.of(2026, 10, 25),
-            DailyDigestWorker.periodicOccurrenceDate(afterFallBack))
+            DailyDigestWorker.periodicOccurrenceDate(afterFallBack, beforeFallBack.toInstant().toEpochMilli()))
         assertEquals(LocalDate.of(2026, 10, 26),
-            DailyDigestWorker.periodicOccurrenceDate(afterFallBack.plusHours(24)))
+            DailyDigestWorker.periodicOccurrenceDate(afterFallBack.plusHours(24), beforeFallBack.toInstant().toEpochMilli()))
     }
 
     @Test
-    fun `new delayed periodic attempt belongs to its execution day`() {
-        val delayed = ZonedDateTime.of(2026, 3, 8, 1, 0, 0, 0, zone)
-        assertEquals(LocalDate.of(2026, 3, 8),
-            DailyDigestWorker.periodicOccurrenceDate(delayed))
+    fun `constrained periodic work retains prior evening occurrence across midnight`() {
+        val scheduled = ZonedDateTime.of(2026, 3, 7, 18, 0, 0, 0, zone)
+        val delayed = scheduled.plusHours(6).plusMinutes(30)
+        assertEquals(LocalDate.of(2026, 3, 7), DailyDigestWorker.periodicOccurrenceDate(
+            delayed, scheduled.toInstant().toEpochMilli()))
+        assertEquals(LocalDate.of(2026, 3, 8), DailyDigestWorker.periodicOccurrenceDate(
+            delayed.plusHours(24), scheduled.toInstant().toEpochMilli()))
+    }
+
+    @Test
+    fun `long constrained periodic delay coalesces to latest nominal slot`() {
+        val scheduled = ZonedDateTime.of(2026, 3, 7, 7, 0, 0, 0, zone)
+        assertEquals(LocalDate.of(2026, 3, 9), DailyDigestWorker.periodicOccurrenceDate(
+            scheduled.plusHours(50), scheduled.toInstant().toEpochMilli()))
     }
 }
