@@ -132,10 +132,10 @@ class AndroidFeedV2Store @Inject constructor(
     private fun decode(row: FeedMutationEntity): FeedDirtyFieldsV2 = feedV2Json.decodeFromString(row.fieldsJson)
     private fun snapshot(row: FeedSnapshotV2) = feedV2Json.encodeToString(row)
     private fun parseSnapshot(value: String?): FeedSnapshotV2? = value?.let { feedV2Json.decodeFromString(it) }
-    private fun sameFields(feed: FeedEntity, remote: FeedSnapshotV2): Boolean =
-        remote.kind == "feed" && feed.name == remote.title && feed.isEnabled == remote.isActive &&
-            (if (feed.mode == ProcessingMode.BRIEFING) "summarize" else "raw") == remote.mode &&
-            feed.maxArticles == remote.maxArticles
+    private fun sameFields(proposal: FeedDirtyFieldsV2, remote: FeedSnapshotV2): Boolean =
+        remote.kind == "feed" && proposal.title == remote.title &&
+            proposal.isActive == remote.isActive && proposal.mode == remote.mode &&
+            proposal.maxArticles == remote.maxArticles
 
     private fun fromRemote(current: FeedEntity?, remote: FeedSnapshotV2): FeedEntity {
         require(remote.kind == "feed")
@@ -200,6 +200,8 @@ class AndroidFeedV2Store @Inject constructor(
     suspend fun recordOutcome(outcome: FeedSyncV2Outcome) {
         database.withTransaction {
             val state = states.active() ?: return@withTransaction
+            // A run invalidated by a destination or server-identity change cannot hide Review.
+            if (state.suspended) return@withTransaction
             val label = when (outcome) {
                 is FeedSyncV2Outcome.Complete -> "complete"
                 is FeedSyncV2Outcome.Partial -> "partial"
@@ -288,9 +290,18 @@ class AndroidFeedV2Store @Inject constructor(
                         serverId = row.id, serverVersion = row.version, serverSnapshotJson = snapshot(row)))
                     continue
                 }
-                if (head.state == "legacy_unresolved" && row != null && sameFields(feed, row)) {
+                if (head.state == "legacy_unresolved" && row != null && sameFields(decode(head), row)) {
                     mutations.deleteById(head.opId)
-                    feeds.insertFeed(fromRemote(feed, row))
+                    val successor = mutations.forUrl(feed.url)
+                        .filter { it.serverKey == state.serverKey }
+                        .minWithOrNull(compareBy<FeedMutationEntity> { it.queueOrder }.thenBy { it.sequence })
+                    if (successor != null) mutations.update(successor.copy(
+                        baseVersion = if (successor.sent) successor.baseVersion else row.version,
+                        state = if (successor.sent) "needs_resolution" else successor.state,
+                        serverSnapshotJson = snapshot(row)))
+                    feeds.insertFeed(if (successor == null) fromRemote(feed, row) else feed.copy(
+                        serverId = row.id, serverVersion = row.version,
+                        serverSnapshotJson = snapshot(row), locallyModified = true))
                 } else if (head.state == "legacy_unresolved" || head.state == "needs_resolution" ||
                     row != null || head.kind == "delete") {
                     mutations.update(head.copy(state = "needs_resolution", serverSnapshotJson = row?.let(::snapshot)))
@@ -411,8 +422,13 @@ class AndroidFeedV2Store @Inject constructor(
                 if (pending != null) {
                     if (current != null && (current.serverVersion == null || row.version >= current.serverVersion)) {
                         val newer = current.serverVersion != null && row.version > current.serverVersion
-                        if (newer && pending.state == "queued" && !pending.sent) mutations.update(pending.copy(state = "needs_resolution",
-                            serverSnapshotJson = snapshot(row)))
+                        val proposalVersion = parseSnapshot(pending.serverSnapshotJson)?.version
+                        if (proposalVersion == null || row.version > proposalVersion) {
+                            mutations.update(pending.copy(
+                                state = if (newer && pending.state == "queued" && !pending.sent)
+                                    "needs_resolution" else pending.state,
+                                serverSnapshotJson = snapshot(row)))
+                        }
                         feeds.insertFeed(if (newer && row.kind == "feed" && pending.kind != "delete")
                             fromRemote(current, row).copy(locallyModified = true)
                             else current.copy(serverId = row.id, serverVersion = row.version,
@@ -433,8 +449,11 @@ class AndroidFeedV2Store @Inject constructor(
         if (row.state !in setOf("needs_resolution", "rejected")) return@withTransaction false
         val state = states.byKey(row.serverKey) ?: return@withTransaction false
         if (!state.active || state.suspended) return@withTransaction false
-        val server = parseSnapshot(row.serverSnapshotJson)
         val feed = feeds.getFeedByUrl(row.url)
+        val proposalServer = parseSnapshot(row.serverSnapshotJson)
+        val feedServer = parseSnapshot(feed?.serverSnapshotJson)
+        val server = if (feedServer != null &&
+            (proposalServer == null || feedServer.version > proposalServer.version)) feedServer else proposalServer
         val successors = mutations.forUrl(row.url).filter { it.serverKey == state.serverKey && it.queueOrder > row.queueOrder }
         val keep = action in setOf("keep_server", "keep_feed", "keep_removed", "discard")
         val apply = action in setOf("apply_mine", "delete_anyway", "add_to_server") ||

@@ -12,7 +12,9 @@ import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import com.example.epilogue.shared.sync.FeedSyncV2UseCase
+import com.example.epilogue.shared.ghostwriter.isFeedUrlV2
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -52,15 +54,28 @@ class FeedViewModel @Inject constructor(
         maxArticles: Int = 0,
         isEnabled: Boolean = true
     ) {
+        val trimmedUrl = url.trim()
+        val trimmedName = name.trim()
+        if (!isFeedUrlV2(trimmedUrl) || trimmedName.isBlank() || maxArticles < 0) {
+            _uiState.value = _uiState.value.copy(error = "Enter a valid HTTP or HTTPS feed URL and nickname")
+            return
+        }
         viewModelScope.launch {
             val feed = Feed(
-                url = url.trim(),
-                name = name.trim(),
+                url = trimmedUrl,
+                name = trimmedName,
                 mode = mode,
                 maxArticles = maxArticles,
                 isEnabled = isEnabled
             )
-            feedRepository.insertFeed(feed)
+            try {
+                feedRepository.insertFeed(feed)
+                _uiState.value = _uiState.value.copy(showAddDialog = false, error = null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _uiState.value = _uiState.value.copy(error = error.message ?: "Could not save feed")
+            }
         }
     }
 
@@ -142,7 +157,7 @@ class FeedViewModel @Inject constructor(
     }
 
     fun showAddDialog() {
-        _uiState.value = _uiState.value.copy(showAddDialog = true)
+        _uiState.value = _uiState.value.copy(showAddDialog = true, error = null)
     }
 
     fun hideAddDialog() {
