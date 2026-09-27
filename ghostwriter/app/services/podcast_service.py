@@ -1089,14 +1089,18 @@ class PodcastDigestService:
             else_="[]",
         )
         episode_ids = func.json_each(safe_ids).table_valued("value")
+        normalized_reference = func.lower(episode_ids.c.value)
+        # Match UUID()'s accepted legacy text wrappers before comparing hex.
+        # Conservative exclusion of malformed wrappers cannot grant access.
+        for marker in ("urn:", "uuid:", "{", "}", "-"):
+            normalized_reference = func.replace(normalized_reference, marker, "")
         referenced_by_one_off = (
             select(1)
             .select_from(PodcastEpisode)
             .join(episode_ids, true())
             .where(PodcastEpisode.trigger == "one_off")
             .where(
-                func.replace(func.lower(episode_ids.c.value), "-", "")
-                == func.lower(cast(Digest.id, String))
+                normalized_reference == func.lower(cast(Digest.id, String))
             )
             .exists()
         )
