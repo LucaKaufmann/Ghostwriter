@@ -383,6 +383,9 @@ async def update_feed(
             detail="Feed not found",
         )
 
+    if feed.deleted_at is not None:
+        raise HTTPException(409, detail={"code": "feed_conflict", "current": feed_sync.snapshot(feed)})
+
     update_data = feed_data.model_dump(exclude_unset=True)
     if not feed_sync.validate_fields(update_data, creating=False):
         raise HTTPException(422, detail="Invalid feed fields")

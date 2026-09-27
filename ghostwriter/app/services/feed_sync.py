@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
@@ -143,6 +144,17 @@ def _payload_hash(item: dict) -> str:
                                      ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
+def _valid_url_shape(url: object) -> bool:
+    if not isinstance(url, str) or url.startswith("synthetic://"):
+        return False
+    try:
+        parsed = urlsplit(url)
+        return (parsed.scheme in ("http", "https") and parsed.hostname is not None
+                and parsed.username is None and parsed.password is None)
+    except ValueError:
+        return False
+
+
 async def mutate_one(session: Session, instance_id: str, item: dict) -> dict:
     """One transaction per item; terminal results and writes commit together."""
     op_id = str(UUID(item["op_id"]))
@@ -151,14 +163,18 @@ async def mutate_one(session: Session, instance_id: str, item: dict) -> dict:
     # network-dependent validation, then recheck under the write lock below.
     receipt = session.get(FeedMutationReceipt, op_id)
     prior = (receipt.payload_hash, receipt.result_json) if receipt else None
+    url = item.get("url")
+    url_valid = _valid_url_shape(url)
+    known_url = bool(session.exec(select(Feed.id).where(Feed.url == url)).first()) if url_valid and prior is None else False
     session.rollback()
     if prior is not None:
         if prior[0] != payload_hash:
             return _reject(op_id, "op_id_reused", "Operation ID was used with a different payload")
         return json.loads(prior[1])
-    url = item.get("url")
-    url_valid = isinstance(url, str) and not url.startswith("synthetic://")
-    if url_valid:
+    kind = item.get("kind")
+    base = item.get("base_version", "missing")
+    needs_new_url_admission = url_valid and kind == "upsert" and base is None and not known_url
+    if needs_new_url_admission:
         try:
             await validate_public_url_bounded(url)
         except ValueError:
@@ -178,8 +194,6 @@ async def mutate_one(session: Session, instance_id: str, item: dict) -> dict:
                 result = json.loads(receipt.result_json)
             session.commit()
             return result
-        kind = item.get("kind")
-        base = item.get("base_version", "missing")
         fields = item.get("fields")
         if not url_valid:
             result = _reject(op_id, "invalid_url", "A public HTTP(S) feed URL is required")
@@ -201,6 +215,10 @@ async def mutate_one(session: Session, instance_id: str, item: dict) -> dict:
                 result = _reject(op_id, "unknown_base", "No feed exists at this base version")
             elif feed is not None and (base is None or feed.version != base):
                 result = _result(op_id, "conflict", current=snapshot(feed))
+            elif kind == "upsert" and feed is None and not needs_new_url_admission:
+                # A row disappeared between preflight and CAS. Do not create
+                # an unvalidated URL or write a terminal receipt.
+                raise HTTPException(503, detail={"code": "feed_preflight_changed"})
             else:
                 current = _apply(session, clock, feed, url, kind, fields or {})
                 result = _result(op_id, "applied", current=snapshot(current))
