@@ -6,6 +6,7 @@ from app.models.client_config import ClientConfig
 from app.models.client_settings import ClientSettings
 from app.models.digest import Digest, DigestArticle
 from app.models.feed import Feed
+from app.models.feed_sync import FeedMutationReceipt, FeedSyncClock
 from app.models.media_feed import MediaFeed
 from app.models.media_item import MediaItem
 from app.models.media_processing_run import MediaProcessingRun
@@ -25,6 +26,8 @@ __all__ = [
     "Digest",
     "DigestArticle",
     "Feed",
+    "FeedMutationReceipt",
+    "FeedSyncClock",
     "MediaFeed",
     "MediaItem",
     "MediaProcessingRun",
