@@ -232,7 +232,8 @@ function GhostwriterSync.run(settings, progress_cb)
               and ownership_scope(server_url, download_dir) == scope then
             -- A content check is available after stamping; use it when the
             -- failure followed a slow settings write.
-            if (not stamp or stamp.hash == (dl_info and dl_info.hash))
+            -- A failed read is not evidence that the file is still ours.
+            if dl_info.hash and file_hash(target_path) == dl_info.hash
                 and (not stamp or same_file(target_path, current, stamp)) then
               os.remove(target_path)
             end

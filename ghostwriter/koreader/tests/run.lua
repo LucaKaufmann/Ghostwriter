@@ -232,9 +232,10 @@ io.open = function(path, mode)
 end
 next_digests = { digest("9", "stampfail.epub") }
 ok, result = Sync.run(settings)
-check(ok and result.failed == 1 and not attributes(dir .. "/stampfail.epub"),
-  "unrecorded finalized file blocked retry")
+check(ok and result.failed == 1 and attributes(dir .. "/stampfail.epub"),
+  "unreadable finalized file was deleted without ownership proof")
 io.open = real_open
+assert(os.remove(dir .. "/stampfail.epub")) -- User resolves the unowned collision.
 ok, result = Sync.run(settings)
 check(ok and result.downloaded == 1, "stamp failure retry")
 local read_count = 0
@@ -250,9 +251,10 @@ io.open = function(path, mode)
 end
 next_digests = { digest("10", "readerror.epub") }
 ok, result = Sync.run(settings)
-check(ok and result.failed == 1 and not attributes(dir .. "/readerror.epub"),
-  "mid-file hash read error blocked retry")
+check(ok and result.failed == 1 and attributes(dir .. "/readerror.epub"),
+  "hash read error allowed deletion without ownership proof")
 io.open = real_open
+assert(os.remove(dir .. "/readerror.epub")) -- User resolves the unowned collision.
 ok, result = Sync.run(settings)
 check(ok and result.downloaded == 1, "read error retry")
 check(settings:setConnection("https://two.example", "synthetic-token"), "new server")
