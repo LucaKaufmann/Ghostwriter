@@ -362,6 +362,67 @@ final class IOSFeedV2StoreEngine {
         }
     }
 
+    #if DEBUG
+    struct ClaimedPayloadForTesting: Equatable {
+        let opId: String
+        let sentRevision: Int64
+        let baseVersion: Int64?
+        let title: String?
+        let isActive: Bool?
+        let mode: String?
+        let maxArticles: Int?
+        let wireJSON: String
+    }
+
+    /// Keep Kotlin payload objects inside the app image: the hosted XCTest
+    /// bundle cannot link the static shared framework a second time.
+    func claimOneForTesting() throws -> ClaimedPayloadForTesting? {
+        let destination = try transaction { context -> FeedV2Destination in
+            guard let value = binding(try state(context)) else { throw StoreError.staleBinding }
+            return value.destination
+        }
+        let token = try begin(destination)
+        defer { end(token) }
+        guard let expected = try identity(token) else { throw StoreError.staleBinding }
+        guard let operation = try claim(token, expected, maxItems: 10).first else { return nil }
+        let wireJSON = FeedMutationBatchV2(
+            serverInstanceId: "00000000-0000-4000-8000-000000000001",
+            mutations: [operation.payload]).toWireJson()
+        return ClaimedPayloadForTesting(
+            opId: operation.opId, sentRevision: operation.sentRevision,
+            baseVersion: operation.payload.baseVersion?.int64Value,
+            title: operation.payload.fields?.title,
+            isActive: operation.payload.fields?.isActive?.boolValue,
+            mode: operation.payload.fields?.mode,
+            maxArticles: operation.payload.fields?.maxArticles.map { Int($0.intValue) },
+            wireJSON: wireJSON)
+    }
+
+    func acknowledgeForTesting(opId: String, revision: Int64, version: Int64,
+                               title: String? = nil) throws {
+        let destination = try transaction { context -> FeedV2Destination in
+            guard let value = binding(try state(context)) else { throw StoreError.staleBinding }
+            return value.destination
+        }
+        let token = try begin(destination)
+        defer { end(token) }
+        guard let expected = try identity(token) else { throw StoreError.staleBinding }
+        let url = try transaction { context -> String in
+            guard let mutation = try mutations(context).first(where: { $0.opId == opId }) else {
+                throw StoreError.invalidEdit
+            }
+            return mutation.url
+        }
+        let current = FeedSnapshotV2(
+            kind: title == nil ? "tombstone" : "feed", id: "server-id", url: url,
+            version: version, title: title,
+            isActive: title.map { _ in KotlinBoolean(bool: false) },
+            mode: title.map { _ in "raw" },
+            maxArticles: title.map { _ in KotlinInt(int: 2) })
+        try acknowledge(token, expected, opId: opId, revision: revision, current: current)
+    }
+    #endif
+
     func summary(_ token: FeedV2RunToken, _ expected: FeedV2Binding) throws -> FeedV2WorkSummary {
         try transaction { context in
             _ = try checked(token, context, binding: expected)
@@ -515,7 +576,13 @@ final class IOSFeedV2StoreEngine {
             let scopeKey = value.destinationURL.flatMap { url in
                 value.configurationId.map { url + "\n" + $0 }
             } ?? "__unbound__"
-            let full = existing == nil || originalVersion == nil
+            // A first create or re-add of a locally deleted feed needs all
+            // fields, including when the user keeps its displayed values.
+            // Later upserts for the same queued create carry only changes;
+            // copied fields could replay an obsolete rejected value.
+            let full = existing == nil || existing?.isLocallyDeleted == true ||
+                (originalVersion == nil &&
+                 !(prior?.scopeKey == scopeKey && prior?.kind == "upsert"))
             let revision = (existing?.mutationRevision ?? 0) + (existing == nil ? 0 : 1)
             let mutation = FeedMutation(
                 url: url, scopeKey: scopeKey, kind: "upsert",
@@ -590,11 +657,23 @@ final class IOSFeedV2StoreEngine {
                   let selected = try mutations(context).first(where: { $0.opId == opId }),
                   selected.scopeKey != destinationURL + "\n" + configurationId,
                   selected.scopeKey != "__unbound__" else { throw StoreError.invalidEdit }
-            let preceding = try mutations(context).contains {
-                $0.url == selected.url && $0.scopeKey == selected.scopeKey &&
-                $0.sequence < selected.sequence
+            let related = try mutations(context).filter {
+                $0.url == selected.url && $0.scopeKey == selected.scopeKey
             }
-            guard !preceding else { throw StoreError.invalidEdit }
+            guard !related.contains(where: { $0.sequence < selected.sequence }) else {
+                throw StoreError.invalidEdit
+            }
+            if selected.kind == "upsert", selected.baseVersion == nil,
+               let next = related.first(where: { $0.sequence > selected.sequence }),
+               next.kind == "upsert", next.baseVersion == nil {
+                // Removing the old-scope head promotes a sparse successor to
+                // a standalone create. Keep its dirty fields and inherit only
+                // the unchanged fields from the complete predecessor.
+                next.title = next.title ?? selected.title
+                next.isActive = next.isActive ?? selected.isActive
+                next.mode = next.mode ?? selected.mode
+                next.maxArticles = next.maxArticles ?? selected.maxArticles
+            }
             if action == .discard {
                 context.delete(selected)
                 return
@@ -715,9 +794,11 @@ final class IOSFeedV2StoreEngine {
                 context.delete(selected)
             case .applyMine, .addToServer, .correct:
                 if action == .applyMine && snapshot == nil { throw StoreError.invalidSnapshot }
-                if action == .addToServer && snapshot != nil { throw StoreError.invalidEdit }
+                if action == .addToServer && (snapshot != nil || selected.kind != "upsert") {
+                    throw StoreError.invalidEdit
+                }
                 if action == .correct {
-                    guard selected.status == "rejected",
+                    guard selected.kind == "upsert", selected.status == "rejected",
                           let correctedTitle,
                           !correctedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     else { throw StoreError.invalidTitle }
@@ -743,7 +824,61 @@ final class IOSFeedV2StoreEngine {
                 copySnapshot(selected, to: replacement)
                 context.delete(selected)
                 context.insert(replacement)
-                target?.mutationRevision = max(target?.mutationRevision ?? 0, replacement.localRevision)
+                var visible = target
+                if selected.kind == "delete" {
+                    visible?.isLocallyDeleted = true
+                    visible?.locallyModified = true
+                    visible?.mutationRevision = max(visible?.mutationRevision ?? 0,
+                                                   replacement.localRevision)
+                } else {
+                    if visible == nil {
+                        guard let title, let mode = selected.mode,
+                              let active = selected.isActive,
+                              let max = selected.maxArticles else { throw StoreError.invalidEdit }
+                        let created = Domain.Feed(url: selected.url, name: title,
+                                              mode: mode == "summarize" ? .briefing : .fidelity,
+                                              maxArticles: max, isEnabled: active,
+                                              locallyModified: true,
+                                              serverId: snapshot?.id,
+                                              serverVersion: snapshot?.version)
+                        context.insert(created)
+                        visible = created
+                    }
+                    if let visible {
+                        if let title { visible.name = title }
+                        if let active = selected.isActive { visible.isEnabled = active }
+                        if let mode = selected.mode {
+                            visible.mode = mode == "summarize" ? .briefing : .fidelity
+                        }
+                        if let max = selected.maxArticles { visible.maxArticles = max }
+                        visible.isLocallyDeleted = false
+                        visible.locallyModified = true
+                        visible.mutationRevision = max(visible.mutationRevision ?? 0,
+                                                       replacement.localRevision)
+                    }
+                }
+                // The resolved head is older than any queued local edits, even
+                // when that head is a delete. Rebuild their visible state in
+                // order without changing the queued payloads.
+                if let visible {
+                    for successor in successors {
+                        if successor.kind == "delete" {
+                            visible.isLocallyDeleted = true
+                        } else {
+                            if let title = successor.title { visible.name = title }
+                            if let active = successor.isActive { visible.isEnabled = active }
+                            if let mode = successor.mode {
+                                visible.mode = mode == "summarize" ? .briefing : .fidelity
+                            }
+                            if let maximum = successor.maxArticles {
+                                visible.maxArticles = maximum
+                            }
+                            visible.isLocallyDeleted = false
+                        }
+                        visible.mutationRevision = max(visible.mutationRevision ?? 0,
+                                                       successor.localRevision)
+                    }
+                }
             }
         }
     }

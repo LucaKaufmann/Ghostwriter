@@ -244,6 +244,38 @@ final class DigestSyncOutcomeTests: XCTestCase {
         XCTAssertEqual(known, ["good"])
     }
 
+    func testPartialBatchCleansStaleRemoteFileWithoutAdvancingTimestamp() async throws {
+        let fixture = try await Fixture(download: false)
+        let prior = Date(timeIntervalSince1970: 1_700_000_000)
+        try await fixture.settings.setLastDigestSyncTime(prior)
+        try FileManager.default.createDirectory(at: fixture.directory,
+                                                withIntermediateDirectories: true)
+        let stale = fixture.directory.appendingPathComponent("stale.epub")
+        try Data("old epub".utf8).write(to: stale)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-32 * 24 * 60 * 60)],
+            ofItemAtPath: stale.path)
+        try await fixture.repository.createDigest(Digest(
+            generatedAt: Date().addingTimeInterval(-32 * 24 * 60 * 60),
+            epubFilePath: stale.path, articleCount: 1, triggerType: .ghostwriter,
+            isComplete: true, remoteId: "stale"))
+
+        let service = try fixture.service(
+            plan: { [self] in .combined(digests: [combined("../invalid")],
+                                        shouldDownloadEpubs: false) })
+        do {
+            try await service.sync()
+            XCTFail("Expected invalid digest to keep the batch partial")
+        } catch let error as DigestSyncIngestionError {
+            XCTAssertEqual(error.failedRemoteIds, ["../invalid"])
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        let retainedRow = try await fixture.repository.getDigestByRemoteId("stale")
+        let unchanged = try await fixture.settings.getLastDigestSyncTime()
+        XCTAssertNotNil(retainedRow)
+        XCTAssertEqual(unchanged, prior)
+    }
+
     func testLegacyArticleFetchFailureDoesNotRecordRemoteIdAndRetries() async throws {
         let fixture = try await Fixture(download: false)
         var fail = true

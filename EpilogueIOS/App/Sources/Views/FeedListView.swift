@@ -532,8 +532,10 @@ struct FeedResolutionView: View {
                 if mutation.status == "rejected" {
                     Section("Rejected") {
                         Text(mutation.rejectionMessage ?? mutation.rejectionCode ?? "The server rejected this change.")
-                        TextField("Corrected title", text: $correctedTitle)
-                        Button("Correct and retry") { resolve(.correct, title: correctedTitle) }
+                        if mutation.kind != "delete" {
+                            TextField("Corrected title", text: $correctedTitle)
+                            Button("Correct and retry") { resolve(.correct, title: correctedTitle) }
+                        }
                         Button("Discard proposal", role: .destructive) { resolve(.discard) }
                     }
                 } else if absent {

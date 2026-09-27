@@ -29,7 +29,8 @@ final class FeedV2TestHarness {
                 ("conflict", "Web headline", "conflict", "My headline", false),
                 ("rejected", "Rejected feed", "rejected", "Bad request", false),
                 ("absent", "Missing feed", "needs_resolution", "Missing feed", true),
-                ("delete", "Removed locally", "conflict", nil, true)
+                ("delete", "Removed locally", "conflict", nil, true),
+                ("rejected-delete", "Rejected removal", "rejected", nil, true)
             ]
             for (index, example) in examples.enumerated() {
                 let url = "https://example.test/\(example.0).xml"
@@ -38,7 +39,7 @@ final class FeedV2TestHarness {
                                            serverVersion: example.0 == "absent" ? nil : 8,
                                            isLocallyDeleted: example.4))
                 let mutation = FeedMutation(url: url, scopeKey: scope,
-                                            kind: example.0 == "delete" ? "delete" : "upsert",
+                                            kind: example.0.contains("delete") ? "delete" : "upsert",
                                             baseVersion: 7, title: example.3,
                                             isActive: true, mode: "raw", maxArticles: 5,
                                             sequence: Int64(index + 1), localRevision: 1,
@@ -54,6 +55,9 @@ final class FeedV2TestHarness {
                 if example.0 == "rejected" {
                     mutation.rejectionCode = "invalid_fields"
                     mutation.rejectionMessage = "The title needs correction."
+                } else if example.0 == "rejected-delete" {
+                    mutation.rejectionCode = "delete_denied"
+                    mutation.rejectionMessage = "The server rejected this removal."
                 }
                 context.insert(mutation)
             }
