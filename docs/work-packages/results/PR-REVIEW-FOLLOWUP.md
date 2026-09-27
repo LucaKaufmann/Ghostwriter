@@ -1,6 +1,6 @@
 # PR review follow-up ledger
 
-Initial snapshot: 2026-09-27, PR74–105. This is active work, not a completed review claim. Refresh new PRs and updated heads before closeout. Automated status/introductory comments have no additional findings; substantive inline comments are tracked below. Code changes require source validation and affected verification.
+Historical opening snapshot: 2026-09-27, PR74–105. The implementation review is closed: all 46 PRs were inspected at 21:50:43Z, with a final PR106/119 refresh at 22:07:38Z. Accepted findings and subsequent dispositions are recorded below. The separate authorized merge/main-verification milestone is tracked in [the merge plan](../merge-plan.md); historical instructions do not reopen completed implementation work. Automated status comments contain no additional findings.
 
 | PR / comment | Topic | Disposition / next action |
 |---|---|---|
@@ -207,3 +207,7 @@ PR119's available mid-build feedback had no new substantive finding. Current cod
 ### Completed review closeout
 
 2026-09-27T21:50:43Z final paginated74–119 sweep:31open/15externally merged,112inline comments,58review bodies,47issue comments; no new/edited feedback. Every actionable finding is integrated; rejected findings have evidence above. Hosted product source2918931994a05c3fb2d0e1f9e812556361fef479 finished10SUCCESS+1intentional SKIP at21:48:49Z, no failed/pending jobs. The final test/documentation checkpoint preserves that product tree; publication reruns are not mislabeled as completed. No remote merge, release, deployment, external reply or automatic thread-resolution action.
+
+## Merge-boundary review refresh
+
+At 2026-09-27T22:07:38Z, PR119 had no new substantive finding. PR106 [4117156228](https://github.com/LucaKaufmann/Ghostwriter/pull/106#discussion_r4117156228) correctly identified the stale opening review status. The opening now explicitly describes a historical snapshot and records the completed review cutoff; this documentation correction is included in the aggregate merge.
