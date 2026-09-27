@@ -102,8 +102,10 @@ package.preload.ghostwriter_api = function()
       file:close()
       assert(os.rename(target .. ".part.mock", target))
       local created = attributes(target)
+      local hash = require("ffi/sha2").sha256()
+      hash("owned:" .. name)
       if after_download then after_download(target) end
-      return true, { created = created }
+      return true, { created = created, hash = hash() }
     end,
   }
 end
@@ -213,6 +215,16 @@ check(read(dir .. "/postdownload-replaced.epub") == "PERSONAL REPLACEMENT",
   "replacement after finalization was removed")
 check(not (settings:getOwnedDownloads(scope) or {})["postdownload-replaced.epub"],
   "replacement appeared in ownership ledger")
+after_download = function(target) write(target, "PERSONAL IN-PLACE EDIT") end
+next_digests = { digest("9", "postdownload-edited.epub") }
+ok, result = Sync.run(settings)
+after_download = nil
+check(ok and result.failed == 1 and result.downloaded == 0,
+  "in-place edit after finalization was adopted")
+check(read(dir .. "/postdownload-edited.epub") == "PERSONAL IN-PLACE EDIT",
+  "in-place edit after finalization was removed")
+check(not (settings:getOwnedDownloads(scope) or {})["postdownload-edited.epub"],
+  "in-place edit appeared in ownership ledger")
 local real_open = io.open
 io.open = function(path, mode)
   if path == dir .. "/stampfail.epub" and mode == "rb" then return nil, "injected read failure" end
