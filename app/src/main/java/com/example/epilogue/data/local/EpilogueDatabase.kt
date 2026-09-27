@@ -6,8 +6,9 @@ import androidx.room.TypeConverters
 
 @Database(
     entities = [FeedEntity::class, DigestEntity::class, DigestArticleEntity::class,
-        FeedMutationEntity::class, FeedSyncStateEntity::class],
-    version = 9,
+        FeedMutationEntity::class, FeedSyncStateEntity::class,
+        ArticleDeliveryEntity::class, GenerationRunEntity::class],
+    version = 10,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -16,4 +17,6 @@ abstract class EpilogueDatabase : RoomDatabase() {
     abstract fun digestDao(): DigestDao
     abstract fun feedMutationDao(): FeedMutationDao
     abstract fun feedSyncStateDao(): FeedSyncStateDao
+    abstract fun articleDeliveryDao(): ArticleDeliveryDao
+    abstract fun generationRunDao(): GenerationRunDao
 }

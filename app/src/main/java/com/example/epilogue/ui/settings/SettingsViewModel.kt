@@ -159,6 +159,7 @@ class SettingsViewModel @Inject constructor(
                 digestTriggered = true,
                 digestCompleted = false,
                 digestFailed = false,
+                digestResultMessage = null,
                 ghostwriterProgress = null,
                 ghostwriterError = null
             )
@@ -168,19 +169,36 @@ class SettingsViewModel @Inject constructor(
             runDigestViaGhostwriter()
         } else {
             // Use local generation
-            runDigestLocally()
+            runDigestLocally(regeneration = false)
         }
     }
 
-    private fun runDigestLocally() {
-        val id = digestScheduler.runNow(fetchAll = false)
+    /** Explicitly repeat local articles, including identities already delivered. */
+    fun regenerateDigestLocally() {
+        if (_uiState.value.ghostwriterEnabled) return
+        clearImmediateWorkObserver()
+        digestPollingJob?.cancel()
+        _uiState.update { it.copy(isGenerating = true, digestTriggered = true,
+            digestCompleted = false, digestFailed = false, digestResultMessage = null) }
+        runDigestLocally(regeneration = true)
+    }
+
+    private fun runDigestLocally(regeneration: Boolean) {
+        val id = digestScheduler.runNow(fetchAll = regeneration)
         immediateWorkId = id
         val workInfoLiveData = digestScheduler.getImmediateWorkInfo(id)
         val observer = Observer<WorkInfo?> { workInfo ->
             if (workInfo == null || immediateWorkId != id || workInfo.id != id) return@Observer
             when (workInfo.state) {
                 WorkInfo.State.SUCCEEDED -> {
-                    _uiState.update { it.copy(isGenerating = false, digestCompleted = true) }
+                    val message = when (workInfo.outputData.getString("generation_outcome")) {
+                        "partial" -> "Digest saved with some articles still pending"
+                        "deferred" -> "No articles included; more remain for the next edition"
+                        "empty" -> "No eligible articles found"
+                        else -> "Digest generated successfully"
+                    }
+                    _uiState.update { it.copy(isGenerating = false, digestCompleted = true,
+                        digestResultMessage = message) }
                     clearImmediateWorkObserver()
                 }
                 WorkInfo.State.FAILED -> {
@@ -1650,6 +1668,7 @@ data class SettingsUiState(
     val digestTriggered: Boolean = false,
     val digestCompleted: Boolean = false,
     val digestFailed: Boolean = false,
+    val digestResultMessage: String? = null,
     val dataReset: Boolean = false,
     val dataResetError: String? = null,
     val customExportUri: String? = null,

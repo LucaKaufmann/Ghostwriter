@@ -1,0 +1,16 @@
+# ANDROID-DELIVERY result
+
+## Scope and behavior
+
+Room 10 adds an installation-local `article_delivery` ledger keyed by exact feed URL and the shared article identity, a durable `generation_runs` diagnostic record, and an optional feed URL on new digest article associations. Room 9 and frozen Room 8 history is preserved without inferring historical delivery claims from feed names. Normal local generation parses each complete feed page, deduplicates identities, excludes delivered or same-signature filtered entries, then applies the per-feed cap after persisted least-recent-attempt ordering. A cap of zero remains unlimited. Selection writes retryable attempt sequences before extraction so a consistently failing early item cannot starve later items.
+
+The singleton generation gate serializes Android local manual, scheduled, and retry runs. A unique EPUB is synced before a single Room transaction writes complete history, exact article associations, delivered claims, accepted filtered exclusions, and the run outcome. A failed claim or transaction removes only the unreferenced generated artifact; post-commit cancellation or optional export failure cannot demote the completed result. Failed and cancelled runs retain retryable attempts and commit no exclusions. Filtered-only completed runs record exclusions with an empty or deferred outcome. A changed filter signature or the explicit regeneration action can reevaluate exclusions; regeneration leaves earlier first-delivery claims intact.
+
+Settings now separates ordinary **Run Now** from **Regenerate including previously delivered articles**. The latter alone sets the worker's fetch-all input. The retained Android filter implementation distinguishes a model's promotional sentinel from provider failure; provider failure delivers the full article and reports a partial run. Fetch failure, extraction failure, invalid identity, filtering, fallback, and cap deferral have separate structured diagnostics without article bodies or credentials.
+
+## Verification
+
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=/private/tmp/epilogue-backlog-20260927/android-sdk ANDROID_SDK_ROOT=/private/tmp/epilogue-backlog-20260927/android-sdk ./gradlew :app:testDebugUnitTest :shared:testDebugUnitTest :app:assembleDebug --offline --no-daemon`: passed. XML totals: 145 Android and 46 shared tests, zero failures, errors, or skips; debug APK built.
+- Focused Room tests validate fresh Room 10, direct installed Room 9→10, frozen Room 8→9→10, reopen, preserved old associations and no guessed claims. Delivery tests validate transaction rollback, claim collision, retained claims after history deletion, post-commit cancellation artifact ownership, filtered-only versus failed outcomes, regeneration, a process-wide gate, five items with cap two and a failing first item, and transient summary fallback.
+- Installed the debug APK on isolated `emulator-5580` and inspected the Settings accessibility tree and screenshot. Both ordinary Run Now and explicit regeneration are visible in local Manual Generation: [Settings screenshot](assets/android-delivery-regenerate.png).
+- All source/provider fixtures are synthetic; no paid provider was called. This run did not execute a live feed-to-EPUB generation against a network feed.

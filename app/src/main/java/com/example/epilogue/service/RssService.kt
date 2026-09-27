@@ -3,6 +3,7 @@ package com.example.epilogue.service
 import android.util.Log
 import com.prof18.rssparser.RssParser
 import com.prof18.rssparser.model.RssItem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -31,10 +32,17 @@ class RssService @Inject constructor() {
             val channel = parser.getRssChannel(feedUrl)
             Log.d(TAG, "Fetched ${channel.items.size} items from $feedUrl")
             channel.items
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch feed $feedUrl: ${e.message}")
             emptyList()
         }
+    }
+
+    /** Generation needs a failed fetch to remain distinguishable from an empty feed. */
+    suspend fun fetchFeedForGeneration(feedUrl: String): List<RssItem> = withContext(Dispatchers.IO) {
+        parser.getRssChannel(feedUrl).items
     }
 
     /**

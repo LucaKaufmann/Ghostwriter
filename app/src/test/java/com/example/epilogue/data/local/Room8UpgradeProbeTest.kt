@@ -75,9 +75,9 @@ class Room8UpgradeProbeTest {
         if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null
     }
 
-    private fun room9(migration: Migration = DatabaseModule.MIGRATION_8_9): EpilogueDatabase =
+    private fun room10(migration: Migration = DatabaseModule.MIGRATION_8_9): EpilogueDatabase =
         Room.databaseBuilder(context, EpilogueDatabase::class.java, name)
-            .addMigrations(migration)
+            .addMigrations(migration, DatabaseModule.MIGRATION_9_10)
             .allowMainThreadQueries()
             .build()
 
@@ -88,7 +88,7 @@ class Room8UpgradeProbeTest {
 
     @Test fun `migrated dirty false exact match adopts while tombstone retains dirty true proposal`() = runBlocking {
         createFixture()
-        val db = room9()
+        val db = room10()
         val store = AndroidFeedV2Store(db, configuredSettings())
         val destination = store.currentDestination()!!
         val token = (store.beginSyncRun(destination) as FeedV2StoreResult.Success).value
@@ -117,7 +117,7 @@ class Room8UpgradeProbeTest {
 
     @Test fun `migrated absence remains unresolved with no automatic upload`() = runBlocking {
         createFixture()
-        val db = room9()
+        val db = room10()
         val store = AndroidFeedV2Store(db, configuredSettings())
         val destination = store.currentDestination()!!
         val token = (store.beginSyncRun(destination) as FeedV2StoreResult.Success).value
@@ -133,12 +133,12 @@ class Room8UpgradeProbeTest {
         db.close()
     }
 
-    @Test fun `production Room 9 migration upgrades frozen Room 8 and reopens`() {
+    @Test fun `production Room 10 migration upgrades frozen Room 8 and reopens`() {
         createFixture()
-        val upgraded = room9()
-        assertEquals(9, upgraded.openHelper.readableDatabase.version)
+        val upgraded = room10()
+        assertEquals(10, upgraded.openHelper.readableDatabase.version)
         upgraded.close()
-        val reopened = room9()
+        val reopened = room10()
         assertEquals(2, runBlocking { reopened.feedDao().getAllRealFeedsIncludingHidden() }.size)
         assertEquals(2, runBlocking { reopened.feedMutationDao().forScope("unbound") }.size)
         reopened.close()
@@ -151,6 +151,34 @@ class Room8UpgradeProbeTest {
             assertEquals("3", sql.scalar("SELECT nextSequence FROM feed_sync_state WHERE serverKey='unbound'"))
             assertEquals("1", sql.scalar("SELECT COUNT(*) FROM digests"))
             assertEquals("1", sql.scalar("SELECT COUNT(*) FROM digest_articles"))
+            assertNull(sql.scalar("SELECT feedUrl FROM digest_articles WHERE id=1"))
+            assertEquals("0", sql.scalar("SELECT COUNT(*) FROM article_delivery"))
+            assertEquals("0", sql.scalar("SELECT COUNT(*) FROM generation_runs"))
+        }
+    }
+
+    @Test fun `production Room 10 migration upgrades installed Room 9 without inferring old delivery claims`() {
+        createFixture()
+        val old = room8()
+        old.openHelper.writableDatabase.apply {
+            beginTransaction()
+            try {
+                DatabaseModule.MIGRATION_8_9.migrate(this)
+                version = 9
+                setTransactionSuccessful()
+            } finally { endTransaction() }
+        }
+        old.close()
+        val upgraded = Room.databaseBuilder(context, EpilogueDatabase::class.java, name)
+            .addMigrations(DatabaseModule.MIGRATION_9_10)
+            .allowMainThreadQueries().build()
+        assertEquals(10, upgraded.openHelper.writableDatabase.version)
+        assertEquals(1, runBlocking { upgraded.digestDao().getArticlesForDigest(1) }.size)
+        assertTrue(runBlocking { upgraded.articleDeliveryDao().forFeed("https://example.org/unchanged") }.isEmpty())
+        upgraded.close()
+        SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { sql ->
+            assertNull(sql.scalar("SELECT feedUrl FROM digest_articles WHERE id=1"))
+            assertEquals("0", sql.scalar("SELECT COUNT(*) FROM article_delivery"))
         }
     }
 
@@ -163,7 +191,7 @@ class Room8UpgradeProbeTest {
             }
         }
         assertThrows(IllegalStateException::class.java) {
-            val upgrade = room9(failing)
+            val upgrade = room10(failing)
             try { upgrade.openHelper.writableDatabase } finally { upgrade.close() }
         }
         val reopened = room8()

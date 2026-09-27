@@ -4,6 +4,11 @@ import android.util.Log
 import com.example.epilogue.data.local.DigestArticleEntity
 import com.example.epilogue.data.local.DigestDao
 import com.example.epilogue.data.local.DigestEntity
+import com.example.epilogue.data.local.ArticleDeliveryDao
+import com.example.epilogue.data.local.ArticleDeliveryEntity
+import com.example.epilogue.data.local.EpilogueDatabase
+import com.example.epilogue.data.local.GenerationRunDao
+import androidx.room.withTransaction
 import com.example.epilogue.data.remote.ghostwriter.DigestArticleResponse
 import com.example.epilogue.domain.model.Digest
 import com.example.epilogue.domain.model.DigestArticle
@@ -24,7 +29,10 @@ import javax.inject.Singleton
  */
 @Singleton
 class DigestRepository @Inject constructor(
-    private val digestDao: DigestDao
+    private val digestDao: DigestDao,
+    private val database: EpilogueDatabase,
+    private val deliveries: ArticleDeliveryDao,
+    private val runs: GenerationRunDao
 ) {
     companion object {
         const val MAX_RETAINED_DIGESTS = 30
@@ -115,7 +123,8 @@ class DigestRepository @Inject constructor(
                 originalUrl = article.originalUrl,
                 isSummary = article.isSummary,
                 feedName = feedName,
-                sortOrder = index
+                sortOrder = index,
+                feedUrl = article.feedUrl.takeIf { it.isNotBlank() }
             )
         }
 
@@ -132,6 +141,70 @@ class DigestRepository @Inject constructor(
         )
 
         cleanupOldDigests()
+    }
+
+    /** An EPUB has already been durably written before this transaction starts. */
+    suspend fun finalizeDeliveryRun(
+        runId: Long, diagnostics: GenerationDiagnostics,
+        epubFilePath: String, triggerType: TriggerType, period: String?,
+        regeneration: Boolean
+    ): Long {
+        require(diagnostics.articles.isNotEmpty() && diagnostics.outcome in setOf("complete", "partial"))
+        val articles = diagnostics.articles
+        val digestId = database.withTransaction {
+            check(runs.get(runId)?.outcome == "running")
+            val feedNames = articles.map { it.article.feedName }.distinct()
+            val digest = DigestEntity(
+                generatedAt = System.currentTimeMillis(), epubFilePath = epubFilePath,
+                articleCount = articles.size,
+                briefingCount = articles.count { it.article.isSummary },
+                fidelityCount = articles.count { !it.article.isSummary },
+                triggerType = triggerType, feedNames = feedNames.joinToString(","),
+                period = period, isComplete = true
+            )
+            val id = digestDao.insertDigest(digest)
+            digestDao.insertArticles(articles.mapIndexed { index, delivered ->
+                val article = delivered.article
+                DigestArticleEntity(
+                    digestId = id, title = article.title, author = article.author,
+                    content = article.content, originalUrl = article.originalUrl,
+                    isSummary = article.isSummary, feedName = article.feedName,
+                    sortOrder = index, feedUrl = delivered.identity.feedUrl)
+            })
+            for (delivered in articles) {
+                val key = delivered.identity
+                val old = deliveries.get(key.feedUrl, key.articleKey)
+                if (old?.state == "delivered") {
+                    if (!regeneration) throw DeliveryClaimConflict()
+                    continue // Regeneration never rewrites an earlier first-delivery claim.
+                }
+                if (old?.state == "excluded" && !regeneration &&
+                    old.filterSignature == delivered.filterSignature) {
+                    throw DeliveryClaimConflict()
+                }
+                deliveries.put((old ?: ArticleDeliveryEntity(key.feedUrl, key.articleKey,
+                    "retryable")).copy(state = "delivered", reason = null,
+                    filterSignature = null, firstDigestId = id,
+                    committedAt = System.currentTimeMillis()))
+            }
+            for (excluded in diagnostics.exclusions) {
+                val key = excluded.identity
+                val old = deliveries.get(key.feedUrl, key.articleKey)
+                if (old?.state == "delivered") continue
+                deliveries.put((old ?: ArticleDeliveryEntity(key.feedUrl, key.articleKey,
+                    "retryable")).copy(state = "excluded", reason = excluded.reason,
+                    filterSignature = excluded.signature,
+                    committedAt = System.currentTimeMillis()))
+            }
+            runs.finish(runId, System.currentTimeMillis(), diagnostics.outcome, id,
+                diagnostics.toJson())
+            id
+        }
+        // Retention is post-commit maintenance; it must not demote a completed digest.
+        try { cleanupOldDigests() } catch (failure: Exception) {
+            Log.w("DigestRepository", "Could not clean old digests", failure)
+        }
+        return digestId
     }
 
     /** Keep a newly generated EPUB owned until its history finalization succeeds. */
@@ -214,7 +287,8 @@ class DigestRepository @Inject constructor(
                 originalUrl = article.originalUrl,
                 isSummary = article.isSummary,
                 feedName = feedName,
-                sortOrder = index
+                sortOrder = index,
+                feedUrl = article.feedUrl.takeIf { it.isNotBlank() }
             )
         }
 
