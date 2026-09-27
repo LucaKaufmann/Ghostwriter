@@ -104,6 +104,7 @@ class DigestScheduler @Inject constructor(
     private val registrationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val registrationJobs = mutableMapOf<DigestPeriod, Job>()
     private val registrationGenerations = mutableMapOf<DigestPeriod, Long>()
+    private val pendingCancellations = mutableMapOf<DigestPeriod, MutableList<Operation>>()
 
     /**
      * Constraints for digest generation:
@@ -190,6 +191,24 @@ class DigestScheduler @Inject constructor(
         awaitPersistence: Boolean = false, waitForRunning: Boolean = true) {
         val manager = workManager
         val workName = getWorkName(period)
+        val cancellations = synchronized(registrationLock) {
+            pendingCancellations[period]?.toList().orEmpty()
+        }
+        try {
+            // Await every outstanding cancellation; a later receipt alone does not
+            // prove an earlier cancellation has finished removing its request.
+            cancellations.forEach { it.awaitPersistence() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not confirm ${period.name} cancellation", error)
+            return
+        }
+        synchronized(registrationLock) {
+            pendingCancellations[period]?.removeAll(cancellations.toSet())
+            if (pendingCancellations[period]?.isEmpty() == true) pendingCancellations.remove(period)
+            if (registrationGenerations[period] != generation) return
+        }
         val existing = try {
             // An already-running legacy worker keeps its original input. Wait for
             // the next ENQUEUED generation rather than interrupting that run.
@@ -264,7 +283,8 @@ class DigestScheduler @Inject constructor(
         synchronized(registrationLock) {
             registrationGenerations[period] = (registrationGenerations[period] ?: 0L) + 1
             registrationJobs.remove(period)?.cancel()
-            workManager.cancelUniqueWork(getWorkName(period))
+            pendingCancellations.getOrPut(period) { mutableListOf() }
+                .add(workManager.cancelUniqueWork(getWorkName(period)))
         }
         Log.i(TAG, "Cancelled ${period.name} digest")
     }

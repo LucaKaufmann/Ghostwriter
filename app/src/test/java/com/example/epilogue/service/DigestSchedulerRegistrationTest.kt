@@ -149,6 +149,9 @@ class DigestSchedulerRegistrationTest {
         mockkStatic(WorkManager::class)
         try {
             every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(any()) } returns mockk {
+                every { result } returns com.google.common.util.concurrent.Futures.immediateFuture(Operation.SUCCESS)
+            }
             every { manager.getWorkInfosForUniqueWorkFlow(any()) } returns
                 MutableStateFlow(emptyList())
             every { manager.enqueueUniquePeriodicWork(any(), any(), any()) } answers {
@@ -169,6 +172,39 @@ class DigestSchedulerRegistrationTest {
             boot.await()
             verify(exactly = 1) { manager.cancelUniqueWork(noonName) }
             verify(exactly = 1) { manager.enqueueUniquePeriodicWork(noonName, any(), any()) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
+    @Test fun `reenable waits for delayed cancellation before reading or registering`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        val receipt = SettableFuture.create<Operation.State.SUCCESS>()
+        val waiting = CountDownLatch(1)
+        val cancellation = mockk<Operation> {
+            every { result } answers { waiting.countDown(); receipt }
+        }
+        val old = info(WorkInfo.State.ENQUEUED, System.currentTimeMillis() + 100_000,
+            tags = setOf(DigestScheduler.ANCHOR_TAG))
+        val rows = MutableStateFlow(listOf(old))
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(workName) } returns cancellation
+            every { manager.getWorkInfosForUniqueWorkFlow(workName) } returns rows
+            every { manager.enqueueUniquePeriodicWork(workName, any(), any()) } returns mockk(relaxed = true)
+            val scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            scheduler.cancelPeriod(DigestPeriod.MORNING)
+            scheduler.schedulePeriod(DigestPeriod.MORNING)
+            assertTrue(waiting.await(3, TimeUnit.SECONDS))
+            verify(exactly = 0) { manager.getWorkInfosForUniqueWorkFlow(workName) }
+            verify(exactly = 0) { manager.enqueueUniquePeriodicWork(workName, any(), any()) }
+            rows.value = emptyList()
+            receipt.set(Operation.SUCCESS)
+            verify(timeout = 3000, exactly = 1) { manager.enqueueUniquePeriodicWork(
+                workName, ExistingPeriodicWorkPolicy.KEEP, any()) }
         } finally {
             unmockkStatic(WorkManager::class)
         }
