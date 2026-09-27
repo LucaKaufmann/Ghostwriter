@@ -21,6 +21,7 @@ import Data
 import ContentProcessing
 import EPUBGeneration
 import AIServices
+import SwiftData
 
 // MARK: - TaskCompletionGuard
 
@@ -48,22 +49,6 @@ actor AsyncExecutionGate {
     }
 }
 
-/// Prevents overlapping scheduled digest generations (e.g. foreground catch-up
-/// racing with a BGProcessing handler).
-actor DigestGenerationGate {
-    private var inProgress = false
-
-    func tryStart() -> Bool {
-        guard !inProgress else { return false }
-        inProgress = true
-        return true
-    }
-
-    func finish() {
-        inProgress = false
-    }
-}
-
 // MARK: - LocalDigestScheduler
 
 public final class LocalDigestScheduler: Sendable {
@@ -74,18 +59,20 @@ public final class LocalDigestScheduler: Sendable {
     private let feedRepository: FeedRepositoryProtocol
     private let digestRepository: DigestRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
-    private let generationGate = DigestGenerationGate()
+    private let modelContainer: ModelContainer
     private let logger = Logger(subsystem: "com.epilogue", category: "LocalScheduler")
     private let catchUpGate = AsyncExecutionGate()
 
     public init(
         feedRepository: FeedRepositoryProtocol,
         digestRepository: DigestRepositoryProtocol,
-        settingsRepository: SettingsRepositoryProtocol
+        settingsRepository: SettingsRepositoryProtocol,
+        modelContainer: ModelContainer
     ) {
         self.feedRepository = feedRepository
         self.digestRepository = digestRepository
         self.settingsRepository = settingsRepository
+        self.modelContainer = modelContainer
     }
 
     // MARK: - Registration
@@ -198,23 +185,17 @@ public final class LocalDigestScheduler: Sendable {
                     now: now,
                     calendar: calendar
                 )
-                guard !hasDigestForLatestPeriod else { return }
-
-                guard let digest = try await withGenerationLock({
-                    logger.info("Catch-up: generating missed digest for \(latestElapsedPeriod.rawValue)")
-                    let generator = try await buildDigestGenerator()
-                    return try await generator.generateDigest(
-                        triggerType: .scheduled,
-                        period: latestElapsedPeriod.rawValue
-                    )
-                }) else {
-                    logger.info("Catch-up skipped: another scheduled digest generation is already running")
-                    return
+                let hasTerminalRun = try await MainActor.run {
+                    try DeliveryStore(container: modelContainer).hasTerminalScheduledRun(
+                        period: latestElapsedPeriod.rawValue, since: todayStart)
                 }
+                guard !hasDigestForLatestPeriod && !hasTerminalRun else { return }
 
-                logger.info("Catch-up digest complete: \(digest.articleCount) articles")
-
-                await exportIfConfigured(digest: digest)
+                logger.info("Catch-up: generating missed digest for \(latestElapsedPeriod.rawValue)")
+                let generator = try await buildDigestGenerator()
+                let result = try await generator.generateDigest(
+                    triggerType: .scheduled, period: latestElapsedPeriod.rawValue)
+                if let digest = result.digest { await exportIfConfigured(digest: digest) }
             } catch {
                 logger.error("Catch-up digest generation failed: \(error.localizedDescription)")
             }
@@ -252,21 +233,15 @@ public final class LocalDigestScheduler: Sendable {
                     ($0.hour, $0.minute) < ($1.hour, $1.minute)
                 })
 
-            guard let digest = try await self.withGenerationLock({
-                let generator = try await self.buildDigestGenerator()
-                return try await generator.generateDigest(
-                    triggerType: .scheduled,
-                    period: periodToGenerate?.rawValue
-                )
-            }) else {
-                self.logger.info("Overnight digest skipped: another scheduled generation is already running")
-                return false
+            let generator = try await self.buildDigestGenerator()
+            let result = try await generator.generateDigest(
+                triggerType: .scheduled, period: periodToGenerate?.rawValue)
+            if let digest = result.digest {
+                self.logger.info("Overnight digest complete: \(digest.articleCount) articles")
+                await self.exportIfConfigured(digest: digest)
+                await self.scheduleMorningNotification(for: digest)
             }
-
-            self.logger.info("Overnight digest complete: \(digest.articleCount) articles")
-            await self.exportIfConfigured(digest: digest)
-            await self.scheduleMorningNotification(for: digest)
-            return true
+            return result.outcome != .failed
         }
 
         task.expirationHandler = {
@@ -554,19 +529,6 @@ public final class LocalDigestScheduler: Sendable {
         return calendar.date(from: components)
     }
 
-    private func withGenerationLock<T>(_ operation: @Sendable () async throws -> T) async throws -> T? {
-        guard await generationGate.tryStart() else { return nil }
-
-        do {
-            let result = try await operation()
-            await generationGate.finish()
-            return result
-        } catch {
-            await generationGate.finish()
-            throw error
-        }
-    }
-
     func buildDigestGenerator() async throws -> DigestGenerator {
         let feedParser = EpilogueFeedParser()
         let contentExtractor = ContentExtractor()
@@ -588,11 +550,12 @@ public final class LocalDigestScheduler: Sendable {
             minWordCount: minWordCount
         )
 
-        return DigestGenerator(
+        return await DigestGenerator(
             feedRepository: feedRepository,
-            digestRepository: digestRepository,
             articleRepository: articleRepository,
-            epubBuilder: EPUBBuilder()
+            epubBuilder: EPUBBuilder(),
+            deliveryStore: await DeliveryStore(container: modelContainer),
+            filterSignature: DeliveryFilterSignature.make(minWordCount: minWordCount)
         )
     }
 

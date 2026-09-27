@@ -382,9 +382,9 @@ fun SettingsScreen(
                         onDismissRequest = { showConfirmDialog = false },
                         title = { Text("Clear current digest history?") },
                         text = { Text(if (configuredGhostwriter) {
-                            "This deletes the digests currently saved on this device; editions generated during cleanup remain and resets feed timestamps. Local delivery records remain. This cannot be undone."
+                            "This deletes the digests currently saved on this device and resets feed timestamps. Editions generated during cleanup remain. Local delivery records remain. This cannot be undone."
                         } else {
-                            "This deletes saved digests and resets feed timestamps. Delivered articles remain recorded and will not be included again in ordinary runs. Use Regenerate to repeat them. This cannot be undone."
+                            "This deletes the digests currently saved on this device and resets feed timestamps. Editions generated during cleanup remain. Delivered articles remain recorded and will not be included again in ordinary runs. Use Regenerate to repeat them. This cannot be undone."
                         }) },
                         confirmButton = {
                             TextButton(
