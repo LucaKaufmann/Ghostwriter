@@ -76,12 +76,21 @@ class DigestSchedulerCatchUpTest {
     }
 
     @Test
-    fun `periodic admission uses latest due day when work starts after midnight`() {
-        val beforeHour = ZonedDateTime.of(2026, 3, 8, 1, 0, 0, 0, zone)
-        val afterHour = ZonedDateTime.of(2026, 3, 8, 8, 0, 0, 0, zone)
-        assertEquals(LocalDate.of(2026, 3, 7),
-            DailyDigestWorker.dueOccurrenceDate(beforeHour, 7))
+    fun `periodic occurrence remains today when fall back moves execution before local hour`() {
+        val beforeFallBack = ZonedDateTime.of(2026, 10, 24, 7, 0, 0, 0,
+            java.time.ZoneId.of("Europe/Zurich"))
+        val afterFallBack = beforeFallBack.plusHours(24)
+        assertEquals(6, afterFallBack.hour)
+        assertEquals(LocalDate.of(2026, 10, 25),
+            DailyDigestWorker.periodicOccurrenceDate(afterFallBack))
+        assertEquals(LocalDate.of(2026, 10, 26),
+            DailyDigestWorker.periodicOccurrenceDate(afterFallBack.plusHours(24)))
+    }
+
+    @Test
+    fun `new delayed periodic attempt belongs to its execution day`() {
+        val delayed = ZonedDateTime.of(2026, 3, 8, 1, 0, 0, 0, zone)
         assertEquals(LocalDate.of(2026, 3, 8),
-            DailyDigestWorker.dueOccurrenceDate(afterHour, 7))
+            DailyDigestWorker.periodicOccurrenceDate(delayed))
     }
 }

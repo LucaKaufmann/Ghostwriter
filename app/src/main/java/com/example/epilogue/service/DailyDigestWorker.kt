@@ -67,8 +67,11 @@ class DailyDigestWorker @AssistedInject constructor(
         const val KEY_OCCURRENCE_DATE = "occurrence_date" // Explicit catch-up occurrence.
         private const val MAX_CONCURRENT_FEEDS = 3
 
-        internal fun dueOccurrenceDate(now: ZonedDateTime, hour: Int): LocalDate =
-            if (now.hour < hour) now.toLocalDate().minusDays(1) else now.toLocalDate()
+        // Periodic WorkManager intervals are elapsed-time based, so DST may
+        // start today's run before the configured local hour. A new attempt
+        // belongs to its execution day; retries reuse their persisted date.
+        internal fun periodicOccurrenceDate(now: ZonedDateTime): LocalDate =
+            now.toLocalDate()
 
         /** Bounded fan-out, with results retained in the input feed order. */
         internal suspend fun <T, R> ingestInOrder(items: List<T>,
@@ -118,7 +121,7 @@ class DailyDigestWorker @AssistedInject constructor(
             val id = if (!isManual && period != null) {
                 val explicit = inputData.getString(KEY_OCCURRENCE_DATE)
                     ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-                val occurrence = (explicit ?: dueOccurrenceDate(ZonedDateTime.now(), period.hour))
+                val occurrence = (explicit ?: periodicOccurrenceDate(ZonedDateTime.now()))
                     .toString()
                 deliveryStore.startScheduledRun(period.name, occurrence, this.id.toString(),
                     retry = runAttemptCount > 0, regeneration = regeneration)
