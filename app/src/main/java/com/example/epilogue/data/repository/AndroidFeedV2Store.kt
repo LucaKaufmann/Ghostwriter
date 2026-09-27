@@ -13,6 +13,7 @@ import com.example.epilogue.shared.ghostwriter.FeedMutationV2
 import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
 import com.example.epilogue.shared.ghostwriter.feedV2Json
 import com.example.epilogue.shared.ghostwriter.isFeedUrlV2
+import com.example.epilogue.shared.ghostwriter.isAdmissibleNewFeedUrlV2
 import com.example.epilogue.shared.sync.FeedV2Binding
 import com.example.epilogue.shared.sync.FeedV2ConfigurationPort
 import com.example.epilogue.shared.sync.FeedV2Destination
@@ -187,6 +188,7 @@ class AndroidFeedV2Store @Inject constructor(
         require(isFeedUrlV2(feed.url) && feed.maxArticles >= 0 && feed.name.isNotBlank())
         database.withTransaction {
             val old = feeds.getFeedByUrl(feed.url)
+            if (old == null) require(isAdmissibleNewFeedUrlV2(feed.url))
             val state = localState()
             val nextRevision = (old?.mutationRevision ?: 0) + 1
             val updated = (old ?: FeedEntity(feed.url, feed.name, feed.mode)).copy(

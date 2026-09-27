@@ -1,5 +1,6 @@
 package com.example.epilogue.shared.ghostwriter
 
+import com.example.epilogue.shared.delivery.normalizeArticleUrl
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -93,6 +94,9 @@ fun isFeedUrlV2(url: String): Boolean {
     val authority = url.substring(separator + 3).substringBefore('/').substringBefore('?').substringBefore('#')
     return authority.isNotBlank() && '@' !in authority && authority.none { it.isWhitespace() }
 }
+
+/** New local admission only. Validation never replaces the URL used as the feed key. */
+fun isAdmissibleNewFeedUrlV2(url: String): Boolean = normalizeArticleUrl(url) != null
 
 fun isUuidV2(value: String): Boolean = value.length == 36 && value.indices.all { index ->
     when (index) {

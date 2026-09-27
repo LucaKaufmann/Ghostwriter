@@ -13,7 +13,7 @@ import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
 import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import com.example.epilogue.shared.sync.FeedSyncV2UseCase
-import com.example.epilogue.shared.ghostwriter.isFeedUrlV2
+import com.example.epilogue.shared.ghostwriter.isAdmissibleNewFeedUrlV2
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,7 +57,7 @@ class FeedViewModel @Inject constructor(
     ) {
         val trimmedUrl = url.trim()
         val trimmedName = name.trim()
-        if (!isFeedUrlV2(trimmedUrl) || trimmedName.isBlank() || maxArticles < 0) {
+        if (!isAdmissibleNewFeedUrlV2(trimmedUrl) || trimmedName.isBlank() || maxArticles < 0) {
             _uiState.value = _uiState.value.copy(error = "Enter a valid HTTP or HTTPS feed URL and nickname")
             return
         }

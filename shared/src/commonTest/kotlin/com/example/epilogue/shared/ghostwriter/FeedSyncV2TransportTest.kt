@@ -114,6 +114,28 @@ class FeedSyncV2TransportTest {
             payload.copy(opId = op.uppercase(), url = "https://example.test/other"))).toWireJson() }.isFailure)
     }
 
+    @Test
+    fun newAdmissionChecksHostAndPortWithoutChangingLegacyWireOrSnapshotShape() {
+        listOf(
+            "HTTPS://EXAMPLE.com:443/Case/%2f?x=1%2F2&x=%7e#part",
+            "http://[2001:DB8::1]:8080/rss?tag=One%2FTwo",
+            "https://bücher.example/Über?q=café"
+        ).forEach { assertTrue(isAdmissibleNewFeedUrlV2(it), it) }
+        listOf(
+            "http://:8080/rss", "http:///rss", "http://example.com:/rss",
+            "http://example.com:bad/rss", "http://example.com:0/rss",
+            "http://example.com:65536/rss", "http://[2001:db8::1/rss",
+            "https://user@example.com/rss", "https://example.com/%GG"
+        ).forEach { assertFalse(isAdmissibleNewFeedUrlV2(it), it) }
+
+        val legacy = "http://:8080/rss"
+        assertTrue(isFeedUrlV2(legacy))
+        assertTrue(FeedSnapshotV2("feed", op, legacy, 1, "Known", true, "raw", 0).isValidV2())
+        val replay = FeedMutationBatchV2(instance, listOf(FeedMutationV2(
+            op, legacy, "upsert", 1, FeedDirtyFieldsV2(title = "Edited"))))
+        assertTrue(replay.toWireJson().contains("\"url\":\"$legacy\""))
+    }
+
     private fun client(
         respondWith: (io.ktor.client.request.HttpRequestData) -> Pair<String, HttpStatusCode>
     ): Pair<HttpClient, GhostwriterApiClient> {

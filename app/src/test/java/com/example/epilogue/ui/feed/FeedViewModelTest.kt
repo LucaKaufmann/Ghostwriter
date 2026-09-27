@@ -72,6 +72,28 @@ class FeedViewModelTest {
         coVerify(exactly = 0) { feeds.insertFeed(any()) }
     }
 
+    @Test fun `hostless or malformed-port URL keeps add dialog open`() = runTest(dispatcher) {
+        val model = model()
+        for (url in listOf("http://:8080/rss", "https://example.org:bad/rss")) {
+            model.showAddDialog()
+            model.addFeed(url, "News", ProcessingMode.FIDELITY)
+            advanceUntilIdle()
+            assertTrue(model.uiState.value.showAddDialog)
+            assertNotNull(model.uiState.value.error)
+        }
+        coVerify(exactly = 0) { feeds.insertFeed(any()) }
+    }
+
+    @Test fun `valid IPv6 add preserves raw path and query in proposal`() = runTest(dispatcher) {
+        val url = "http://[2001:DB8::1]:8080/Case/%2f?x=1%2F2"
+        val model = model()
+        model.showAddDialog()
+        model.addFeed(url, "News", ProcessingMode.FIDELITY)
+        advanceUntilIdle()
+        coVerify(exactly = 1) { feeds.insertFeed(match<Feed> { it.url == url }) }
+        assertFalse(model.uiState.value.showAddDialog)
+    }
+
     @Test fun `valid URL closes only after successful save`() = runTest(dispatcher) {
         val model = model()
         model.showAddDialog()

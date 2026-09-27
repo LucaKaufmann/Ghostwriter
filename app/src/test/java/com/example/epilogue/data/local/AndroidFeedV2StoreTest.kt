@@ -61,6 +61,35 @@ class AndroidFeedV2StoreTest {
         return token to binding
     }
 
+    @Test fun `new local URL requires host and port but keeps valid raw identity`() = runBlocking {
+        context.deleteDatabase(name)
+        val database = db()
+        val store = AndroidFeedV2Store(database, settings)
+        for (invalid in listOf("http://:8080/rss", "http://example.org:bad/rss",
+            "http://example.org:65536/rss")) {
+            assertTrue(runCatching { store.saveLocal(feed("New").copy(url = invalid)) }.isFailure)
+            assertNull(database.feedDao().getFeedByUrl(invalid))
+            assertTrue(database.feedMutationDao().forUrl(invalid).isEmpty())
+        }
+        val raw = "HTTPS://[2001:DB8::1]:8080/Case/%2f?x=1%2F2"
+        store.saveLocal(feed("Raw").copy(url = raw))
+        assertEquals(raw, database.feedDao().getFeedByUrl(raw)!!.url)
+        assertEquals(raw, database.feedMutationDao().forUrl(raw).single().url)
+        database.close()
+    }
+
+    @Test fun `persisted legacy URL remains editable without changing its queued key`() = runBlocking {
+        context.deleteDatabase(name)
+        val database = db()
+        val store = AndroidFeedV2Store(database, settings)
+        val legacy = "http://:8080/rss"
+        database.feedDao().insertFeed(FeedEntity(legacy, "Known", ProcessingMode.FIDELITY))
+        store.saveLocal(feed("Edited").copy(url = legacy))
+        assertEquals("Edited", database.feedDao().getFeedByUrl(legacy)!!.name)
+        assertEquals(legacy, database.feedMutationDao().forUrl(legacy).single().url)
+        database.close()
+    }
+
     @Test fun `offline edit and delete retain ordered intents across Room restart`() = runBlocking {
         context.deleteDatabase(name)
         var database = db()
