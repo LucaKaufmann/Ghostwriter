@@ -32,13 +32,20 @@ again when returning to v2.
 1. Start from a clean branch based on current `main`.
 2. Bump `ghostwriter/app/__init__.py` and `ghostwriter/pyproject.toml` to the release version.
 3. Update this file with release notes and any operational migration notes.
-4. Activate the backend virtualenv or put it on `PATH`:
+4. From `ghostwriter/`, install the declared backend/test requirements and the
+   platform PDF libraries used by CI. Install `ffmpeg` on `PATH` before backend
+   tests: the synthetic audio fixture requires it. Verify `ffmpeg -version`,
+   then activate the backend virtualenv or put it on `PATH`:
    ```bash
    source venv/bin/activate
    ```
    If the venv is not activated, prefix backend commands with
    `PATH="$PWD/venv/bin:$PATH"` so tests that shell out to `alembic` use the
-   project executable.
+   project executable. Put installed packages before the local `alembic/`
+   directory for subprocess tests, matching CI:
+   ```bash
+   export PYTHONPATH="$(python -c 'import site; print(site.getsitepackages()[0])'):$PWD"
+   ```
 5. Run backend checks:
    ```bash
    python -m pytest -q --durations=10
@@ -59,6 +66,7 @@ again when returning to v2.
    ```bash
    cd frontend
    npm ci
+   npx playwright install --with-deps chromium
    npm run check
    npm run build
    npm run test:e2e
