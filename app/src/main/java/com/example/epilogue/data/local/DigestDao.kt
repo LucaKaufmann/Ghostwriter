@@ -100,6 +100,28 @@ interface DigestDao {
     @Query("DELETE FROM digests WHERE id = :id")
     suspend fun deleteDigestById(id: Long)
 
+    @Query("SELECT EXISTS(SELECT 1 FROM digests WHERE epubFilePath = :path AND id != :excludingId)")
+    suspend fun hasOtherArtifactReference(path: String, excludingId: Long): Boolean
+
+    /** Keep reference inspection and row deletion serialized with other Room writers. */
+    @Transaction
+    suspend fun deleteWithArtifact(id: Long, removeFile: (String) -> Boolean): Boolean {
+        val digest = getDigestById(id) ?: return true
+        if (digest.epubFilePath.isNotBlank() &&
+            !hasOtherArtifactReference(digest.epubFilePath, id) &&
+            !removeFile(digest.epubFilePath)
+        ) return false
+        deleteDigestById(id)
+        return true
+    }
+
+    @Transaction
+    suspend fun removeUnsharedArtifact(id: Long, removeFile: (String) -> Boolean): Boolean {
+        val digest = getDigestById(id) ?: return false
+        if (digest.epubFilePath.isBlank() || hasOtherArtifactReference(digest.epubFilePath, id)) return false
+        return removeFile(digest.epubFilePath)
+    }
+
     @Query("SELECT COUNT(*) FROM digests")
     suspend fun getDigestCount(): Int
 
