@@ -15,11 +15,11 @@ from sqlmodel import Session, select
 
 from app.core.database import get_session
 from app.core.logging import digest_logger
-from app.core.net import validate_public_url
 from app.core.security import verify_api_key
 from app.models.feed import Feed, FeedCreate, FeedRead, FeedSync, FeedUpdate
 from app.models.seen_article import SeenArticle
-from app.services import feed_sync
+from app.services import activity_tracker, feed_sync
+from app.services.outbound_fetch import validate_public_url_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,8 @@ async def get_changes_v2(
 ) -> dict:
     if since_version is not None and not feed_sync.validate_version(since_version):
         raise HTTPException(422, detail="Invalid feed cursor")
+    if since_version is not None and server_instance_id is None:
+        raise HTTPException(422, detail="server_instance_id is required with since_version")
     feed_sync._begin_write(session)
     try:
         clock = feed_sync._clock(session)
@@ -69,6 +71,7 @@ async def get_changes_v2(
         result = {"server_instance_id": clock.server_instance_id,
                   "server_version": clock.version, "changes": changes}
         session.commit()
+        activity_tracker.record_feed_sync()
         return result
     except BaseException:
         session.rollback()
@@ -103,14 +106,16 @@ async def mutate_v2(body: dict, session: Session = Depends(get_session)) -> dict
     return {"server_instance_id": instance_id, "results": results}
 
 
-def _validate_feed_url(url: str) -> None:
+async def _validate_feed_url(url: str) -> None:
     try:
-        validate_public_url(url)
+        await validate_public_url_bounded(url)
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid feed URL '{url}': {exc}",
         ) from exc
+    except TimeoutError as exc:
+        raise HTTPException(504, detail="Feed URL validation timed out") from exc
 
 
 class SyncResponse(BaseModel):
@@ -233,7 +238,7 @@ async def sync_feeds(
 
     # Validate URLs before applying changes
     for feed_data in feeds:
-        _validate_feed_url(feed_data.url)
+        await _validate_feed_url(feed_data.url)
 
     # The v1 bulk writer is read-safe: reject the entire batch on any change.
     for feed_data in feeds:
@@ -334,8 +339,6 @@ async def create_feed(
     If a soft-deleted feed with the same URL exists, it is restored with
     the new settings. Returns 409 Conflict if an active feed already exists.
     """
-    _validate_feed_url(feed_data.url)
-
     if not feed_sync.validate_fields(feed_data.model_dump(exclude={"url"}), creating=True):
         raise HTTPException(422, detail="Invalid feed fields")
     existing = session.exec(select(Feed).where(Feed.url == feed_data.url)).first()
@@ -343,6 +346,7 @@ async def create_feed(
     session.rollback()
     if active_snapshot is not None:
         raise HTTPException(409, detail={"code": "feed_conflict", "current": active_snapshot})
+    await _validate_feed_url(feed_data.url)
     return feed_sync.write_web(
         session, url=feed_data.url, kind="upsert",
         fields=feed_data.model_dump(exclude={"url"}), expected=_if_match(if_match),
@@ -389,9 +393,9 @@ async def update_feed(
     update_data = feed_data.model_dump(exclude_unset=True)
     if not feed_sync.validate_fields(update_data, creating=False):
         raise HTTPException(422, detail="Invalid feed fields")
-    _validate_feed_url(feed.url)
     url = feed.url
     session.rollback()
+    await _validate_feed_url(url)
     return feed_sync.write_web(session, url=url, kind="upsert", fields=update_data,
                                expected=_if_match(if_match), feed_id=feed_id)
 

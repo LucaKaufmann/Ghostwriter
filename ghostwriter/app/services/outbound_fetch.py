@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import zlib
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from urllib.parse import urljoin
@@ -24,39 +25,63 @@ REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 MAX_DNS_VALIDATIONS = 4
 _dns_executor = ThreadPoolExecutor(max_workers=MAX_DNS_VALIDATIONS)
 _dns_slots = threading.BoundedSemaphore(MAX_DNS_VALIDATIONS)
-_dns_waiters: set[asyncio.Future] = set()
+_dns_waiters: deque[asyncio.Future] = deque()
 _dns_waiters_lock = threading.Lock()
 
 
 def _wake_dns_waiter(waiter: asyncio.Future) -> None:
-    if not waiter.done():
+    if waiter.done():
+        # Cancellation after selection must pass the reserved slot onward.
+        _release_dns_slot(None)
+    else:
         waiter.set_result(None)
 
 
 def _release_dns_slot(_future) -> None:
     with _dns_waiters_lock:
-        _dns_slots.release()
-        waiters = tuple(_dns_waiters)
-    for waiter in waiters:
+        while _dns_waiters:
+            waiter = _dns_waiters.popleft()
+            if waiter.done():
+                continue
+            break
+        else:
+            _dns_slots.release()
+            return
+    # Transfer this slot to exactly one FIFO waiter, including across loops.
+    while True:
         try:
             waiter.get_loop().call_soon_threadsafe(_wake_dns_waiter, waiter)
-        except RuntimeError:
-            pass  # An expired caller's loop may have closed while DNS continued.
+            return
+        except RuntimeError:  # The caller's loop closed while DNS continued.
+            with _dns_waiters_lock:
+                while _dns_waiters:
+                    waiter = _dns_waiters.popleft()
+                    if not waiter.done():
+                        break
+                else:
+                    _dns_slots.release()
+                    return
 
 
 async def _acquire_dns_slot() -> None:
-    while True:
-        waiter = asyncio.get_running_loop().create_future()
+    waiter = asyncio.get_running_loop().create_future()
+    with _dns_waiters_lock:
+        if not _dns_waiters and _dns_slots.acquire(blocking=False):
+            return
+        # Register under the release lock to prevent missed wakeups or overtaking.
+        _dns_waiters.append(waiter)
+    try:
+        await waiter
+    except asyncio.CancelledError:
         with _dns_waiters_lock:
-            if _dns_slots.acquire(blocking=False):
-                return
-            # Register under the same lock as release to avoid a missed wakeup.
-            _dns_waiters.add(waiter)
-        try:
-            await waiter
-        finally:
-            with _dns_waiters_lock:
-                _dns_waiters.discard(waiter)
+            if waiter in _dns_waiters:
+                _dns_waiters.remove(waiter)
+                return_slot = False
+            else:
+                return_slot = waiter.done() and not waiter.cancelled()
+        if return_slot:
+            _release_dns_slot(None)
+        raise
 
 
 class NonHtmlContentError(RuntimeError):
