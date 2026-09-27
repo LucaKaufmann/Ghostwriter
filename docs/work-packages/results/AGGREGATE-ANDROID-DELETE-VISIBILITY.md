@@ -1,0 +1,11 @@
+# AGGREGATE-ANDROID-DELETE-VISIBILITY
+
+Acceptance base: `0591f1fbca88926c6e851faa0f10c86ab4c9e9ba` on `codex/aggregate-android-delete-visibility`. Scope: Android Room feed projection and focused tests. No shared contract or schema change.
+
+The original Room probe reproduced queued upsert → delete becoming visible after a newer live server pull: `hidden=false`, and the URL appeared in ordinary, configured-enabled, and local-enabled DAO queries. The accepted regression now asserts all four outputs. Configured `DailyDigestWorker` skips local generation; the local-enabled query demonstrates the offline generation risk.
+
+Server projection now takes the latest retained mutation from the active server scope in `(queueOrder, sequence)` order. For a live server row, a latest delete remains hidden and a latest explicit upsert remains visible; passive server tombstones remain hidden. The rule covers initial reconciliation, conflict, incremental pull, ACK, keep/apply resolution, and rejected-head correction. It leaves mutation payloads, statuses, and queue order intact. Existing optimistic cached field behavior with retained successors remains unchanged; the authoritative server snapshot and version still advance.
+
+Focused Room/shared-use-case fixtures cover newer pull visibility and both eligibility queries, full reconciliation, conflict → Apply mine → ACK → incremental pull → disk reopen, keep-server and rejected-head correction with a later delete, delete → re-add control, and old-scope isolation. Replacing a head assigns a higher sequence while retaining its earlier queue slot; tests prove the trailing delete still wins. Existing Room transaction rollback coverage remains applicable because no transaction boundary was added.
+
+Verification: `:app:testDebugUnitTest --tests '*AndroidFeedV2DeleteVisibilityTest' --tests '*AndroidFeedV2StoreTest' --tests '*AndroidFeedV2UseCaseTest' --offline --no-daemon` passed 35/35, zero failures/errors. Log: `/private/tmp/epilogue-backlog-20260927/android-delete-visibility-focused.log`. Full Android/shared/debug build remains for acceptance after independent source review.

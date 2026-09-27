@@ -238,6 +238,48 @@ class AndroidFeedV2StoreTest {
         }
     }
 
+    @Test fun `conflict and keep server on earlier upsert cannot expose later delete`() = runBlocking {
+        context.deleteDatabase(name)
+        configured = true
+        val database = db()
+        val store = AndroidFeedV2Store(database, settings)
+        val (token, binding) = bind(store, listOf(remote("Original", 1)), 1)
+        store.saveLocal(feed("Mine"))
+        store.deleteLocal(url)
+        val sent = value(store.loadPendingMutations(token, binding, 100)).single()
+        assertTrue(store.recordConflict(token, binding, sent.opId, sent.sentRevision,
+            remote("Web", 2)) is FeedV2StoreResult.Success)
+        assertTrue(database.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+        assertTrue(store.resolve(sent.opId, "keep_server"))
+        assertEquals("Web", database.feedDao().getFeedByUrl(url)!!.name)
+        assertTrue(database.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+        assertEquals(listOf("delete"), database.feedMutationDao().forUrl(url).map { it.kind })
+        assertTrue(database.feedDao().getEnabledLocalFeedsList().isEmpty())
+        store.endSyncRun(token)
+        database.close()
+    }
+
+    @Test fun `correcting rejected earlier upsert retains later delete despite newer sequence`() = runBlocking {
+        context.deleteDatabase(name)
+        configured = true
+        val database = db()
+        val store = AndroidFeedV2Store(database, settings)
+        val (token, binding) = bind(store, listOf(remote("Original", 1)), 1)
+        store.saveLocal(feed("Invalid"))
+        val sent = value(store.loadPendingMutations(token, binding, 100)).single()
+        store.deleteLocal(url)
+        assertTrue(store.recordRejection(token, binding, sent.opId, sent.sentRevision,
+            "invalid_fields", "Title invalid") is FeedV2StoreResult.Success)
+        assertTrue(store.correctRejected(sent.opId, "Corrected", ProcessingMode.FIDELITY, true, 0))
+        val rows = database.feedMutationDao().forUrl(url).sortedBy { it.queueOrder }
+        assertEquals(listOf("upsert", "delete"), rows.map { it.kind })
+        assertTrue(rows.first().sequence > rows.last().sequence)
+        assertTrue(database.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+        assertTrue(database.feedDao().getAllFeedsList().isEmpty())
+        store.endSyncRun(token)
+        database.close()
+    }
+
     @Test fun `initial match to legacy proposal rebases later edit`() = runBlocking {
         context.deleteDatabase(name)
         val database = db()

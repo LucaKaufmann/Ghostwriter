@@ -166,6 +166,11 @@ class AndroidFeedV2Store @Inject constructor(
             proposal.isActive == remote.isActive && proposal.mode == remote.mode &&
             proposal.maxArticles == remote.maxArticles
 
+    private val intentOrder = compareBy<FeedMutationEntity> { it.queueOrder }.thenBy { it.sequence }
+    private suspend fun latestIntent(url: String, serverKey: String): FeedMutationEntity? =
+        mutations.forUrl(url).filter { it.serverKey == serverKey }.maxWithOrNull(intentOrder)
+    private fun hiddenByLiveIntent(latest: FeedMutationEntity?): Boolean = latest?.kind == "delete"
+
     private fun fromRemote(current: FeedEntity?, remote: FeedSnapshotV2): FeedEntity {
         require(remote.kind == "feed")
         return (current ?: FeedEntity(remote.url, remote.title!!,
@@ -192,7 +197,8 @@ class AndroidFeedV2Store @Inject constructor(
             val changed = old == null || old.hiddenDelete || fields(old) != fields(updated)
             feeds.insertFeed(updated)
             if (changed) {
-                val head = mutations.forUrl(feed.url).firstOrNull { it.serverKey == state.serverKey }
+                val head = mutations.forUrl(feed.url).filter { it.serverKey == state.serverKey }
+                    .minWithOrNull(intentOrder)
                 val base = head?.baseVersion ?: old?.serverVersion
                 val dirty = if (old == null || base == null || old.hiddenDelete) fields(updated) else FeedDirtyFieldsV2(
                     title = updated.name.takeIf { it != old.name },
@@ -378,12 +384,16 @@ class AndroidFeedV2Store @Inject constructor(
                         serverSnapshotJson = snapshot(row)))
                     feeds.insertFeed(if (successor == null) fromRemote(feed, row) else feed.copy(
                         serverId = row.id, serverVersion = row.version,
-                        serverSnapshotJson = snapshot(row), locallyModified = true))
+                        serverSnapshotJson = snapshot(row), locallyModified = true,
+                        hiddenDelete = hiddenByLiveIntent(latestIntent(feed.url, state.serverKey))))
                 } else if (head.state == "legacy_unresolved" || head.state == "needs_resolution" ||
                     row != null || head.kind == "delete") {
                     mutations.update(head.copy(state = "needs_resolution", serverSnapshotJson = row?.let(::snapshot)))
-                    feeds.insertFeed(if (row?.kind == "feed" && head.kind != "delete") fromRemote(feed, row)
-                        else feed.copy(hiddenDelete = true, serverId = row?.id ?: feed.serverId,
+                    val latest = latestIntent(feed.url, state.serverKey)
+                    feeds.insertFeed(if (row?.kind == "feed" && head.kind != "delete")
+                        fromRemote(feed, row).copy(hiddenDelete = hiddenByLiveIntent(latest))
+                        else feed.copy(hiddenDelete = if (row?.kind == "feed") hiddenByLiveIntent(latest) else true,
+                            serverId = row?.id ?: feed.serverId,
                             serverVersion = row?.version ?: feed.serverVersion,
                             serverSnapshotJson = row?.let(::snapshot)))
                 }
@@ -441,9 +451,12 @@ class AndroidFeedV2Store @Inject constructor(
             val successors = mutations.forUrl(row.url).filter { it.serverKey == state.serverKey }
                 .sortedWith(compareBy<FeedMutationEntity> { it.queueOrder }.thenBy { it.sequence })
             if (feed != null && current != null && !older) {
+                val latest = successors.lastOrNull()
                 feeds.insertFeed(if (successors.isEmpty() && current.kind == "feed") fromRemote(feed, current)
                     else feed.copy(serverId = current.id, serverVersion = current.version,
-                        serverSnapshotJson = snapshot(current), hiddenDelete = if (successors.isEmpty()) current.kind == "tombstone" else feed.hiddenDelete,
+                        serverSnapshotJson = snapshot(current),
+                        hiddenDelete = if (successors.isEmpty()) current.kind == "tombstone"
+                            else hiddenByLiveIntent(latest),
                         locallyModified = successors.isNotEmpty()))
             } else if (feed != null && successors.isEmpty()) {
                 feeds.insertFeed(feed.copy(locallyModified = false))
@@ -467,13 +480,16 @@ class AndroidFeedV2Store @Inject constructor(
             if (row.serverKey != state.serverKey || !row.sent || row.localRevision != sentRevision)
                 return@withTransaction FeedV2StoreResult.StaleSentRevision
             val feed = feeds.getFeedByUrl(row.url)
+            val latest = latestIntent(row.url, state.serverKey)
             val effective = if (feed?.serverVersion?.let { it > current.version } == true)
                 parseSnapshot(feed.serverSnapshotJson) ?: current else current
             mutations.update(row.copy(state = "needs_resolution", serverSnapshotJson = snapshot(effective)))
             if (feed != null && (feed.serverVersion == null || effective.version >= feed.serverVersion))
-                feeds.insertFeed(if (effective.kind == "feed" && row.kind != "delete") fromRemote(feed, effective)
+                feeds.insertFeed(if (effective.kind == "feed" && row.kind != "delete")
+                    fromRemote(feed, effective).copy(hiddenDelete = hiddenByLiveIntent(latest))
                     else feed.copy(serverId = effective.id, serverVersion = effective.version,
-                        serverSnapshotJson = snapshot(effective), hiddenDelete = true))
+                        serverSnapshotJson = snapshot(effective),
+                        hiddenDelete = if (effective.kind == "feed") hiddenByLiveIntent(latest) else true))
             FeedV2StoreResult.Success(Unit)
         }
     }
@@ -500,9 +516,10 @@ class AndroidFeedV2Store @Inject constructor(
             for (row in changes.changes) {
                 if (row.url.startsWith("synthetic://")) continue
                 val current = feeds.getFeedByUrl(row.url)
-                val pending = mutations.forUrl(row.url).filter { it.serverKey == state.serverKey }
-                    .minWithOrNull(compareBy<FeedMutationEntity> { it.queueOrder }.thenBy { it.sequence })
+                val scoped = mutations.forUrl(row.url).filter { it.serverKey == state.serverKey }
+                val pending = scoped.minWithOrNull(intentOrder)
                 if (pending != null) {
+                    val latest = scoped.maxWithOrNull(intentOrder)
                     if (current != null && (current.serverVersion == null || row.version >= current.serverVersion)) {
                         val newer = current.serverVersion != null && row.version > current.serverVersion
                         val proposalVersion = parseSnapshot(pending.serverSnapshotJson)?.version
@@ -513,9 +530,11 @@ class AndroidFeedV2Store @Inject constructor(
                                 serverSnapshotJson = snapshot(row)))
                         }
                         feeds.insertFeed(if (newer && row.kind == "feed" && pending.kind != "delete")
-                            fromRemote(current, row).copy(locallyModified = true)
+                            fromRemote(current, row).copy(locallyModified = true,
+                                hiddenDelete = hiddenByLiveIntent(latest))
                             else current.copy(serverId = row.id, serverVersion = row.version,
-                                serverSnapshotJson = snapshot(row), hiddenDelete = current.hiddenDelete || row.kind == "tombstone"))
+                                serverSnapshotJson = snapshot(row), hiddenDelete =
+                                    if (row.kind == "tombstone") true else hiddenByLiveIntent(latest)))
                     }
                 } else if (row.kind == "feed") feeds.insertFeed(fromRemote(current, row))
                 else if (current != null) feeds.insertFeed(current.copy(hiddenDelete = true, serverId = row.id,
@@ -541,6 +560,7 @@ class AndroidFeedV2Store @Inject constructor(
         val server = if (feedServer != null &&
             (proposalServer == null || feedServer.version > proposalServer.version)) feedServer else proposalServer
         val successors = mutations.forUrl(row.url).filter { it.serverKey == state.serverKey && it.queueOrder > row.queueOrder }
+        val latestSuccessor = successors.maxWithOrNull(intentOrder)
         val keep = action in setOf("keep_server", "keep_feed", "keep_removed", "discard")
         val apply = action in setOf("apply_mine", "delete_anyway", "add_to_server") ||
             (action == "correct" && row.state == "rejected" && row.kind == "delete")
@@ -549,18 +569,20 @@ class AndroidFeedV2Store @Inject constructor(
         successors.forEach { mutations.update(it.copy(state = "needs_resolution",
             serverSnapshotJson = server?.let(::snapshot))) }
         if (keep) {
-            if (feed != null) feeds.insertFeed(if (server?.kind == "feed") fromRemote(feed, server)
+            if (feed != null) feeds.insertFeed(if (server?.kind == "feed")
+                fromRemote(feed, server).copy(hiddenDelete = hiddenByLiveIntent(latestSuccessor))
                 else feed.copy(hiddenDelete = true, locallyModified = successors.isNotEmpty()))
         } else {
             val proposed = decode(row)
             val base = server?.version
             var resolvedFields = row.fieldsJson
             if (feed != null) {
-                val corrected = if (row.kind == "delete") feed.copy(hiddenDelete = true)
+                val hidden = hiddenByLiveIntent(latestSuccessor ?: row)
+                val corrected = if (row.kind == "delete") feed.copy(hiddenDelete = hidden)
                 else feed.copy(name = proposed.title ?: feed.name,
                     mode = when (proposed.mode) { "summarize" -> ProcessingMode.BRIEFING; "raw" -> ProcessingMode.FIDELITY; else -> feed.mode },
                     isEnabled = proposed.isActive ?: feed.isEnabled,
-                    maxArticles = proposed.maxArticles ?: feed.maxArticles, hiddenDelete = false)
+                    maxArticles = proposed.maxArticles ?: feed.maxArticles, hiddenDelete = hidden)
                 feeds.insertFeed(corrected.copy(locallyModified = true, mutationRevision = feed.mutationRevision + 1))
                 if (row.kind == "upsert" && server == null) resolvedFields = encode(fields(corrected))
             }
@@ -605,8 +627,11 @@ class AndroidFeedV2Store @Inject constructor(
         val maxArticles = edits.maxArticles ?: proposed.maxArticles ?: current?.maxArticles
             ?: return@withTransaction false
         if (title.isBlank() || maxArticles < 0) return@withTransaction false
+        val latestSuccessor = mutations.forUrl(row.url)
+            .filter { it.serverKey == state.serverKey && it.queueOrder > row.queueOrder }
+            .maxWithOrNull(intentOrder)
         val corrected = feed.copy(name = title, mode = mode, isEnabled = enabled,
-            maxArticles = maxArticles, hiddenDelete = false, locallyModified = true,
+            maxArticles = maxArticles, hiddenDelete = hiddenByLiveIntent(latestSuccessor), locallyModified = true,
             mutationRevision = feed.mutationRevision + 1)
         val fields = FeedDirtyFieldsV2(title, enabled,
             if (mode == ProcessingMode.BRIEFING) "summarize" else "raw", maxArticles)

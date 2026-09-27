@@ -67,6 +67,58 @@ class AndroidFeedV2UseCaseTest {
         store.endSyncRun(token)
     }
 
+    @Test fun `conflict apply mine acknowledgement and later pull retain trailing delete after reopen`() = runBlocking {
+        context.deleteDatabase(name)
+        var db = database()
+        var store = AndroidFeedV2Store(db, settings)
+        bound(store, snapshot("Original", 1))
+        store.saveLocal(feed("Mine"))
+        store.deleteLocal(url)
+        val original = db.feedMutationDao().forUrl(url).sortedBy { it.queueOrder }
+        assertEquals(listOf("upsert", "delete"), original.map { it.kind })
+        assertTrue(db.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+
+        val conflictRemote = Remote().apply {
+            pull = { FeedV2RemoteResult.Success(FeedChangesV2Response(serverId, 2,
+                listOf(snapshot("Web", 2)))) }
+            push = { batch -> FeedV2RemoteResult.Success(FeedMutationBatchResultV2(serverId,
+                listOf(FeedMutationResultV2(batch.mutations.single().opId, "conflict", snapshot("Web", 2))))) }
+        }
+        assertTrue(store.syncAndRecord(FeedSyncV2UseCase(store, store, conflictRemote))
+            is FeedSyncV2Outcome.Partial)
+        assertEquals(original.first().opId, conflictRemote.batches.single().mutations.single().opId)
+        assertTrue(db.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+        assertTrue(store.resolve(original.first().opId, "apply_mine"))
+        val afterResolution = db.feedMutationDao().forUrl(url).sortedBy { it.queueOrder }
+        assertEquals(listOf("upsert", "delete"), afterResolution.map { it.kind })
+        assertTrue(afterResolution.first().sequence > afterResolution.last().sequence)
+        assertTrue(db.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+
+        val ackRemote = Remote().apply {
+            pull = { FeedV2RemoteResult.Success(FeedChangesV2Response(serverId, 3,
+                listOf(snapshot("Accepted", 3)))) }
+            push = { batch -> FeedV2RemoteResult.Success(FeedMutationBatchResultV2(serverId,
+                listOf(FeedMutationResultV2(batch.mutations.single().opId, "applied", snapshot("Accepted", 3))))) }
+        }
+        assertTrue(store.syncAndRecord(FeedSyncV2UseCase(store, store, ackRemote))
+            is FeedSyncV2Outcome.Partial)
+        assertEquals(afterResolution.first().opId, ackRemote.batches.single().mutations.single().opId)
+        assertEquals(3L, db.feedDao().getFeedByUrl(url)!!.serverVersion)
+        assertTrue(db.feedDao().getFeedByUrl(url)!!.serverSnapshotJson!!.contains("Accepted"))
+        assertTrue(db.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+        assertTrue(db.feedDao().getAllFeedsList().isEmpty())
+        assertTrue(db.feedDao().getEnabledFeedsList().isEmpty())
+        assertTrue(db.feedDao().getEnabledLocalFeedsList().isEmpty())
+        db.close()
+
+        db = database()
+        store = AndroidFeedV2Store(db, settings)
+        assertTrue(db.feedDao().getFeedByUrl(url)!!.hiddenDelete)
+        assertEquals(listOf("delete"), db.feedMutationDao().forUrl(url).map { it.kind })
+        assertTrue(db.feedDao().getEnabledLocalFeedsList().isEmpty())
+        db.close()
+    }
+
     @Test fun `real Room store and shared use case create ack and pull complete`() = runBlocking {
         context.deleteDatabase(name)
         val db = database()
