@@ -211,3 +211,28 @@ PR119's available mid-build feedback had no new substantive finding. Current cod
 ## Merge-boundary review refresh
 
 At 2026-09-27T22:07:38Z, PR119 had no new substantive finding. PR106 [4117156228](https://github.com/LucaKaufmann/Ghostwriter/pull/106#discussion_r4117156228) correctly identified the stale opening review status. The opening now explicitly describes a historical snapshot and records the completed review cutoff; this documentation correction is included in the aggregate merge.
+
+## Post-merge review sweep — 2026-09-27T22:13:24Z
+
+All46 original PRs report merged;114 inline comments,61 review bodies and47 issue comments were read. The last aggregate review completed at22:15:23Z without another finding. These new findings are separate from the historical implementation closeout above:
+
+| PR / comment | Validation | Disposition |
+|---|---|---|
+| [#90 / 4117204255](https://github.com/LucaKaufmann/Ghostwriter/pull/90#discussion_r4117204255) | The merged endpoint awaits `validate_public_url_bounded`; synchronous DNS validation runs in its bounded worker pool. | Obsolete against main5c5cc40; no product change. |
+| [#103 / 5332345948](https://github.com/LucaKaufmann/Ghostwriter/pull/103#pullrequestreview-5332345948) | An `invalid_url` rejection can originate from server public-host/DNS checks after native syntax admission. Title-only correction retains the rejected URL. | Fixed in [PR120](https://github.com/LucaKaufmann/Ghostwriter/pull/120), merged to main174a349. Source548a817 passed independent Sol review, two focused UI tests and inspected screenshot; exact main174a349 subsequently passed197 workspace units and2 focused UI tests, with no failures/skips. Preserve store/wire identity, rejected-delete behavior and other title-correction controls. |
+
+Independent source review also caught the new actionable UI test's missing configured server destination. The fixture now uses a guarded isolated settings suite with the matching server destination. Its initial failure was reproduced and the corrected two-test flow passed. See [the committed result](REVIEW-IOS-INVALID-URL.md).
+
+
+## PR120 queued-successor review
+
+[PR120/4117295134](https://github.com/LucaKaufmann/Ghostwriter/pull/120#discussion_r4117295134) correctly noted that discarding a selected rejected create can leave a later proposal for the same URL. The bounded wording/fixture/UI-test fix is merged in [PR121](https://github.com/LucaKaufmann/Ghostwriter/pull/121), source67ae3d86/c2f072d9; it tells users to resolve remaining proposals, using Keep removed when the feed is absent from the server. The store and wire contract remain unchanged. Independent Sol source review is clean; both discard/add flows, the corrected screen assertion and rendered screenshot checks passed. Final mainc894fb80 passed all three UI cases together with no failures/skips; tracked checkout clean. The original main174a349 unit197/UI2 results remain valid for that revision.
+
+Final product verification is complete. The review ledger records code/evidence dispositions; it does not claim GitHub conversation threads were resolved or external replies posted.
+
+
+## Final PR121 fixture fidelity finding
+
+[Comment4117345638](https://github.com/LucaKaufmann/Ghostwriter/pull/121#discussion_r4117345638) is accepted as a fixture-fidelity improvement only. Production `edit` already updates the visible feed name; the manually seeded successor fixture did not. Correction0b6715fb changes the fixture's visible name and the test's row lookup to the latest edit while preserving the rejected mutation's original payload. The affected UI case passed1/1 and independent Sol review is clean. No production/store/wire behavior changed; no broad suite rerun was warranted. The final checkpoint includes this correction.
+
+Final119/120/121 review refresh cutoff:2026-09-27T22:54:43Z. All three reviews completed; no unresolved accepted product or fixture finding remains. The final checkpoint's publication is a separate PR and its available comments are checked during closeout.

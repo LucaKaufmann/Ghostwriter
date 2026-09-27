@@ -54,13 +54,15 @@ again when returning to v2.
 7. Verify Alembic head, upgrade, and stopped-backup/restore paths. The
    [release-readiness checks](docs/release-readiness.md) exercise migration
    021 through current head, feed-sync 026 identity rotation, and preservation
-   of source acknowledgements from 027:
+   of source acknowledgements from 027. Include the 028 one-off ownership
+   migration and its conservative legacy backfill:
    ```bash
    alembic heads
    DATA_DIR="$(mktemp -d)" alembic upgrade head
    python -m pytest -q tests/test_release_recovery.py \
      tests/test_feed_sync_migration.py \
-     tests/test_source_acknowledgement_migration.py
+     tests/test_source_acknowledgement_migration.py \
+     tests/test_one_off_owner_migration.py
    ```
 8. Run frontend checks with Node 24, matching CI:
    ```bash

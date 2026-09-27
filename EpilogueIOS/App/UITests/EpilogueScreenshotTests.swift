@@ -119,7 +119,7 @@ final class EpilogueScreenshotTests: XCTestCase {
         app.terminate()
         app.launchArguments += ["-feed-v2-ui-fixture"]
         app.launch()
-        let oldURL = app.staticTexts["Invalid URL chain"]
+        let oldURL = app.staticTexts["Later URL edit"]
         XCTAssertTrue(waitForExists(oldURL))
         oldURL.tap()
         XCTAssertTrue(waitForExists(app.buttons["Discard proposal"]))
