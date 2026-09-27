@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from mutagen.id3 import CHAP, CTOC, ID3, TIT2, CTOCFlags, ID3NoHeaderError
-from sqlalchemy import exists, text
+from sqlalchemy import String, case, cast, exists, func, text, true
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
@@ -945,6 +945,12 @@ class PodcastDigestService:
             raise ValueError("Digest not found")
         if digest.status != "completed":
             raise ValueError("Digest must be completed before podcast generation")
+        if (
+            trigger == "one_off"
+            and digest.one_off_owner_id is not None
+            and user_id != digest.one_off_owner_id
+        ):
+            raise ValueError("Digest not found")
         cleaned_overrides = self.sanitize_generation_overrides(generation_overrides)
         cleaned_title = self._sanitize_episode_title(title)
 
@@ -1070,18 +1076,44 @@ class PodcastDigestService:
 
     @staticmethod
     def exclude_one_off_digests(statement):
-        """Exclude digests backed by one-off synthetic-feed articles."""
+        """Keep private one-off digests out of installation-wide digest views."""
         one_off_digest_exists = (
             exists()
             .where(DigestArticle.digest_id == Digest.id)
             .where(DigestArticle.feed_id == Feed.id)
             .where(Feed.url == ONE_OFF_SYNTHETIC_FEED_URL)
         )
-        return statement.where(~one_off_digest_exists)
+        # A legacy zero-article one-off may only have an episode reference.
+        safe_ids = case(
+            (func.json_valid(PodcastEpisode.digest_ids) == 1, PodcastEpisode.digest_ids),
+            else_="[]",
+        )
+        episode_ids = func.json_each(safe_ids).table_valued("value")
+        referenced_by_one_off = (
+            select(1)
+            .select_from(PodcastEpisode)
+            .join(episode_ids, true())
+            .where(PodcastEpisode.trigger == "one_off")
+            .where(
+                func.replace(func.lower(episode_ids.c.value), "-", "")
+                == func.lower(cast(Digest.id, String))
+            )
+            .exists()
+        )
+        return statement.where(
+            Digest.one_off_owner_id.is_(None),
+            ~one_off_digest_exists,
+            ~referenced_by_one_off,
+        )
 
     @staticmethod
     def is_one_off_digest(session: Session, digest_id: UUID) -> bool:
-        """Return true when a digest contains one-off synthetic-feed articles."""
+        """Return true for private owner, synthetic article, or legacy episode evidence."""
+        digest = session.get(Digest, digest_id)
+        if digest is None:
+            return False
+        if digest.one_off_owner_id is not None:
+            return True
         statement = (
             select(DigestArticle.id)
             .join(Feed, DigestArticle.feed_id == Feed.id)
@@ -1089,7 +1121,35 @@ class PodcastDigestService:
             .where(Feed.url == ONE_OFF_SYNTHETIC_FEED_URL)
             .limit(1)
         )
-        return session.exec(statement).first() is not None
+        if session.exec(statement).first() is not None:
+            return True
+        return bool(PodcastDigestService.one_off_referencing_episodes(session, digest_id))
+
+    @staticmethod
+    def one_off_referencing_episodes(session: Session, digest_id: UUID) -> list[PodcastEpisode]:
+        """Find legacy one-off references without trusting JSON string formatting."""
+        episodes = session.exec(
+            select(PodcastEpisode).where(PodcastEpisode.trigger == "one_off")
+        ).all()
+        matches = []
+        for episode in episodes:
+            for raw in episode.digest_ids or []:
+                try:
+                    if UUID(str(raw)) == digest_id:
+                        matches.append(episode)
+                        break
+                except (ValueError, TypeError, AttributeError):
+                    continue
+        return matches
+
+    @staticmethod
+    def one_off_owner_id(session: Session, digest: Digest) -> UUID | None:
+        """Use the durable owner, or one unambiguous live pre-migration owner."""
+        if digest.one_off_owner_id is not None:
+            return digest.one_off_owner_id
+        episodes = PodcastDigestService.one_off_referencing_episodes(session, digest.id)
+        owners = {episode.user_id for episode in episodes}
+        return next(iter(owners)) if len(owners) == 1 and None not in owners else None
 
     def queue_multi_digest_episode(
         self, session: Session, digest_ids: list[UUID], *,

@@ -99,6 +99,8 @@ class OneOffPodcastService:
         user_id: UUID | None,
     ) -> PodcastEpisode:
         """Create a completed manual digest and queue podcast generation."""
+        if user_id is None:
+            raise OneOffPodcastError("A user account is required for a one-off digest")
         title = self._normalize_title(title)
         brief = self._normalize_brief(brief)
         normalized = await self.normalize_sources(sources)
@@ -115,6 +117,7 @@ class OneOffPodcastService:
         feed = get_or_create_synthetic_feed(session, "one_off")
         digest = Digest(
             filename=filename,
+            one_off_owner_id=user_id,
             period="manual",
             status="processing",
             stage="compiling",

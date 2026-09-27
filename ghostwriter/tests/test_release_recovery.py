@@ -219,11 +219,11 @@ client.close()
     return json.loads(result.stdout)
 
 
-def test_current_026_027_stopped_restore_keeps_ack_and_rotates_identity(tmp_path):
+def test_current_026_028_stopped_restore_keeps_ack_and_rotates_identity(tmp_path):
     live, backup, restored = (tmp_path / name for name in ("live", "backup", "restored"))
     alembic(live, "upgrade", "head")
     assert_current(live)
-    assert alembic(live, "heads").stdout.split()[0] == "027"
+    assert alembic(live, "heads").stdout.split()[0] == "028"
     # The migration has created the clock table; the operational command seeds
     # its identity before this disposable instance accepts writes.
     rotate = [sys.executable, "-m", "app.cli.rotate_sync_identity"]
