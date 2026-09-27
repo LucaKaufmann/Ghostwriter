@@ -1,75 +1,61 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mockGhostwriterApi, setAuthenticatedSession } from './fixtures/mockApi';
+import { expectNoUnexpectedRequests, mockGhostwriterApi, setAuthenticatedSession } from './fixtures/mockApi';
 
-type RouteSpec = {
-	path: string;
-	heading: string;
-	snapshotKey: string;
-};
+const routes = [
+	{ path: '/', label: 'Dashboard', heading: 'Dashboard', snapshot: 'dashboard', content: '3 total feeds' },
+	{ path: '/sources/feeds', label: 'Feeds', heading: 'Feeds', snapshot: 'feeds', content: 'Example Feed' },
+	{ path: '/digests', label: 'Digests', heading: 'Digests', snapshot: 'digests', content: 'Showing' },
+	{ path: '/settings', label: 'Settings', heading: 'Settings', snapshot: 'settings', content: 'openai' }
+] as const;
 
-const coreRoutes: RouteSpec[] = [
-	{ path: '/', heading: 'Dashboard', snapshotKey: 'dashboard' },
-	{ path: '/feeds', heading: 'Feeds', snapshotKey: 'feeds' },
-	{ path: '/digests', heading: 'Digests', snapshotKey: 'digests' },
-	{ path: '/settings', heading: 'Settings', snapshotKey: 'settings' }
-];
-
-async function setTheme(page: Page, label: 'Light' | 'Dark') {
-	await page.evaluate((mode) => {
-		const root = document.documentElement;
-		const isDark = mode === 'dark';
-		root.classList.toggle('dark', isDark);
-		root.style.colorScheme = isDark ? 'dark' : 'light';
-	}, label.toLowerCase());
-	await page.waitForTimeout(100);
-}
-
-async function goToSection(page: Page, route: RouteSpec) {
-	await page.locator(`aside a[href=\"${route.path}\"]`).first().click();
-	await page.waitForURL(`**${route.path === '/' ? '/' : route.path}`);
+async function selectTheme(page: Page, name: 'Light' | 'Dark') {
+	await page.evaluate((theme) => {
+		const dark = theme === 'Dark';
+		document.documentElement.classList.toggle('dark', dark);
+		document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+	}, name);
+	if (name === 'Dark') {
+		await expect(page.locator('html')).toHaveClass(/dark/);
+	} else {
+		await expect(page.locator('html')).not.toHaveClass(/dark/);
+	}
 }
 
 test.beforeEach(async ({ page }) => {
-	await mockGhostwriterApi(page, { authenticated: true });
+	await mockGhostwriterApi(page);
 	await setAuthenticatedSession(page);
 });
 
-test('supports core route navigation', async ({ page }) => {
+test.afterEach(async ({ page }) => expectNoUnexpectedRequests(page));
+
+test('sidebar uses current routes', async ({ page }) => {
 	await page.goto('/');
-	await expect(page.locator('main').getByRole('heading', { name: 'Dashboard' })).toBeVisible();
-
-	await expect(page.getByRole('link', { name: 'Feeds' }).first()).toHaveAttribute('href', '/feeds');
-	await expect(page.getByRole('link', { name: 'Digests' }).first()).toHaveAttribute('href', '/digests');
-	await expect(page.getByRole('link', { name: 'Settings' }).first()).toHaveAttribute('href', '/settings');
-
-	for (const route of coreRoutes.slice(1)) {
-		await goToSection(page, route);
+	for (const route of routes) {
+		const link = page.locator('aside').getByRole('link', { name: route.label, exact: true });
+		await expect(link).toHaveAttribute('href', route.path);
+		await link.click();
+		await expect(page).toHaveURL(`http://127.0.0.1:4173${route.path}`);
 		await expect(page.locator('main').getByRole('heading', { name: route.heading })).toBeVisible();
 	}
 });
 
-test('captures light and dark snapshots for critical routes', async ({ page }) => {
-	test.setTimeout(120_000);
+test('old feeds URL redirects to source feeds', async ({ page }) => {
+	await page.goto('/feeds');
+	await expect(page).toHaveURL('http://127.0.0.1:4173/sources/feeds');
+	await expect(page.locator('main').getByRole('heading', { name: 'Feeds' })).toBeVisible();
+});
 
-	await page.goto('/');
-	await expect(page.locator('main').getByRole('heading', { name: 'Dashboard' })).toBeVisible();
-
-	for (const route of coreRoutes) {
-		if (route.heading !== 'Dashboard') {
-			await goToSection(page, route);
+for (const route of routes) {
+	test(`reviewed light and dark route snapshots: ${route.snapshot}`, async ({ page }) => {
+		await page.goto(route.path);
+		await expect(page.locator('main').getByRole('heading', { name: route.heading })).toBeVisible();
+		await expect(page.locator('main').getByText(route.content).first()).toBeVisible();
+		for (const theme of ['Light', 'Dark'] as const) {
+			await selectTheme(page, theme);
+			await expect(page).toHaveScreenshot(`${route.snapshot}-${theme.toLowerCase()}.png`, {
+				fullPage: true,
+				animations: 'disabled'
+			});
 		}
-		await expect(page.locator('main').getByRole('heading', { name: route.heading })).toBeVisible();
-
-		await setTheme(page, 'Light');
-		await expect(page).toHaveScreenshot(`${route.snapshotKey}-light.png`, {
-			fullPage: true,
-			animations: 'disabled'
-		});
-
-		await setTheme(page, 'Dark');
-		await expect(page).toHaveScreenshot(`${route.snapshotKey}-dark.png`, {
-			fullPage: true,
-			animations: 'disabled'
-		});
-	}
-});
+	});
+}
