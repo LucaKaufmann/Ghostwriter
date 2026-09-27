@@ -25,6 +25,7 @@ import com.example.epilogue.domain.model.TriggerType
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.IOException
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZonedDateTime
 import java.util.Date
@@ -67,11 +68,15 @@ class DailyDigestWorker @AssistedInject constructor(
         const val KEY_OCCURRENCE_DATE = "occurrence_date" // Explicit catch-up occurrence.
         private const val MAX_CONCURRENT_FEEDS = 3
 
-        // Periodic WorkManager intervals are elapsed-time based, so DST may
-        // start today's run before the configured local hour. A new attempt
-        // belongs to its execution day; retries reuse their persisted date.
-        internal fun periodicOccurrenceDate(now: ZonedDateTime): LocalDate =
-            now.toLocalDate()
+        const val KEY_PERIODIC_ANCHOR = "periodic_anchor_millis"
+        private const val PERIOD_MILLIS = 24L * 60 * 60 * 1000
+
+        /** Latest nominal 24-hour slot, independent of constrained execution time. */
+        internal fun periodicOccurrenceDate(now: ZonedDateTime, anchorMillis: Long): LocalDate {
+            val elapsed = (now.toInstant().toEpochMilli() - anchorMillis).coerceAtLeast(0)
+            val intended = Instant.ofEpochMilli(anchorMillis + (elapsed / PERIOD_MILLIS) * PERIOD_MILLIS)
+            return intended.atZone(now.zone).toLocalDate()
+        }
 
         /** Bounded fan-out, with results retained in the input feed order. */
         internal suspend fun <T, R> ingestInOrder(items: List<T>,
@@ -121,8 +126,14 @@ class DailyDigestWorker @AssistedInject constructor(
             val id = if (!isManual && period != null) {
                 val explicit = inputData.getString(KEY_OCCURRENCE_DATE)
                     ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-                val occurrence = (explicit ?: periodicOccurrenceDate(ZonedDateTime.now()))
-                    .toString()
+                val anchor = inputData.getLong(KEY_PERIODIC_ANCHOR, 0L)
+                // Unanchored legacy work is cancelled when schedules register.
+                // A worker already starting during that transition keeps the
+                // previous due-window interpretation for this last attempt.
+                val now = ZonedDateTime.now()
+                val occurrence = (explicit ?: if (anchor > 0) periodicOccurrenceDate(now, anchor)
+                    else if (now.hour < period.hour) now.toLocalDate().minusDays(1)
+                    else now.toLocalDate()).toString()
                 deliveryStore.startScheduledRun(period.name, occurrence, this.id.toString(),
                     retry = runAttemptCount > 0, regeneration = regeneration)
                     ?: return success("already_covered")

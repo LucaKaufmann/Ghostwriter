@@ -45,7 +45,8 @@ class DigestScheduler @Inject constructor(
 
     companion object {
         private const val TAG = "DigestScheduler"
-        private const val WORK_NAME_PREFIX = "daily_digest_"
+        private const val LEGACY_WORK_NAME_PREFIX = "daily_digest_"
+        private const val WORK_NAME_PREFIX = "daily_digest_anchored_"
         private const val CATCH_UP_WORK_NAME_PREFIX = "daily_digest_catchup_"
         private const val CATCH_UP_TAG = "catch_up"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
@@ -129,9 +130,11 @@ class DigestScheduler @Inject constructor(
      */
     fun schedulePeriod(period: DigestPeriod) {
         val initialDelay = calculateInitialDelay(period.hour, 0)
+        val anchor = System.currentTimeMillis() + initialDelay
 
         val inputData = Data.Builder()
             .putString(DailyDigestWorker.KEY_PERIOD, period.name)
+            .putLong(DailyDigestWorker.KEY_PERIODIC_ANCHOR, anchor)
             .build()
 
         val periodicWorkRequest = PeriodicWorkRequestBuilder<DailyDigestWorker>(
@@ -145,9 +148,12 @@ class DigestScheduler @Inject constructor(
             .addTag(period.name)
             .build()
 
+        // Replace old requests without an occurrence anchor once. KEEP retains
+        // the original anchor on later app launches, matching the 24-hour timer.
+        workManager.cancelUniqueWork("$LEGACY_WORK_NAME_PREFIX${period.name}")
         workManager.enqueueUniquePeriodicWork(
             getWorkName(period),
-            ExistingPeriodicWorkPolicy.UPDATE,
+            ExistingPeriodicWorkPolicy.KEEP,
             periodicWorkRequest
         )
 
@@ -161,6 +167,7 @@ class DigestScheduler @Inject constructor(
      * Cancels the scheduled digest for a specific period.
      */
     fun cancelPeriod(period: DigestPeriod) {
+        workManager.cancelUniqueWork("$LEGACY_WORK_NAME_PREFIX${period.name}")
         workManager.cancelUniqueWork(getWorkName(period))
         Log.i(TAG, "Cancelled ${period.name} digest")
     }
