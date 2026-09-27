@@ -1,6 +1,6 @@
 # Pull request index
 
-Checkpoint: 2026-09-27. All29 original package outcomes are published. All local combined gates passed; aggregate119 hosted review/checks remain active; see [project state](../../project-state.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md). Fifteen PRs were merged externally, including seven into prerequisite branches. The orchestrator has not merged or deployed.
+Checkpoint: 2026-09-27. All29 original package outcomes are published. All local combined gates passed, including final Android208/iOS183 tests; aggregate119 final hosted checks remain under inspection; see [project state](../../project-state.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md). Fifteen PRs were merged externally, including seven into prerequisite branches. The orchestrator has not merged or deployed.
 
 | PR | Outcome | State / base | Immutable evidence |
 |---|---|---|---|
@@ -48,7 +48,7 @@ Checkpoint: 2026-09-27. All29 original package outcomes are published. All local
 | [#115](https://github.com/LucaKaufmann/Ghostwriter/pull/115) | fix: address reviewed iOS sync follow-ups | Open; `codex/ios-sync-review-verified-base` | [c526cb6](https://github.com/LucaKaufmann/Ghostwriter/blob/c526cb64528ff148006cd6946ea230783f83553c/docs/work-packages/results/REVIEW-IOS-SYNC.md) |
 | [#116](https://github.com/LucaKaufmann/Ghostwriter/pull/116) | fix: recover interrupted local iOS generation | Open; `codex/review-followup-base` | [879f237](https://github.com/LucaKaufmann/Ghostwriter/blob/879f23774d558de9a592c0943e82e5039781ba67/docs/work-packages/results/IOS-RECOVERY.md) |
 | [#117](https://github.com/LucaKaufmann/Ghostwriter/pull/117) | fix: download one-off podcast audio from configured API | Open; `codex/review-followup-base` | [304f964](https://github.com/LucaKaufmann/Ghostwriter/blob/304f9648511e7999168a40886efd3a04e69aed01/docs/work-packages/results/REVIEW-HELPER-DOWNLOAD.md) |
-| [#118](https://github.com/LucaKaufmann/Ghostwriter/pull/118) | fix: cover Android scheduled delivery outcomes | Open; `codex/review-followup-base` | [43581ef](https://github.com/LucaKaufmann/Ghostwriter/blob/43581efcfb1494b035ade69cff0a353a722b9813/docs/work-packages/results/REVIEW-ANDROID-DELIVERY.md) |
+| [#118](https://github.com/LucaKaufmann/Ghostwriter/pull/118) | fix: cover Android scheduled delivery outcomes | Open; `codex/review-followup-base` | [661cbae](https://github.com/LucaKaufmann/Ghostwriter/blob/661cbae82af9a0f1528ee9eec61a868aa77e45f1/docs/work-packages/results/REVIEW-ANDROID-DELIVERY.md) |
 | [#119](https://github.com/LucaKaufmann/Ghostwriter/pull/119) | fix: integrate audited reliability improvements across Ghostwriter and Epilogue | Open; `main` | [cfa81a3](https://github.com/LucaKaufmann/Ghostwriter/blob/cfa81a3746d39048713a0a875bd2a9119240580e/docs/project-state.md) |
 
 Evidence links pin a recorded published PR head and its result document (or design/checkpoint). The continuity PR intentionally does not copy every implementation result or screenshot; these immutable links recover that evidence from any checkout. A published result can precede a later review correction: current acceptance and superseding evidence are recorded in project state and the disposition ledger.

@@ -146,3 +146,19 @@ The paginated74–117 sweep covered inline comments, review bodies and issue com
 - PR106/4116319541/542/546: current checkpoint now distinguishes historical CI snapshots, names the active recovery gate correctly, and links accepted compatibility/persistence contract. Root-owned updates are included in the final continuity checkpoint.
 
 Final scoped refresh74–118: no new inline/review-body/issue feedback;149current-head checks succeeded,24skipped,4running,0failed. PR83/84/85/88 also merged externally into prerequisite branches, bringing external merges to15; main stays86d3efd. Root has not merged remotely. Final aggregate and changed-head CI still need inspection.
+
+## Aggregate review closeout
+
+- PR119/4116430726 identified a temporary iOS URL edit/revert leaving the original binding suspended. Initial045cf734 preserved binding but independent Sol review found local resolution could consume old-server proposals while a different URL was configured. A configured-destination/generation guard and atomic URL/generation update are in progress; neither initial correction nor follow-up is accepted yet.
+- Root reproduced Android failed-cancellation receipt poisoning after the previous accepted118 revision. Correction16d63a6 removes settled failed/successful receipts, retains later pending operations and avoids enqueue on the failing attempt; a subsequent registration retries from durable WorkManager state. Focused12 passed; independent Sol review clean; published118/integrateddfb233c. Combined205 App/58shared passed+1intentional live skip/debugAPK, zero failures/errors (`final-android-pr118-cancel-acceptance.log`).
+- Aggregate119 source baseline d87115f has10 successful hosted checks and1 intentionally skipped image publication. This precedes the final Android/iOS corrections and is not acceptance of their hosted checks.
+
+- Final paginated74–119 sweep found PR106/4116431240: native handoff incorrectly described configured Android workers as local-only. Corrected against actual DailyDigestWorker skip and SettingsViewModel backend/manual routing; no behavior change.
+- PR118/4116469560: empty selected-period boot registration cancels asynchronously without awaiting persistence. Assigned the Android owner for cancellation-only success/failure/pending receipt regression and bounded correction; current205-test baseline does not verify the new fix.
+
+- PR119/4116430726 correction045cf734+8766275 accepted after independent Sol guard review returned no actionable findings. Configured URL/generation checks preserve proposals while B is saved; reverting unsynced B to A resumes valid actions without clearing integrity suspensions. Atomic MainActor preference/generation update closes the observation gap. Focused41/App87/Data68 passed; integratedc721b25/0de22a0. Combined workspace acceptance is running.
+
+- Final combined iOS App build and183/183 workspace unit tests passed0de22a0 (UI excluded; V3sim3B168BD4), logs `final-ios-url-{app-build,workspace-test}.log`. No later iOS source changes.
+- PR118/4116469560 reproduced at16d63a6 and fixed661cbae: boot awaits unselected cancellations with zero registrations, drains later pending receipts after a failure, and preserves ordinary registration's conservative failure handling. Scheduler15/15 passed; independent Sol review clean; integratedf53d7d4. Final combined Android gate is running.
+
+- Final Android acceptance:661cbae published118 and integratedf53d7d4; combined208/208 App tests and58 shared tests passed,1intentional live skip, zero failures/errors, debugAPK. Log `final-android-boot-closeout.log`. All currently identified actionable review findings are corrected; final publication/hosted refresh remains.
