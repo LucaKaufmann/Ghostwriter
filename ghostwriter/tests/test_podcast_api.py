@@ -578,7 +578,6 @@ def test_create_one_off_podcast_from_text_sources(client, monkeypatch, auth_head
             .where(DigestArticle.digest_id == digest_id)
             .order_by(DigestArticle.sort_order.asc())
         ).all()
-        first_article_id = articles[0].id
         feed = session.exec(select(Feed).where(Feed.url == "synthetic://one-off")).first()
 
     assert episode is not None
@@ -958,11 +957,13 @@ def test_one_off_digest_access_requires_episode_owner(client, monkeypatch):
     assert other_podcast_trigger.status_code == 404
 
 
-def test_orphaned_one_off_digest_fails_closed(client, monkeypatch):
+def test_one_off_owner_survives_last_episode_deletion(client, monkeypatch):
     monkeypatch.setattr(
         podcast_service, "_schedule_episode_task", lambda _episode_id: None
     )
-    _owner_id, owner_headers = _create_auth_headers_for_user("orphan_owner")
+    owner_id, owner_headers = _create_auth_headers_for_user("orphan_owner")
+    _other_id, other_headers = _create_auth_headers_for_user("orphan_other")
+    _admin_id, admin_headers = _create_auth_headers_for_user("orphan_admin")
 
     response = client.post(
         "/api/podcast/episodes/one-off",
@@ -985,6 +986,12 @@ def test_orphaned_one_off_digest_fails_closed(client, monkeypatch):
     payload = response.json()
     digest_id = payload["digest_ids"][0]
     episode_id = UUID(payload["episode_id"])
+    with Session(engine) as session:
+        digest = session.get(Digest, UUID(digest_id))
+        assert digest.one_off_owner_id == owner_id
+        filename = digest.filename
+
+    assert client.delete(f"/api/digests/{filename}", headers=owner_headers).status_code == 409
 
     with Session(engine) as session:
         episode = session.get(PodcastEpisode, episode_id)
@@ -996,13 +1003,118 @@ def test_orphaned_one_off_digest_fails_closed(client, monkeypatch):
         f"/api/digests/{digest_id}/articles",
         headers=owner_headers,
     )
-    assert articles.status_code == 404
+    assert articles.status_code == 200
 
     download = client.get(
         f"/api/digests/{digest_id}/download",
         headers=owner_headers,
     )
-    assert download.status_code == 404
+    assert download.status_code == 200
+    for headers in (other_headers, admin_headers):
+        assert client.get(f"/api/digests/{digest_id}/articles", headers=headers).status_code == 404
+        assert client.get(f"/api/digests/{digest_id}/download", headers=headers).status_code == 404
+        assert client.delete(f"/api/digests/{filename}", headers=headers).status_code == 404
+    for endpoint in ("/api/digests", "/api/digests/new", "/api/sync"):
+        response = client.get(endpoint, headers=owner_headers)
+        assert response.status_code == 200
+        assert digest_id not in response.text
+    assert client.delete(f"/api/digests/{filename}", headers=owner_headers).status_code == 200
+    with Session(engine) as session:
+        assert session.get(Digest, UUID(digest_id)) is None
+
+
+def test_zero_article_one_off_owner_is_private_without_episode(client):
+    owner_id, owner_headers = _create_auth_headers_for_user("empty_oneoff_owner")
+    _other_id, other_headers = _create_auth_headers_for_user("empty_oneoff_other")
+    private_id, public_id = uuid4(), uuid4()
+    with Session(engine) as session:
+        session.add(Digest(
+            id=private_id, filename=f"{private_id}.epub", period="manual",
+            status="failed", one_off_owner_id=owner_id,
+        ))
+        session.add(Digest(
+            id=public_id, filename=f"{public_id}.epub", period="manual",
+            status="failed",
+        ))
+        session.commit()
+    assert client.get(f"/api/digests/{private_id}/status", headers=owner_headers).status_code == 200
+    assert client.get(f"/api/digests/{private_id}/articles", headers=owner_headers).json()["articles"] == []
+    assert client.get(f"/api/digests/{private_id}/status", headers=other_headers).status_code == 404
+    listed = client.get("/api/digests", headers=owner_headers).json()
+    listed_ids = {item["id"] for item in listed}
+    assert str(private_id) not in listed_ids and str(public_id) in listed_ids
+    assert client.delete(f"/api/digests/{private_id}.epub", headers=owner_headers).status_code == 200
+
+
+def test_unknown_legacy_one_off_digest_remains_private(client):
+    _owner_id, owner_headers = _create_auth_headers_for_user("unknown_oneoff_owner")
+    _other_id, other_headers = _create_auth_headers_for_user("unknown_oneoff_other")
+    digest_id, _ = _create_digest_with_articles(
+        article_count=1, feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    for headers in (owner_headers, other_headers):
+        assert client.get(f"/api/digests/{digest_id}/articles", headers=headers).status_code == 404
+        assert client.delete(f"/api/digests/{digest_id}", headers=headers).status_code == 404
+    assert str(digest_id) not in client.get("/api/digests", headers=owner_headers).text
+
+
+def test_conflicting_legacy_episode_owners_fail_closed(client):
+    owner_id, owner_headers = _create_auth_headers_for_user("conflict_oneoff_owner")
+    other_id, other_headers = _create_auth_headers_for_user("conflict_oneoff_other")
+    digest_id, _ = _create_digest_with_articles(
+        article_count=1, feed_url="synthetic://one-off",
+        feed_title=ONE_OFF_SOURCE_LABEL,
+    )
+    with Session(engine) as session:
+        for user_id in (owner_id, other_id):
+            session.add(PodcastEpisode(
+                digest_ids=[str(digest_id)], trigger="one_off",
+                user_id=user_id, status="failed",
+            ))
+        session.commit()
+    for headers in (owner_headers, other_headers):
+        assert client.get(f"/api/digests/{digest_id}/status", headers=headers).status_code == 404
+
+
+def test_unowned_zero_article_legacy_reference_stays_out_of_lists(client):
+    _owner_id, headers = _create_auth_headers_for_user("unowned_empty_oneoff")
+    digest_id = uuid4()
+    with Session(engine) as session:
+        session.add(Digest(
+            id=digest_id, filename=f"{digest_id}.epub", period="manual", status="failed",
+        ))
+        session.add(PodcastEpisode(
+            digest_ids=[str(digest_id)], trigger="one_off", user_id=None, status="failed",
+        ))
+        session.commit()
+    assert client.get(f"/api/digests/{digest_id}/status", headers=headers).status_code == 404
+    assert str(digest_id) not in client.get("/api/digests", headers=headers).text
+    assert str(digest_id) not in client.get("/api/sync", headers=headers).text
+
+
+def test_one_off_requeue_cannot_replace_durable_owner(client):
+    owner_id, _owner_headers = _create_auth_headers_for_user("requeue_durable_owner")
+    other_id, _other_headers = _create_auth_headers_for_user("requeue_other")
+    digest_id = uuid4()
+    with Session(engine) as session:
+        session.add(Digest(
+            id=digest_id, filename=f"{digest_id}.epub", period="manual",
+            status="completed", one_off_owner_id=owner_id,
+        ))
+        session.commit()
+        with pytest.raises(ValueError, match="Digest not found"):
+            podcast_service.queue_episode_generation(
+                session, digest_id, user_id=other_id, trigger="one_off",
+            )
+        session.rollback()
+        assert session.get(Digest, digest_id).one_off_owner_id == owner_id
+        assert all(
+            str(digest_id) not in episode.digest_ids
+            for episode in session.exec(select(PodcastEpisode).where(
+                PodcastEpisode.trigger == "one_off"
+            )).all()
+        )
 
 
 def test_one_off_episode_access_requires_episode_owner(client, monkeypatch):

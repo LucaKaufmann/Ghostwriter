@@ -25,7 +25,6 @@ from app.core.database import get_session
 from app.core.security import get_current_user, security, verify_api_key
 from app.models.client_config import ClientConfig
 from app.models.digest import Digest, DigestArticle, DigestRead
-from app.models.podcast_episode import PodcastEpisode
 from app.services.content_processor import ExtractedArticle
 from app.services.digest_content_formatter import format_digest_content_to_html
 from app.services.digest_deletion import (
@@ -183,20 +182,6 @@ def _to_digest_read(digest: Digest, pdf_enabled: bool) -> DigestRead:
     )
 
 
-def _one_off_episode_for_digest(
-    session: Session,
-    digest_id: UUID,
-) -> PodcastEpisode | None:
-    digest_id_str = str(digest_id)
-    episodes = session.exec(
-        select(PodcastEpisode).where(PodcastEpisode.trigger == "one_off")
-    ).all()
-    return next(
-        (episode for episode in episodes if digest_id_str in (episode.digest_ids or [])),
-        None,
-    )
-
-
 async def _ensure_digest_access(
     *,
     session: Session,
@@ -208,17 +193,13 @@ async def _ensure_digest_access(
     digest = session.get(Digest, digest_id)
     if digest is None or (digest.status == "deleting" and not allow_deleting):
         raise HTTPException(status_code=404, detail="Digest not found")
-    episode = _one_off_episode_for_digest(session, digest_id)
-    if episode is None:
-        if podcast_service.is_one_off_digest(session, digest_id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Digest not found",
-            )
+    if not podcast_service.is_one_off_digest(session, digest_id):
         return
-
+    owner_id = podcast_service.one_off_owner_id(session, digest)
+    if owner_id is None:
+        raise HTTPException(status_code=404, detail="Digest not found")
     current_user = await get_current_user(request, credentials, session)
-    if episode.user_id != current_user.id:
+    if owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Digest not found",

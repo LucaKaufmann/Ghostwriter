@@ -39,7 +39,7 @@ from app.core.security import (
     verify_api_key_with_session,
 )
 from app.models.article_feedback import ArticleFeedbackRead, ArticleFeedbackUpsert
-from app.models.digest import DigestArticle
+from app.models.digest import Digest, DigestArticle
 from app.models.podcast_episode import PodcastEpisode, PodcastEpisodeArticleRead
 from app.models.podcast_preferences import (
     PodcastPreferences,
@@ -433,11 +433,13 @@ async def _ensure_one_off_digest_episode_access(
 ) -> None:
     if not podcast_service.is_one_off_digest(session, digest_id):
         return
-
-    episode = _episode_for_digest(session, digest_id)
-    if episode is None:
+    digest = session.get(Digest, digest_id)
+    owner_id = podcast_service.one_off_owner_id(session, digest) if digest else None
+    if owner_id is None:
         raise HTTPException(status_code=404, detail="Podcast episode not found")
-    await _ensure_one_off_episode_access(request, session, episode)
+    current_user = await _current_user_for_request(request, session)
+    if owner_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Podcast episode not found")
 
 
 async def _resolve_podcast_preferences_user_id(
@@ -451,13 +453,18 @@ async def _resolve_podcast_preferences_user_id(
     except HTTPException as exc:
         settings = get_settings()
         has_users = session.exec(select(User)).first() is not None
-        if exc.status_code == 401 and not has_users:
+        if exc.status_code in (401, 403) and not has_users:
             token = None
             if credentials and credentials.credentials:
                 token = credentials.credentials
             else:
                 token = request.headers.get("x-api-key")
-            if not settings.api_key or token == settings.api_key:
+            if (exc.status_code == 401 and not settings.api_key) or (
+                settings.api_key and token == settings.api_key
+                and (exc.status_code == 401 or exc.detail == (
+                    "User account required for this endpoint. Please set up an admin account."
+                ))
+            ):
                 return None
         raise
 
