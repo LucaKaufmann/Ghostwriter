@@ -191,9 +191,9 @@ fun FeedManagerScreen(
     if (uiState.showAddDialog) {
         AddFeedDialog(
             onDismiss = { viewModel.hideAddDialog() },
+            error = uiState.error,
             onConfirm = { url, name, mode, maxArticles, isEnabled ->
                 viewModel.addFeed(url, name, mode, maxArticles, isEnabled)
-                viewModel.hideAddDialog()
             }
         )
     }
@@ -464,6 +464,7 @@ private val maxArticleOptions = listOf(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 0)
 @Composable
 fun AddFeedDialog(
     onDismiss: () -> Unit,
+    error: String? = null,
     onConfirm: (
         url: String,
         name: String,
@@ -489,8 +490,13 @@ fun AddFeedDialog(
                     onValueChange = { url = it },
                     label = { Text("Feed URL") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    isError = error != null
                 )
+                if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall)
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name,

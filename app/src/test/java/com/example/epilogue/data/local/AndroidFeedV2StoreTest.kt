@@ -9,6 +9,7 @@ import com.example.epilogue.shared.ghostwriter.FeedChangesV2Response
 import com.example.epilogue.shared.ghostwriter.FeedSnapshotV2
 import com.example.epilogue.shared.sync.FeedV2Binding
 import com.example.epilogue.shared.sync.FeedV2StoreResult
+import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -128,6 +129,72 @@ class AndroidFeedV2StoreTest {
             remote("Stale", 4)) is FeedV2StoreResult.Success)
         assertEquals(5L, database.feedDao().getFeedByUrl(url)!!.serverVersion)
         assertTrue(database.feedMutationDao().byId(sent.opId)!!.serverSnapshotJson!!.contains("Web"))
+        store.endSyncRun(token)
+        database.close()
+    }
+
+    @Test fun `newer pull refreshes conflict before keep server or apply mine`() = runBlocking {
+        for (action in listOf("keep_server", "apply_mine")) {
+            context.deleteDatabase(name)
+            configured = true
+            val database = db()
+            val store = AndroidFeedV2Store(database, settings)
+            val (token, binding) = bind(store, listOf(remote("Original", 4)), 4)
+            store.saveLocal(feed("Mine"))
+            val sent = value(store.loadPendingMutations(token, binding, 100)).single()
+            value(store.recordConflict(token, binding, sent.opId, sent.sentRevision, remote("Web 5", 5)))
+            value(store.applyServerChangesAndCursor(token, binding,
+                FeedChangesV2Response(serverId, 6, listOf(remote("Web 6", 6)))))
+            assertTrue(database.feedMutationDao().byId(sent.opId)!!.serverSnapshotJson!!.contains("Web 6"))
+            assertTrue(store.resolve(sent.opId, action))
+            if (action == "keep_server") {
+                assertEquals("Web 6", database.feedDao().getFeedByUrl(url)!!.name)
+                assertEquals(6L, database.feedDao().getFeedByUrl(url)!!.serverVersion)
+            } else {
+                val replacement = value(store.loadPendingMutations(token, binding, 100)).single()
+                assertEquals(6L, replacement.payload.baseVersion)
+                assertEquals("Mine", replacement.payload.fields!!.title)
+            }
+            store.endSyncRun(token)
+            database.close()
+        }
+    }
+
+    @Test fun `initial match to legacy proposal rebases later edit`() = runBlocking {
+        context.deleteDatabase(name)
+        val database = db()
+        val store = AndroidFeedV2Store(database, settings)
+        store.saveLocal(feed("Legacy"))
+        val legacy = database.feedMutationDao().forUrl(url).single()
+        database.feedMutationDao().update(legacy.copy(state = "legacy_unresolved"))
+        store.saveLocal(feed("Edited"))
+        configured = true
+        val (token, binding) = bind(store, listOf(remote("Legacy", 5)), 5)
+        assertNull(database.feedMutationDao().byId(legacy.opId))
+        val successor = database.feedMutationDao().forUrl(url).single()
+        assertEquals("queued", successor.state)
+        assertEquals(5L, successor.baseVersion)
+        assertEquals("Edited", database.feedDao().getFeedByUrl(url)!!.name)
+        assertEquals(5L, value(store.loadPendingMutations(token, binding, 100)).single().payload.baseVersion)
+        store.endSyncRun(token)
+        database.close()
+    }
+
+    @Test fun `initial match to successor does not send null base create`() = runBlocking {
+        context.deleteDatabase(name)
+        val database = db()
+        val store = AndroidFeedV2Store(database, settings)
+        store.saveLocal(feed("Legacy"))
+        val legacy = database.feedMutationDao().forUrl(url).single()
+        database.feedMutationDao().update(legacy.copy(state = "legacy_unresolved"))
+        store.saveLocal(feed("Edited"))
+        configured = true
+        val (token, binding) = bind(store, listOf(remote("Edited", 5)), 5)
+        assertEquals("needs_resolution", database.feedMutationDao().byId(legacy.opId)!!.state)
+        assertTrue(value(store.loadPendingMutations(token, binding, 100)).isEmpty())
+        assertTrue(store.resolve(legacy.opId, "keep_server"))
+        assertTrue(value(store.loadPendingMutations(token, binding, 100)).isEmpty())
+        assertEquals("needs_resolution", database.feedMutationDao().forUrl(url).single().state)
         store.endSyncRun(token)
         database.close()
     }
@@ -280,8 +347,10 @@ class AndroidFeedV2StoreTest {
         val sent = value(store.loadPendingMutations(token, binding, 100)).single()
         store.beforeDestinationChange("https://two.invalid")
         destination = "https://two.invalid"
+        store.recordOutcome(FeedSyncV2Outcome.Failed("pull", "stale binding"))
         assertEquals(binding.destination, store.currentDestination())
         assertTrue(database.feedSyncStateDao().active()!!.suspended)
+        assertEquals("server_changed", database.feedSyncStateDao().active()!!.lastOutcome)
         assertEquals(FeedV2StoreResult.StaleBinding,
             store.acknowledge(token, binding, sent.opId, sent.sentRevision, remote("Pending", 1)))
         assertEquals(FeedV2StoreResult.StaleBinding,
