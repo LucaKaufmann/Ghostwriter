@@ -67,8 +67,44 @@ const BASE_URL = '/api';
 
 class ApiClient {
 	private token: string | null = null;
+	private sessionRevision = 0;
+	private unauthorizedHandler: ((token: string) => void) | null = null;
+
+	// A request from a previous session must never settle into a mutation or a
+	// direct download callback. Rejecting it would still run onError handlers.
+	private async forSession<T>(revision: number, operation: () => Promise<T>): Promise<T> {
+		try {
+			const result = await operation();
+			if (revision !== this.sessionRevision) return new Promise<never>(() => {});
+			return result;
+		} catch (error) {
+			if (revision !== this.sessionRevision) return new Promise<never>(() => {});
+			throw error;
+		}
+	}
+
+	onUnauthorized(handler: (token: string) => void): () => void {
+		this.unauthorizedHandler = handler;
+		return () => {
+			if (this.unauthorizedHandler === handler) this.unauthorizedHandler = null;
+		};
+	}
+
+	private async responseError(response: Response, token: string | null, revision: number): Promise<ApiError> {
+		let error: APIError;
+		try {
+			error = await response.json();
+		} catch {
+			error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+		}
+		if (response.status === 401 && token && revision === this.sessionRevision) {
+			this.unauthorizedHandler?.(token);
+		}
+		return new ApiError(response.status, error);
+	}
 
 	setToken(token: string | null) {
+		this.sessionRevision++;
 		this.token = token;
 		if (token) {
 			localStorage.setItem('ghostwriter_token', token);
@@ -93,6 +129,7 @@ class ApiClient {
 		options: RequestInit = {}
 	): Promise<T> {
 		const token = this.getToken();
+		const revision = this.sessionRevision;
 		const headers: Record<string, string> = {
 			'Content-Type': 'application/json',
 			...(options.headers as Record<string, string> || {})
@@ -102,25 +139,21 @@ class ApiClient {
 			headers['Authorization'] = `Bearer ${token}`;
 		}
 
-		const response = await fetch(`${BASE_URL}${endpoint}`, {
-			...options,
-			headers
-		});
+		return this.forSession(revision, async () => {
+			const response = await fetch(`${BASE_URL}${endpoint}`, {
+				...options,
+				headers
+			});
 
-		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+			if (!response.ok) {
+				throw await this.responseError(response, token, revision);
 			}
-			throw new ApiError(response.status, error);
-		}
 
-		// Handle empty responses (204 No Content, etc.)
-		const text = await response.text();
-		if (!text) return {} as T;
-		return JSON.parse(text);
+			// Handle empty responses (204 No Content, etc.)
+			const text = await response.text();
+			if (!text) return {} as T;
+			return JSON.parse(text);
+		});
 	}
 
 	private async download(
@@ -128,24 +161,21 @@ class ApiClient {
 		filename: string
 	): Promise<{ blob: Blob; filename: string }> {
 		const token = this.getToken();
+		const revision = this.sessionRevision;
 		const headers: Record<string, string> = {};
 		if (token) {
 			headers['Authorization'] = `Bearer ${token}`;
 		}
 
-		const response = await fetch(`${BASE_URL}${endpoint}`, { headers });
-		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+		return this.forSession(revision, async () => {
+			const response = await fetch(`${BASE_URL}${endpoint}`, { headers });
+			if (!response.ok) {
+				throw await this.responseError(response, token, revision);
 			}
-			throw new ApiError(response.status, error);
-		}
 
-		const blob = await response.blob();
-		return { blob, filename };
+			const blob = await response.blob();
+			return { blob, filename };
+		});
 	}
 
 	private resolveFilenameFromHeaders(headers: Headers, fallback: string): string {
@@ -170,13 +200,7 @@ class ApiClient {
 			body: JSON.stringify(data)
 		});
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, null, this.sessionRevision);
 		}
 		return response.json();
 	}
@@ -188,13 +212,7 @@ class ApiClient {
 			body: JSON.stringify(data)
 		});
 		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
-			}
-			throw new ApiError(response.status, error);
+			throw await this.responseError(response, null, this.sessionRevision);
 		}
 		return response.json();
 	}
@@ -235,6 +253,7 @@ class ApiClient {
 		data: KoreaderPluginDownloadRequest
 	): Promise<{ blob: Blob; filename: string }> {
 		const token = this.getToken();
+		const revision = this.sessionRevision;
 		const headers: Record<string, string> = {
 			'Content-Type': 'application/json'
 		};
@@ -243,25 +262,21 @@ class ApiClient {
 			headers['Authorization'] = `Bearer ${token}`;
 		}
 
-		const response = await fetch(`${BASE_URL}/plugins/koreader/download`, {
-			method: 'POST',
-			headers,
-			body: JSON.stringify(data)
-		});
+		return this.forSession(revision, async () => {
+			const response = await fetch(`${BASE_URL}/plugins/koreader/download`, {
+				method: 'POST',
+				headers,
+				body: JSON.stringify(data)
+			});
 
-		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+			if (!response.ok) {
+				throw await this.responseError(response, token, revision);
 			}
-			throw new ApiError(response.status, error);
-		}
 
-		const blob = await response.blob();
-		const filename = this.resolveFilenameFromHeaders(response.headers, 'ghostwriter.koplugin.zip');
-		return { blob, filename };
+			const blob = await response.blob();
+			const filename = this.resolveFilenameFromHeaders(response.headers, 'ghostwriter.koplugin.zip');
+			return { blob, filename };
+		});
 	}
 
 	// ============ Health & Config ============
@@ -321,25 +336,22 @@ class ApiClient {
 
 	async uploadManualCover(file: File): Promise<void> {
 		const token = this.getToken();
+		const revision = this.sessionRevision;
 		const formData = new FormData();
 		formData.append('file', file);
 		const headers: Record<string, string> = {};
 		if (token) headers['Authorization'] = `Bearer ${token}`;
 
-		const response = await fetch(`${BASE_URL}/config/covers/upload`, {
-			method: 'POST',
-			headers,
-			body: formData
-		});
-		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+		return this.forSession(revision, async () => {
+			const response = await fetch(`${BASE_URL}/config/covers/upload`, {
+				method: 'POST',
+				headers,
+				body: formData
+			});
+			if (!response.ok) {
+				throw await this.responseError(response, token, revision);
 			}
-			throw new ApiError(response.status, error);
-		}
+		});
 	}
 
 	async activateManualCover(id: string): Promise<void> {
@@ -702,27 +714,24 @@ class ApiClient {
 
 	async uploadPodcastFeedArtwork(file: File): Promise<PodcastArtworkUploadResponse> {
 		const token = this.getToken();
+		const revision = this.sessionRevision;
 		const formData = new FormData();
 		formData.append('file', file);
 		const headers: Record<string, string> = {};
 		if (token) headers['Authorization'] = `Bearer ${token}`;
 
-		const response = await fetch(`${BASE_URL}/podcast/feed/artwork`, {
-			method: 'POST',
-			headers,
-			body: formData
-		});
-		if (!response.ok) {
-			let error: APIError;
-			try {
-				error = await response.json();
-			} catch {
-				error = { detail: `HTTP ${response.status}: ${response.statusText}` };
+		return this.forSession(revision, async () => {
+			const response = await fetch(`${BASE_URL}/podcast/feed/artwork`, {
+				method: 'POST',
+				headers,
+				body: formData
+			});
+			if (!response.ok) {
+				throw await this.responseError(response, token, revision);
 			}
-			throw new ApiError(response.status, error);
-		}
 
-		return response.json();
+			return response.json();
+		});
 	}
 
 	// ============ Media: YouTube ============
@@ -815,7 +824,7 @@ export class ApiError extends Error {
 	}
 
 	get isUnauthorized(): boolean {
-		return this.status === 401 || this.status === 403;
+		return this.status === 401;
 	}
 
 	get isNotFound(): boolean {

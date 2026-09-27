@@ -1,6 +1,6 @@
 # Pull request index
 
-Checkpoint: 2026-09-27. All29 original package outcomes are published. Review follow-ups and aggregate verification remain active; see [project state](../../project-state.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md). Eight PRs were merged externally, including three into prerequisite branches. The orchestrator has not merged or deployed.
+Checkpoint: 2026-09-27. All29 original package outcomes are published. Review follow-ups and aggregate verification remain active; see [project state](../../project-state.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md). Eleven PRs were merged externally, including three into prerequisite branches. The orchestrator has not merged or deployed.
 
 | PR | Outcome | State / base |
 |---|---|---|
@@ -12,12 +12,12 @@ Checkpoint: 2026-09-27. All29 original package outcomes are published. Review fo
 | [#79](https://github.com/LucaKaufmann/Ghostwriter/pull/79) | build: verify native toolchains and simulator tests | Merged externally; `main` |
 | [#80](https://github.com/LucaKaufmann/Ghostwriter/pull/80) | docs: preserve reliability backlog and project checkpoints | Merged externally; `main` |
 | [#81](https://github.com/LucaKaufmann/Ghostwriter/pull/81) | docs: define safe digest retention and retry behavior | Merged externally; `codex/env-01-hermetic-tests` |
-| [#82](https://github.com/LucaKaufmann/Ghostwriter/pull/82) | docs: define feed sync and native delivery contracts | Open; `main` |
+| [#82](https://github.com/LucaKaufmann/Ghostwriter/pull/82) | docs: define feed sync and native delivery contracts | Merged externally; `main` |
 | [#83](https://github.com/LucaKaufmann/Ghostwriter/pull/83) | fix: control Ghostwriter container build inputs | Open; `codex/env-01-hermetic-tests` |
 | [#84](https://github.com/LucaKaufmann/Ghostwriter/pull/84) | fix: isolate Wallabag tokens by service configuration | Open; `codex/ingest-01-source-editions` |
 | [#85](https://github.com/LucaKaufmann/Ghostwriter/pull/85) | fix: preserve Android digest artifacts through their lifecycle | Open; `codex/build-native-baseline` |
-| [#86](https://github.com/LucaKaufmann/Ghostwriter/pull/86) | fix: recover expired web sessions and discard stale downloads | Open; `main` |
-| [#87](https://github.com/LucaKaufmann/Ghostwriter/pull/87) | fix: restrict KOReader cleanup to verified owned downloads | Open; `main` |
+| [#86](https://github.com/LucaKaufmann/Ghostwriter/pull/86) | fix: recover expired web sessions and discard stale downloads | Merged externally; `main` |
+| [#87](https://github.com/LucaKaufmann/Ghostwriter/pull/87) | fix: restrict KOReader cleanup to verified owned downloads | Merged externally; `main` |
 | [#88](https://github.com/LucaKaufmann/Ghostwriter/pull/88) | ci: run Ghostwriter backend helper and plugin regressions | Open; `codex/ci-01-verified-base` |
 | [#89](https://github.com/LucaKaufmann/Ghostwriter/pull/89) | fix: bind Android generation observation to the current work | Open; `codex/android-files-unique-artifacts` |
 | [#90](https://github.com/LucaKaufmann/Ghostwriter/pull/90) | fix: bound and validate feed and article fetches | Open; `codex/env-01-hermetic-tests` |
