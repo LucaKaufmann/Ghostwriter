@@ -1093,6 +1093,29 @@ def test_unowned_zero_article_legacy_reference_stays_out_of_lists(client):
     assert str(digest_id) not in client.get("/api/sync", headers=headers).text
 
 
+@pytest.mark.parametrize("spelling", ["canonical", "braces", "urn", "upper_hex"])
+@pytest.mark.parametrize("article_count", [0, 1])
+def test_legacy_one_off_uuid_spellings_are_excluded_from_lists_and_sync(
+    client, spelling, article_count,
+):
+    _owner, headers = _create_auth_headers_for_user(f"uuid_{spelling}_{article_count}")
+    digest_id, _ = _create_digest_with_articles(article_count=article_count)
+    reference = {
+        "canonical": str(digest_id), "braces": "{" + str(digest_id) + "}",
+        "urn": digest_id.urn, "upper_hex": digest_id.hex.upper(),
+    }[spelling]
+    with Session(engine) as session:
+        session.add(PodcastEpisode(digest_ids=[reference], trigger="one_off",
+                                   user_id=None, status="failed"))
+        session.commit()
+        assert podcast_service.is_one_off_digest(session, digest_id)
+    assert client.get(f"/api/digests/{digest_id}/articles", headers=headers).status_code == 404
+    for endpoint in ("/api/digests", "/api/digests/new", "/api/sync"):
+        response = client.get(endpoint, headers=headers)
+        assert response.status_code == 200
+        assert str(digest_id) not in response.text
+
+
 def test_one_off_requeue_cannot_replace_durable_owner(client):
     owner_id, _owner_headers = _create_auth_headers_for_user("requeue_durable_owner")
     other_id, _other_headers = _create_auth_headers_for_user("requeue_other")

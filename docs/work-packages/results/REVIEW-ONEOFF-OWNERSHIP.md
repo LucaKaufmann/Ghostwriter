@@ -16,4 +16,8 @@ The podcast preferences fallback also accepts the exact account-required 403 ret
 
 ## Limits
 
-An unclassifiable historical one-off digest without a live episode reference or durable owner remains private and cannot be recovered by guessing. This change does not expose the owner in API responses or alter normal digest tenancy.
+A historical digest with no owner, episode reference, or synthetic article marker cannot be classified from remaining evidence; it is left untouched rather than assigned a guessed owner. A recognizable private orphan remains inaccessible. This change does not expose the owner in API responses or alter normal digest tenancy.
+
+Final full suite at a763f49 passed432/432 before this review correction. Review found differing legacy UUID spellings in direct-access and installation-wide filters; the filter now normalizes accepted wrappers and excludes conservatively. New fixtures cover canonical/braced/URN/uppercase-hex references with and without articles.
+
+UUID-normalization correction: focused podcast API, migration and legacy-key suite108passed; direct access/list/new/sync fixtures cover zero/nonzero article digests under canonical, brace, URN and uppercase-hex references.
