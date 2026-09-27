@@ -1,6 +1,6 @@
 # Reliability backlog: merged main verification
 
-Checkpoint: 2026-09-28 (Europe/Zurich). Verification complete. The final documentation and test-fixture checkpoint preserves the verified product source.
+Checkpoint: 2026-09-28 (Europe/Zurich). Verification complete. [PR122](https://github.com/LucaKaufmann/Ghostwriter/pull/122) records the final documentation and test-fixture checkpoint, preserving verified production behavior.
 
 ## Scope and merge result
 
