@@ -96,3 +96,20 @@ Refresh through PR114: PR110/113/114 have no inline findings. PR111 comments4116
 - PR116 resolves107 and IOS-RECOVERY. Final context-staleness finding did not reproduce using the exact preloaded repository/reconciliation/coverage path on iOS18.6. Missing-EPUB automatic retry produces empty while retaining prior delivery claims; this is intentional under the confirmed deliver-once policy, verified with actual generator and explicit regeneration. Both dispositions and tests are in IOS-RECOVERY.md; no clean-review claim for those two findings.
 - PR110 currentcd2f83e and PR1129f1d393 include the verified liveV3 coordinator fixture; old iOS CI failures were on previous heads.
 - Android scheduled-coverage migration remains under correction: pending legacy WorkManager work must be updated without cancellation or dropped occurrences. Room11 owns the only new Android schema change.
+
+## Closeout refresh through PR117
+
+- PR86 issue comment5857583055 is fixed by PR117/304f964. Known episode downloads use the configured API origin and canonical validated UUID; arbitrary advertised origins never receive bearer credentials. Twenty transport tests passed on Python3.11 and integrated Python3.14; independent Sol review clean.
+- PR115 comment4116111625 exposed delete-then-re-add visibility. The first correction0cfba92 passed38 focused/79 App tests but independent review found unchanged re-add payloads were empty and rejected by the shared serializer. The owner is fixing and verifying the complete acknowledgement/serialization path before acceptance.
+- Android64ccb06 review: accept the finding that repeat registration re-anchors delayed periodic work incorrectly. A durable request marker will retain the original occurrence anchor. Reject migration from the transient `daily_digest_anchored_*` name: that intermediate implementation was never published or installed and no persisted requests exist; compatibility code would manufacture unsupported state. Final correction/review remains pending.
+
+## Newly refreshed comments after PR118
+
+The paginated74–117 sweep covered inline comments, review bodies and issue comments. Its current-head CI snapshot had149 successful checks,24 skipped,0 failed/pending; absent rollups were not counted as passing coverage.
+
+- PR112/4116133533: correction-dialog defaults can become stale after a concurrent server refresh. Android owner is reproducing/fixing preservation of edited fields and refresh of untouched fields.
+- PR111/4116133843: restore shares the Add form mutation pending state. Web owner is separating those operations and adding a delayed-response browser regression.
+- PR116/4116125704: production scheduler captures Calendar.current. iOS owner will use an updating production calendar with deterministic injected-calendar tests.
+- PR106/4116156533 and6535: contract now requires the Room singleton transaction boundary and includes typed ServerChanged; existing implementation already does both.
+- PR106/4116088623 and8626: corrected the contract to allocate ArticleDelivery to V3 and preserve retryable attempt markers after cancellation. These were documentation contradictions, not new schema changes.
+- PR106/4116156530: removed “optional” from required native read-only compatibility preview and made the layer boundary explicit. Android FeedViewModel.previewOlderServerFeeds fetches legacy changes; iOS GhostwriterSyncCoordinator.previewOlderServerFeeds fetches the legacy list, each exposed by the upgrade UI. Shared v2 deliberately returns ServerUpgradeRequired without importing unversioned rows. Source inspection verifies those routes; this is not a new automatic legacy synchronization feature or a new end-to-end fallback test claim.

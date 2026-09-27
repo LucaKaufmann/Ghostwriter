@@ -47,7 +47,9 @@ Checkpoint: 2026-09-27. All29 original package outcomes are published. Review fo
 | [#114](https://github.com/LucaKaufmann/Ghostwriter/pull/114) | fix: retain private digest ownership after episode deletion | Open; `codex/review-followup-base` |
 | [#115](https://github.com/LucaKaufmann/Ghostwriter/pull/115) | fix: address reviewed iOS sync follow-ups | Open; `codex/ios-sync-review-verified-base` |
 | [#116](https://github.com/LucaKaufmann/Ghostwriter/pull/116) | fix: recover interrupted local iOS generation | Open; `codex/review-followup-base` |
+| [#117](https://github.com/LucaKaufmann/Ghostwriter/pull/117) | fix: download one-off podcast audio from configured API | Open; `codex/review-followup-base` |
+| [#118](https://github.com/LucaKaufmann/Ghostwriter/pull/118) | fix: cover Android scheduled delivery outcomes | Open; `codex/review-followup-base` |
 
-Android scheduled coverage, the podcast helper download follow-up, and the final aggregate PR remain to be published. PR115 has a new queued-re-add correction under development. Refresh the index after those changes.
+Only the final aggregate PR remains to be created. Updated corrections to111/112/115/116 remain under verification; see the current state and review ledger.
 
 Native podcast parity, positioning, multi-tenant hosting and DEPLOY-01 remain outside this scope. Provider calls were mocked; no release/production certification is implied.

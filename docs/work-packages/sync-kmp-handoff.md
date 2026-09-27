@@ -77,7 +77,7 @@ sealed class FeedV2RemoteResult<out T> {
 }
 ```
 
-Implement those methods with the real Ktor `HttpClient` and `@SerialName` DTOs. First/full pull omits both query parameters; bound incremental pull sends both. Mutation always sends observed instance ID. Parse bounded/safe FastAPI `detail.code` on non-2xx before generic `GhostwriterApiException` mapping: `409/server_changed` suspends binding, v2 `404/405` is `ServerUpgradeRequired` (optional v1 **read-only preview**, no v1 write or cursor/ack application), auth and 422 are failures. HTTP 200 is still untrusted until response instance and outcome identities are checked. Do not route these through `GhostwriterRepository.syncFeeds` or Swift `GhostwriterClient.syncFeeds`.
+Implement those methods with the real Ktor `HttpClient` and `@SerialName` DTOs. First/full pull omits both query parameters; bound incremental pull sends both. Mutation always sends observed instance ID. Parse bounded/safe FastAPI `detail.code` on non-2xx before generic `GhostwriterApiException` mapping: `409/server_changed` suspends binding, v2 `404/405` is `ServerUpgradeRequired` (native clients must provide a v1 **read-only preview** on explicit user request; the shared v2 use case returns the upgrade outcome without applying unversioned rows, and no v1 write or cursor/ack application is allowed), auth and 422 are failures. HTTP 200 is still untrusted until response instance and outcome identities are checked. Do not route these through `GhostwriterRepository.syncFeeds` or Swift `GhostwriterClient.syncFeeds`.
 
 The native store port should expose semantic **atomic operations**, rather than a KMP callback pretending to be a Room/SwiftData transaction:
 
