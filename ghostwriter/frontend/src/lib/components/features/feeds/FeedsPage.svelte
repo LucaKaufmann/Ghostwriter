@@ -127,9 +127,9 @@
 		const detail = err instanceof ApiError && typeof err.error.detail !== 'string' ? err.error.detail : null;
 		if (detail?.current?.kind === 'tombstone' &&
 			offerConflict(err, 'restoring it', (version, conflict) => restoreFeedMutation.mutate({
-				...variables, origin: 'restore', existingId: undefined, version, conflict
+				...variables, existingId: undefined, version, conflict
 			}), (version, conflict) => restoreFeedMutation.mutate({
-				...variables, origin: 'restore', existingId: undefined, version, conflict
+				...variables, existingId: undefined, version, conflict
 			}), variables.conflict,
 			() => { if (variables.origin === 'add' && variables.addSession === addSession) addDialogOpen = false; },
 			variables.data)) return;
@@ -141,7 +141,7 @@
 				? mergedProposal(variables.data, variables.partialData, activeSnapshot)
 				: variables.data;
 			if (offerConflict(err, 'saving your proposed settings', (version, conflict) =>
-				restoreFeedMutation.mutate({ ...variables, origin: 'restore', data, activeSnapshot,
+				restoreFeedMutation.mutate({ ...variables, data, activeSnapshot,
 					existingId, version, conflict }),
 				undefined, variables.conflict, undefined, variables.data)) return;
 		}

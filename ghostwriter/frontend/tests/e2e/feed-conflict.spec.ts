@@ -119,6 +119,46 @@ test('add dialog closes before offering explicit versioned restoration', async (
 	await expect.poll(() => writes.length).toBe(2);
 	expect(writes[1].version).toBe('"9"');
 	expect(writes[1].data).toEqual(writes[0].data);
+	await expect(page.getByRole('alert')).toHaveCount(0);
+	await page.getByRole('button', { name: 'Add Feed', exact: true }).first().click();
+	await expect(page.locator('#url')).toHaveValue('');
+	await expect(page.locator('#title')).toHaveValue('');
+});
+
+test('delayed Add restoration does not clear a newer Add draft', async ({ page }) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	let restoring = false;
+	let writes = 0;
+	await page.route('**/api/feeds', async (route) => {
+		if (route.request().method() === 'GET') return route.fallback();
+		writes += 1;
+		if (writes === 1) return route.fulfill({ status: 428, contentType: 'application/json',
+			body: JSON.stringify({ detail: { code: 'feed_version_required',
+				current: { kind: 'tombstone', version: 9 } } }) });
+		restoring = true;
+		await held;
+		await route.fulfill({ status: 200, contentType: 'application/json',
+			body: JSON.stringify({ id: 'restored', version: 10 }) });
+	});
+	await page.goto('/sources/feeds');
+	await page.getByRole('button', { name: 'Add Feed', exact: true }).first().click();
+	await page.locator('#url').fill('https://example.com/deleted.xml');
+	await page.locator('#title').fill('Restore proposal');
+	await page.getByRole('dialog').getByRole('button', { name: 'Add Feed', exact: true }).click();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await page.getByRole('button', { name: 'Restore feed with my changes' }).click();
+	await expect.poll(() => restoring).toBe(true);
+	await page.getByRole('button', { name: 'Add Feed', exact: true }).first().click();
+	await page.locator('#url').fill('https://example.com/new-draft.xml');
+	await page.locator('#title').fill('Keep this new draft');
+	release();
+	await expect(page.getByRole('alert')).toHaveCount(0);
+	await expect(page.getByRole('dialog')).toBeVisible();
+	await expect(page.locator('#url')).toHaveValue('https://example.com/new-draft.xml');
+	await expect(page.locator('#title')).toHaveValue('Keep this new draft');
 });
 
 test('a restore proposal survives unrelated success and a transient POST failure', async ({ page }) => {
