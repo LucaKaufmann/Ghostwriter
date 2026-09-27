@@ -17,7 +17,7 @@ from fnmatch import fnmatch
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlsplit
 
 READY_STATUSES = {"ready", "failed"}
 MIN_TEXT_CHARS = 80
@@ -130,18 +130,81 @@ def is_loopback_host(host: str | None) -> bool:
         return normalized.endswith(".localhost")
 
 
+def transport_origin(value: str) -> tuple[str, str, int]:
+    """Return a canonical origin without putting untrusted URL text in errors."""
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.netloc
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.netloc.endswith(":")
+            or any(ord(char) < 33 for char in value)
+        ):
+            raise ValueError
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname.encode("idna").decode("ascii").lower()
+        if not hostname:
+            raise ValueError
+        port = parsed.port
+        if port is None:
+            port = 443 if scheme == "https" else 80
+        if port < 1:
+            raise ValueError
+        return scheme, hostname, port
+    except (ValueError, UnicodeError):
+        raise ValueError("Invalid http(s) URL or port") from None
+
+
 def enforce_safe_transport(value: str, *, allow_insecure_http: bool) -> None:
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        fail("Ghostwriter URL must be an absolute http(s) URL", EXIT_CONFIG)
-    if parsed.scheme == "http" and not allow_insecure_http:
-        if is_loopback_host(parsed.hostname):
-            return
+    try:
+        scheme, host, _ = transport_origin(value)
+    except ValueError as exc:
+        fail(str(exc), EXIT_CONFIG)
+    if scheme == "http" and not allow_insecure_http and not is_loopback_host(host):
         fail(
             "Refusing to send bearer auth over non-loopback HTTP. "
             "Use HTTPS, use localhost/127.0.0.1, or pass --allow-insecure-http.",
             EXIT_CONFIG,
         )
+
+
+class OriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Check the resolved redirect target before urllib copies request headers."""
+
+    def __init__(self, origin: tuple[str, str, int]):
+        self.origin = origin
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # urllib handles relative and scheme-relative Locations before this method.
+        try:
+            target = transport_origin(newurl)
+        except ValueError:
+            raise urllib.error.URLError("Unsafe redirect URL") from None
+        if target != self.origin:
+            raise urllib.error.URLError("Redirect leaves configured origin")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def authenticated_opener(
+    url: str, api_base: str, *, allow_insecure_http: bool
+) -> urllib.request.OpenerDirector:
+    try:
+        origin = transport_origin(api_base)
+        target = transport_origin(url)
+    except ValueError:
+        raise urllib.error.URLError("Invalid authenticated URL") from None
+    if target != origin:
+        raise urllib.error.URLError("Authenticated URL leaves configured origin")
+    if origin[0] == "http" and not allow_insecure_http and not is_loopback_host(origin[1]):
+        raise urllib.error.URLError("Non-loopback HTTP requires explicit opt-in")
+    return urllib.request.build_opener(OriginRedirectHandler(origin))
+
+
+def safe_error_detail(value: str, token: str) -> str:
+    return value.replace(token, "[redacted]") if token else value
 
 
 def default_env_files() -> list[Path]:
@@ -236,7 +299,15 @@ def request_json(
     path: str,
     token: str,
     payload: dict[str, Any] | None = None,
+    allow_insecure_http: bool = False,
 ) -> dict[str, Any]:
+    url = f"{api_base}{path}"
+    try:
+        opener = authenticated_opener(
+            url, api_base, allow_insecure_http=allow_insecure_http
+        )
+    except urllib.error.URLError:
+        fail("Unsafe Ghostwriter request URL", EXIT_API)
     body = None
     headers = {
         "Authorization": f"Bearer {token}",
@@ -247,35 +318,44 @@ def request_json(
         headers["Content-Type"] = "application/json"
 
     request = urllib.request.Request(
-        f"{api_base}{path}",
+        url,
         data=body,
         headers=headers,
         method=method,
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with opener.open(request, timeout=60) as response:
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
+        detail = safe_error_detail(exc.read().decode("utf-8", errors="replace"), token)
         fail(f"Ghostwriter returned HTTP {exc.code}: {detail}", EXIT_API)
     except urllib.error.URLError as exc:
-        fail(f"Could not reach Ghostwriter: {exc}", EXIT_API)
+        fail(f"Could not reach Ghostwriter: {safe_error_detail(str(exc.reason), token)}", EXIT_API)
 
     if not raw:
         return {}
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        fail(f"Ghostwriter returned non-JSON response: {raw[:500]}", EXIT_API)
+        fail(
+            f"Ghostwriter returned non-JSON response: {safe_error_detail(raw, token)[:500]}",
+            EXIT_API,
+        )
 
 
 def request_bytes(
     *,
     url: str,
+    api_base: str,
     token: str,
     allow_insecure_http: bool,
 ) -> tuple[bytes, str | None]:
-    enforce_safe_transport(url, allow_insecure_http=allow_insecure_http)
+    try:
+        opener = authenticated_opener(
+            url, api_base, allow_insecure_http=allow_insecure_http
+        )
+    except (urllib.error.URLError, ValueError):
+        fail("Unsafe audio download URL", EXIT_DOWNLOAD)
     request = urllib.request.Request(
         url,
         headers={
@@ -285,13 +365,13 @@ def request_bytes(
         method="GET",
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with opener.open(request, timeout=120) as response:
             return response.read(), response.headers.get("Content-Type")
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
+        detail = safe_error_detail(exc.read().decode("utf-8", errors="replace"), token)
         fail(f"Audio download returned HTTP {exc.code}: {detail}", EXIT_DOWNLOAD)
     except urllib.error.URLError as exc:
-        fail(f"Could not download audio: {exc}", EXIT_DOWNLOAD)
+        fail(f"Could not download audio: {safe_error_detail(str(exc.reason), token)}", EXIT_DOWNLOAD)
 
 
 def parse_titled_file(spec: str) -> tuple[str | None, Path]:
@@ -1100,6 +1180,7 @@ def poll_episode(
     episode_id: str,
     interval_seconds: float,
     timeout_seconds: float,
+    allow_insecure_http: bool = False,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_status = ""
@@ -1109,6 +1190,7 @@ def poll_episode(
             api_base=api_base,
             path=f"/podcast/episodes/{episode_id}",
             token=token,
+            allow_insecure_http=allow_insecure_http,
         )
         status = str(detail.get("status") or "")
         if status != last_status:
@@ -1144,18 +1226,20 @@ def download_episode(
     raw_url = detail.get("download_url") or detail.get("stream_url")
     if not raw_url:
         fail("Cannot download audio: episode detail did not include a download URL", EXIT_DOWNLOAD)
-    url = str(raw_url)
-    if url.startswith("/"):
-        root = api_base.removesuffix("/api") + "/"
-        url = urljoin(root, url.lstrip("/"))
+    root = api_base.removesuffix("/api") + "/"
+    try:
+        url = urljoin(root, str(raw_url))
+    except ValueError:
+        fail("Unsafe audio download URL", EXIT_DOWNLOAD)
 
     data, content_type = request_bytes(
         url=url,
+        api_base=api_base,
         token=token,
         allow_insecure_http=allow_insecure_http,
     )
     if content_type and "json" in content_type.lower():
-        fail(f"Audio download returned JSON instead of audio from {url}", EXIT_DOWNLOAD)
+        fail("Audio download returned JSON instead of audio", EXIT_DOWNLOAD)
 
     path = output_path_for_episode(output, episode_id)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1418,6 +1502,7 @@ def main() -> int:
         path="/podcast/episodes/one-off",
         token=token,
         payload=submit_payload,
+        allow_insecure_http=args.allow_insecure_http,
     )
 
     should_poll = args.poll or args.download or bool(args.output)
@@ -1445,6 +1530,7 @@ def main() -> int:
         episode_id=str(episode_id),
         interval_seconds=args.poll_interval,
         timeout_seconds=args.poll_timeout,
+        allow_insecure_http=args.allow_insecure_http,
     )
 
     if args.download or args.output:
