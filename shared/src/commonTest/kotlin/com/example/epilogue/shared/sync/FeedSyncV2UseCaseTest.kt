@@ -59,7 +59,7 @@ class FeedSyncV2UseCaseTest {
             val (http, remote) = wireRemote(
                 fullBody = changesWire(4, cap),
                 pushBody = resultWire(0),
-                pullBody = changesWire(4, null))
+                pullBody = changesWire(if (cap == 0) 5 else 4, null))
             try {
                 val outcome = useCase(store, remote).sync()
                 if (cap < 0) {
@@ -70,7 +70,7 @@ class FeedSyncV2UseCaseTest {
                     assertEquals(1, store.claims.size)
                 } else {
                     assertIs<FeedSyncV2Outcome.Complete>(outcome)
-                    assertEquals(4L, store.binding?.cursorVersion)
+                    assertEquals(5L, store.binding?.cursorVersion)
                     assertEquals(1, store.reconciliations)
                     assertEquals(listOf(op to 1L), store.acks)
                 }
@@ -111,7 +111,7 @@ class FeedSyncV2UseCaseTest {
             val (http, remote) = wireRemote(
                 fullBody = changesWire(4, null),
                 pushBody = resultWire(cap),
-                pullBody = changesWire(4, null))
+                pullBody = changesWire(if (cap == 0) 5 else 4, null))
             try {
                 val outcome = useCase(store, remote).sync()
                 if (cap < 0) {
@@ -123,7 +123,7 @@ class FeedSyncV2UseCaseTest {
                     assertEquals(listOf(op to 1L), store.acks)
                     assertTrue(store.claims.isEmpty())
                 }
-                assertEquals(4L, store.binding?.cursorVersion)
+                assertEquals(if (cap == 0) 5L else 4L, store.binding?.cursorVersion)
             } finally { http.close() }
         }
     }
