@@ -141,6 +141,16 @@ interface DigestDao {
     @Query("SELECT * FROM digests")
     suspend fun getAllDigestsList(): List<DigestEntity>
 
+    /** Hold one Room writer transaction from snapshot through reference-aware deletion. */
+    @Transaction
+    suspend fun deleteAllWithArtifacts(removeFile: (String) -> Boolean): Boolean {
+        var allDeleted = true
+        getAllDigestsList().forEach { digest ->
+            if (!deleteWithArtifact(digest.id, removeFile)) allDeleted = false
+        }
+        return allDeleted
+    }
+
     @Query("DELETE FROM digests")
     suspend fun deleteAllDigests()
 

@@ -14,9 +14,14 @@ interface FeedMutationDao {
     @Query("SELECT * FROM feed_mutations WHERE url = :url ORDER BY sequence")
     suspend fun forUrl(url: String): List<FeedMutationEntity>
 
-    @Query("SELECT * FROM feed_mutations WHERE state IN ('needs_resolution','rejected') " +
-        "AND serverKey = (SELECT serverKey FROM feed_sync_state WHERE active = 1 LIMIT 1) " +
-        "ORDER BY createdAt, sequence")
+    @Query("SELECT candidate.* FROM feed_mutations AS candidate " +
+        "WHERE candidate.state IN ('needs_resolution','rejected') " +
+        "AND candidate.serverKey = (SELECT serverKey FROM feed_sync_state WHERE active = 1 LIMIT 1) " +
+        "AND NOT EXISTS (SELECT 1 FROM feed_mutations AS earlier " +
+        "WHERE earlier.serverKey = candidate.serverKey AND earlier.url = candidate.url " +
+        "AND (earlier.queueOrder < candidate.queueOrder OR " +
+        "(earlier.queueOrder = candidate.queueOrder AND earlier.sequence < candidate.sequence))) " +
+        "ORDER BY candidate.createdAt, candidate.sequence")
     fun unresolvedFlow(): Flow<List<FeedMutationEntity>>
 
     @Query("SELECT * FROM feed_mutations WHERE opId = :opId")

@@ -172,6 +172,7 @@ fun FeedManagerScreen(
                 uiState.error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
                 items(unresolved, key = { "proposal-${it.opId}" }) { proposal ->
                     FeedResolutionCard(proposal,
+                        current = feeds.find { it.url == proposal.url },
                         onResolve = { action -> viewModel.resolve(proposal.opId, action) },
                         onCorrect = { title, mode, enabled, cap ->
                             viewModel.correctRejected(proposal.opId, title, mode, enabled, cap)
@@ -210,9 +211,46 @@ fun FeedManagerScreen(
     }
 }
 
+internal data class FeedCorrectionDraft(
+    val title: String,
+    val mode: ProcessingMode,
+    val enabled: Boolean,
+    val maxArticles: Int
+)
+
+/** Sparse rejected fields override the complete server state, then the visible local row. */
+internal fun correctionDraft(proposal: FeedMutationEntity, current: Feed?): FeedCorrectionDraft {
+    val fields = runCatching { JSONObject(proposal.fieldsJson) }.getOrDefault(JSONObject())
+    val server = proposal.serverSnapshotJson?.let { runCatching { JSONObject(it) }.getOrNull() }
+        ?.takeIf { it.optString("kind") == "feed" }
+    val title = when {
+        fields.has("title") -> fields.optString("title")
+        server != null -> server.optString("title")
+        else -> current?.name.orEmpty()
+    }
+    val mode = when {
+        fields.has("mode") -> fields.optString("mode") == "summarize"
+        server != null -> server.optString("mode") == "summarize"
+        else -> current?.mode == ProcessingMode.BRIEFING
+    }
+    val enabled = when {
+        fields.has("is_active") -> fields.optBoolean("is_active")
+        server != null -> server.optBoolean("is_active")
+        else -> current?.isEnabled ?: true
+    }
+    val cap = when {
+        fields.has("max_articles") -> fields.optInt("max_articles")
+        server != null -> server.optInt("max_articles")
+        else -> current?.maxArticles ?: 0
+    }
+    return FeedCorrectionDraft(title, if (mode) ProcessingMode.BRIEFING else ProcessingMode.FIDELITY,
+        enabled, cap)
+}
+
 @Composable
 private fun FeedResolutionCard(
     proposal: FeedMutationEntity,
+    current: Feed?,
     onResolve: (String) -> Unit,
     onCorrect: (String, ProcessingMode, Boolean, Int) -> Unit
 ) {
@@ -263,12 +301,21 @@ private fun FeedResolutionCard(
         }
     }
     if (correcting) {
-        var title by rememberSaveable(proposal.opId) { mutableStateOf(local.optString("title")) }
-        var cap by rememberSaveable(proposal.opId) { mutableStateOf(local.optString("max_articles", "0")) }
-        var mode by rememberSaveable(proposal.opId) {
-            mutableStateOf(if (local.optString("mode") == "summarize") ProcessingMode.BRIEFING else ProcessingMode.FIDELITY)
+        val initial = remember(proposal.fieldsJson, proposal.serverSnapshotJson, current) {
+            correctionDraft(proposal, current)
         }
-        var enabled by rememberSaveable(proposal.opId) { mutableStateOf(local.optBoolean("is_active", true)) }
+        var title by rememberSaveable(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+            mutableStateOf(initial.title)
+        }
+        var cap by rememberSaveable(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+            mutableStateOf(initial.maxArticles.toString())
+        }
+        var mode by rememberSaveable(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+            mutableStateOf(initial.mode)
+        }
+        var enabled by rememberSaveable(proposal.opId, proposal.fieldsJson, proposal.serverSnapshotJson) {
+            mutableStateOf(initial.enabled)
+        }
         AlertDialog(
             onDismissRequest = { correcting = false },
             title = { Text("Correct feed proposal") },

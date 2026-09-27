@@ -21,6 +21,9 @@ interface FeedDao {
         "AND serverKey = (SELECT serverKey FROM feed_sync_state WHERE active = 1 LIMIT 1)) ORDER BY name ASC")
     suspend fun getEnabledFeedsList(): List<FeedEntity>
 
+    @Query("SELECT * FROM feeds WHERE isEnabled = 1 AND hiddenDelete = 0 ORDER BY name ASC")
+    suspend fun getEnabledLocalFeedsList(): List<FeedEntity>
+
     @Query("SELECT * FROM feeds WHERE url = :url")
     suspend fun getFeedByUrl(url: String): FeedEntity?
 

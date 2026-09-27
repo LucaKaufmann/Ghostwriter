@@ -447,6 +447,9 @@ class AndroidFeedV2Store @Inject constructor(
     suspend fun resolve(opId: String, action: String): Boolean = database.withTransaction {
         val row = mutations.byId(opId) ?: return@withTransaction false
         if (row.state !in setOf("needs_resolution", "rejected")) return@withTransaction false
+        if (mutations.forUrl(row.url).filter { it.serverKey == row.serverKey }
+                .minWithOrNull(compareBy<FeedMutationEntity> { it.queueOrder }.thenBy { it.sequence })?.opId != opId)
+            return@withTransaction false
         val state = states.byKey(row.serverKey) ?: return@withTransaction false
         if (!state.active || state.suspended) return@withTransaction false
         val feed = feeds.getFeedByUrl(row.url)
@@ -493,6 +496,9 @@ class AndroidFeedV2Store @Inject constructor(
         if (title.isBlank() || maxArticles < 0) return@withTransaction false
         val row = mutations.byId(opId) ?: return@withTransaction false
         if (row.state != "rejected" || row.kind != "upsert") return@withTransaction false
+        if (mutations.forUrl(row.url).filter { it.serverKey == row.serverKey }
+                .minWithOrNull(compareBy<FeedMutationEntity> { it.queueOrder }.thenBy { it.sequence })?.opId != opId)
+            return@withTransaction false
         val state = states.byKey(row.serverKey) ?: return@withTransaction false
         if (!state.active || state.suspended) return@withTransaction false
         val feed = feeds.getFeedByUrl(row.url) ?: return@withTransaction false
