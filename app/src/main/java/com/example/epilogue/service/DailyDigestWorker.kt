@@ -27,6 +27,7 @@ import dagger.assisted.AssistedInject
 import java.io.IOException
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.Date
 import kotlinx.coroutines.CancellationException
@@ -69,13 +70,15 @@ class DailyDigestWorker @AssistedInject constructor(
         private const val MAX_CONCURRENT_FEEDS = 3
 
         const val KEY_PERIODIC_ANCHOR = "periodic_anchor_millis"
+        const val KEY_PERIODIC_ZONE = "periodic_zone_id"
         private const val PERIOD_MILLIS = 24L * 60 * 60 * 1000
 
         /** Latest nominal 24-hour slot, independent of constrained execution time. */
-        internal fun periodicOccurrenceDate(now: ZonedDateTime, anchorMillis: Long): LocalDate {
+        internal fun periodicOccurrenceDate(now: ZonedDateTime, anchorMillis: Long,
+            scheduleZone: ZoneId = now.zone): LocalDate {
             val elapsed = (now.toInstant().toEpochMilli() - anchorMillis).coerceAtLeast(0)
             val intended = Instant.ofEpochMilli(anchorMillis + (elapsed / PERIOD_MILLIS) * PERIOD_MILLIS)
-            return intended.atZone(now.zone).toLocalDate()
+            return intended.atZone(scheduleZone).toLocalDate()
         }
 
         /** Bounded fan-out, with results retained in the input feed order. */
@@ -127,10 +130,13 @@ class DailyDigestWorker @AssistedInject constructor(
                 val explicit = inputData.getString(KEY_OCCURRENCE_DATE)
                     ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
                 val anchor = inputData.getLong(KEY_PERIODIC_ANCHOR, 0L)
+                val scheduleZone = inputData.getString(KEY_PERIODIC_ZONE)
+                    ?.let { runCatching { ZoneId.of(it) }.getOrNull() }
                 // A legacy attempt may finish before its periodic request is
                 // updated with an anchor; retain its prior due-window rule.
                 val now = ZonedDateTime.now()
-                val occurrence = (explicit ?: if (anchor > 0) periodicOccurrenceDate(now, anchor)
+                val occurrence = (explicit ?: if (anchor > 0)
+                    periodicOccurrenceDate(now, anchor, scheduleZone ?: now.zone)
                     else if (now.hour < period.hour) now.toLocalDate().minusDays(1)
                     else now.toLocalDate()).toString()
                 deliveryStore.startScheduledRun(period.name, occurrence, this.id.toString(),

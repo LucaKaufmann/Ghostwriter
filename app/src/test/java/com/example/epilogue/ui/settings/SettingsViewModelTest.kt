@@ -143,7 +143,7 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `partial result reports issues without claiming pending articles`() {
+    fun `partial result uses neutral wording for cap deferral or processing failure`() {
         val id = UUID.randomUUID()
         val data = MutableLiveData<WorkInfo>()
         every { scheduler.runNow(false) } returns id
@@ -153,7 +153,7 @@ class SettingsViewModelTest {
         emit(data, WorkInfo(id, WorkInfo.State.SUCCEEDED, emptySet(),
             Data.Builder().putString("generation_outcome", "partial").build()))
         assertTrue(model.uiState.value.digestCompleted)
-        assertEquals("Digest saved with some processing issues",
+        assertEquals("Digest saved with a partial result",
             model.uiState.value.digestResultMessage)
     }
 
