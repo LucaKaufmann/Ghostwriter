@@ -103,6 +103,16 @@ interface DigestDao {
     @Query("SELECT EXISTS(SELECT 1 FROM digests WHERE epubFilePath = :path AND id != :excludingId)")
     suspend fun hasOtherArtifactReference(path: String, excludingId: Long): Boolean
 
+    @Query("SELECT EXISTS(SELECT 1 FROM digests WHERE epubFilePath = :path)")
+    suspend fun hasArtifactReference(path: String): Boolean
+
+    /** Serialize the reference check and unlink with history writes. */
+    @Transaction
+    suspend fun removeUnreferencedArtifact(path: String, removeFile: (String) -> Boolean): Boolean {
+        if (hasArtifactReference(path)) return false
+        return removeFile(path)
+    }
+
     /** Keep reference inspection and row deletion serialized with other Room writers. */
     @Transaction
     suspend fun deleteWithArtifact(id: Long, removeFile: (String) -> Boolean): Boolean {
