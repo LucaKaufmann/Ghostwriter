@@ -50,7 +50,7 @@ class ConfigSyncUseCase(
                 applyServerConfig(config)
                 true
             }
-            localTime > serverTime -> pushLocalConfig(localUpdatedAt)
+            localTime > serverTime -> pushLocalConfig(localUpdatedAt, serverUpdatedAt)
             else -> true
         }
     }
@@ -129,28 +129,33 @@ class ConfigSyncUseCase(
         settings.setConfigUpdatedAt(config.updatedAt)
     }
 
-    private suspend fun pushLocalConfig(localUpdatedAt: String): Boolean {
-        val schedule = settings.getGhostwriterSchedule()
-        val minWordCount = settings.getMinWordCount()
+    private suspend fun pushLocalConfig(localUpdatedAt: String, serverUpdatedAt: String): Boolean {
+        val local = LocalConfigSnapshot(
+            updatedAt = localUpdatedAt,
+            schedule = settings.getGhostwriterSchedule(),
+            minWordCount = settings.getMinWordCount()
+        )
+        if (!localConfigIsUnchanged(local)) return false
 
         val result = ghostwriter.updateConfig(
             ClientConfigUpdateRequest(
-                minWordCount = minWordCount,
-                morningHour = schedule?.morningHour,
-                morningMinute = schedule?.morningMinute,
-                noonHour = schedule?.noonHour,
-                noonMinute = schedule?.noonMinute,
-                eveningHour = schedule?.eveningHour,
-                eveningMinute = schedule?.eveningMinute,
-                timezone = schedule?.timezone,
-                scheduleMorning = schedule?.let { formatTime(it.morningHour, it.morningMinute) },
-                scheduleNoon = schedule?.let { formatTime(it.noonHour, it.noonMinute) },
-                scheduleEvening = schedule?.let { formatTime(it.eveningHour, it.eveningMinute) },
-                clientUpdatedAt = localUpdatedAt
+                minWordCount = local.minWordCount,
+                morningHour = local.schedule?.morningHour,
+                morningMinute = local.schedule?.morningMinute,
+                noonHour = local.schedule?.noonHour,
+                noonMinute = local.schedule?.noonMinute,
+                eveningHour = local.schedule?.eveningHour,
+                eveningMinute = local.schedule?.eveningMinute,
+                timezone = local.schedule?.timezone,
+                scheduleMorning = local.schedule?.let { formatTime(it.morningHour, it.morningMinute) },
+                scheduleNoon = local.schedule?.let { formatTime(it.noonHour, it.noonMinute) },
+                scheduleEvening = local.schedule?.let { formatTime(it.eveningHour, it.eveningMinute) },
+                clientUpdatedAt = serverUpdatedAt
             )
         )
 
         currentCoroutineContext().ensureActive()
+        if (!localConfigIsUnchanged(local)) return false
         return when (result) {
             is SyncPortResult.Success -> {
                 settings.setConfigUpdatedAt(result.data.updatedAt)
@@ -160,6 +165,7 @@ class ConfigSyncUseCase(
                 if (result.code == 409) {
                     val refetch = ghostwriter.getConfig()
                     currentCoroutineContext().ensureActive()
+                    if (!localConfigIsUnchanged(local)) return false
                     when (refetch) {
                         is SyncPortResult.Success -> {
                             applyServerConfig(refetch.data)
@@ -171,6 +177,22 @@ class ConfigSyncUseCase(
             }
             is SyncPortResult.NotConfigured -> false
         }
+    }
+
+    private data class LocalConfigSnapshot(
+        val updatedAt: String,
+        val schedule: GhostwriterScheduleSnapshot?,
+        val minWordCount: Int
+    )
+
+    private suspend fun localConfigIsUnchanged(local: LocalConfigSnapshot): Boolean {
+        val currentUpdatedAt = settings.getConfigUpdatedAt()
+        val currentSchedule = settings.getGhostwriterSchedule()
+        val currentMinWordCount = settings.getMinWordCount()
+        currentCoroutineContext().ensureActive()
+        return currentUpdatedAt == local.updatedAt &&
+            currentSchedule == local.schedule &&
+            currentMinWordCount == local.minWordCount
     }
 
     private fun parseTime(timeString: String?): Pair<Int, Int>? {
