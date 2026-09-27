@@ -63,7 +63,7 @@ class SettingsViewModelTest {
     private fun workInfo(id: UUID, state: WorkInfo.State) =
         WorkInfo(id, state, emptySet(), Data.EMPTY)
 
-    private fun emit(data: MutableLiveData<WorkInfo>, info: WorkInfo) {
+    private fun emit(data: MutableLiveData<WorkInfo>, info: WorkInfo?) {
         data.postValue(info)
         shadowOf(Looper.getMainLooper()).idle()
     }
@@ -94,6 +94,23 @@ class SettingsViewModelTest {
         assertTrue(model.uiState.value.digestCompleted)
         assertFalse(secondData.hasObservers())
         verify(exactly = 2) { scheduler.runNow(false) }
+    }
+
+    @Test
+    fun `null before asynchronous enqueue leaves observation active`() {
+        val id = UUID.randomUUID()
+        val data = MutableLiveData<WorkInfo>()
+        every { scheduler.runNow(false) } returns id
+        every { scheduler.getImmediateWorkInfo(id) } returns data
+        val model = viewModel()
+        emit(data, null)
+        model.runDigestNow()
+        assertTrue(model.uiState.value.isGenerating)
+        assertTrue(data.hasObservers())
+        emit(data, null)
+        emit(data, workInfo(id, WorkInfo.State.SUCCEEDED))
+        assertTrue(model.uiState.value.digestCompleted)
+        assertFalse(data.hasObservers())
     }
 
     @Test
