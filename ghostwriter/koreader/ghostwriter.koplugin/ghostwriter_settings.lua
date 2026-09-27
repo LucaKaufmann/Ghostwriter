@@ -1,6 +1,7 @@
 local DataStorage = require("datastorage")
 local LuaSettings = require("luasettings")
 local logger = require("logger")
+local lfs = require("libs/libkoreader-lfs")
 
 local GhostwriterSettings = {
   settings = nil,
@@ -77,6 +78,20 @@ function GhostwriterSettings:new()
   else
     logger.err("[Ghostwriter] Failed to read settings, using defaults", tostring(data))
     obj.data = {}
+  end
+
+  local path = obj.settings.file
+  if lfs.symlinkattributes(path) then
+    local chunk = loadfile(path)
+    local valid, primary = chunk and pcall(chunk)
+    if not valid or type(primary) ~= "table" or type(primary[ROOT_KEY]) ~= "table" then
+      -- LuaSettings.open silently falls back to .old. Preserve connection
+      -- details, but never adopt ownership/cursor state from that backup.
+      obj.data.owned_downloads = nil
+      obj.data.cursors = nil
+      obj.data.last_known_id = nil
+      logger.err("[Ghostwriter] Primary settings file is invalid; ownership reset")
+    end
   end
 
   return obj

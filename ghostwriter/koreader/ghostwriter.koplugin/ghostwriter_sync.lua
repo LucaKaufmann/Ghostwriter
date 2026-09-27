@@ -124,9 +124,10 @@ local function prune_owned(settings, server_url, scope, download_dir, keep_last_
   local removed = 0
   for i = keep_last_n + 1, #files do
     local file = files[i]
+    local stamp = records[file.name]
     local fresh_dir = safe_directory(download_dir)
     if fresh_dir ~= download_dir or ownership_scope(server_url, download_dir) ~= scope
-        or not same_file(file.path, regular_file(file.path), records[file.name]) then
+        or not same_file(file.path, regular_file(file.path), stamp) then
       break
     end
     -- Forget ownership durably first. A failed unlink leaves the book intact.
@@ -136,7 +137,9 @@ local function prune_owned(settings, server_url, scope, download_dir, keep_last_
       break
     end
     records = next_records
-    if os.remove(file.path) then
+    if safe_directory(download_dir) == download_dir
+        and ownership_scope(server_url, download_dir) == scope
+        and same_file(file.path, regular_file(file.path), stamp) and os.remove(file.path) then
       removed = removed + 1
     end
   end
@@ -215,8 +218,22 @@ function GhostwriterSync.run(settings, progress_cb)
           can_advance_cursor = false
         end
       else
-        local dl_ok = api.download_digest(server_url, api_token, filename, target_path)
+        local dl_ok, dl_info = api.download_digest(server_url, api_token, filename,
+          target_path, lfs.symlinkattributes(download_dir))
         local stamp = stamp_for(target_path, regular_file(target_path))
+        local function cleanup_created()
+          local current = regular_file(target_path)
+          local created = dl_info and dl_info.created
+          if created and current and current.dev == created.dev and current.ino == created.ino
+              and safe_directory(download_dir) == download_dir
+              and ownership_scope(server_url, download_dir) == scope then
+            -- A content check is available after stamping; use it when the
+            -- failure followed a slow settings write.
+            if not stamp or same_file(target_path, current, stamp) then
+              os.remove(target_path)
+            end
+          end
+        end
         if dl_ok and stamp and safe_directory(download_dir) == download_dir
             and ownership_scope(server_url, download_dir) == scope then
           local next_records = copy_records(records)
@@ -228,15 +245,12 @@ function GhostwriterSync.run(settings, progress_cb)
           else
             -- A finalized but unrecorded file must not become a collision on
             -- retry. Remove only the file just created, after rechecking it.
-            if safe_directory(download_dir) == download_dir
-                and ownership_scope(server_url, download_dir) == scope
-                and same_file(target_path, regular_file(target_path), stamp) then
-              os.remove(target_path)
-            end
+            cleanup_created()
             failed = failed + 1
             can_advance_cursor = false
           end
         else
+          if dl_ok then cleanup_created() end
           failed = failed + 1
           can_advance_cursor = false
           logger.err("[Ghostwriter] Failed to download digest", tostring(filename))

@@ -34,9 +34,12 @@ This is a KOReader plugin scaffold for syncing Ghostwriter digest EPUB files.
   rename that collision manually before retrying. Existing installations may
   need to resolve such collisions once because older downloads were not
   recorded as plugin-owned.
-- Downloads use a uniquely named `.part.*` file and require filesystem hard
-  links for collision-safe finalization. A folder on a filesystem without hard
-  link support will report a failed download and preserve existing books.
+- Downloads use a uniquely named `.part.*` file. Finalization uses an atomic
+  no-replace rename where available, a hard link, or an exclusive-create copy
+  for filesystems such as FAT that support neither. A power loss during that
+  last copy can leave an unowned partial EPUB at the target filename. Resolve
+  that collision manually before retrying; the plugin will not adopt or
+  remove it automatically.
 - Host regression checks: `luajit ghostwriter/koreader/tests/run.lua` from the
   repository root. The harness uses temporary files under `/private/tmp` and
   mocks the KOReader UI and Ghostwriter network calls; it requires LuaJIT and
