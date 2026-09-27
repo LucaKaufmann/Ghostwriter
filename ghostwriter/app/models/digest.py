@@ -42,6 +42,10 @@ class Digest(DigestBase, table=True):
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    one_off_owner_id: UUID | None = Field(
+        default=None, foreign_key="users.id",
+        description="Durable owner of a private one-off podcast digest",
+    )
     created_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: datetime | None = Field(default=None, description="Completion time")
     downloaded_at: datetime | None = Field(default=None, description="When client downloaded this digest")

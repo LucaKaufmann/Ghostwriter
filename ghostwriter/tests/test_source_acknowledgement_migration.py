@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def migrate(data_dir: Path) -> None:
     env = dict(os.environ, DATA_DIR=str(data_dir))
     subprocess.run(
-        ["alembic", "-c", str(ROOT / "alembic.ini"), "upgrade", "head"],
+        ["alembic", "-c", str(ROOT / "alembic.ini"), "upgrade", "027"],
         cwd=ROOT, env=env, check=True, capture_output=True, text=True,
     )
 
@@ -79,5 +79,6 @@ def test_receipt_table_exists_on_fresh_bootstrap(tmp_path):
     migrate(tmp_path)
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'ghostwriter.db'}")
     with engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "027"
+        # Fresh bootstrap stamps the current head after creating all model tables.
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "028"
         assert sa.inspect(connection).has_table("source_acknowledgements")
