@@ -294,7 +294,7 @@ class AndroidDeliveryTest {
         var persisted = open()
         val store = ArticleDeliveryStore(persisted, persisted.articleDeliveryDao(),
             persisted.generationRunDao())
-        val run = store.startRun(false)
+        val run = store.startScheduledRun("MORNING", "2026-09-27", "fresh-work", false)!!
         store.finishWithoutDigest(run, "deferred",
             """{"delivered_count":0,"filtered_count":2,"cap_deferred_count":3,"failed_count":0,
                 "reason_counts":{"content_too_short":2}}""")
@@ -303,8 +303,86 @@ class AndroidDeliveryTest {
         val latest = persisted.generationRunDao().observeLatestFinished().first()
         assertEquals(run, latest?.runId)
         assertEquals("deferred", latest?.outcome)
+        assertEquals("MORNING", latest?.period)
+        assertEquals("2026-09-27", latest?.occurrenceDate)
+        assertTrue(ArticleDeliveryStore(persisted, persisted.articleDeliveryDao(),
+            persisted.generationRunDao()).coversScheduled("MORNING", "2026-09-27"))
         assertTrue(latest!!.diagnosticsJson.contains("content_too_short"))
         persisted.close()
+    }
+
+    @Test fun `scheduled empty and deferred cover only their occurrence while failures and manual do not`() = runBlocking {
+        val date = "2026-09-27"
+        val empty = ledger.startScheduledRun("MORNING", date, "periodic-morning", false)!!
+        ledger.finishWithoutDigest(empty, "empty", "{}")
+        assertTrue(ledger.coversScheduled("MORNING", date))
+        assertNull(ledger.startScheduledRun("MORNING", date, "catchup-morning", false))
+        assertFalse(ledger.coversScheduled("NOON", date))
+        val noon = ledger.startScheduledRun("NOON", date, "periodic-noon", false)!!
+        ledger.finishWithoutDigest(noon, "deferred", "{}")
+        assertTrue(ledger.coversScheduled("NOON", date))
+        val failed = ledger.startScheduledRun("EVENING", date, "periodic-evening", false)!!
+        ledger.finishWithoutDigest(failed, "failed", "{}")
+        assertFalse(ledger.coversScheduled("EVENING", date))
+        assertNotNull(ledger.startScheduledRun("EVENING", date, "periodic-evening", true))
+        val manual = ledger.startRun(false)
+        ledger.finishWithoutDigest(manual, "empty", "{}")
+        assertFalse(ledger.coversScheduled("MORNING", "2026-09-28"))
+        assertNotNull(ledger.startScheduledRun("MORNING", "2026-09-28",
+            "periodic-morning", false))
+    }
+
+    @Test fun `scheduled retry keeps original occurrence across date rollover`() = runBlocking {
+        val oldDate = "2026-09-27"
+        val first = ledger.startScheduledRun("EVENING", oldDate, "periodic-work", false)!!
+        ledger.finishWithoutDigest(first, "failed", "{}")
+        val retry = ledger.startScheduledRun("EVENING", "2026-09-28",
+            "periodic-work", true)!!
+        assertEquals(oldDate, db.generationRunDao().get(retry)?.occurrenceDate)
+        ledger.finishWithoutDigest(retry, "empty", "{}")
+        assertTrue(ledger.coversScheduled("EVENING", oldDate))
+        assertFalse(ledger.coversScheduled("EVENING", "2026-09-28"))
+        val nextNormal = ledger.startScheduledRun("EVENING", "2026-09-28",
+            "periodic-work", false)!!
+        assertEquals("2026-09-28", db.generationRunDao().get(nextNormal)?.occurrenceDate)
+    }
+
+    @Test fun `new periodic slot retry does not inherit a covered previous slot`() = runBlocking {
+        val previous = ledger.startScheduledRun("MORNING", "2026-09-27", "work:0", false)!!
+        ledger.finishWithoutDigest(previous, "empty", "{}")
+        // WorkManager advanced periodCount after acknowledging the previous slot.
+        // The next slot crashed before inserting a Room run, then retried.
+        val next = ledger.startScheduledRun("MORNING", "2026-09-28", "work:1", true)!!
+        assertEquals("2026-09-28", db.generationRunDao().get(next)?.occurrenceDate)
+        assertFalse(ledger.coversScheduled("MORNING", "2026-09-28"))
+    }
+
+    @Test fun `terminal commit before periodic acknowledgement remains covered on retry`() = runBlocking {
+        val run = ledger.startScheduledRun("EVENING", "2026-09-27", "work:7", false)!!
+        ledger.finishWithoutDigest(run, "deferred", "{}")
+        // The Room commit happened but WorkManager has not advanced periodCount.
+        assertNull(ledger.startScheduledRun("EVENING", "2026-09-28", "work:7", true))
+        assertTrue(ledger.coversScheduled("EVENING", "2026-09-27"))
+        assertFalse(ledger.coversScheduled("EVENING", "2026-09-28"))
+    }
+
+    @Test fun `partial scheduled artifact and occurrence coverage commit together`() = runBlocking {
+        val run = ledger.startScheduledRun("EVENING", "2026-09-27", "partial-work", false)!!
+        val mixed = GenerationDiagnostics(listOf(FeedIngestionResult(feed, 1, 1,
+            listOf(result(1)), emptyList(),
+            listOf(DeliveryIssue(key(1).articleKey, "summary", "full_article_fallback")),
+            0, fallbackCount = 1)))
+        assertEquals("partial", mixed.outcome)
+        val file = files.newFile("partial-scheduled.epub").apply { writeText("synthetic") }
+        val digestId = digests.withGeneratedArtifact(file) {
+            digests.finalizeDeliveryRun(run, mixed, file.absolutePath,
+                TriggerType.SCHEDULED, "evening", false)
+        }
+        assertEquals("partial", db.generationRunDao().get(run)?.outcome)
+        assertEquals(digestId, db.generationRunDao().get(run)?.digestId)
+        assertTrue(ledger.coversScheduled("EVENING", "2026-09-27"))
+        assertEquals("delivered", db.articleDeliveryDao().get(feed.url, key(1).articleKey)?.state)
+        assertNull(ledger.startScheduledRun("EVENING", "2026-09-27", "catchup-work", false))
     }
 
     @Test fun `generation deduplicates links and ignores missing or late publication dates`() = runBlocking {
@@ -334,5 +412,33 @@ class AndroidDeliveryTest {
         assertEquals(3, result.selectedCount)
         assertEquals(listOf(key(1), key(2), key(3)), result.delivered.map { it.identity })
         coVerify(exactly = 0) { rss.fetchNewArticles(any(), any()) }
+    }
+
+    @Test fun `promotional prefilter uses nonblank description when content is empty`() = runBlocking {
+        val rss = mockk<RssService>()
+        val processor = mockk<ContentProcessor>()
+        val settings = mockk<SettingsRepository>()
+        val promotion = mockk<PromotionalContentFilter>()
+        val item = mockk<RssItem>(relaxed = true) {
+            every { link } returns article(1).originalUrl
+            every { title } returns "Neutral title"
+            every { content } returns "  "
+            every { description } returns "Sponsored placement"
+        }
+        coEvery { rss.fetchFeedForGeneration(feed.url) } returns listOf(item)
+        every { settings.getMinWordCount() } returns 0
+        every { promotion.isPromotional(any(), any(), any()) } answers {
+            PromotionalContentFilter.FilterResult(thirdArg<String?>()?.contains("Sponsored") == true)
+        }
+        val repository = ArticleRepository(rss, processor, mockk<OpenAIService>(),
+            mockk<FeedRepository>(), settings, promotion, ledger)
+        val run = ledger.startRun(false)
+        val result = repository.ingestForGeneration(feed, run)
+        assertEquals("promotional", result.excluded.single().reason)
+        assertTrue(result.delivered.isEmpty())
+        coVerify(exactly = 0) { processor.processForGeneration(any(), any(), any(), any(), any(), any()) }
+        ledger.finishWithoutDigest(run, "empty", GenerationDiagnostics(listOf(result)).toJson(),
+            result.excluded)
+        assertEquals("excluded", db.articleDeliveryDao().get(feed.url, key(1).articleKey)?.state)
     }
 }

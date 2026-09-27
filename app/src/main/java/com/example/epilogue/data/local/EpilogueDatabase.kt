@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
     entities = [FeedEntity::class, DigestEntity::class, DigestArticleEntity::class,
         FeedMutationEntity::class, FeedSyncStateEntity::class,
         ArticleDeliveryEntity::class, GenerationRunEntity::class],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

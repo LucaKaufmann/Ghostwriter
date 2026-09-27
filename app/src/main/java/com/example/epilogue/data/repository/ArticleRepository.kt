@@ -91,7 +91,8 @@ class ArticleRepository @Inject constructor(
             val id = DeliveryIdentity(feed.url, candidate.key)
             try {
                 val promotion = promotionalFilter.isPromotional(item.link, item.title,
-                    item.content ?: item.description)
+                    item.content?.takeIf { it.isNotBlank() } ?:
+                        item.description?.takeIf { it.isNotBlank() })
                 if (promotion.isPromotional) {
                     excluded += ExcludedArticle(id, "promotional", signature)
                     continue

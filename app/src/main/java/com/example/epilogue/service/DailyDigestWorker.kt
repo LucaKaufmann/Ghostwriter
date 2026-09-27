@@ -25,9 +25,18 @@ import com.example.epilogue.domain.model.TriggerType
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.IOException
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.Date
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /**
@@ -57,6 +66,27 @@ class DailyDigestWorker @AssistedInject constructor(
         const val KEY_FETCH_ALL = "fetch_all"  // Explicit user regeneration only.
         const val KEY_IS_MANUAL = "is_manual"  // If true, triggered manually (not scheduled)
         const val KEY_PERIOD = "period"  // Period name (MORNING, NOON, EVENING) for scheduled digests
+        const val KEY_OCCURRENCE_DATE = "occurrence_date" // Explicit catch-up occurrence.
+        private const val MAX_CONCURRENT_FEEDS = 3
+
+        const val KEY_PERIODIC_ANCHOR = "periodic_anchor_millis"
+        const val KEY_PERIODIC_ZONE = "periodic_zone_id"
+        private const val PERIOD_MILLIS = 24L * 60 * 60 * 1000
+
+        /** Latest nominal 24-hour slot, independent of constrained execution time. */
+        internal fun periodicOccurrenceDate(now: ZonedDateTime, anchorMillis: Long,
+            scheduleZone: ZoneId = now.zone): LocalDate {
+            val elapsed = (now.toInstant().toEpochMilli() - anchorMillis).coerceAtLeast(0)
+            val intended = Instant.ofEpochMilli(anchorMillis + (elapsed / PERIOD_MILLIS) * PERIOD_MILLIS)
+            return intended.atZone(scheduleZone).toLocalDate()
+        }
+
+        /** Bounded fan-out, with results retained in the input feed order. */
+        internal suspend fun <T, R> ingestInOrder(items: List<T>,
+            block: suspend (T) -> R): List<R> = coroutineScope {
+            val permits = Semaphore(MAX_CONCURRENT_FEEDS)
+            items.map { item -> async { permits.withPermit { block(item) } } }.awaitAll()
+        }
 
         // Notification constants for foreground service
         const val NOTIFICATION_CHANNEL_ID = "digest_generation"
@@ -94,12 +124,38 @@ class DailyDigestWorker @AssistedInject constructor(
                 }
             }
 
-            val feeds = feedRepository.getEnabledFeedsList()
             val triggerType = if (isManual) TriggerType.MANUAL else TriggerType.SCHEDULED
             val periodString = period?.name?.lowercase() ?: if (isManual) "manual" else null
-            val id = deliveryStore.startRun(regeneration)
+            val id = if (!isManual && period != null) {
+                val explicit = inputData.getString(KEY_OCCURRENCE_DATE)
+                    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                val anchor = inputData.getLong(KEY_PERIODIC_ANCHOR, 0L)
+                val scheduleZone = inputData.getString(KEY_PERIODIC_ZONE)
+                    ?.let { runCatching { ZoneId.of(it) }.getOrNull() }
+                // A legacy attempt may finish before its periodic request is
+                // updated with an anchor; retain its prior due-window rule.
+                val now = ZonedDateTime.now()
+                val occurrence = (explicit ?: if (anchor > 0)
+                    periodicOccurrenceDate(now, anchor, scheduleZone ?: now.zone)
+                    else if (now.hour < period.hour) now.toLocalDate().minusDays(1)
+                    else now.toLocalDate()).toString()
+                val executionKey = if (explicit != null) this.id.toString() else {
+                    try {
+                        PeriodicWorkExecution.key(applicationContext, this.id)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        Log.w(TAG, "Periodic execution identity unavailable")
+                        null
+                    }
+                } ?: return retryOrFailure()
+                deliveryStore.startScheduledRun(period.name, occurrence, executionKey,
+                    retry = runAttemptCount > 0, regeneration = regeneration)
+                    ?: return success("already_covered")
+            } else deliveryStore.startRun(regeneration, if (isManual) "MANUAL" else null)
             runId = id
-            val diagnostics = GenerationDiagnostics(feeds.map { feed ->
+            val feeds = feedRepository.getEnabledFeedsList()
+            val diagnostics = GenerationDiagnostics(ingestInOrder(feeds) { feed ->
                 articleRepository.ingestForGeneration(feed, id, regeneration)
             })
             if (diagnostics.articles.isEmpty()) {

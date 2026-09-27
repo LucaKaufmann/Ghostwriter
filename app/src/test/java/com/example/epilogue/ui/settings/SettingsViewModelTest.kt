@@ -32,6 +32,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -139,6 +140,21 @@ class SettingsViewModelTest {
         emit(data, workInfo(id, WorkInfo.State.SUCCEEDED))
         assertTrue(model.uiState.value.digestCompleted)
         assertFalse(data.hasObservers())
+    }
+
+    @Test
+    fun `partial result uses neutral wording for cap deferral or processing failure`() {
+        val id = UUID.randomUUID()
+        val data = MutableLiveData<WorkInfo>()
+        every { scheduler.runNow(false) } returns id
+        every { scheduler.getImmediateWorkInfo(id) } returns data
+        val model = viewModel()
+        model.runDigestNow()
+        emit(data, WorkInfo(id, WorkInfo.State.SUCCEEDED, emptySet(),
+            Data.Builder().putString("generation_outcome", "partial").build()))
+        assertTrue(model.uiState.value.digestCompleted)
+        assertEquals("Digest saved with a partial result",
+            model.uiState.value.digestResultMessage)
     }
 
     @Test
