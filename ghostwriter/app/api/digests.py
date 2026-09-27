@@ -6,12 +6,13 @@ import posixpath
 import re
 import zipfile
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -24,6 +25,17 @@ from app.models.digest import Digest, DigestArticle, DigestRead
 from app.models.podcast_episode import PodcastEpisode
 from app.services.content_processor import ExtractedArticle
 from app.services.digest_content_formatter import format_digest_content_to_html
+from app.services.digest_deletion import (
+    DeletionConflict,
+    DigestMissing,
+    check_owned_files,
+    digest_lock,
+    immediate_session,
+    safe_digest_paths,
+)
+from app.services.digest_deletion import (
+    delete_digest as remove_digest,
+)
 from app.services.pdf_generator import PdfGenerator
 from app.services.podcast_service import podcast_service
 from app.services.reader_service import (
@@ -188,7 +200,11 @@ async def _ensure_digest_access(
     digest_id: UUID,
     request: Request,
     credentials: HTTPAuthorizationCredentials | None,
+    allow_deleting: bool = False,
 ) -> None:
+    digest = session.get(Digest, digest_id)
+    if digest is None or (digest.status == "deleting" and not allow_deleting):
+        raise HTTPException(status_code=404, detail="Digest not found")
     episode = _one_off_episode_for_digest(session, digest_id)
     if episode is None:
         if podcast_service.is_one_off_digest(session, digest_id):
@@ -251,7 +267,9 @@ async def list_digests(
     Returns digests ordered by creation date, newest first.
     Supports filtering by creation date, status, and period.
     """
-    statement = podcast_service.exclude_one_off_digests(select(Digest))
+    statement = podcast_service.exclude_one_off_digests(
+        select(Digest).where(Digest.status != "deleting")
+    )
 
     # Apply filters
     if since:
@@ -650,6 +668,23 @@ def _to_extracted_articles(articles: list[DigestArticle]) -> list[ExtractedArtic
     return extracted
 
 
+def _stream_open_file(path: Path, filename: str, media_type: str) -> StreamingResponse:
+    try:
+        file = path.open("rb")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Digest file not found") from exc
+
+    def chunks():
+        with file:
+            while block := file.read(64 * 1024):
+                yield block
+
+    return StreamingResponse(
+        chunks(), media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{digest_id}/download", dependencies=[Depends(verify_api_key)])
 async def download_digest_by_id(
     digest_id: UUID,
@@ -658,80 +693,63 @@ async def download_digest_by_id(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
-) -> FileResponse:
-    """Download a digest by ID in EPUB or PDF format."""
+) -> StreamingResponse:
     digest = session.get(Digest, digest_id)
-    if not digest:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Digest not found",
-        )
+    if digest is None:
+        raise HTTPException(status_code=404, detail="Digest not found")
     await _ensure_digest_access(
-        session=session,
-        digest_id=digest_id,
-        request=request,
-        credentials=credentials,
+        session=session, digest_id=digest_id, request=request, credentials=credentials,
     )
-
     if digest.status != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Digest is not completed yet",
-        )
+        raise HTTPException(status_code=409, detail="Digest is not completed yet")
+    if format == "pdf" and not _pdf_enabled(session):
+        raise HTTPException(status_code=400, detail="PDF downloads are disabled in settings")
+    try:
+        epub_path, pdf_path = safe_digest_paths(settings.output_dir, digest.filename)
+    except DeletionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    path = pdf_path if format == "pdf" else epub_path
+    target_filename = path.name
+    media_type = "application/pdf" if format == "pdf" else "application/epub+zip"
 
-    target_filename = digest.filename
-    media_type = "application/epub+zip"
+    with digest_lock(digest_id):
+        # Render outside a DB transaction. Publication and the status check
+        # share one SQLite writer transaction with the deletion claim.
+        if format == "pdf" and not path.exists():
+            articles = _load_digest_articles(session, digest_id)
+            if not articles:
+                raise HTTPException(status_code=404, detail="Digest has no article content to render PDF")
+            temporary_name = f".{uuid4()}.pdf"
+            temporary = Path(settings.output_dir) / temporary_name
+            try:
+                PdfGenerator(settings=settings).generate(
+                    articles=_to_extracted_articles(articles), period=digest.period,
+                    date=digest.created_at, page_size=_pdf_page_size(session),
+                    output_filename=temporary_name,
+                )
+                with immediate_session() as writer:
+                    current = writer.get(Digest, digest_id)
+                    if current is None or current.status != "completed":
+                        raise HTTPException(status_code=409, detail="Digest is no longer available")
+                    check_owned_files(writer, current, settings.output_dir)
+                    os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
 
-    pdf_enabled = _pdf_enabled(session)
-
-    if format == "pdf":
-        if not pdf_enabled:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="PDF downloads are disabled in settings",
-            )
-
-        target_filename = _derive_pdf_filename(digest.filename)
-        media_type = "application/pdf"
-
-    file_path = os.path.join(settings.output_dir, target_filename)
-
-    if format == "pdf" and not os.path.exists(file_path):
-        articles = _load_digest_articles(session, digest_id)
-        if not articles:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Digest has no article content to render PDF",
-            )
-
-        pdf_generator = PdfGenerator(settings=settings)
-        pdf_generator.generate(
-            articles=_to_extracted_articles(articles),
-            period=digest.period,
-            date=digest.created_at,
-            page_size=_pdf_page_size(session),
-            output_filename=target_filename,
-        )
-
-    if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Digest file not found",
-        )
+        # The handle is opened before deletion can unlink the path.
+        with immediate_session() as writer:
+            current = writer.get(Digest, digest_id)
+            if current is None or current.status != "completed":
+                raise HTTPException(status_code=409, detail="Digest is no longer available")
+            check_owned_files(writer, current, settings.output_dir)
+            response = _stream_open_file(path, target_filename, media_type)
+            if not current.downloaded_at:
+                current.downloaded_at = datetime.utcnow()
+                writer.add(current)
 
     from app.services import activity_tracker
     activity_tracker.record_download()
-
-    if not digest.downloaded_at:
-        digest.downloaded_at = datetime.utcnow()
-        session.add(digest)
-        session.commit()
-
-    return FileResponse(
-        path=file_path,
-        filename=target_filename,
-        media_type=media_type,
-    )
+    return response
 
 
 @router.get("/{filename}", dependencies=[Depends(verify_api_key)])
@@ -741,56 +759,14 @@ async def download_digest(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
-) -> FileResponse:
-    """
-    Download a digest EPUB file.
-
-    The filename should be the EPUB filename (e.g., 2024-10-24_morning.epub).
-    This also records download activity for inactivity tracking.
-    """
-    # Validate filename to prevent path traversal
-    if ".." in filename or "/" in filename or "\\" in filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid filename",
-        )
-
-    if not filename.endswith(".epub"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only EPUB files can be downloaded",
-        )
-
-    file_path = os.path.join(settings.output_dir, filename)
-
-    if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Digest file not found",
-        )
-
-    # Record download activity and mark digest as downloaded
-    from app.services import activity_tracker
-    activity_tracker.record_download()
-
-    # Mark the specific digest as downloaded
-    digest = session.exec(select(Digest).where(Digest.filename == filename)).first()
-    if digest:
-        await _ensure_digest_access(
-            session=session,
-            digest_id=digest.id,
-            request=request,
-            credentials=credentials,
-        )
-    if digest and not digest.downloaded_at:
-        digest.downloaded_at = datetime.utcnow()
-        session.add(digest)
-        session.commit()
-
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type="application/epub+zip",
+) -> StreamingResponse:
+    digests = session.exec(select(Digest).where(Digest.filename == filename)).all()
+    if not digests:
+        raise HTTPException(status_code=404, detail="Digest not found")
+    if len(digests) != 1:
+        raise HTTPException(status_code=409, detail="Digest filename is shared")
+    return await download_digest_by_id(
+        digests[0].id, request, "epub", credentials, settings, session,
     )
 
 
@@ -802,42 +778,33 @@ async def delete_digest(
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
 ) -> dict:
-    """
-    Delete a digest EPUB file.
-
-    This also removes the database record.
-    """
-    # Validate filename
-    if ".." in filename or "/" in filename or "\\" in filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid filename",
+    digests = session.exec(select(Digest).where(Digest.filename == filename)).all()
+    if not digests:
+        try:
+            digest_id = UUID(filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Digest not found") from exc
+        digest = session.get(Digest, digest_id)
+        if digest is None:
+            raise HTTPException(status_code=404, detail="Digest not found")
+    elif len(digests) != 1:
+        raise HTTPException(status_code=409, detail="Digest filename is shared")
+    else:
+        digest = digests[0]
+    await _ensure_digest_access(
+        session=session, digest_id=digest.id, request=request,
+        credentials=credentials, allow_deleting=True,
+    )
+    try:
+        remove_digest(digest.id, settings.output_dir)
+    except DigestMissing as exc:
+        raise HTTPException(status_code=404, detail="Digest not found") from exc
+    except DeletionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error(
+            "Digest deletion failed",
+            extra={"digest_id": str(digest.id), "error_class": type(exc).__name__},
         )
-
-    # Find and delete database record
-    statement = select(Digest).where(Digest.filename == filename)
-    digest = session.exec(statement).first()
-
-    if digest:
-        await _ensure_digest_access(
-            session=session,
-            digest_id=digest.id,
-            request=request,
-            credentials=credentials,
-        )
-        session.delete(digest)
-        session.commit()
-
-    # Delete file
-    file_path = os.path.join(settings.output_dir, filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
-        return {"status": "deleted", "filename": filename}
-
-    if not digest:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Digest not found",
-        )
-
-    return {"status": "deleted", "filename": filename, "note": "File already removed"}
+        raise HTTPException(status_code=503, detail="Digest deletion can be retried") from exc
+    return {"status": "deleted", "filename": filename}
