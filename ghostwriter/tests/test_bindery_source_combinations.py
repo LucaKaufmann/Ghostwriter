@@ -25,7 +25,11 @@ REAL_WALLABAG_FACTORY = WallabagService.from_db_or_settings.__func__
 class WallabagStub:
     def __init__(self, entries=(), mode="raw", configured=True):
         self.entries = list(entries)
-        self.settings = SimpleNamespace(wallabag_mode=mode)
+        self.settings = SimpleNamespace(
+            wallabag_mode=mode, wallabag_url="https://wallabag.example.test",
+            wallabag_username="fixture", wallabag_client_id="fixture",
+            wallabag_tag_on_process="ghostwriter",
+        )
         self.is_configured = configured
         self.marked = []
 
@@ -41,12 +45,28 @@ class NewsletterStub:
         self.articles = list(articles)
         self.is_configured = configured
         self.marked = []
+        self.settings = SimpleNamespace(
+            gmail_client_id="fixture", gmail_label="Ghostwriter"
+        )
+
+    async def get_account_id(self):
+        return "fixture@example.test"
+
+    async def _get_access_token(self):
+        return "fixture-token"
+
+    async def get_account_id_for_token(self, _token):
+        return "fixture@example.test"
 
     async def fetch_newsletters(self):
+        self.last_fetch_account_id = "fixture@example.test"
         return self.articles, [f"message-{a.guid}" for a in self.articles]
 
     async def mark_processed(self, ids):
         self.marked.extend(ids)
+
+    async def mark_processed_with_token(self, ids, _token):
+        await self.mark_processed(ids)
 
 
 class EmptyFeedProcessor:
@@ -108,8 +128,12 @@ def scene(tmp_path, monkeypatch):
                         url="https://example.com/feed.xml", title="RSS", is_active=True
                     )
                 )
-            if config:
-                session.add(config)
+            existing_config = session.exec(select(ClientConfig)).first()
+            if config and existing_config:
+                session.delete(existing_config)
+                session.flush()
+            if config or not existing_config:
+                session.add(config or ClientConfig(newsletter_mode="raw"))
             if wallabag_config:
                 session.add(wallabag_config)
             if media:
@@ -384,6 +408,7 @@ async def test_pre_output_failure_preserves_retry_state(scene):
         wallabag=WallabagStub([wallabag_entry()]),
         newsletter=NewsletterStub([article()]),
         media="podcast",
+        config=ClientConfig(newsletter_mode="raw"),
     )
     original_generate = pipeline.epub_generator.generate
 
@@ -401,8 +426,13 @@ async def test_pre_output_failure_preserves_retry_state(scene):
     assert wb.marked == [] and nl.marked == []
 
     pipeline.epub_generator.generate = original_generate
+    retry_id = uuid4()
+    with Session(engine) as session:
+        session.add(Digest(id=retry_id, filename=f"{retry_id}.epub", period="manual"))
+        session.commit()
+    pipeline.digest_id = retry_id
     await pipeline.run()
-    inspect_edition(engine, output_dir, pipeline.digest_id, 3)
+    inspect_edition(engine, output_dir, retry_id, 3)
     with Session(engine) as session:
         assert len(session.exec(select(DigestArticle)).all()) == 3
         assert session.exec(select(MediaItem)).one().consumed_at is not None

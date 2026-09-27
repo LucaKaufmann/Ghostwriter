@@ -22,6 +22,7 @@ from app.core.database import engine, init_db
 from app.core.logging import configure_logging
 from app.models.digest import Digest
 from app.services.podcast_service import podcast_service
+from app.services.source_acknowledgement import drain_pending
 from app.worker.scheduler import setup_scheduler, shutdown_scheduler
 
 # Configure logging (both standard and digest activity logging)
@@ -148,11 +149,26 @@ async def lifespan(app: FastAPI):
     # Start scheduler
     setup_scheduler()
 
+    async def retry_source_acknowledgements() -> None:
+        try:
+            await drain_pending(engine=engine)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Source acknowledgement retry failed on startup")
+
+    acknowledgement_task = asyncio.create_task(retry_source_acknowledgements())
+
     yield
 
     # Shutdown
     logger.info("Shutting down Ghostwriter")
     shutdown_scheduler()
+    acknowledgement_task.cancel()
+    try:
+        await acknowledgement_task
+    except asyncio.CancelledError:
+        pass
 
 
 # Create FastAPI app
