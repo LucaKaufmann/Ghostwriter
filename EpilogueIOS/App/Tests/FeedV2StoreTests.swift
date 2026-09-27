@@ -831,6 +831,54 @@ final class FeedV2StoreTests: XCTestCase {
         try FeedV2TestHarness(model()).invalidInputRollsBackAssertion()
     }
 
+    func testNewFeedAdmissionRejectsHostlessAndInvalidPortsWithoutPersistence() throws {
+        let container = try model()
+        let engine = IOSFeedV2StoreEngine(container: container)
+        for url in ["http://:8080/rss", "https://example.test:0/rss",
+                    "https://example.test:99999/rss"] {
+            do {
+                try engine.edit(url: url, title: "Feed", mode: .fidelity,
+                                isEnabled: true, maxArticles: 2)
+                XCTFail("Accepted invalid new feed URL: \(url)")
+            } catch IOSFeedV2StoreEngine.StoreError.invalidURL {}
+        }
+        let context = ModelContext(container)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Domain.Feed>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<FeedMutation>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<FeedSyncState>()), 0)
+    }
+
+    func testNewIPv6FeedAndKnownLegacyURLKeepExactRawIdentity() throws {
+        let container = try model()
+        let engine = IOSFeedV2StoreEngine(container: container)
+        _ = try engine.destination(for: "https://server.test")
+        let ipv6URL = "HTTP://[2001:DB8::1]:08080/rss?x=%2F"
+        try engine.edit(url: ipv6URL, title: "IPv6", mode: .fidelity,
+                        isEnabled: true, maxArticles: 2)
+        XCTAssertEqual(try ModelContext(container)
+            .fetch(FetchDescriptor<Domain.Feed>()).first?.url, ipv6URL)
+        let first = try XCTUnwrap(engine.claimOneForTesting())
+        let firstJSON = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Foundation.Data(first.wireJSON.utf8)) as? [String: Any])
+        XCTAssertEqual((firstJSON["mutations"] as? [[String: Any]])?.first?["url"] as? String,
+                       ipv6URL)
+
+        let legacyURL = "http://:8080/rss"
+        let context = ModelContext(container)
+        context.insert(Domain.Feed(url: legacyURL, name: "Legacy", mode: .fidelity,
+                                   serverId: "server-id", serverVersion: 7))
+        try context.save()
+        try engine.edit(url: legacyURL, title: "Edited legacy", mode: .fidelity,
+                        isEnabled: true, maxArticles: 2)
+        let legacy = try XCTUnwrap(ModelContext(container)
+            .fetch(FetchDescriptor<FeedMutation>()).first { $0.url == legacyURL })
+        XCTAssertEqual(legacy.url, legacyURL)
+        XCTAssertEqual(legacy.baseVersion, 7)
+        XCTAssertEqual(try ModelContext(container)
+            .fetch(FetchDescriptor<Domain.Feed>()).first { $0.url == legacyURL }?.name,
+                       "Edited legacy")
+    }
+
     func testCursorSaveFailure() throws {
         try FeedV2TestHarness(model()).cursorFailureAssertion()
     }

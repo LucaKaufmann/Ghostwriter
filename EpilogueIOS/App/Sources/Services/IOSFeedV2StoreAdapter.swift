@@ -651,8 +651,13 @@ final class IOSFeedV2StoreEngine {
             throw StoreError.invalidEdit
         }
         try transaction { context in
-            let value = try state(context)
             let existing = try feed(url, context)
+            // New subscriptions need an admissible host and port. Keep the
+            // exact URL of an existing row eligible for edits and replay.
+            guard existing != nil || FeedSyncV2ModelsKt.isAdmissibleNewFeedUrlV2(url: url) else {
+                throw StoreError.invalidURL
+            }
+            let value = try state(context)
             let prior = try mutations(context).filter { $0.url == url }.last
             let changedTitle = existing?.name != title
             let changedMode = existing?.mode != mode
