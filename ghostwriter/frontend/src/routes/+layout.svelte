@@ -3,6 +3,7 @@
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import { ModeWatcher, createInitialModeExpression } from 'mode-watcher';
 	import { Toaster } from '$lib/components/ui/sonner';
+	import { api, ApiError } from '$lib/api';
 	import { auth, isAuthenticated, isLoading } from '$lib/stores/auth';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import LoginScreen from '$lib/components/layout/LoginScreen.svelte';
@@ -26,10 +27,7 @@
 			queries: {
 				staleTime: 1000 * 60, // 1 minute
 				retry: (failureCount, error) => {
-					// Don't retry on auth errors
-					if (error instanceof Error && error.message.includes('401')) {
-						return false;
-					}
+					if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return false;
 					return failureCount < 3;
 				}
 			}
@@ -37,7 +35,17 @@
 	});
 
 	onMount(() => {
+		const stopUnauthorized = api.onUnauthorized((token) => auth.expireSession(token));
+		let wasAuthenticated = false;
+		const stopAuth = auth.subscribe((state) => {
+			if (wasAuthenticated && !state.isAuthenticated) queryClient.clear();
+			wasAuthenticated = state.isAuthenticated;
+		});
 		auth.init();
+		return () => {
+			stopUnauthorized();
+			stopAuth();
+		};
 	});
 </script>
 
