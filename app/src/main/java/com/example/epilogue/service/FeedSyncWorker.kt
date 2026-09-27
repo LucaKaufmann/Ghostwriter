@@ -70,8 +70,9 @@ class FeedSyncWorker @AssistedInject constructor(
                 }
 
                 is FeedSyncV2Outcome.Partial -> {
-                    Log.w(TAG, "Feed sync partial: pending=${outcome.pending}, conflicts=${outcome.conflicts}, rejected=${outcome.rejected}")
-                    Result.success()
+                    Log.w(TAG, "Feed sync partial: phase=${outcome.phase}, pending=${outcome.pending}, conflicts=${outcome.conflicts}, rejected=${outcome.rejected}")
+                    if (outcome.phase in setOf("push", "pull", "invalid_response")) retryOrFail()
+                    else Result.success()
                 }
 
                 is FeedSyncV2Outcome.Failed -> {
