@@ -10,6 +10,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.ArticleDeliveryStore
@@ -25,6 +26,13 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Manages scheduling of the daily digest generation using WorkManager.
@@ -45,8 +53,7 @@ class DigestScheduler @Inject constructor(
 
     companion object {
         private const val TAG = "DigestScheduler"
-        private const val LEGACY_WORK_NAME_PREFIX = "daily_digest_"
-        private const val WORK_NAME_PREFIX = "daily_digest_anchored_"
+        private const val WORK_NAME_PREFIX = "daily_digest_"
         private const val CATCH_UP_WORK_NAME_PREFIX = "daily_digest_catchup_"
         private const val CATCH_UP_TAG = "catch_up"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
@@ -82,6 +89,10 @@ class DigestScheduler @Inject constructor(
 
     private val workManager: WorkManager
         get() = WorkManager.getInstance(context)
+    private val registrationLock = Any()
+    private val registrationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val registrationJobs = mutableMapOf<DigestPeriod, Job>()
+    private val registrationGenerations = mutableMapOf<DigestPeriod, Long>()
 
     /**
      * Constraints for digest generation:
@@ -129,46 +140,70 @@ class DigestScheduler @Inject constructor(
      * Schedules a digest for a specific period.
      */
     fun schedulePeriod(period: DigestPeriod) {
+        synchronized(registrationLock) {
+            registrationJobs.remove(period)?.cancel()
+            val generation = (registrationGenerations[period] ?: 0L) + 1
+            registrationGenerations[period] = generation
+            registrationJobs[period] = registrationScope.launch {
+                registerPeriod(period, generation)
+            }
+        }
+    }
+
+    private suspend fun registerPeriod(period: DigestPeriod, generation: Long) {
+        val manager = workManager
+        val workName = getWorkName(period)
+        val existing = try {
+            // An already-running legacy worker keeps its original input. Wait for
+            // the next ENQUEUED generation rather than interrupting that run.
+            manager.getWorkInfosForUniqueWorkFlow(workName).first { rows ->
+                val active = rows.firstOrNull { it.state !in setOf(
+                    WorkInfo.State.SUCCEEDED, WorkInfo.State.FAILED, WorkInfo.State.CANCELLED) }
+                active == null || (active.state == WorkInfo.State.ENQUEUED &&
+                    active.nextScheduleTimeMillis in 1L until Long.MAX_VALUE)
+            }.firstOrNull { it.state !in setOf(
+                WorkInfo.State.SUCCEEDED, WorkInfo.State.FAILED, WorkInfo.State.CANCELLED) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not inspect ${period.name} periodic schedule", error)
+            null // KEEP preserves any existing work if the read failed.
+        }
+
         val initialDelay = calculateInitialDelay(period.hour, 0)
-        val anchor = System.currentTimeMillis() + initialDelay
-
-        val inputData = Data.Builder()
-            .putString(DailyDigestWorker.KEY_PERIOD, period.name)
-            .putLong(DailyDigestWorker.KEY_PERIODIC_ANCHOR, anchor)
-            .build()
-
-        val periodicWorkRequest = PeriodicWorkRequestBuilder<DailyDigestWorker>(
-            repeatInterval = 24,
-            repeatIntervalTimeUnit = TimeUnit.HOURS
-        )
+        val anchor = existing?.nextScheduleTimeMillis ?: System.currentTimeMillis() + initialDelay
+        val builder = PeriodicWorkRequestBuilder<DailyDigestWorker>(24, TimeUnit.HOURS)
             .setConstraints(workConstraints)
-            .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
-            .setInputData(inputData)
+            .setInputData(Data.Builder()
+                .putString(DailyDigestWorker.KEY_PERIOD, period.name)
+                .putLong(DailyDigestWorker.KEY_PERIODIC_ANCHOR, anchor)
+                .build())
             .addTag(DailyDigestWorker.TAG)
             .addTag(period.name)
-            .build()
-
-        // Replace old requests without an occurrence anchor once. KEEP retains
-        // the original anchor on later app launches, matching the 24-hour timer.
-        workManager.cancelUniqueWork("$LEGACY_WORK_NAME_PREFIX${period.name}")
-        workManager.enqueueUniquePeriodicWork(
-            getWorkName(period),
-            ExistingPeriodicWorkPolicy.KEEP,
-            periodicWorkRequest
-        )
-
-        val delayHours = initialDelay / (1000 * 60 * 60)
-        val delayMinutes = (initialDelay / (1000 * 60)) % 60
-        Log.i(TAG, "Scheduled ${period.name} digest for ${period.hour}:00, " +
-                "initial delay: ${delayHours}h ${delayMinutes}m")
+        if (existing == null) builder.setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
+        else {
+            builder.setId(existing.id)
+            builder.setNextScheduleTimeOverride(anchor)
+        }
+        val request = builder.build()
+        synchronized(registrationLock) {
+            if (registrationGenerations[period] != generation) return
+            manager.enqueueUniquePeriodicWork(workName,
+                if (existing == null) ExistingPeriodicWorkPolicy.KEEP else ExistingPeriodicWorkPolicy.UPDATE,
+                request)
+        }
+        Log.i(TAG, "Registered ${period.name} digest occurrence at $anchor")
     }
 
     /**
      * Cancels the scheduled digest for a specific period.
      */
     fun cancelPeriod(period: DigestPeriod) {
-        workManager.cancelUniqueWork("$LEGACY_WORK_NAME_PREFIX${period.name}")
-        workManager.cancelUniqueWork(getWorkName(period))
+        synchronized(registrationLock) {
+            registrationGenerations[period] = (registrationGenerations[period] ?: 0L) + 1
+            registrationJobs.remove(period)?.cancel()
+            workManager.cancelUniqueWork(getWorkName(period))
+        }
         Log.i(TAG, "Cancelled ${period.name} digest")
     }
 
