@@ -11,6 +11,7 @@ import Domain
 import Data
 import GhostwriterClient
 import OSLog
+import SwiftData
 
 /// Coordinates all Ghostwriter sync operations
 ///
@@ -32,13 +33,14 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     public init(
         settingsRepository: SettingsRepositoryProtocol,
         feedRepository: FeedRepositoryProtocol,
-        digestRepository: DigestRepositoryProtocol
+        digestRepository: DigestRepositoryProtocol,
+        modelContainer: ModelContainer
     ) {
         self.settingsRepository = settingsRepository
 
         self.feedSyncService = FeedSyncService(
             settingsRepository: settingsRepository,
-            feedRepository: feedRepository
+            modelContainer: modelContainer
         )
 
         self.digestSyncService = DigestSyncService(
@@ -89,8 +91,8 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         do {
             logger.info("Starting Ghostwriter sync")
 
-            // 1. Send heartbeat + push feeds concurrently (independent operations)
-            await sendHeartbeatAndPushFeeds(tracker: tracker)
+            // Feed v2 runs independently of config/digest combined sync.
+            let feedError = await sendHeartbeatAndSyncFeeds(tracker: tracker)
 
             // 3. Try combined sync
             let s = tracker.beginInterval("Combined Sync")
@@ -109,10 +111,6 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                     logger.warning("Config sync failed: \(error.localizedDescription)")
                 }
 
-                let fs = tracker.beginInterval("Feed Sync (fallback)")
-                try await feedSyncService.sync(tracker: tracker)
-                tracker.endInterval("Feed Sync (fallback)", state: fs)
-
                 let shouldSyncDigests = await shouldRunDigestSync()
                 if shouldSyncDigests {
                     let ds = tracker.beginInterval("Digest Sync (fallback)")
@@ -121,6 +119,7 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                 }
             }
 
+            if let feedError { throw feedError }
             lastSyncTime = Date()
             logger.info("Ghostwriter sync completed successfully")
         } catch {
@@ -132,29 +131,20 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         isSyncing = false
     }
 
-    /// Send heartbeat and push feeds concurrently since they're independent operations.
-    private func sendHeartbeatAndPushFeeds(tracker: SyncPerformanceTracker) async {
-        async let heartbeatResult: Void = {
-            do {
-                let s = tracker.beginInterval("Heartbeat")
-                _ = try await self.heartbeatService.sendHeartbeat()
-                tracker.endInterval("Heartbeat", state: s)
-            } catch {
-                self.logger.warning("Heartbeat failed: \(error.localizedDescription)")
-            }
-        }()
-
-        async let feedPushResult: Void = {
-            do {
-                let s = tracker.beginInterval("Feed Push")
-                try await self.feedSyncService.pushLocalFeeds(tracker: tracker)
-                tracker.endInterval("Feed Push", state: s)
-            } catch {
-                self.logger.warning("Feed push failed: \(error.localizedDescription)")
-            }
-        }()
-
-        _ = await (heartbeatResult, feedPushResult)
+    /// Keep heartbeat independent while reporting every v2 feed outcome.
+    private func sendHeartbeatAndSyncFeeds(tracker: SyncPerformanceTracker) async -> Error? {
+        do {
+            _ = try await heartbeatService.sendHeartbeat()
+        } catch {
+            logger.warning("Heartbeat failed: \(error.localizedDescription)")
+        }
+        do {
+            try await feedSyncService.sync(tracker: tracker)
+            return nil
+        } catch {
+            logger.warning("Feed sync v2 needs attention: \(error.localizedDescription)")
+            return error
+        }
     }
 
     /// Try combined sync endpoint. Returns true if successful.
@@ -181,11 +171,7 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                 logger.warning("Failed to apply synced config: \(error.localizedDescription)")
             }
 
-            do {
-                try await feedSyncService.applyFeedChanges(syncResponse.feeds)
-            } catch {
-                logger.warning("Failed to apply synced feeds: \(error.localizedDescription)")
-            }
+            // Combined /sync feed payload is v1 and never touches v2 state.
 
             do {
                 let ds = tracker?.beginInterval("Process Synced Digests")
@@ -222,8 +208,7 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         do {
             logger.info("Starting forced full Ghostwriter sync (including digests)")
 
-            // Send heartbeat + push feeds concurrently (independent operations)
-            await sendHeartbeatAndPushFeeds(tracker: tracker)
+            let feedError = await sendHeartbeatAndSyncFeeds(tracker: tracker)
 
             // Try combined sync
             let s = tracker.beginInterval("Combined Sync")
@@ -236,14 +221,12 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                     _ = try await configSyncManager.sync()
                     tracker.endInterval("Config Sync", state: cs)
                 } catch {}
-                let fs = tracker.beginInterval("Feed Sync (fallback)")
-                try await feedSyncService.sync(tracker: tracker)
-                tracker.endInterval("Feed Sync (fallback)", state: fs)
                 let ds = tracker.beginInterval("Digest Sync (fallback)")
                 try await digestSyncService.sync(tracker: tracker)
                 tracker.endInterval("Digest Sync (fallback)", state: ds)
             }
 
+            if let feedError { throw feedError }
             lastSyncTime = Date()
             logger.info("Forced full sync completed")
         } catch {
@@ -271,6 +254,15 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
     /// Sync only feeds
     public func syncFeeds() async throws {
         try await feedSyncService.sync()
+    }
+
+    /// Read-only compatibility view for servers that do not support feed v2.
+    /// These rows never enter SwiftData, the v2 cursor, or the mutation queue.
+    public func previewOlderServerFeeds() async throws -> [FeedResponse] {
+        guard let url = try await settingsRepository.getGhostwriterURL() else { return [] }
+        let key = try await settingsRepository.getGhostwriterAPIKey()
+        let client = try GhostwriterClient(baseURLString: url, apiKey: key)
+        return try await client.listFeeds()
     }
 
     /// Sync only digests
@@ -304,9 +296,33 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         )
     }
 
-    /// Notify server when a feed is deleted locally
-    public func notifyFeedDeleted(url: String) async throws {
-        try await feedSyncService.notifyFeedDeleted(url: url)
+    public func addOrEditFeed(url: String, title: String, mode: ProcessingMode,
+                              isEnabled: Bool, maxArticles: Int) throws {
+        try feedSyncService.addOrEdit(url: url, title: title, mode: mode,
+                                      isEnabled: isEnabled, maxArticles: maxArticles)
+    }
+
+    public func deleteFeed(url: String) throws {
+        try feedSyncService.delete(url: url)
+    }
+
+    public func startNewFeedBinding() throws {
+        try feedSyncService.startNewBinding()
+    }
+
+    func resolvePreviousFeedProposal(opId: String,
+                                     action: IOSFeedV2StoreEngine.PreviousProposalAction) throws {
+        try feedSyncService.resolvePrevious(opId: opId, action: action)
+    }
+
+    public func suspendFeedBindingForDestinationChange(_ url: String?) throws {
+        try feedSyncService.suspendForDestinationChange(url)
+    }
+
+    func resolveFeed(opId: String, action: IOSFeedV2StoreEngine.Resolution,
+                     correctedTitle: String? = nil) throws {
+        try feedSyncService.resolve(opId: opId, action: action,
+                                    correctedTitle: correctedTitle)
     }
 
     /// Push schedule enable/disable state to the server.

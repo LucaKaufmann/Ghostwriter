@@ -42,6 +42,16 @@ public final class Feed {
     /// Whether this feed has been modified locally and needs to be synced
     public var locallyModified: Bool
 
+    /// Server-owned identity and version; nil until a complete v2 reconciliation.
+    public var serverId: String?
+    public var serverVersion: Int64?
+
+    /// Incremented in the same save that creates each local intent.
+    public var mutationRevision: Int64?
+
+    /// A pending local delete keeps its row and server identity durable.
+    public var isLocallyDeleted: Bool?
+
     public init(
         url: String,
         name: String,
@@ -51,7 +61,11 @@ public final class Feed {
         isEnabled: Bool = true,
         createdAt: Date = Date(),
         serverUpdatedAt: Date? = nil,
-        locallyModified: Bool = false
+        locallyModified: Bool = false,
+        serverId: String? = nil,
+        serverVersion: Int64? = nil,
+        mutationRevision: Int64 = 0,
+        isLocallyDeleted: Bool = false
     ) {
         self.url = url
         self.name = name
@@ -62,5 +76,9 @@ public final class Feed {
         self.createdAt = createdAt
         self.serverUpdatedAt = serverUpdatedAt
         self.locallyModified = locallyModified
+        self.serverId = serverId
+        self.serverVersion = serverVersion
+        self.mutationRevision = mutationRevision
+        self.isLocallyDeleted = isLocallyDeleted
     }
 }
