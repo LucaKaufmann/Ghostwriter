@@ -1,6 +1,8 @@
 import XCTest
 @testable import Epilogue
 import Domain
+import Data
+import SwiftData
 
 final class LocalDigestSchedulerTests: XCTestCase {
     private var calendar: Calendar {
@@ -94,6 +96,52 @@ final class LocalDigestSchedulerTests: XCTestCase {
                                  period: nil, isComplete: false)
         XCTAssertFalse(LocalDigestScheduler.hasDigestCoveringLatestPeriod(
             .morning, digests: [pending], now: now, calendar: calendar))
+    }
+
+    @MainActor
+    func testReconciledDigestDoesNotCoverPeriodInLoadedMainContext() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scheduler-recovery-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
+        let container = try ModelContainer(
+            for: schema, migrationPlan: EpilogueMigrationPlan.self,
+            configurations: [ModelConfiguration(
+                schema: schema, url: directory.appendingPathComponent("Epilogue.sqlite"))])
+        let generatedAt = makeDate(hour: 8, minute: 0)
+        let digest = Digest(generatedAt: generatedAt,
+                            epubFilePath: directory.appendingPathComponent("missing.epub").path,
+                            articleCount: 1, triggerType: .scheduled,
+                            isComplete: true, period: "MORNING")
+        let run = GenerationRun(attemptSequence: 1, startedAt: generatedAt,
+                                trigger: TriggerType.scheduled.rawValue,
+                                period: "MORNING", digestId: digest.id)
+        let writer = ModelContext(container)
+        writer.insert(digest)
+        writer.insert(run)
+        writer.insert(DigestArticle(
+            digest: digest, title: "Article", content: "Body",
+            originalUrl: "https://example.test/article",
+            feedUrl: "https://feed.test/rss", feedName: "Feed",
+            contentType: .deepDive))
+        writer.insert(ArticleDelivery(
+            feedUrl: "https://feed.test/rss", articleKey: "article-key",
+            state: "delivered", firstDigestId: digest.id, committedAt: generatedAt))
+        try writer.save()
+
+        let mainContext = ModelContext(container)
+        let repository = DigestRepository(modelContext: mainContext)
+        let loaded = try XCTUnwrap(mainContext.fetch(FetchDescriptor<Digest>()).first)
+        XCTAssertTrue(loaded.isComplete)
+        try DeliveryStore(container: container).reconcileInterruptedLocalRuns(
+            now: makeDate(hour: 9, minute: 0))
+        let now = makeDate(hour: 10, minute: 0)
+        let fetched = try await repository.getDigests(from: calendar.startOfDay(for: now),
+                                                      to: now)
+        XCTAssertEqual(fetched.count, 1)
+        XCTAssertFalse(try XCTUnwrap(fetched.first).isComplete)
+        XCTAssertFalse(LocalDigestScheduler.hasDigestCoveringLatestPeriod(
+            .morning, digests: fetched, now: now, calendar: calendar))
     }
 
     func testBackgroundCompletionDistinguishesFailureFromNoWork() {
