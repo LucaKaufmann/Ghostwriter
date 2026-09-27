@@ -178,3 +178,20 @@ Aggregate1190591f1f finished 10 successful hosted checks with one intentional im
 
 - Android parity investigation reproduced a newer live pull exposing a queued-deleted feed in visible/enabled/local-generation DAO queries. This was a local fixture, not a provider run; configured DailyDigestWorker skips local generation. Correctionc1a5386, integrated3c5eb75, derives visibility from the latest retained active-scope intent in `(queueOrder, sequence)` order across reconciliation/conflict/pull/ACK/resolution/correction. Existing cached value handling, payloads, statuses and tombstones remain as specified. Full actual shared-usecase and disk-reopen controls passed;35 focused/225App/58shared plus one intentional skip/APK. Sol24159 clean; result62a3555 integratedc7c8595.
 - Root compared integrated iOS/shared source to verified d4834bf and Android/shared/other product source to verified62a3555; only the accepted disjoint platform changes differ between worker trees. Aggregate whitespace check passes with the documented historical SQL fixture exclusion. All currently identified actionable findings are fixed; final published feedback/CI refresh remains.
+
+## Post-CI comments at2026-09-27T21:07Z
+
+Aggregate1190987f80 passed10hosted checks plus one intentional publication skip; iOS completed21:06:37Z. Changed-head paginated refresh at10621:07:07Z/11921:07:09Z found four actionable comments.106/4116901770 corrected locally: only unbound first reconciliation omits both parameters; bound full pulls keep instance ID, matching actual Ktor implementation.119/4116909634 immutable-URL web PUT DNS gate and4116909636 legacy negative cap consumption assigned backend owner.119/4116909638 hostless malformed authority admitted by shared validation assigned for bounded contract/admission design. Final closeout remains held; earlier green tests do not verify upcoming source corrections.
+
+### All-PR refresh during final feed-input follow-up
+
+Paginated PR74–119 refresh at 2026-09-27T21:16:13Z: 31 open, 15 externally merged, 109 inline comments, 57 review bodies, and 47 issue comments. No additional or changed comments beyond the four already tracked at21:07Z. Backend `21f7df5` passed independent Sol commit review (`backend-feed-compat-review.log/json`, exit0); full verification and native admission corrections remain active.
+
+### Final feed-input corrections accepted locally
+
+- #106/4116901770: corrected bound full-pull handoff documentation; actual Ktor client already sends the observed instance ID while omitting only `since_version`.
+- #119/4116909634 and4116909636: backend source `ec8ed10`, result `b0c9e5f`, integrated through `df4382b`. Immutable-URL PUT preserves CAS without DNS admission; bindery projects legacy raw limits before the strict parser. New-only malformed-port validation covers web/v2 creation while preserving known rows/replay.462backend tests passed; final cumulative Sol review49023 clean. The accepted review fixture-signature finding was corrected and retested.
+- #119/4116909638: common/Android `c63ded1` integrated8a4f27c and iOS `470e834` integrated37d43a0. New admission checks actual hostname/port through the shared parser as a boolean; exact identity, legacy snapshots, durable wire replay and known-row edits remain compatible.229Android/59shared plus one intentional live skip,197iOS/55focused,59shared-native, both app builds and XCFramework passed. Android Sol88214 and integrated iOS Sol5148 clean. Isolated iOS review97406 reported dependencies absent from its old-base checkout; rejected after confirming the already accepted helper/Android source and rerunning in the combined checkout.
+- Combined source37d43a0: real Ktor→FastAPI1passed with no skips; synthetic browser reading/listening1passed. Exact component source comparisons matched the verified worker trees. No paid providers or production content. Logs `final-feed-admission-{live-contract,journey}.log`.
+
+All four latest comments are addressed locally; final source publication and hosted feedback remain to be inspected. No external review replies or thread-resolution claim.
