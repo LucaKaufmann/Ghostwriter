@@ -2,6 +2,7 @@ package com.example.epilogue.data.local
 
 import androidx.room.Room
 import com.example.epilogue.data.repository.AndroidFeedV2Store
+import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.Feed
 import com.example.epilogue.domain.model.ProcessingMode
@@ -13,6 +14,7 @@ import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -21,6 +23,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
@@ -68,6 +71,32 @@ class AndroidFeedV2StoreTest {
         assertTrue(database.feedDao().getAllFeedsList().isEmpty())
         assertEquals(firstId, database.feedMutationDao().forUrl(url).first().opId)
         assertEquals(3L, database.feedSyncStateDao().byKey("unbound")!!.nextSequence)
+        database.close()
+    }
+
+    @Test fun `disabled Ghostwriter leaves migrated legacy feed available locally across restart`() = runBlocking {
+        context.deleteDatabase(name)
+        var database = db()
+        var store = AndroidFeedV2Store(database, settings)
+        store.saveLocal(feed("Legacy local"))
+        val proposal = database.feedMutationDao().forUrl(url).single()
+        database.feedMutationDao().update(proposal.copy(state = "legacy_unresolved"))
+        configured = true
+        val scope = store.currentDestination()!!.configurationId
+        assertTrue(database.feedDao().getEnabledFeedsList().isEmpty())
+        configured = false
+        assertEquals("Legacy local", FeedRepository(database.feedDao(), store, settings)
+            .getEnabledFeedsList().single().name)
+        assertEquals("legacy_unresolved", database.feedMutationDao().forScope(scope).single().state)
+        database.close()
+
+        database = db()
+        store = AndroidFeedV2Store(database, settings)
+        assertEquals("Legacy local", FeedRepository(database.feedDao(), store, settings)
+            .getEnabledFeedsList().single().name)
+        assertEquals(proposal.opId, database.feedMutationDao().forScope(scope).single().opId)
+        configured = true
+        assertTrue(FeedRepository(database.feedDao(), store, settings).getEnabledFeedsList().isEmpty())
         database.close()
     }
 
@@ -334,6 +363,38 @@ class AndroidFeedV2StoreTest {
         assertTrue(store.resolve(successor.opId, "discard"))
         assertTrue(database.feedMutationDao().forUrl(url).isEmpty())
         store.endSyncRun(token)
+        database.close()
+    }
+
+    @Test fun `only per URL head is actionable and direct successor resolution is rejected after reopen`() = runBlocking {
+        context.deleteDatabase(name)
+        configured = true
+        var database = db()
+        var store = AndroidFeedV2Store(database, settings)
+        bind(store)
+        store.saveLocal(feed("First"))
+        val first = database.feedMutationDao().forUrl(url).single()
+        database.feedMutationDao().update(first.copy(state = "needs_resolution"))
+        val second = first.copy(opId = UUID.randomUUID().toString(), state = "rejected",
+            sequence = first.sequence + 1, queueOrder = first.queueOrder + 1,
+            fieldsJson = """{"title":"Second"}""")
+        val third = second.copy(opId = UUID.randomUUID().toString(),
+            sequence = second.sequence + 1, queueOrder = second.queueOrder + 1,
+            fieldsJson = """{"title":"Third"}""")
+        database.feedMutationDao().insert(second)
+        database.feedMutationDao().insert(third)
+        assertEquals(listOf(first.opId), database.feedMutationDao().unresolvedFlow().first().map { it.opId })
+        database.close()
+
+        database = db()
+        store = AndroidFeedV2Store(database, settings)
+        assertFalse(store.resolve(third.opId, "discard"))
+        assertFalse(store.correctRejected(third.opId, "Third", ProcessingMode.FIDELITY, true, 0))
+        assertTrue(store.resolve(first.opId, "keep_server"))
+        assertEquals(listOf(second.opId), database.feedMutationDao().unresolvedFlow().first().map { it.opId })
+        assertFalse(store.resolve(third.opId, "discard"))
+        assertTrue(store.resolve(second.opId, "discard"))
+        assertEquals(listOf(third.opId), database.feedMutationDao().unresolvedFlow().first().map { it.opId })
         database.close()
     }
 

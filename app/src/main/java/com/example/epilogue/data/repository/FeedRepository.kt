@@ -11,7 +11,8 @@ import javax.inject.Singleton
 @Singleton
 class FeedRepository @Inject constructor(
     private val feedDao: FeedDao,
-    private val feedV2Store: AndroidFeedV2Store
+    private val feedV2Store: AndroidFeedV2Store,
+    private val settings: SettingsRepository
 ) {
     fun getAllFeeds(): Flow<List<Feed>> =
         feedDao.getAllFeeds().map { entities ->
@@ -22,7 +23,8 @@ class FeedRepository @Inject constructor(
         feedDao.getAllFeedsList().map { it.toDomain() }
 
     suspend fun getEnabledFeedsList(): List<Feed> =
-        feedDao.getEnabledFeedsList().map { it.toDomain() }
+        (if (settings.isGhostwriterConfigured()) feedDao.getEnabledFeedsList()
+        else feedDao.getEnabledLocalFeedsList()).map { it.toDomain() }
 
     suspend fun getFeedByUrl(url: String): Feed? =
         feedDao.getFeedByUrl(url)?.toDomain()
