@@ -456,11 +456,12 @@ public final class DigestSyncService {
         }
 
         try Task.checkCancellation()
+        await cleanupStaleRemoteEpubFiles()
+        try Task.checkCancellation()
         guard failedIds.isEmpty else {
             throw DigestSyncIngestionError(processedCount: processedCount, failedRemoteIds: failedIds)
         }
         try await settingsRepository.setLastDigestSyncTime(Date())
-        await cleanupStaleRemoteEpubFiles()
         logger.info("Digest sync completed: processed \(processedCount) digests")
     }
 

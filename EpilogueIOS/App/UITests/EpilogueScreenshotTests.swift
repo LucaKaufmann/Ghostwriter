@@ -72,6 +72,13 @@ final class EpilogueScreenshotTests: XCTestCase {
         app.staticTexts["https://example.test/delete.xml"].tap()
         XCTAssertTrue(waitForExists(app.buttons["Delete anyway"]))
         capture(name: "feed-v2-delete")
+        app.buttons["Close"].tap()
+
+        app.staticTexts["https://example.test/rejected-delete.xml"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Discard proposal"]))
+        XCTAssertFalse(app.textFields["Corrected title"].exists)
+        XCTAssertFalse(app.buttons["Correct and retry"].exists)
+        capture(name: "feed-v2-rejected-delete")
     }
 
     func testRemoteDigestArtifactAvailabilityFixture() throws {
