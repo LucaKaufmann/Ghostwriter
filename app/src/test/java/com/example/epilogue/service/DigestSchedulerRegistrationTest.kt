@@ -38,6 +38,10 @@ import kotlinx.coroutines.withTimeout
 class DigestSchedulerRegistrationTest {
     private val workName = "daily_digest_MORNING"
 
+    private fun completedOperation(): Operation = mockk {
+        every { result } returns com.google.common.util.concurrent.Futures.immediateFuture(Operation.SUCCESS)
+    }
+
     private fun info(state: WorkInfo.State, next: Long = Long.MAX_VALUE,
         id: UUID = UUID.randomUUID(), tags: Set<String> = emptySet()): WorkInfo {
         val result = mockk<WorkInfo>()
@@ -113,6 +117,7 @@ class DigestSchedulerRegistrationTest {
         mockkStatic(WorkManager::class)
         try {
             every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(any()) } returns completedOperation()
             every { manager.getWorkInfosForUniqueWorkFlow(workName) } returns
                 MutableStateFlow(emptyList())
             every { manager.enqueueUniquePeriodicWork(workName, any(), any()) } answers {
@@ -127,6 +132,107 @@ class DigestSchedulerRegistrationTest {
             registration.await()
             verify(exactly = 1) { manager.enqueueUniquePeriodicWork(
                 workName, ExistingPeriodicWorkPolicy.KEEP, any()) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
+    @Test fun `boot with no selected periods waits for cancellation persistence`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        every { settings.getSchedulePeriods() } returns emptySet()
+        val receipt = SettableFuture.create<Operation.State.SUCCESS>()
+        val awaiting = CountDownLatch(1)
+        val operation = mockk<Operation> {
+            every { result } answers { awaiting.countDown(); receipt }
+        }
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(any()) } returns operation
+            val scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            val boot = async(Dispatchers.IO) { scheduler.scheduleAllPeriodsAwaitPersistence() }
+            assertTrue(awaiting.await(3, TimeUnit.SECONDS))
+            assertFalse(boot.isCompleted)
+            receipt.set(Operation.SUCCESS)
+            boot.await()
+            verify(exactly = DigestPeriod.entries.size) { manager.cancelUniqueWork(any()) }
+            verify(exactly = 0) { manager.enqueueUniquePeriodicWork(any(), any(), any()) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
+    @Test fun `failed empty-selection cancellation settles before boot returns and later enable recovers`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        var selected = emptySet<DigestPeriod>()
+        every { settings.getSchedulePeriods() } answers { selected }
+        val receipt = SettableFuture.create<Operation.State.SUCCESS>()
+        val awaiting = CountDownLatch(1)
+        val failure = mockk<Operation> {
+            every { result } answers { awaiting.countDown(); receipt }
+        }
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(any()) } answers {
+                if (firstArg<String>() == workName) failure else completedOperation()
+            }
+            every { manager.getWorkInfosForUniqueWorkFlow(workName) } returns
+                MutableStateFlow(emptyList())
+            every { manager.enqueueUniquePeriodicWork(workName, any(), any()) } returns
+                completedOperation()
+            val scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            val boot = async(Dispatchers.IO) { scheduler.scheduleAllPeriodsAwaitPersistence() }
+            assertTrue(awaiting.await(3, TimeUnit.SECONDS))
+            assertFalse(boot.isCompleted)
+            receipt.setException(IllegalStateException("synthetic cancellation failure"))
+            boot.await()
+            verify(exactly = 0) { manager.enqueueUniquePeriodicWork(any(), any(), any()) }
+            selected = setOf(DigestPeriod.MORNING)
+            scheduler.schedulePeriod(DigestPeriod.MORNING)
+            verify(timeout = 3000, exactly = 1) { manager.enqueueUniquePeriodicWork(
+                workName, ExistingPeriodicWorkPolicy.KEEP, any()) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
+    @Test fun `boot drains later pending cancel after earlier same-period failure`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val settings = mockk<SettingsRepository>()
+        every { settings.getSchedulePeriods() } returns emptySet()
+        val failed = SettableFuture.create<Operation.State.SUCCESS>().apply {
+            setException(IllegalStateException("synthetic cancellation failure"))
+        }
+        val pending = SettableFuture.create<Operation.State.SUCCESS>()
+        val awaiting = CountDownLatch(1)
+        val failedOperation = mockk<Operation> { every { result } returns failed }
+        val pendingOperation = mockk<Operation> {
+            every { result } answers { awaiting.countDown(); pending }
+        }
+        var morningCancels = 0
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(any()) } answers {
+                if (firstArg<String>() != workName) completedOperation()
+                else if (morningCancels++ == 0) failedOperation else pendingOperation
+            }
+            val scheduler = DigestScheduler(context, settings, mockk(), mockk())
+            scheduler.cancelPeriod(DigestPeriod.MORNING)
+            val boot = async(Dispatchers.IO) { scheduler.scheduleAllPeriodsAwaitPersistence() }
+            assertTrue(awaiting.await(3, TimeUnit.SECONDS))
+            assertFalse(boot.isCompleted)
+            pending.set(Operation.SUCCESS)
+            boot.await()
+            verify(exactly = 1) { failedOperation.result }
+            verify(exactly = 1) { pendingOperation.result }
+            verify(exactly = 0) { manager.enqueueUniquePeriodicWork(any(), any(), any()) }
         } finally {
             unmockkStatic(WorkManager::class)
         }
@@ -272,6 +378,7 @@ class DigestSchedulerRegistrationTest {
         mockkStatic(WorkManager::class)
         try {
             every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(any()) } returns completedOperation()
             every { manager.getWorkInfosForUniqueWorkFlow(any()) } returns
                 MutableStateFlow(emptyList())
             scheduler = DigestScheduler(context, settings, mockk(), mockk())
@@ -307,6 +414,7 @@ class DigestSchedulerRegistrationTest {
         mockkStatic(WorkManager::class)
         try {
             every { WorkManager.getInstance(context) } returns manager
+            every { manager.cancelUniqueWork(any()) } returns completedOperation()
             every { manager.getWorkInfosForUniqueWorkFlow(workName) } returns rows
             val scheduler = DigestScheduler(context, settings, mockk(), mockk())
             withTimeout(1_000) { scheduler.scheduleAllPeriodsAwaitPersistence() }

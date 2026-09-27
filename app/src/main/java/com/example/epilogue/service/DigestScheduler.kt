@@ -49,10 +49,8 @@ import kotlin.coroutines.resumeWithException
  * Manages scheduling of the daily digest generation using WorkManager.
  * Supports multiple time periods (morning, noon, evening) with independent scheduling.
  *
- * When Ghostwriter is configured, scheduled digests are still handled locally
- * (WorkManager triggers at the scheduled time), but the actual generation
- * can be delegated to the backend. Manual triggers from the UI are handled
- * by the ViewModel which decides between local and backend generation.
+ * When Ghostwriter is configured, the scheduled worker exits without local
+ * generation. Manual triggers from the UI are handled by the ViewModel.
  */
 @Singleton
 class DigestScheduler @Inject constructor(
@@ -150,16 +148,18 @@ class DigestScheduler @Inject constructor(
         Log.i(TAG, "Scheduled periods: ${selectedPeriods.joinToString { it.name }}")
     }
 
-    /** Boot keeps its broadcast open until selected requests are durable. */
+    /** Boot keeps its broadcast open until selected enqueues and unselected cancels settle. */
     suspend fun scheduleAllPeriodsAwaitPersistence() {
         val selectedPeriods = settingsRepository.getSchedulePeriods()
         // Cancel from this snapshot before waiting. A later user enable may then
         // register its own work without a stale boot callback cancelling it.
-        for (period in DigestPeriod.entries) {
-            if (period !in selectedPeriods) cancelPeriod(period)
-        }
+        val unselectedPeriods = DigestPeriod.entries.filter { it !in selectedPeriods }
+        unselectedPeriods.forEach(::cancelPeriod)
         coroutineScope {
-            selectedPeriods.map { period ->
+            val cancellations = unselectedPeriods.map { period ->
+                async { awaitPendingCancellations(period, drainAfterFailure = true); Unit }
+            }
+            val registrations = selectedPeriods.map { period ->
                 async {
                     val generation = synchronized(registrationLock) {
                         if (period !in settingsRepository.getSchedulePeriods()) return@synchronized null
@@ -171,7 +171,8 @@ class DigestScheduler @Inject constructor(
                     registerPeriod(period, generation, awaitPersistence = true,
                         waitForRunning = false)
                 }
-            }.awaitAll()
+            }
+            (cancellations + registrations).awaitAll()
         }
     }
 
@@ -193,33 +194,8 @@ class DigestScheduler @Inject constructor(
         awaitPersistence: Boolean = false, waitForRunning: Boolean = true) {
         val manager = workManager
         val workName = getWorkName(period)
-        val cancellations = synchronized(registrationLock) {
-            pendingCancellations[period]?.toList().orEmpty()
-        }
-        val settled = mutableListOf<Operation>()
-        // Await every outstanding cancellation; a later receipt alone does not
-        // prove an earlier cancellation has finished removing its request.
-        for (cancellation in cancellations) {
-            try {
-                cancellation.awaitPersistence()
-                settled.add(cancellation)
-            } catch (error: Exception) {
-                currentCoroutineContext().ensureActive()
-                // A completed failed receipt is no longer useful. Leave any later
-                // still-pending cancellations for the next registration to await.
-                settled.add(cancellation)
-                synchronized(registrationLock) {
-                    pendingCancellations[period]?.removeAll(settled.toSet())
-                    if (pendingCancellations[period]?.isEmpty() == true)
-                        pendingCancellations.remove(period)
-                }
-                Log.w(TAG, "Could not confirm ${period.name} cancellation", error)
-                return
-            }
-        }
+        if (!awaitPendingCancellations(period)) return
         synchronized(registrationLock) {
-            pendingCancellations[period]?.removeAll(settled.toSet())
-            if (pendingCancellations[period]?.isEmpty() == true) pendingCancellations.remove(period)
             if (registrationGenerations[period] != generation) return
         }
         val existing = try {
@@ -275,6 +251,37 @@ class DigestScheduler @Inject constructor(
         }
         if (awaitPersistence) operation.awaitPersistence()
         Log.i(TAG, "Registered ${period.name} digest occurrence at $anchor")
+    }
+
+    private suspend fun awaitPendingCancellations(period: DigestPeriod,
+        drainAfterFailure: Boolean = false): Boolean {
+        val cancellations = synchronized(registrationLock) {
+            pendingCancellations[period]?.toList().orEmpty()
+        }
+        val settled = mutableListOf<Operation>()
+        var allSucceeded = true
+        // Await every outstanding cancellation; a later receipt alone does not
+        // prove an earlier cancellation has finished removing its request.
+        for (cancellation in cancellations) {
+            try {
+                cancellation.awaitPersistence()
+                settled.add(cancellation)
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                // A completed failed receipt is no longer useful. Leave any later
+                // still-pending cancellations for the next registration to await.
+                // Boot must drain them before releasing its broadcast, however.
+                settled.add(cancellation)
+                Log.w(TAG, "Could not confirm ${period.name} cancellation", error)
+                allSucceeded = false
+                if (!drainAfterFailure) break
+            }
+        }
+        synchronized(registrationLock) {
+            pendingCancellations[period]?.removeAll(settled.toSet())
+            if (pendingCancellations[period]?.isEmpty() == true) pendingCancellations.remove(period)
+        }
+        return allSucceeded
     }
 
     private suspend fun Operation.awaitPersistence() = suspendCancellableCoroutine<Unit> { continuation ->
