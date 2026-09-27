@@ -11,9 +11,13 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import androidx.work.Data
 import com.codable.epilogue.R
 import com.example.epilogue.data.repository.ArticleRepository
+import com.example.epilogue.data.repository.ArticleDeliveryStore
+import com.example.epilogue.data.repository.DeliveryClaimConflict
 import com.example.epilogue.data.repository.DigestRepository
+import com.example.epilogue.data.repository.GenerationDiagnostics
 import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.DigestPeriod
@@ -23,6 +27,8 @@ import dagger.assisted.AssistedInject
 import java.io.IOException
 import java.util.Date
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /**
  * WorkManager worker that generates the daily EPUB digest.
@@ -38,7 +44,9 @@ class DailyDigestWorker @AssistedInject constructor(
     private val digestRepository: DigestRepository,
     private val settingsRepository: SettingsRepository,
     private val epubGenerator: EpubGenerator,
-    private val epubExporter: EpubExporter
+    private val epubExporter: EpubExporter,
+    private val deliveryStore: ArticleDeliveryStore,
+    private val generationGate: GenerationGate
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -46,7 +54,7 @@ class DailyDigestWorker @AssistedInject constructor(
         const val WORK_NAME = "daily_digest_work"
 
         // Input data keys
-        const val KEY_FETCH_ALL = "fetch_all"  // If true, fetch all articles (not just new)
+        const val KEY_FETCH_ALL = "fetch_all"  // Explicit user regeneration only.
         const val KEY_IS_MANUAL = "is_manual"  // If true, triggered manually (not scheduled)
         const val KEY_PERIOD = "period"  // Period name (MORNING, NOON, EVENING) for scheduled digests
 
@@ -60,24 +68,22 @@ class DailyDigestWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         Log.i(TAG, "Starting daily digest generation (attempt ${runAttemptCount})")
-        var pendingDigestId: Long = -1
-
-        // Skip local generation if Ghostwriter is configured
-        // This is a safety check in case scheduled work wasn't cancelled properly
         if (settingsRepository.isGhostwriterConfigured()) {
             Log.i(TAG, "Ghostwriter is configured, skipping local digest generation")
             return Result.success()
         }
-
-        // Set foreground for long-running work
         try {
             setForeground(createForegroundInfo())
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Could not start foreground service (app in background), continuing anyway")
         }
+        return generationGate.run { generateLocal() }
+    }
 
+    private suspend fun generateLocal(): Result {
+        var runId: Long? = null
         return try {
-            val fetchOnlyNew = !inputData.getBoolean(KEY_FETCH_ALL, false)
+            val regeneration = inputData.getBoolean(KEY_FETCH_ALL, false)
             val isManual = inputData.getBoolean(KEY_IS_MANUAL, false)
             val periodName = inputData.getString(KEY_PERIOD)
             val period = periodName?.let {
@@ -88,103 +94,69 @@ class DailyDigestWorker @AssistedInject constructor(
                 }
             }
 
-            // Get all feeds for later reference
             val feeds = feedRepository.getEnabledFeedsList()
             val triggerType = if (isManual) TriggerType.MANUAL else TriggerType.SCHEDULED
             val periodString = period?.name?.lowercase() ?: if (isManual) "manual" else null
-            pendingDigestId = digestRepository.createPendingDigest(
-                feeds = feeds,
-                triggerType = triggerType,
-                period = periodString
-            )
-
-            // Fetch and process articles from all feeds
-            val articles = articleRepository.fetchFromAllFeeds(onlyNew = fetchOnlyNew)
-
-            if (articles.isEmpty()) {
-                Log.i(TAG, "No articles to process")
-                digestRepository.deleteDigestById(pendingDigestId)
-                return Result.success()
+            val id = deliveryStore.startRun(regeneration)
+            runId = id
+            val diagnostics = GenerationDiagnostics(feeds.map { feed ->
+                articleRepository.ingestForGeneration(feed, id, regeneration)
+            })
+            if (diagnostics.articles.isEmpty()) {
+                deliveryStore.finishWithoutDigest(id, diagnostics.outcome, diagnostics.toJson(),
+                    if (diagnostics.outcome in setOf("empty", "deferred")) diagnostics.exclusions
+                    else emptyList())
+                return if (diagnostics.outcome == "failed") retryOrFailure() else
+                    success(diagnostics.outcome)
             }
-
-            Log.i(TAG, "Fetched ${articles.size} articles")
-
-            // Generate EPUB with optional period for filename
-            val result = epubGenerator.generate(articles, Date(), period)
-
-            if (result != null) {
-                Log.i(TAG, "Generated EPUB: ${result.file.absolutePath}")
-                digestRepository.withGeneratedArtifact(result.file) {
-                    // Export to custom directory if configured
-                    when (val exportResult = epubExporter.exportToCustomDirectory(result.file)) {
-                        is ExportResult.Success ->
-                            Log.i(TAG, "Exported to custom directory")
-                        is ExportResult.PermissionRevoked ->
-                            Log.w(TAG, "Custom export permission revoked")
-                        is ExportResult.Error ->
-                            Log.e(TAG, "Custom export failed: ${exportResult.message}")
-                        ExportResult.NotConfigured -> { /* No-op */ }
+            val result = epubGenerator.generate(diagnostics.articles.map { it.article },
+                Date(), period)
+            if (result == null) {
+                deliveryStore.finishWithoutDigest(id, "failed",
+                    """{"outcome":"failed","code":"epub_failed"}""")
+                return retryOrFailure()
+            }
+            digestRepository.withGeneratedArtifact(result.file) {
+                check(result.articles == diagnostics.articles.map { it.article })
+                digestRepository.finalizeDeliveryRun(id, diagnostics,
+                    result.file.absolutePath, triggerType, periodString, regeneration)
+                // Optional export happens after the durable local commit.
+                try {
+                    when (val export = epubExporter.exportToCustomDirectory(result.file)) {
+                        is ExportResult.Error -> Log.w(TAG, "Custom export failed: ${export.message}")
+                        is ExportResult.PermissionRevoked -> Log.w(TAG, "Custom export permission revoked")
+                        else -> Unit
                     }
-
-                    // Finalize digest history record
-                    digestRepository.completePendingDigest(
-                        digestId = pendingDigestId,
-                        articles = result.articles,
-                        feeds = feeds,
-                        epubFilePath = result.file.absolutePath
-                    )
-                    Log.i(TAG, "Saved digest to history (period: $periodString)")
-
-                    Result.success()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    Log.w(TAG, "Optional export failed", failure)
                 }
-            } else {
-                Log.e(TAG, "Failed to generate EPUB")
-                handleFailure(
-                    digestId = pendingDigestId,
-                    message = "Failed to generate EPUB",
-                    retriable = true
-                )
+                success(diagnostics.outcome)
             }
         } catch (e: CancellationException) {
+            runId?.let { id -> withContext(NonCancellable) {
+                deliveryStore.finishWithoutDigest(id, "cancelled",
+                    """{"outcome":"cancelled"}""")
+            } }
             throw e
-        } catch (e: IOException) {
-            // Network errors are retriable
-            Log.e(TAG, "Network error generating digest", e)
-            val message = e.message ?: "Network error generating digest"
-            handleFailure(
-                digestId = pendingDigestId.takeIf { it > 0 },
-                message = message,
-                retriable = true
-            )
+        } catch (e: DeliveryClaimConflict) {
+            runId?.let { deliveryStore.finishWithoutDigest(it, "failed",
+                """{"outcome":"failed","code":"claim_conflict"}""") }
+            retryOrFailure()
         } catch (e: Exception) {
             Log.e(TAG, "Error generating digest", e)
-            val message = e.message ?: "Error generating digest"
-            handleFailure(
-                digestId = pendingDigestId.takeIf { it > 0 },
-                message = message,
-                retriable = false
-            )
+            runId?.let { deliveryStore.finishWithoutDigest(it, "failed",
+                """{"outcome":"failed","code":"generation_failed"}""") }
+            if (e is IOException) retryOrFailure() else Result.failure()
         }
     }
 
-    private suspend fun handleFailure(
-        digestId: Long?,
-        message: String,
-        retriable: Boolean
-    ): Result {
-        return if (retriable && runAttemptCount < MAX_RETRY_ATTEMPTS) {
-            if (digestId != null) {
-                digestRepository.deleteDigestById(digestId)
-            }
-            Log.i(TAG, "Scheduling retry (attempt ${runAttemptCount + 1}/$MAX_RETRY_ATTEMPTS)")
-            Result.retry()
-        } else {
-            if (digestId != null) {
-                digestRepository.markDigestFailed(digestId, message)
-            }
-            Result.failure()
-        }
-    }
+    private fun retryOrFailure(): Result =
+        if (runAttemptCount < MAX_RETRY_ATTEMPTS) Result.retry() else Result.failure()
+
+    private fun success(outcome: String): Result = Result.success(Data.Builder()
+        .putString("generation_outcome", outcome).build())
 
     /**
      * Required for expedited work - provides notification for foreground service.

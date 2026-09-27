@@ -110,7 +110,7 @@ fun SettingsScreen(
 
     LaunchedEffect(uiState.digestCompleted) {
         if (uiState.digestCompleted) {
-            snackbarHostState.showSnackbar("Digest generated successfully")
+            snackbarHostState.showSnackbar(uiState.digestResultMessage ?: "Digest generated successfully")
             viewModel.clearDigestCompletedFlag()
         }
     }
@@ -347,7 +347,8 @@ fun SettingsScreen(
                     ghostwriterEnabled = uiState.ghostwriterEnabled && uiState.ghostwriterUrl.isNotBlank(),
                     progress = uiState.ghostwriterProgress,
                     error = uiState.ghostwriterError,
-                    onRunNow = viewModel::runDigestNow
+                    onRunNow = viewModel::runDigestNow,
+                    onRegenerate = viewModel::regenerateDigestLocally
                 )
             }
 
@@ -1423,7 +1424,8 @@ fun ManualGenerationInput(
     ghostwriterEnabled: Boolean,
     progress: DigestStatusResponse?,
     error: String?,
-    onRunNow: () -> Unit
+    onRunNow: () -> Unit,
+    onRegenerate: () -> Unit
 ) {
     Column {
         Button(
@@ -1446,6 +1448,15 @@ fun ManualGenerationInput(
             } else {
                 Text("Run Now")
             }
+        }
+
+        if (!ghostwriterEnabled) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onRegenerate,
+                enabled = !isGenerating,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Regenerate including previously delivered articles") }
         }
 
         // Progress indicator for Ghostwriter

@@ -1,11 +1,11 @@
 package com.example.epilogue.service
 
-import android.util.Log
 import com.example.epilogue.data.remote.openai.ChatCompletionRequest
 import com.example.epilogue.data.remote.openai.ChatMessage
 import com.example.epilogue.data.remote.openai.OpenAIApi
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.domain.model.ProcessedArticle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -22,7 +22,6 @@ class OpenAIService @Inject constructor(
 ) {
 
     companion object {
-        private const val TAG = "OpenAIService"
         private const val MODEL = "gpt-4o-mini"
         private const val MAX_TOKENS = 512
         private const val TEMPERATURE = 0.7
@@ -125,18 +124,21 @@ class OpenAIService @Inject constructor(
                 val errorBody = response.errorBody()?.string()
                 SummaryResult.Error("API error: ${response.code()} - $errorBody")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             SummaryResult.Error("Network error: ${e.message}")
         }
     }
 
-    /**
-     * Summarizes an article and returns a ProcessedArticle with isSummary = true.
-     *
-     * @param originalArticle The original full article
-     * @return ProcessedArticle with summary content, or null if summarization fails or content is promotional
-     */
-    suspend fun summarizeArticle(originalArticle: ProcessedArticle): ProcessedArticle? {
+    sealed interface ArticleSummaryResult {
+        data class Summarized(val article: ProcessedArticle) : ArticleSummaryResult
+        data object Promotional : ArticleSummaryResult
+        data object Failed : ArticleSummaryResult
+    }
+
+    /** Keep intentional exclusions distinct from failures eligible for full-article fallback. */
+    suspend fun summarizeArticle(originalArticle: ProcessedArticle): ArticleSummaryResult {
         val result = summarize(
             title = originalArticle.title,
             content = originalArticle.content,
@@ -145,22 +147,21 @@ class OpenAIService @Inject constructor(
 
         return when (result) {
             is SummaryResult.Success -> {
-                // Filter out articles the AI identified as promotional
                 if (result.summary.trim().equals("PROMOTIONAL_CONTENT", ignoreCase = true)) {
-                    Log.i(TAG, "AI identified promotional content: ${originalArticle.title}")
-                    return null
+                    ArticleSummaryResult.Promotional
+                } else {
+                    ArticleSummaryResult.Summarized(ProcessedArticle(
+                        title = originalArticle.title,
+                        author = originalArticle.author,
+                        content = markdownToHtml(result.summary),
+                        originalUrl = originalArticle.originalUrl,
+                        isSummary = true,
+                        feedUrl = originalArticle.feedUrl,
+                        feedName = originalArticle.feedName
+                    ))
                 }
-                ProcessedArticle(
-                    title = originalArticle.title,
-                    author = originalArticle.author,
-                    content = markdownToHtml(result.summary),
-                    originalUrl = originalArticle.originalUrl,
-                    isSummary = true,
-                    feedUrl = originalArticle.feedUrl,
-                    feedName = originalArticle.feedName
-                )
             }
-            else -> null
+            is SummaryResult.Error, SummaryResult.NoApiKey -> ArticleSummaryResult.Failed
         }
     }
 
