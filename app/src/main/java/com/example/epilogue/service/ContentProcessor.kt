@@ -28,21 +28,22 @@ class ContentProcessor @Inject constructor(
         data object Failed : GenerationResult
     }
 
-    /** Only a demonstrably full but below-threshold source is a terminal short exclusion. */
+    /** A short exclusion requires a successfully extracted source, not a failed URL fetch. */
     suspend fun processForGeneration(
         url: String, rssContent: String?, rssDescription: String?, rssTitle: String?,
         rssAuthor: String?, minWordCount: Int
     ): GenerationResult {
         val article = processWithRssContent(url, rssContent, rssDescription, rssTitle,
             rssAuthor, minWordCount)
-        if (article != null) return GenerationResult.Ready(article)
-        if (minWordCount > 0 &&
-            contentAnalyzer.analyze(rssContent, rssDescription).contentType ==
-            ContentAnalyzer.ContentType.FULL_ARTICLE) {
-            val source = processRssContent(url, rssContent ?: rssDescription ?: "",
-                rssTitle, rssAuthor, 0)
-            if (source != null && countWords(source.content) < minWordCount)
-                return GenerationResult.TooShort
+        if (article != null &&
+            (minWordCount <= 0 || countWords(article.content) >= minWordCount))
+            return GenerationResult.Ready(article)
+        if (minWordCount > 0) {
+            // The ordinary path may already have tried (and failed) a URL fetch. RSS
+            // heuristics alone cannot prove that the article itself was too short.
+            val extracted = fetchAndProcess(url, 0) ?: return GenerationResult.Failed
+            return if (countWords(extracted.content) < minWordCount)
+                GenerationResult.TooShort else GenerationResult.Ready(extracted)
         }
         return GenerationResult.Failed
     }

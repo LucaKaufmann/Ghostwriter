@@ -347,6 +347,7 @@ fun SettingsScreen(
                     ghostwriterEnabled = uiState.ghostwriterEnabled && uiState.ghostwriterUrl.isNotBlank(),
                     progress = uiState.ghostwriterProgress,
                     error = uiState.ghostwriterError,
+                    localRunSummary = uiState.localRunSummary,
                     onRunNow = viewModel::runDigestNow,
                     onRegenerate = viewModel::regenerateDigestLocally
                 )
@@ -1424,6 +1425,7 @@ fun ManualGenerationInput(
     ghostwriterEnabled: Boolean,
     progress: DigestStatusResponse?,
     error: String?,
+    localRunSummary: LocalRunSummary?,
     onRunNow: () -> Unit,
     onRegenerate: () -> Unit
 ) {
@@ -1457,6 +1459,14 @@ fun ManualGenerationInput(
                 enabled = !isGenerating,
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Regenerate including previously delivered articles") }
+            localRunSummary?.let { summary ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(summary.title, style = MaterialTheme.typography.titleSmall)
+                Text(summary.counts, style = MaterialTheme.typography.bodySmall)
+                summary.reasons?.let { reasons ->
+                    Text(reasons, style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
 
         // Progress indicator for Ghostwriter

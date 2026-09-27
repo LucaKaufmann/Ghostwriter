@@ -10,6 +10,8 @@ import com.example.epilogue.data.repository.FeedRepository
 import com.example.epilogue.data.repository.AndroidFeedV2Store
 import com.example.epilogue.data.repository.GhostwriterRepository
 import com.example.epilogue.data.repository.SettingsRepository
+import com.example.epilogue.data.local.GenerationRunDao
+import com.example.epilogue.data.local.GenerationRunEntity
 import com.example.epilogue.service.ConfigSyncManager
 import com.example.epilogue.service.DigestScheduler
 import com.example.epilogue.shared.sync.FeedSyncV2UseCase
@@ -20,6 +22,8 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -48,6 +52,7 @@ class SettingsViewModelTest {
     private val configSync = mockk<ConfigSyncManager>(relaxed = true)
     private val feedSyncV2 = mockk<FeedSyncV2UseCase>(relaxed = true)
     private val feedV2Store = mockk<AndroidFeedV2Store>(relaxed = true)
+    private val generationRunDao = mockk<GenerationRunDao>()
 
     @Before
     fun setUp() {
@@ -55,6 +60,7 @@ class SettingsViewModelTest {
         every { settings.isGhostwriterConfigured() } returns false
         every { settings.isGhostwriterEnabled() } returns false
         every { settings.getGhostwriterUrl() } returns null
+        every { generationRunDao.observeLatestFinished() } returns flowOf(null)
     }
 
     @After
@@ -62,7 +68,8 @@ class SettingsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel() = SettingsViewModel(settings, scheduler, digests, feeds, ghostwriter, configSync, feedSyncV2, feedV2Store)
+    private fun viewModel() = SettingsViewModel(settings, scheduler, digests, feeds,
+        ghostwriter, configSync, feedSyncV2, feedV2Store, generationRunDao)
 
     private fun workInfo(id: UUID, state: WorkInfo.State) =
         WorkInfo(id, state, emptySet(), Data.EMPTY)
@@ -70,6 +77,23 @@ class SettingsViewModelTest {
     private fun emit(data: MutableLiveData<WorkInfo>, info: WorkInfo?) {
         data.postValue(info)
         shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    @Test
+    fun `scheduled local run diagnostics appear without manual WorkInfo and survive view model recreation`() = runTest {
+        val latest = MutableStateFlow<GenerationRunEntity?>(null)
+        every { generationRunDao.observeLatestFinished() } returns latest
+        val first = viewModel()
+        advanceUntilIdle()
+        latest.value = GenerationRunEntity(runId = 4, startedAt = 1, finishedAt = 2,
+            outcome = "deferred", diagnosticsJson =
+                """{"delivered_count":0,"filtered_count":2,"cap_deferred_count":3,"failed_count":0,"reason_counts":{"content_too_short":2}}""")
+        advanceUntilIdle()
+        assertTrue(first.uiState.value.localRunSummary!!.title.contains("Deferred"))
+        val reopened = viewModel()
+        advanceUntilIdle()
+        assertTrue(reopened.uiState.value.localRunSummary!!.counts.contains("Waiting 3"))
+        assertTrue(reopened.uiState.value.localRunSummary!!.reasons!!.contains("minimum word count"))
     }
 
     @Test

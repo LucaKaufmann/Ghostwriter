@@ -49,8 +49,14 @@ data class GenerationDiagnostics(val feeds: List<FeedIngestionResult>) {
         .put("cap_deferred_count", capDeferred)
         .put("fallback_count", fallbackCount)
         .put("failed_count", failures)
+        .put("reason_counts", JSONObject().also { counts ->
+            val reasons = feeds.flatMap { feed ->
+                feed.excluded.map { it.reason } + feed.failedItems.map { it.code } +
+                    listOfNotNull(feed.feedError)
+            }.groupingBy { it }.eachCount()
+            reasons.forEach { (reason, count) -> counts.put(reason, count) }
+        })
         .put("feeds", JSONArray(feeds.map { feed -> JSONObject()
-            .put("feed_url", feed.feed.url)
             .put("candidate_count", feed.candidateCount)
             .put("selected_count", feed.selectedCount)
             .put("delivered_count", feed.deliveredCount)

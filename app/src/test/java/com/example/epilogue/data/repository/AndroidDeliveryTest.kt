@@ -21,6 +21,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -242,5 +243,66 @@ class AndroidDeliveryTest {
         assertEquals(1, result.fallbackCount)
         assertEquals("full_article_fallback", result.failedItems.single().code)
         assertEquals("partial", GenerationDiagnostics(listOf(result)).outcome)
+    }
+
+    @Test fun `capped regeneration rotates five delivered items without rewriting first claims`() = runBlocking {
+        (1..5).forEach { n ->
+            commit(ledger.startRun(false), n, files.newFile("original-$n.epub"))
+        }
+        val claims = (1..5).associateWith { n ->
+            db.articleDeliveryDao().get(feed.url, key(n).articleKey)!!
+        }
+        val rss = mockk<RssService>()
+        val processor = mockk<ContentProcessor>()
+        val settings = mockk<SettingsRepository>()
+        val promotion = mockk<PromotionalContentFilter>()
+        val items = (1..5).map { n -> mockk<RssItem>(relaxed = true) {
+            every { link } returns article(n).originalUrl
+            every { title } returns "Article $n"
+        } }
+        coEvery { rss.fetchFeedForGeneration(feed.url) } returns items
+        every { settings.getMinWordCount() } returns 0
+        every { promotion.isPromotional(any(), any(), any()) } returns
+            PromotionalContentFilter.FilterResult(false)
+        coEvery { processor.processForGeneration(any(), any(), any(), any(), any(), any()) } answers {
+            ContentProcessor.GenerationResult.Ready(article(firstArg<String>().substringAfterLast('/').toInt()))
+        }
+        val repository = ArticleRepository(rss, processor, mockk<OpenAIService>(),
+            mockk<FeedRepository>(), settings, promotion, ledger)
+        val selections = (1..3).map {
+            repository.ingestForGeneration(feed, ledger.startRun(true), true)
+                .delivered.map { it.identity }
+        }
+        assertEquals(listOf(key(1), key(2)), selections[0])
+        assertEquals(listOf(key(3), key(4)), selections[1])
+        assertEquals(listOf(key(5), key(1)), selections[2])
+        (1..5).forEach { n ->
+            val current = db.articleDeliveryDao().get(feed.url, key(n).articleKey)!!
+            assertEquals("delivered", current.state)
+            assertEquals(claims[n]!!.firstDigestId, current.firstDigestId)
+            assertEquals(claims[n]!!.committedAt, current.committedAt)
+        }
+    }
+
+    @Test fun `latest finished diagnostics stream survives database reopen`() = runBlocking {
+        val name = "delivery-" + files.root.name + ".db"
+        val context = RuntimeEnvironment.getApplication()
+        context.deleteDatabase(name)
+        fun open() = Room.databaseBuilder(context, EpilogueDatabase::class.java, name)
+            .allowMainThreadQueries().build()
+        var persisted = open()
+        val store = ArticleDeliveryStore(persisted, persisted.articleDeliveryDao(),
+            persisted.generationRunDao())
+        val run = store.startRun(false)
+        store.finishWithoutDigest(run, "deferred",
+            """{"delivered_count":0,"filtered_count":2,"cap_deferred_count":3,"failed_count":0,
+                "reason_counts":{"content_too_short":2}}""")
+        persisted.close()
+        persisted = open()
+        val latest = persisted.generationRunDao().observeLatestFinished().first()
+        assertEquals(run, latest?.runId)
+        assertEquals("deferred", latest?.outcome)
+        assertTrue(latest!!.diagnosticsJson.contains("content_too_short"))
+        persisted.close()
     }
 }
