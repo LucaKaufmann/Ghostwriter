@@ -15,6 +15,7 @@ from app.models.media_feed import MediaFeed
 from app.models.media_item import MediaItem
 from app.models.seen_article import SeenArticle
 from app.models.source_acknowledgement import SourceAcknowledgement
+from app.services import source_acknowledgement as acknowledgement_service
 from app.services.content_processor import ExtractedArticle
 from app.services.source_acknowledgement import (
     add_intent,
@@ -23,6 +24,19 @@ from app.services.source_acknowledgement import (
     wallabag_binding,
 )
 from app.worker import bindery
+
+
+async def wait_for_follow_ups():
+    """Keep background scans inside the lifetime of their disposable test DB."""
+    while True:
+        await asyncio.sleep(0)  # Let call_soon create a queued follow-up.
+        tasks = tuple(acknowledgement_service._follow_up_tasks)
+        if tasks:
+            await asyncio.gather(*tasks)
+            continue
+        if not acknowledgement_service._pending_requests:
+            break
+    assert not acknowledgement_service._drain_lock.locked()
 
 
 class WallabagRemote:
@@ -354,23 +368,161 @@ async def test_slow_provider_budget_and_concurrent_scan_do_not_delay_edition(sce
 
     scene.remote.mark_processed = stalled_mark
 
-    async def short_drain():
+    async def short_drain(**kwargs):
         await drain_pending(
             engine=scene.database, deadline_seconds=0.05,
             newsletter_factory=lambda: scene.mail,
             wallabag_factory=lambda _session: scene.remote,
+            **kwargs,
         )
 
     pipeline._drain_source_acknowledgements = short_drain
     run_task = asyncio.create_task(pipeline.run())
     await asyncio.wait_for(started.wait(), 1)
-    await asyncio.wait_for(short_drain(), 0.02)
+    await asyncio.wait_for(short_drain(request_follow_up=False), 0.02)
     await asyncio.wait_for(run_task, 1)
     state = scene.snapshot(pipeline.digest_id)
     assert state.status == "completed" and state.artifact
     assert state.count == len(state.rows) == 3
     assert any(r.state == "pending" for r in state.receipts)
     assert any(r.last_error_code == "deadline_exceeded" for r in state.receipts)
+    await asyncio.wait_for(wait_for_follow_ups(), 2)
+
+
+@pytest.mark.asyncio
+async def test_publication_during_prior_drain_gets_automatic_follow_up(scene):
+    binding = wallabag_binding(scene.remote)
+    with Session(scene.database) as session:
+        session.add(SourceAcknowledgement(
+            digest_id=uuid4(), provider="wallabag",
+            source_identity=binding[0], source_config_fingerprint=binding[1],
+            external_item_id="99", action="archive_and_tag",
+        ))
+        session.commit()
+    started = asyncio.Event()
+
+    async def mark(entry_id):
+        if entry_id == 99:
+            started.set()
+            await asyncio.Event().wait()
+        scene.remote.marked.append(entry_id)
+
+    scene.remote.mark_processed = mark
+    prior = asyncio.create_task(drain_pending(
+        engine=scene.database, limit=1, deadline_seconds=0.5,
+        wallabag_factory=lambda _session: scene.remote,
+    ))
+    await asyncio.wait_for(started.wait(), 1)
+    pipeline = scene.new_pipeline()
+    await asyncio.wait_for(pipeline.run(), 1)
+    assert scene.snapshot(pipeline.digest_id).status == "completed"
+    assert scene.remote.marked == []  # Publication returned while prior pass held lock.
+    await asyncio.wait_for(prior, 2)
+    async def wait_for_new_receipts():
+        while True:
+            with Session(scene.database) as session:
+                new = session.exec(select(SourceAcknowledgement).where(
+                    SourceAcknowledgement.digest_id == pipeline.digest_id
+                )).all()
+                if len(new) == 2 and all(receipt.state == "done" for receipt in new):
+                    return
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(wait_for_new_receipts(), 2)
+    await asyncio.wait_for(wait_for_follow_ups(), 2)
+    with Session(scene.database) as session:
+        old = session.exec(select(SourceAcknowledgement).where(
+            SourceAcknowledgement.external_item_id == "99"
+        )).one()
+        new = session.exec(select(SourceAcknowledgement).where(
+            SourceAcknowledgement.digest_id == pipeline.digest_id
+        )).all()
+        assert old.state == "pending" and old.last_error_code == "deadline_exceeded"
+        assert len(new) == 2 and {receipt.state for receipt in new} == {"done"}
+    assert scene.remote.marked == [7]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_prior_pass_propagates_and_preserves_follow_up(scene):
+    binding = wallabag_binding(scene.remote)
+    with Session(scene.database) as session:
+        session.add(SourceAcknowledgement(
+            digest_id=uuid4(), provider="wallabag",
+            source_identity=binding[0], source_config_fingerprint=binding[1],
+            external_item_id="99", action="archive_and_tag",
+        ))
+        session.commit()
+    started = asyncio.Event()
+
+    async def mark(entry_id):
+        if entry_id == 99:
+            started.set()
+            await asyncio.Event().wait()
+        scene.remote.marked.append(entry_id)
+
+    scene.remote.mark_processed = mark
+    prior = asyncio.create_task(drain_pending(
+        engine=scene.database, limit=1, deadline_seconds=10,
+        wallabag_factory=lambda _session: scene.remote,
+    ))
+    await asyncio.wait_for(started.wait(), 1)
+    pipeline = scene.new_pipeline()
+    await asyncio.wait_for(pipeline.run(), 1)
+    prior.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await prior
+
+    async def wait_for_new_receipts():
+        while True:
+            with Session(scene.database) as session:
+                new = session.exec(select(SourceAcknowledgement).where(
+                    SourceAcknowledgement.digest_id == pipeline.digest_id
+                )).all()
+                if len(new) == 2 and all(receipt.state == "done" for receipt in new):
+                    return
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(wait_for_new_receipts(), 2)
+    await asyncio.wait_for(wait_for_follow_ups(), 2)
+    assert scene.remote.marked == [7]
+
+
+@pytest.mark.asyncio
+async def test_digest_follow_up_continues_only_unattempted_receipts(scene):
+    digest_id = uuid4()
+    binding = wallabag_binding(scene.remote)
+    with Session(scene.database) as session:
+        for index in range(1, 52):
+            session.add(SourceAcknowledgement(
+                digest_id=digest_id, provider="wallabag",
+                source_identity=binding[0], source_config_fingerprint=binding[1],
+                external_item_id=str(index), action="archive_and_tag",
+                created_at=datetime(2026, 1, 1, 0, 0, index),
+            ))
+        session.commit()
+
+    async def mark(entry_id):
+        if entry_id == 1:
+            raise RuntimeError("provider unavailable for one item")
+        scene.remote.marked.append(entry_id)
+
+    scene.remote.mark_processed = mark
+    await drain_pending(
+        engine=scene.database, limit=50, digest_id=digest_id,
+        wallabag_factory=lambda _session: scene.remote,
+    )
+    await asyncio.wait_for(wait_for_follow_ups(), 2)
+    with Session(scene.database) as session:
+        receipts = session.exec(select(SourceAcknowledgement).where(
+            SourceAcknowledgement.digest_id == digest_id
+        )).all()
+    assert len(receipts) == 51
+    assert all(receipt.attempt_count == 1 for receipt in receipts)
+    assert {receipt.external_item_id for receipt in receipts if receipt.state == "done"} == {
+        str(index) for index in range(2, 52)
+    }
+    assert {receipt.external_item_id for receipt in receipts if receipt.state == "pending"} == {"1"}
+    assert sorted(scene.remote.marked) == list(range(2, 52))
 
 
 @pytest.mark.asyncio
