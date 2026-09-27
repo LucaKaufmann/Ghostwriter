@@ -398,6 +398,7 @@ async def _authorize_standard_or_feed_token(
         request=request,
         credentials=credentials,
         settings=get_settings(),
+        session=session,
     )
     return None
 

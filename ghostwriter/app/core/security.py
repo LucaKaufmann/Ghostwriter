@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
@@ -53,6 +53,7 @@ def _is_api_token(token: str) -> bool:
 
 async def verify_api_key(
     request: Request,
+    session: Annotated[Session, Depends(get_session)],
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
 ) -> None:
@@ -71,8 +72,6 @@ async def verify_api_key(
     from app.core.auth import decode_access_token, get_token_prefix, verify_api_token
     from app.models.api_token import APIToken
     from app.models.user import User
-
-    session = next(get_session())
 
     # Check if any users exist
     has_users = session.exec(select(User)).first() is not None
