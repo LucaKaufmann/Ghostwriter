@@ -70,9 +70,10 @@ internal fun normalizeArticleUrl(link: String?): String? {
 
 private fun validDnsHost(host: String): Boolean {
     if (host.isEmpty() || host.length > 253 || host.startsWith('.') || ".." in host) return false
-    val labels = host.trimEnd('.').split('.')
+    val bareHost = host.removeSuffix(".")
+    val labels = bareHost.split('.')
     if (labels.size == 4 && labels.all { label -> label.all { it in '0'..'9' } } &&
-        !validIpv4(host)) return false
+        !validIpv4(bareHost)) return false
     return labels.all { label ->
         label.isNotEmpty() && label.length <= 63 && label.first().isLetterOrDigit() &&
             label.last().isLetterOrDigit() && label.all { it.isLetterOrDigit() || it == '-' }
@@ -123,7 +124,7 @@ private fun validIpv6(address: String): Boolean {
     if (compression < 0 && (address.startsWith(':') || address.endsWith(':'))) return false
     val groups = address.split(':').filter { it.isNotEmpty() }
     val ipv4 = groups.lastOrNull()?.takeIf { '.' in it }
-    if (ipv4 != null && !validIpv4(ipv4)) return false
+    if (ipv4 != null && (!address.endsWith(ipv4) || !validIpv4(ipv4))) return false
     val hexGroups = if (ipv4 == null) groups else groups.dropLast(1)
     if (hexGroups.any { it.length !in 1..4 || it.any { digit -> !digit.isHex() } }) return false
     val width = hexGroups.size + if (ipv4 == null) 0 else 2
