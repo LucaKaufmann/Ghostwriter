@@ -32,20 +32,56 @@ class ContentProcessor @Inject constructor(
     suspend fun processForGeneration(
         url: String, rssContent: String?, rssDescription: String?, rssTitle: String?,
         rssAuthor: String?, minWordCount: Int
-    ): GenerationResult {
-        val article = processWithRssContent(url, rssContent, rssDescription, rssTitle,
-            rssAuthor, minWordCount)
-        if (article != null &&
-            (minWordCount <= 0 || countWords(article.content) >= minWordCount))
-            return GenerationResult.Ready(article)
-        if (minWordCount > 0) {
-            // The ordinary path may already have tried (and failed) a URL fetch. RSS
-            // heuristics alone cannot prove that the article itself was too short.
-            val extracted = fetchAndProcess(url, 0) ?: return GenerationResult.Failed
-            return if (countWords(extracted.content) < minWordCount)
-                GenerationResult.TooShort else GenerationResult.Ready(extracted)
+    ): GenerationResult = withContext(Dispatchers.IO) {
+        fun classify(article: ProcessedArticle): GenerationResult =
+            if (minWordCount > 0 && countWords(article.content) < minWordCount)
+                GenerationResult.TooShort else GenerationResult.Ready(article)
+
+        suspend fun fetchOnce(): GenerationResult =
+            fetchAndProcess(url, 0)?.let(::classify) ?: GenerationResult.Failed
+
+        val rss = try {
+            val analysis = contentAnalyzer.analyze(rssContent, rssDescription)
+            val rssArticle = processRssContent(url, rssContent ?: rssDescription ?: "",
+                rssTitle, rssAuthor, 0)
+            val usableRss = rssArticle?.takeIf {
+                minWordCount <= 0 || countWords(it.content) >= minWordCount
+            }
+            analysis.contentType to usableRss
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Log.w(TAG, "RSS generation analysis failed; trying source extraction")
+            null
         }
-        return GenerationResult.Failed
+        if (rss == null) fetchOnce() else {
+            val (contentType, usableRss) = rss
+            when (contentType) {
+                ContentAnalyzer.ContentType.FULL_ARTICLE ->
+                    usableRss?.let { GenerationResult.Ready(it) } ?: fetchOnce()
+                ContentAnalyzer.ContentType.PREVIEW -> {
+                    // A failed fetch may still use substantial RSS content, but a
+                    // short preview cannot become a terminal exclusion.
+                    when (val fetched = fetchOnce()) {
+                        GenerationResult.Failed ->
+                            usableRss?.let { GenerationResult.Ready(it) } ?: fetched
+                        else -> fetched
+                    }
+                }
+                ContentAnalyzer.ContentType.UNCERTAIN -> {
+                    if (usableRss != null &&
+                        countWords(usableRss.content) >= MIN_RSS_CONTENT_WORDS) {
+                        GenerationResult.Ready(usableRss)
+                    } else {
+                        when (val fetched = fetchOnce()) {
+                            GenerationResult.Failed ->
+                                usableRss?.let { GenerationResult.Ready(it) } ?: fetched
+                            else -> fetched
+                        }
+                    }
+                }
+            }
+        }
     }
 
     companion object {

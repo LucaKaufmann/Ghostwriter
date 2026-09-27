@@ -15,6 +15,7 @@ import com.example.epilogue.shared.delivery.ArticleDeliveryIdentity
 import com.example.epilogue.shared.delivery.ArticleIdentityResult
 import com.prof18.rssparser.model.RssItem
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
@@ -304,5 +305,34 @@ class AndroidDeliveryTest {
         assertEquals("deferred", latest?.outcome)
         assertTrue(latest!!.diagnosticsJson.contains("content_too_short"))
         persisted.close()
+    }
+
+    @Test fun `generation deduplicates links and ignores missing or late publication dates`() = runBlocking {
+        val source = feed.copy(maxArticles = 0, lastFetched = Long.MAX_VALUE)
+        val rss = mockk<RssService>()
+        val processor = mockk<ContentProcessor>()
+        val settings = mockk<SettingsRepository>()
+        val promotion = mockk<PromotionalContentFilter>()
+        val items = listOf(1, 1, 2, 3).mapIndexed { index, n ->
+            mockk<RssItem>(relaxed = true) {
+                every { link } returns article(n).originalUrl
+                every { title } returns "Article $n"
+                every { pubDate } returns if (index == 2) null else "Mon, 01 Jan 2024 00:00:00 GMT"
+            }
+        }
+        coEvery { rss.fetchFeedForGeneration(source.url) } returns items
+        every { settings.getMinWordCount() } returns 0
+        every { promotion.isPromotional(any(), any(), any()) } returns
+            PromotionalContentFilter.FilterResult(false)
+        coEvery { processor.processForGeneration(any(), any(), any(), any(), any(), any()) } answers {
+            ContentProcessor.GenerationResult.Ready(article(firstArg<String>().substringAfterLast('/').toInt()))
+        }
+        val repository = ArticleRepository(rss, processor, mockk<OpenAIService>(),
+            mockk<FeedRepository>(), settings, promotion, ledger)
+        val result = repository.ingestForGeneration(source, ledger.startRun(false))
+        assertEquals(4, result.candidateCount)
+        assertEquals(3, result.selectedCount)
+        assertEquals(listOf(key(1), key(2), key(3)), result.delivered.map { it.identity })
+        coVerify(exactly = 0) { rss.fetchNewArticles(any(), any()) }
     }
 }
