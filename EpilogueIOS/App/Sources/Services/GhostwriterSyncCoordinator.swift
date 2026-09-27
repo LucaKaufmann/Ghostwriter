@@ -50,7 +50,6 @@ struct SyncRunError: LocalizedError {
 struct SyncOperations {
     var configured: @MainActor () async throws -> Bool
     var lastDigestSync: @MainActor () async throws -> Date?
-    var feedSince: @MainActor () async throws -> Date?
     var heartbeat: @MainActor () async throws -> Void
     var feed: @MainActor (SyncPerformanceTracker?) async throws -> Void
     var fetchCombined: @MainActor (Date?, [String]) async throws -> SyncResponse
@@ -77,7 +76,8 @@ struct ScheduleTimeValues {
 /// Coordinates all Ghostwriter sync operations
 ///
 /// This is the main entry point for syncing with Ghostwriter.
-/// Call `performFullSync()` on app launch or when the user triggers a sync.
+/// Call `performFullSync()` for background sync and `performFullSyncIncludingDigests()`
+/// for an explicit user-requested sync.
 @MainActor
 public final class GhostwriterSyncCoordinator: ObservableObject {
     private let feedSyncService: FeedSyncService
@@ -147,7 +147,6 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         self.operations = injectedOperations ?? SyncOperations(
             configured: { try await settingsRepository.isGhostwriterConfigured() },
             lastDigestSync: { try await settingsRepository.getLastDigestSyncTime() },
-            feedSince: { try await settingsRepository.getLastFeedSyncTime() },
             heartbeat: { _ = try await heartbeat.sendHeartbeat() },
             feed: { try await feed.sync(tracker: $0) },
             fetchCombined: { since, ids in
@@ -268,22 +267,18 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
                 }
             }
 
-            let feedSince: Date?
-            let knownDigestIDs: [String]
+            var knownDigestIDs: [String] = []
             do {
-                feedSince = try await operations.feedSince()
-                try Task.checkCancellation()
                 knownDigestIDs = try await operations.knownDigestIDs()
                 try Task.checkCancellation()
             } catch {
-                try record(error, component: .settings, phase: "combined request input", into: &issues)
-                finish(issues)
-                return
+                try record(error, component: .digest, phase: "known IDs read", into: &issues)
             }
 
             let response: SyncResponse
             do {
-                response = try await operations.fetchCombined(feedSince, knownDigestIDs)
+                // The combined feed section is v1 and ignored; no v1 cursor is needed.
+                response = try await operations.fetchCombined(nil, knownDigestIDs)
                 try Task.checkCancellation()
             } catch {
                 try rethrowCancellation(error)
@@ -351,7 +346,7 @@ public final class GhostwriterSyncCoordinator: ObservableObject {
         }
 
         // The combined feed section is v1 and must never enter feed v2 state.
-        if syncDigests {
+        if syncDigests || !response.digests.newDigests.isEmpty {
             do {
                 try await operations.applyDigests(response.digests.newDigests, tracker)
                 try Task.checkCancellation()
