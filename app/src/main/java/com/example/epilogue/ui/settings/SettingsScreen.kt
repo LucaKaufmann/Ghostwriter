@@ -131,7 +131,7 @@ fun SettingsScreen(
 
     LaunchedEffect(uiState.dataReset) {
         if (uiState.dataReset) {
-            snackbarHostState.showSnackbar("All digests deleted and feed timestamps reset")
+            snackbarHostState.showSnackbar("Digest history cleared. Delivered articles remain recorded; use Regenerate to repeat them.")
             viewModel.clearDataResetFlag()
         }
     }
@@ -363,10 +363,10 @@ fun SettingsScreen(
                     onClick = { showConfirmDialog = true },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Reset All Data")
+                    Text("Clear digest history")
                 }
                 Text(
-                    text = "Deletes all digests and resets feed timestamps (for testing)",
+                    text = "Deletes saved digests and resets feed timestamps. Delivery history remains.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 4.dp)
                 )
@@ -374,8 +374,8 @@ fun SettingsScreen(
                 if (showConfirmDialog) {
                     AlertDialog(
                         onDismissRequest = { showConfirmDialog = false },
-                        title = { Text("Reset All Data?") },
-                        text = { Text("This will delete all digests and reset feed timestamps so all articles will be fetched again. This cannot be undone.") },
+                        title = { Text("Clear digest history?") },
+                        text = { Text("This deletes saved digests and resets feed timestamps. Delivered articles remain recorded and will not be included again in ordinary runs. Use Regenerate to repeat them. This cannot be undone.") },
                         confirmButton = {
                             TextButton(
                                 onClick = {
@@ -383,7 +383,7 @@ fun SettingsScreen(
                                     showConfirmDialog = false
                                 }
                             ) {
-                                Text("Reset")
+                                Text("Clear history")
                             }
                         },
                         dismissButton = {

@@ -194,4 +194,20 @@ class SettingsViewModelTest {
         verify(exactly = 0) { scheduler.runNow(any()) }
         assertFalse(model.uiState.value.isGenerating)
     }
+
+    @Test
+    fun `regeneration follows visible local fallback when backend URL is blank`() = runTest(dispatcher) {
+        every { settings.isGhostwriterEnabled() } returns true
+        every { settings.getGhostwriterUrl() } returns "   "
+        val id = UUID.randomUUID()
+        every { scheduler.runNow(true) } returns id
+        every { scheduler.getImmediateWorkInfo(id) } returns MutableLiveData()
+        val model = viewModel()
+        advanceUntilIdle()
+
+        model.regenerateDigestLocally()
+
+        verify(exactly = 1) { scheduler.runNow(true) }
+        assertTrue(model.uiState.value.isGenerating)
+    }
 }

@@ -42,7 +42,9 @@ class ContentProcessor @Inject constructor(
 
         val rss = try {
             val analysis = contentAnalyzer.analyze(rssContent, rssDescription)
-            val rssArticle = processRssContent(url, rssContent ?: rssDescription ?: "",
+            val rssHtml = rssContent?.takeIf { it.isNotBlank() }
+                ?: rssDescription?.takeIf { it.isNotBlank() } ?: ""
+            val rssArticle = processRssContent(url, rssHtml,
                 rssTitle, rssAuthor, 0)
             val usableRss = rssArticle?.takeIf {
                 minWordCount <= 0 || countWords(it.content) >= minWordCount
