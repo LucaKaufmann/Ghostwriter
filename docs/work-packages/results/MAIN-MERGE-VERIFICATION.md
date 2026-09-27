@@ -1,10 +1,10 @@
 # Reliability backlog: merged main verification
 
-Checkpoint: 2026-09-28 (Europe/Zurich). Verification complete. The final documentation-only checkpoint preserves the verified product source.
+Checkpoint: 2026-09-28 (Europe/Zurich). Verification complete. The final documentation and test-fixture checkpoint preserves the verified product source.
 
 ## Scope and merge result
 
-The 29 approved reliability packages and the previously accepted review corrections are integrated through all 46 PRs **#74–#119**. A late review found one additional iOS rejection-guidance issue, fixed in merged PR120. Its final actual-main verification is recorded separately below. GitHub reports all 46 merged. The final integration merge is `5c5cc4037f5d9bfccd6e04bb19addca2ff914d03` on main, created at 2026-09-27T22:10:44Z.
+The 29 approved reliability packages and the previously accepted review corrections are integrated through all 46 PRs **#74–#119**. Late review found two iOS rejection-guidance issues, fixed in merged PR120 and PR121. Their actual-main verification is recorded separately below. GitHub reports all 46 merged. The final integration merge is `5c5cc4037f5d9bfccd6e04bb19addca2ff914d03` on main, created at 2026-09-27T22:10:44Z.
 
 The [merge plan](../merge-plan.md) lists the exact child-before-parent order. Scoped PRs merged into their existing prerequisite bases; continuity PR106 preceded aggregate PR119 on main. The accepted aggregate already contained their changes and later fixes through cherry-picks. Explicit history-only merge resolutions retained those original histories without reintroducing superseded code. Every original head and scoped merge commit was proven an ancestor of final main. Before documentation updates, the entire reconciled tree exactly equaled accepted `3c60540a9d11b3ae277818f834b42272607290fe` (tree `b651aa87dbee79d26cdd2e1547ffe7ded3be0505`). Main's tree exactly equals final PR119 head `7070e45436f23dcd3f63cde7a8360c001a999e07`; production and test files are unchanged from the accepted aggregate.
 
@@ -35,6 +35,14 @@ Source `548a817` passed independent Sol review, two focused UI tests, the simula
 [PR121](https://github.com/LucaKaufmann/Ghostwriter/pull/121) addresses the subsequent queued-successor review: guidance now distinguishes discarding one proposal from resolving later proposals for the same URL. Source `c2f072d9` passed independent review, both interaction flows, the corrected screen assertion and screenshot capture; root inspected both [guidance](assets/ios-invalid-url-successor/rejected-guidance.png) and [remaining-proposal](assets/ios-invalid-url-successor/remaining-proposal.png) screens. The initial screen query hit XCTest's 128-character query limit; a stable accessibility identifier and full-label assertion corrected that test-only failure.
 
 Main `c894fb8072c3919f367722782dbde25b12b6760c` exactly equals accepted PR121 head `b3ad9d9bc2b8bf92e473bb00fb61a042533ffcfe`. Its delta from174a349 is guidance/accessibility text, synthetic fixture and UI tests plus evidence. Store, model, sync, backend, web, shared and Android behavior are unchanged. Final three-case UI check on exact main `c894fb80`: **3/3 passed together, zero failures/skips**, with clean tracked state and matching remote main. Command: `xcodebuildmcp simulator test` on `Epilogue-Workspace`, iPhone16Plus/iOS18.6, selecting the resolution fixture, single-proposal discard/add and queued-successor discard/add tests. Log: `actual-main-ios-successor-focused-ui.log`; compact record: `merge-closeout/actual-main-ios-successor.json`. The197-unit suite was already verified on174a349 and was not needlessly repeated for this UI-only change.
+
+## Final fixture fidelity review
+
+The last [PR121 comment4117345638](https://github.com/LucaKaufmann/Ghostwriter/pull/121#discussion_r4117345638) identified test-data drift, not a production defect. Real queued edits already update the visible feed title immediately. The synthetic chain fixture kept the older title; correction `0b6715fb98e799e648c98d1e123536aa6c37e1d7` now seeds the latest title and asserts it survives Discard before disappearing after Keep removed. The rejected head mutation still retains its original payload.
+
+The two-location fixture/test correction passed independent Sol review and its single affected UI case **1/1**, with no failures/skips. Command: `xcodebuildmcp simulator test`, `Epilogue-Workspace`, iPhone16Plus/iOS18.6, selecting `testInvalidURLSuccessorRequiresKeepRemovedBeforeCorrectedAdd`. Log: `review-ios-invalid-url-fixture-title-ui.log`; compact record: `merge-closeout/ios-invalid-url-fixture-title.json`. The final checkpoint retains this tested commit as an ancestor and changes no production behavior. A post-merge repetition of that one case verifies the final remote main; its exact ref/result belongs to the task closeout rather than a self-referential commit hash in this file.
+
+Review cutoff for119/120/121:2026-09-27T22:54:43Z. All three automated reviews completed; every substantive finding is fixed or explicitly dispositioned. Earlier original-PR sweeps remain recorded in the review ledger.
 
 ## Audit progress
 

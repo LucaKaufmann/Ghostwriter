@@ -4,7 +4,7 @@ Updated 2026-09-28 (Europe/Zurich). Historical audit baseline: `cdb776d1d544bc6d
 
 ## Outcome and authority
 
-**All 29 approved reliability packages are complete, merged and verified.** All 11 headline audit findings have remedies. Original PRs 74–119 and late iOS review fixes 120–121 are merged. Verified product source on main is `c894fb8072c3919f367722782dbde25b12b6760c`; the final closeout checkpoint changes documentation only.
+**All 29 approved reliability packages are complete, merged and verified.** All 11 headline audit findings have remedies. Original PRs 74–119 and late iOS review fixes 120–121 are merged. Verified product source on main is `c894fb8072c3919f367722782dbde25b12b6760c`; the final closeout checkpoint changes documentation and the DEBUG UI fixture/test only.
 
 The user authorized implementation, PRs, review corrections, merging all scoped work and verification on main. All workers/reviewers use Sol (`gpt-6-sol`). No release, deployment, tag, branch deletion, production-content inspection or paid-provider invocation occurred. No recurring automation exists.
 
@@ -25,7 +25,7 @@ The [merge plan](work-packages/merge-plan.md), [PR index](work-packages/results/
 | Dependency-safe merges | Root; complete, independently checked | Scoped children merged before parents, then continuity106 and aggregate119. Every original scoped head and merge commit is retained in main ancestry. History reconciliation preserved the entire accepted aggregate tree before documentation updates. |
 | Main verification | Root; complete | Six workflows on 5c5cc40: 10 successful jobs and one intentional publication skip. Local shared native 62/APK also passed. iOS 197 units plus 2 UI tests passed on 174a349; final three-case UI run passed on c894fb80. Other surfaces are byte-identical across these main revisions. |
 | Late iOS review fixes | Sol ios_sync_closeout; complete | PR120 fixes invalid-URL recovery guidance; PR121 handles remaining queued proposals. Both independently reviewed and visually inspected. Store/wire contracts unchanged. |
-| Durable closeout | Root; complete | This documentation-only checkpoint records exact evidence and the release checklist through migration 028. No implementation worker remains active. |
+| Durable closeout | Root; complete | This documentation and test-fixture checkpoint records exact evidence and the release checklist through migration 028. No implementation worker remains active. |
 
 Temporary worktrees/evidence: `/private/tmp/epilogue-backlog-20260927/`. Final documentation branch: `codex/reliability-main-closeout`, worktree `main-closeout-docs`, based on verified main c894fb80. Root alone owns shared planning documents.
 
@@ -47,6 +47,6 @@ A future rollout must back up first, migrate the server before enabling native v
 
 ## Exact next action and open decisions
 
-No reliability implementation or required verification remains. Choose the next bounded product/release outcome with the user. Audience, preferred reading/listening/native surface, release target, generated-podcast native UI, durable native configuration outbox, distributed scheduling and personal deployment helper DEPLOY-01 remain outside this scope. Do not deploy or restart old packages without a new outcome.
+No reliability production implementation or source verification remains. After publishing this checkpoint, verify the final remote ref/tree and repeat the affected fixture case once on that exact main; record the result in the task closeout. Choose the next bounded product/release outcome with the user. Audience, preferred reading/listening/native surface, release target, generated-podcast native UI, durable native configuration outbox, distributed scheduling and personal deployment helper DEPLOY-01 remain outside this scope. Do not deploy or restart old packages without a new outcome.
 
 Protected work remains intact: original `/Users/luca/git/Epilogue` stays on main cdb776d with local audit/planning files; `/Users/luca/git/Epilogue-secondary` stays on gitbutler/workspace14a753e with staged CLAUDE.md, Android SettingsScreen.kt and deployment-example changes. Do not absorb, reset or publish those changes.

@@ -1,6 +1,6 @@
 # Pull request index
 
-Checkpoint: 2026-09-28. **All 29 approved reliability packages and their review corrections are complete, merged and verified.** Original PRs74–119 plus late iOS follow-ups120–121 are merged. All six workflows passed on main5c5cc40 (10 successful jobs, one intentional publication skip); iOS197 units and2 focused UI tests passed again on main174a349. The final three-case UI suite passed on mainc894fb80 after PR121. Other product surfaces are byte-identical across those revisions. The final documentation-only checkpoint records this acceptance; no release or deployment. See [project state](../../project-state.md), [main verification](MAIN-MERGE-VERIFICATION.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md).
+Checkpoint: 2026-09-28. **All 29 approved reliability packages and their review corrections are complete, merged and verified.** Original PRs74–119 plus late iOS follow-ups120–121 are merged. All six workflows passed on main5c5cc40 (10 successful jobs, one intentional publication skip); iOS197 units and2 focused UI tests passed again on main174a349. The final three-case UI suite passed on mainc894fb80 after PR121. Other product surfaces are byte-identical across those revisions. The final documentation and test-fixture checkpoint records this acceptance; no release or deployment. See [project state](../../project-state.md), [main verification](MAIN-MERGE-VERIFICATION.md) and [review dispositions](PR-REVIEW-FOLLOWUP.md).
 
 | PR | Outcome | State / base | Immutable evidence |
 |---|---|---|---|

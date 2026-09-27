@@ -229,3 +229,10 @@ Independent source review also caught the new actionable UI test's missing confi
 [PR120/4117295134](https://github.com/LucaKaufmann/Ghostwriter/pull/120#discussion_r4117295134) correctly noted that discarding a selected rejected create can leave a later proposal for the same URL. The bounded wording/fixture/UI-test fix is merged in [PR121](https://github.com/LucaKaufmann/Ghostwriter/pull/121), source67ae3d86/c2f072d9; it tells users to resolve remaining proposals, using Keep removed when the feed is absent from the server. The store and wire contract remain unchanged. Independent Sol source review is clean; both discard/add flows, the corrected screen assertion and rendered screenshot checks passed. Final mainc894fb80 passed all three UI cases together with no failures/skips; tracked checkout clean. The original main174a349 unit197/UI2 results remain valid for that revision.
 
 Final product verification is complete. The review ledger records code/evidence dispositions; it does not claim GitHub conversation threads were resolved or external replies posted.
+
+
+## Final PR121 fixture fidelity finding
+
+[Comment4117345638](https://github.com/LucaKaufmann/Ghostwriter/pull/121#discussion_r4117345638) is accepted as a fixture-fidelity improvement only. Production `edit` already updates the visible feed name; the manually seeded successor fixture did not. Correction0b6715fb changes the fixture's visible name and the test's row lookup to the latest edit while preserving the rejected mutation's original payload. The affected UI case passed1/1 and independent Sol review is clean. No production/store/wire behavior changed; no broad suite rerun was warranted. The final checkpoint includes this correction.
+
+Final119/120/121 review refresh cutoff:2026-09-27T22:54:43Z. All three reviews completed; no unresolved accepted product or fixture finding remains. The final checkpoint's publication is a separate PR and its available comments are checked during closeout.
