@@ -120,3 +120,42 @@ test('add dialog closes before offering explicit versioned restoration', async (
 	expect(writes[1].version).toBe('"9"');
 	expect(writes[1].data).toEqual(writes[0].data);
 });
+
+test('a restore proposal survives unrelated success and a transient POST failure', async ({ page }) => {
+	await mockGhostwriterApi(page);
+	await setAuthenticatedSession(page);
+	await page.route('**/api/feeds/feed-1', async (route) => route.fulfill({
+		status: 409, contentType: 'application/json', body: JSON.stringify({
+			detail: { code: 'feed_conflict', current: { kind: 'tombstone', version: 4 } }
+		})
+	}));
+	await page.route('**/api/feeds/feed-2', async (route) => route.fulfill({
+		status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'feed-2', version: 5 })
+	}));
+	const restores: unknown[] = [];
+	await page.route('**/api/feeds', async (route) => {
+		if (route.request().method() === 'GET') return route.fallback();
+		restores.push(route.request().postDataJSON());
+		await route.fulfill({ status: restores.length === 1 ? 500 : 200,
+			contentType: 'application/json', body: JSON.stringify(restores.length === 1
+				? { detail: 'Temporary failure' } : { id: 'feed-1', version: 5 }) });
+	});
+	await page.goto('/sources/feeds');
+	await page.getByRole('row').filter({ hasText: 'Example Feed' }).getByRole('button').last().click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.locator('#edit-title').fill('Keep my proposal');
+	await page.getByRole('button', { name: 'Save Changes' }).click();
+	const restore = page.getByRole('button', { name: 'Restore feed with my changes' });
+	await expect(restore).toBeVisible();
+	await page.getByRole('row').filter({ hasText: 'Daily News' }).getByTitle('Pause feed').click();
+	await expect(page.getByText('Feed paused', { exact: true })).toBeVisible();
+	await expect(restore).toBeVisible();
+	await restore.click();
+	await expect(page.getByText('Failed to create feed', { exact: true })).toBeVisible();
+	await expect(restore).toBeVisible();
+	await restore.click();
+	await expect.poll(() => restores.length).toBe(2);
+	expect(restores[1]).toEqual(restores[0]);
+	expect(restores[1]).toMatchObject({ title: 'Keep my proposal' });
+	await expect(restore).toHaveCount(0);
+});

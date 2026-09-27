@@ -30,8 +30,12 @@
 	const queryClient = useQueryClient();
 	let conflictMessage = $state('');
 	let conflictAction = $state('Retry with current server version');
+	let conflictToken = 0;
+	function finishConflict(token?: number) {
+		if (token === conflictToken) conflictRetry = null;
+	}
 	let conflictRetry = $state<(() => void) | null>(null);
-	function offerConflict(err: Error, action: string, retry: (version: number) => void, restore?: (version: number) => void): boolean {
+	function offerConflict(err: Error, action: string, retry: (version: number, conflict: number) => void, restore?: (version: number, conflict: number) => void): boolean {
 		if (!(err instanceof ApiError) || (err.status !== 409 && err.status !== 428)) return false;
 		const detail = typeof err.error.detail === 'string' ? null : err.error.detail;
 		const version = detail?.current?.version;
@@ -43,7 +47,8 @@
 		conflictMessage = `This feed changed on the server (version ${version}). ${currentDescription} Review it before ${action}.`;
 		const restoring = current?.kind === 'tombstone' && restore;
 		conflictAction = restoring ? 'Restore feed with my changes' : 'Retry with current server version';
-		conflictRetry = () => (restoring || retry)(version);
+		const token = ++conflictToken;
+		conflictRetry = () => (restoring || retry)(version, token);
 		// The captured proposal survives closing its form; the page action must
 		// remain reachable outside the modal focus trap and overlay.
 		addDialogOpen = false;
@@ -53,13 +58,13 @@
 		return true;
 	}
 
-	function offerEditConflict(err: Error, action: string, variables: { feed: Feed; data: FeedUpdate }, retry: (version: number) => void): boolean {
+	function offerEditConflict(err: Error, action: string, variables: { feed: Feed; data: FeedUpdate; conflict?: number }, retry: (version: number, conflict: number) => void): boolean {
 		const { feed, data } = variables;
 		const proposed: FeedCreate = {
 			url: feed.url, title: data.title ?? feed.title, mode: data.mode ?? feed.mode,
 			is_active: data.is_active ?? feed.is_active, max_articles: data.max_articles ?? feed.max_articles
 		};
-		return offerConflict(err, action, retry, (version) => createFeedMutation.mutate({ data: proposed, version }));
+		return offerConflict(err, action, retry, (version, conflict) => createFeedMutation.mutate({ data: proposed, version, conflict }));
 	}
 
 	// Queries
@@ -70,20 +75,19 @@
 
 	// Mutations
 	const createFeedMutation = createMutation(() => ({
-		mutationFn: ({ data, version }: { data: FeedCreate; version?: number }) => api.createFeed(data, version),
-		onSuccess: () => {
+		mutationFn: ({ data, version }: { data: FeedCreate; version?: number; conflict?: number }) => api.createFeed(data, version),
+		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success('Feed created successfully');
 			addDialogOpen = false;
 			resetForm();
-			conflictRetry = null;
+			finishConflict(variables.conflict);
 		},
 		onError: (err: Error, variables) => {
 			const detail = err instanceof ApiError && typeof err.error.detail !== 'string' ? err.error.detail : null;
 			if (detail?.current?.kind === 'tombstone' &&
-				offerConflict(err, 'restoring it', (version) => createFeedMutation.mutate({ ...variables, version }),
-					(version) => createFeedMutation.mutate({ ...variables, version }))) return;
-			conflictRetry = null;
+				offerConflict(err, 'restoring it', (version, conflict) => createFeedMutation.mutate({ ...variables, version, conflict }),
+					(version, conflict) => createFeedMutation.mutate({ ...variables, version, conflict }))) return;
 			toast.error('Failed to create feed', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -91,15 +95,15 @@
 	}));
 
 	const deleteFeedMutation = createMutation(() => ({
-		mutationFn: (feed: Feed) => api.deleteFeed(feed.id, feed.version),
-		onSuccess: () => {
+		mutationFn: (feed: Feed & { conflict?: number }) => api.deleteFeed(feed.id, feed.version),
+		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success('Feed deleted');
 			feedToDelete = null;
-			conflictRetry = null;
+			finishConflict(variables.conflict);
 		},
 		onError: (err: Error, feed) => {
-			if (offerConflict(err, 'deleting it', (version) => deleteFeedMutation.mutate({ ...feed, version }))) return;
+			if (offerConflict(err, 'deleting it', (version, conflict) => deleteFeedMutation.mutate({ ...feed, version, conflict }))) return;
 			toast.error('Failed to delete feed', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -107,16 +111,16 @@
 	}));
 
 	const updateFeedMutation = createMutation(() => ({
-		mutationFn: ({ feed, data }: { feed: Feed; data: FeedUpdate }) => api.updateFeed(feed.id, data, feed.version),
-		onSuccess: () => {
+		mutationFn: ({ feed, data }: { feed: Feed; data: FeedUpdate; conflict?: number }) => api.updateFeed(feed.id, data, feed.version),
+		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success('Feed updated successfully');
 			editDialogOpen = false;
 			feedToEdit = null;
-			conflictRetry = null;
+			finishConflict(variables.conflict);
 		},
 		onError: (err: Error, variables) => {
-			if (offerEditConflict(err, 'saving your edit', variables, (version) => updateFeedMutation.mutate({ ...variables, feed: { ...variables.feed, version } }))) return;
+			if (offerEditConflict(err, 'saving your edit', variables, (version, conflict) => updateFeedMutation.mutate({ ...variables, conflict, feed: { ...variables.feed, version } }))) return;
 			toast.error('Failed to update feed', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -124,14 +128,14 @@
 	}));
 
 	const toggleFeedMutation = createMutation(() => ({
-		mutationFn: ({ feed, data }: { feed: Feed; data: FeedUpdate }) => api.updateFeed(feed.id, data, feed.version),
+		mutationFn: ({ feed, data }: { feed: Feed; data: FeedUpdate; conflict?: number }) => api.updateFeed(feed.id, data, feed.version),
 		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success(variables.data.is_active ? 'Feed activated' : 'Feed paused');
-			conflictRetry = null;
+			finishConflict(variables.conflict);
 		},
 		onError: (err: Error, variables) => {
-			if (offerEditConflict(err, 'changing its status', variables, (version) => toggleFeedMutation.mutate({ ...variables, feed: { ...variables.feed, version } }))) return;
+			if (offerEditConflict(err, 'changing its status', variables, (version, conflict) => toggleFeedMutation.mutate({ ...variables, conflict, feed: { ...variables.feed, version } }))) return;
 			toast.error('Failed to update feed status', {
 				description: err.message ?? 'Unknown error'
 			});
@@ -355,7 +359,7 @@
 				const conflictIndex = results.findIndex((result) => result.status === 'rejected' && result.reason instanceof ApiError && result.reason.status === 409);
 				if (conflictIndex >= 0) {
 					const rejected = results[conflictIndex] as PromiseRejectedResult;
-					offerEditConflict(rejected.reason, 'changing its status', { feed: selected[conflictIndex], data: { is_active: isActive } }, (version) => toggleFeedMutation.mutate({ feed: { ...selected[conflictIndex], version }, data: { is_active: isActive } }));
+					offerEditConflict(rejected.reason, 'changing its status', { feed: selected[conflictIndex], data: { is_active: isActive } }, (version, conflict) => toggleFeedMutation.mutate({ conflict, feed: { ...selected[conflictIndex], version }, data: { is_active: isActive } }));
 				}
 				toast.error(`${failureCount} feed update${failureCount === 1 ? '' : 's'} failed`);
 			}
@@ -381,7 +385,7 @@
 				const conflictIndex = results.findIndex((result) => result.status === 'rejected' && result.reason instanceof ApiError && result.reason.status === 409);
 				if (conflictIndex >= 0) {
 					const rejected = results[conflictIndex] as PromiseRejectedResult;
-					offerConflict(rejected.reason, 'deleting it', (version) => deleteFeedMutation.mutate({ ...selected[conflictIndex], version }));
+					offerConflict(rejected.reason, 'deleting it', (version, conflict) => deleteFeedMutation.mutate({ ...selected[conflictIndex], version, conflict }));
 				}
 				toast.error(`${failureCount} feed deletion${failureCount === 1 ? '' : 's'} failed`);
 			}
