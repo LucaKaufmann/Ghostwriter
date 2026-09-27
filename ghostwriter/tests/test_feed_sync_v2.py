@@ -127,8 +127,9 @@ def test_concurrent_creates_return_success_and_active_conflict(client, monkeypat
     lock = threading.Lock()
     validations = 0
 
-    async def gated_validation(_url):
+    async def gated_validation(_url, *, new_url=False):
         nonlocal validations
+        assert new_url is True
         with lock:
             validations += 1
             if validations == 2:
