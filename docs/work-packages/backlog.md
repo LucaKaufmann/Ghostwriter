@@ -40,7 +40,7 @@ All PRs: `git diff --check`, focused behavior/failure tests, inspected final dif
 
 ## Package ledger
 
-Execution is in final review and integration. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`; the [PR index](results/PR-INDEX.md) lists the published work. The table below is the original scope/dependency map, not live completion status. All 29 original package outcomes and known actionable review corrections are integrated and locally verified. Final publication checks and feedback remain explicitly tracked until closeout. Result path convention: `docs/work-packages/results/ID.md` on the relevant branch.
+The approved reliability backlog is complete. Current owners, exact worktrees/bases, verification and PR URLs are authoritative in `docs/project-state.md`; the [PR index](results/PR-INDEX.md) lists the published work. The table below is the original scope/dependency map, not live completion status. All 29 original package outcomes and known actionable review corrections are integrated and locally verified. Final product-source CI passed and all available PR feedback was inspected; see project state for exact revisions and cutoffs. Result path convention: `docs/work-packages/results/ID.md` on the relevant branch.
 
 | ID | Priority/type | Outcome | Start condition |
 |---|---|---|---|
