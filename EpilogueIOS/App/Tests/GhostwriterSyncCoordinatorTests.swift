@@ -21,7 +21,7 @@ final class GhostwriterSyncCoordinatorTests: XCTestCase {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("sync-status-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let schema = Schema(versionedSchema: EpilogueSchemaV2.self)
+            let schema = Schema(versionedSchema: EpilogueSchemaV3.self)
             let configuration = ModelConfiguration(schema: schema,
                 url: directory.appendingPathComponent("Epilogue.sqlite"))
             container = try ModelContainer(for: schema, migrationPlan: EpilogueMigrationPlan.self,
