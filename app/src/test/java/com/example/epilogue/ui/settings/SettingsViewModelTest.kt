@@ -7,11 +7,13 @@ import androidx.work.Data
 import androidx.work.WorkInfo
 import com.example.epilogue.data.repository.DigestRepository
 import com.example.epilogue.data.repository.FeedRepository
+import com.example.epilogue.data.repository.AndroidFeedV2Store
 import com.example.epilogue.data.repository.GhostwriterRepository
-import com.example.epilogue.data.repository.GhostwriterRepository.GhostwriterResult
 import com.example.epilogue.data.repository.SettingsRepository
 import com.example.epilogue.service.ConfigSyncManager
 import com.example.epilogue.service.DigestScheduler
+import com.example.epilogue.shared.sync.FeedSyncV2UseCase
+import com.example.epilogue.shared.sync.FeedSyncV2Outcome
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -44,6 +46,8 @@ class SettingsViewModelTest {
     private val feeds = mockk<FeedRepository>(relaxed = true)
     private val ghostwriter = mockk<GhostwriterRepository>(relaxed = true)
     private val configSync = mockk<ConfigSyncManager>(relaxed = true)
+    private val feedSyncV2 = mockk<FeedSyncV2UseCase>(relaxed = true)
+    private val feedV2Store = mockk<AndroidFeedV2Store>(relaxed = true)
 
     @Before
     fun setUp() {
@@ -58,7 +62,7 @@ class SettingsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel() = SettingsViewModel(settings, scheduler, digests, feeds, ghostwriter, configSync)
+    private fun viewModel() = SettingsViewModel(settings, scheduler, digests, feeds, ghostwriter, configSync, feedSyncV2, feedV2Store)
 
     private fun workInfo(id: UUID, state: WorkInfo.State) =
         WorkInfo(id, state, emptySet(), Data.EMPTY)
@@ -157,12 +161,12 @@ class SettingsViewModelTest {
     fun `persisted enabled Ghostwriter uses backend path`() = runTest(dispatcher) {
         every { settings.isGhostwriterEnabled() } returns true
         every { settings.getGhostwriterUrl() } returns "https://fixture.invalid"
-        coEvery { feeds.getAllFeedsList() } returns emptyList()
-        coEvery { ghostwriter.syncFeeds(any()) } returns GhostwriterResult.NotConfigured
+        coEvery { feedSyncV2.sync() } returns FeedSyncV2Outcome.NotConfigured
         val model = viewModel()
         model.runDigestNow()
         advanceUntilIdle()
-        coVerify(exactly = 1) { ghostwriter.syncFeeds(any()) }
+        coVerify(exactly = 1) { feedSyncV2.sync() }
+        coVerify(exactly = 0) { ghostwriter.syncFeeds(any()) }
         verify(exactly = 0) { scheduler.runNow(any()) }
         assertFalse(model.uiState.value.isGenerating)
     }
