@@ -1,6 +1,7 @@
 """Disposable upgrade/restore checks; fixture artifacts are not real audio."""
 
 import hashlib
+import json
 import os
 import shutil
 import site
@@ -8,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -173,6 +175,98 @@ def test_release_021_upgrade_and_stopped_volume_restore(tmp_path):
     audio_path = before_rows["episode"][0][-1]
     assert audio_path.startswith("/app/output/")
     assert (restored / "output" / audio_path.removeprefix("/app/output/")).exists()
+
+
+def _offline_feed_mutation(root, instance_id, operation):
+    """Exercise the v2 HTTP route without startup jobs or external network."""
+    program = r'''
+import json
+import socket
+import sys
+from app.core.config import Settings
+Settings.model_config = {**Settings.model_config, "env_file": None}
+original_connect = socket.socket.connect
+def no_ip_connect(sock, *args, **kwargs):
+    if sock.family in (socket.AF_INET, socket.AF_INET6):
+        raise AssertionError("Release fixture must not contact external sources")
+    return original_connect(sock, *args, **kwargs)
+socket.socket.connect = no_ip_connect
+socket.getaddrinfo = lambda host, port, *args, **kwargs: [
+    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port))
+]
+from fastapi.testclient import TestClient
+from app.main import app
+client = TestClient(app)
+response = client.post("/api/feeds/mutations-v2", json={
+    "server_instance_id": sys.argv[1], "mutations": [json.loads(sys.argv[2])]
+})
+print(json.dumps({"status": response.status_code, "body": response.json()}))
+client.close()
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", program, instance_id, json.dumps(operation)],
+        cwd=ROOT, env=environment(root), check=True, capture_output=True,
+        text=True, timeout=60,
+    )
+    return json.loads(result.stdout)
+
+
+def test_current_026_027_stopped_restore_keeps_ack_and_rotates_identity(tmp_path):
+    live, backup, restored = (tmp_path / name for name in ("live", "backup", "restored"))
+    alembic(live, "upgrade", "head")
+    assert_current(live)
+    assert alembic(live, "heads").stdout.split()[0] == "027"
+    # The migration has created the clock table; the operational command seeds
+    # its identity before this disposable instance accepts writes.
+    rotate = [sys.executable, "-m", "app.cli.rotate_sync_identity"]
+    subprocess.run(rotate, cwd=ROOT, env=environment(live), check=True,
+                   capture_output=True, text=True, timeout=60)
+    acknowledgement_id = uuid4().hex
+    with sqlite3.connect(live / "data" / "ghostwriter.db") as db:
+        instance_id = db.execute("SELECT server_instance_id FROM feed_sync_clock WHERE id=1").fetchone()[0]
+        db.execute(
+            "INSERT INTO source_acknowledgements "
+            "(id,digest_id,provider,source_identity,source_config_fingerprint,"
+            "external_item_id,action,state,attempt_count,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+            (acknowledgement_id, uuid4().hex, "gmail", "fixture@example.test",
+             "fixture-config", "fixture-message", "mark_read", "pending", 0),
+        )
+        expected_ack = db.execute(
+            "SELECT id,provider,source_identity,external_item_id,state,attempt_count "
+            "FROM source_acknowledgements WHERE id=?", (acknowledgement_id,),
+        ).fetchone()
+    # No process or connection is open while all volumes are copied together.
+    for volume in VOLUMES:
+        shutil.copytree(live / volume, backup / volume)
+    feed_url = f"https://example.com/{uuid4()}.xml"
+    operation = {
+        "op_id": str(uuid4()), "url": feed_url, "kind": "upsert",
+        "base_version": None,
+        "fields": {"title": "Post-backup edit", "is_active": True,
+                   "mode": "raw", "max_articles": 5},
+    }
+    accepted = _offline_feed_mutation(live, instance_id, operation)
+    assert accepted["status"] == 200
+    assert accepted["body"]["results"][0]["status"] == "applied"
+    for volume in VOLUMES:
+        shutil.copytree(backup / volume, restored / volume)
+    alembic(restored, "upgrade", "head")
+    rotated = subprocess.run(
+        rotate, cwd=ROOT, env=environment(restored), check=True,
+        capture_output=True, text=True, timeout=60,
+    ).stdout.strip()
+    assert rotated and rotated != instance_id
+    rejected = _offline_feed_mutation(restored, instance_id, operation)
+    assert rejected["status"] == 409
+    assert rejected["body"]["detail"]["code"] == "server_changed"
+    with sqlite3.connect(restored / "data" / "ghostwriter.db") as db:
+        assert db.execute("SELECT id,provider,source_identity,external_item_id,state,attempt_count "
+                          "FROM source_acknowledgements WHERE id=?", (acknowledgement_id,)).fetchone() == expected_ack
+        assert db.execute("SELECT id FROM feeds WHERE url=?", (feed_url,)).fetchone() is None
+        assert db.execute("SELECT op_id FROM feed_mutation_receipts WHERE op_id=?",
+                          (operation["op_id"],)).fetchone() is None
+    assert_current(restored)
 
 
 def test_unknown_revision_fails_without_replacing_database(tmp_path):
