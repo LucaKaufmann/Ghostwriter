@@ -3,33 +3,60 @@
 from __future__ import annotations
 
 import time
-from collections import deque
-from typing import Deque
+from collections import OrderedDict, deque
+from dataclasses import dataclass
 
 from fastapi import HTTPException, Request, status
 
 from app.core.config import get_settings
 
 
+@dataclass
+class _Bucket:
+    hits: deque[float]
+    last_seen: float
+
+
 class RateLimiter:
-    def __init__(self, max_requests: int, window_seconds: int) -> None:
+    def __init__(
+        self, max_requests: int, window_seconds: int, max_clients: int = 10_000
+    ) -> None:
+        if max_clients < 1:
+            raise ValueError("max_clients must be positive")
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        self._hits: dict[str, Deque[float]] = {}
+        self.max_clients = max_clients
+        self._hits: OrderedDict[str, _Bucket] = OrderedDict()
 
     def allow(self, key: str) -> bool:
         now = time.time()
-        bucket = self._hits.setdefault(key, deque())
-
-        # Drop old entries
         cutoff = now - self.window_seconds
-        while bucket and bucket[0] < cutoff:
-            bucket.popleft()
 
-        if len(bucket) >= self.max_requests:
+        # Buckets are ordered by last request, so expired clients leave from
+        # the front without scanning every active client on each attempt.
+        while self._hits:
+            oldest = next(iter(self._hits.values()))
+            if oldest.last_seen >= cutoff:
+                break
+            self._hits.popitem(last=False)
+
+        bucket = self._hits.get(key)
+        if bucket is None:
+            if len(self._hits) >= self.max_clients:
+                self._hits.popitem(last=False)
+            bucket = _Bucket(deque(), now)
+            self._hits[key] = bucket
+        else:
+            bucket.last_seen = now
+            self._hits.move_to_end(key)
+
+        while bucket.hits and bucket.hits[0] < cutoff:
+            bucket.hits.popleft()
+
+        if len(bucket.hits) >= self.max_requests:
             return False
 
-        bucket.append(now)
+        bucket.hits.append(now)
         return True
 
 

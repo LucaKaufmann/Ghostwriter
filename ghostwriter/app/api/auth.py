@@ -15,7 +15,6 @@ from app.core.auth import (
     get_token_prefix,
     hash_api_token,
     hash_password,
-    verify_api_token,
     verify_password,
 )
 from app.core.database import get_session
@@ -81,6 +80,7 @@ async def register(
 
     Returns a JWT token on successful registration.
     """
+    check_auth_rate_limit(request)
     session.exec(text("BEGIN IMMEDIATE"))
     try:
         # Check if any users exist while holding SQLite's write lock so concurrent
@@ -146,6 +146,7 @@ async def login(
 
     Returns a JWT token on successful authentication.
     """
+    check_auth_rate_limit(request)
     # Find user
     user = session.exec(select(User).where(User.username == data.username)).first()
     if not user:
@@ -344,5 +345,3 @@ async def revoke_api_token(
     )
 
     return {"status": "ok", "message": "Token revoked successfully."}
-    check_auth_rate_limit(request)
-    check_auth_rate_limit(request)

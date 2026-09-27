@@ -32,7 +32,12 @@ from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.security import get_current_user, security, verify_api_key
+from app.core.security import (
+    get_current_user,
+    security,
+    verify_api_key,
+    verify_api_key_with_session,
+)
 from app.models.article_feedback import ArticleFeedbackRead, ArticleFeedbackUpsert
 from app.models.digest import DigestArticle
 from app.models.podcast_episode import PodcastEpisode, PodcastEpisodeArticleRead
@@ -394,10 +399,11 @@ async def _authorize_standard_or_feed_token(
         return prefs
 
     credentials = await security(request)
-    await verify_api_key(
+    await verify_api_key_with_session(
         request=request,
         credentials=credentials,
         settings=get_settings(),
+        session=session,
     )
     return None
 
