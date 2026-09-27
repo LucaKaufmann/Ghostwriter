@@ -38,6 +38,7 @@ struct SettingsView: View {
     @State private var showExportPicker = false
     @State private var exportError: String?
     @State private var serverSchedule: GhostwriterSchedule?
+    @State private var feedBindingError: String?
 
     var body: some View {
         NavigationStack {
@@ -235,9 +236,25 @@ struct SettingsView: View {
                             }
                         }
                         .disabled(ghostwriterCoordinator.isSyncing)
+                        if case .some(.serverChanged) = ghostwriterCoordinator.lastSyncError as? FeedSyncV2Error {
+                            Button("Connect to this server as a new feed source") {
+                                do {
+                                    try ghostwriterCoordinator.startNewFeedBinding()
+                                    Task { await syncNow() }
+                                } catch {
+                                    feedBindingError = error.localizedDescription
+                                }
+                            }
+                            Text("Pending edits for the previous server remain saved for review.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     } footer: {
                         if let error = ghostwriterCoordinator.lastSyncError {
                             Text("Sync error: \(error.localizedDescription)")
+                                .foregroundColor(.red)
+                        } else if let feedBindingError {
+                            Text("Feed connection error: \(feedBindingError)")
                                 .foregroundColor(.red)
                         } else if let lastSync = ghostwriterCoordinator.lastSyncTime {
                             Text("Last sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))")

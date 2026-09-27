@@ -8,11 +8,13 @@
 
 import Foundation
 import Domain
+import SwiftData
 
 /// Implementation of SettingsRepositoryProtocol using UserDefaults and Keychain
 public final class SettingsRepository: SettingsRepositoryProtocol {
     private let userDefaults: UserDefaults
     private let keychainService: KeychainService
+    private let modelContainer: ModelContainer?
 
     // Keychain keys
     private enum KeychainKeys {
@@ -61,10 +63,12 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
 
     public init(
         userDefaults: UserDefaults = .standard,
-        keychainService: KeychainService = KeychainService()
+        keychainService: KeychainService = KeychainService(),
+        modelContainer: ModelContainer? = nil
     ) {
         self.userDefaults = userDefaults
         self.keychainService = keychainService
+        self.modelContainer = modelContainer
     }
 
     // MARK: - API Key Management
@@ -240,6 +244,30 @@ public final class SettingsRepository: SettingsRepositoryProtocol {
     }
 
     public func setGhostwriterURL(_ url: String?) async throws {
+        if let modelContainer {
+            let oldURL = userDefaults.string(forKey: DefaultsKeys.ghostwriterURL)
+            let normalize: (String?) -> String? = {
+                $0?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            }
+            if normalize(oldURL) != normalize(url) {
+                try await MainActor.run {
+                    let context = ModelContext(modelContainer)
+                    context.autosaveEnabled = false
+                    do {
+                        if let state = try context.fetch(FetchDescriptor<FeedSyncState>()).first,
+                           state.destinationURL != nil {
+                            state.suspended = true
+                            state.generation += 1
+                            try context.save()
+                        }
+                    } catch {
+                        context.rollback()
+                        throw error
+                    }
+                }
+            }
+        }
         if let url = url {
             userDefaults.set(url, forKey: DefaultsKeys.ghostwriterURL)
         } else {

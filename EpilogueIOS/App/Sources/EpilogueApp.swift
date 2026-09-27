@@ -38,9 +38,14 @@ struct EpilogueApp: App {
         let context = persistence.container.mainContext
 
         ScreenshotDataSeeder.seedIfNeeded(context: context, options: launchOptions)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-feed-v2-ui-fixture") {
+            FeedV2TestHarness.seedUIFixture(context: context)
+        }
+        #endif
 
         // Initialize repositories
-        let settings = SettingsRepository()
+        let settings = SettingsRepository(modelContainer: persistence.container)
         let feeds = FeedRepository(modelContext: context)
         let digests = DigestRepository(modelContext: context)
 
@@ -52,7 +57,8 @@ struct EpilogueApp: App {
         let coordinator = GhostwriterSyncCoordinator(
             settingsRepository: settings,
             feedRepository: feeds,
-            digestRepository: digests
+            digestRepository: digests,
+            modelContainer: persistence.container
         )
         _ghostwriterCoordinator = StateObject(wrappedValue: coordinator)
 

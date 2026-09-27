@@ -43,6 +43,37 @@ final class EpilogueScreenshotTests: XCTestCase {
         capture(name: "04-settings")
     }
 
+    func testFeedResolutionFixture() throws {
+        app.terminate()
+        app.launchArguments += ["-feed-v2-ui-fixture"]
+        app.launch()
+        XCTAssertTrue(waitForExists(app.staticTexts["Web headline"]))
+        XCTAssertTrue(waitForExists(app.staticTexts["Rejected feed"]))
+        XCTAssertTrue(waitForExists(app.staticTexts["Missing feed"]))
+        XCTAssertTrue(waitForExists(app.staticTexts["Removed locally"]))
+        capture(name: "feed-v2-attention")
+
+        app.staticTexts["Web headline"].tap()
+        XCTAssertTrue(waitForExists(app.navigationBars["Resolve feed"]))
+        XCTAssertTrue(waitForExists(app.buttons["Apply mine"]))
+        capture(name: "feed-v2-conflict")
+        app.buttons["Close"].tap()
+
+        app.staticTexts["Rejected feed"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Correct and retry"]))
+        capture(name: "feed-v2-rejected")
+        app.buttons["Close"].tap()
+
+        app.staticTexts["Missing feed"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Add to server"]))
+        capture(name: "feed-v2-absent")
+        app.buttons["Close"].tap()
+
+        app.staticTexts["https://example.test/delete.xml"].tap()
+        XCTAssertTrue(waitForExists(app.buttons["Delete anyway"]))
+        capture(name: "feed-v2-delete")
+    }
+
     private func tapTab(_ title: String) {
         let button = app.tabBars.buttons[title]
         XCTAssertTrue(waitForExists(button), "Tab \(title) not found")
