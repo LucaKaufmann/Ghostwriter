@@ -54,6 +54,7 @@ class DigestScheduler @Inject constructor(
     companion object {
         private const val TAG = "DigestScheduler"
         private const val WORK_NAME_PREFIX = "daily_digest_"
+        internal const val ANCHOR_TAG = "daily_digest_anchor_v1"
         private const val CATCH_UP_WORK_NAME_PREFIX = "daily_digest_catchup_"
         private const val CATCH_UP_TAG = "catch_up"
         private const val IMMEDIATE_WORK_NAME = "daily_digest_immediate"
@@ -159,8 +160,9 @@ class DigestScheduler @Inject constructor(
             manager.getWorkInfosForUniqueWorkFlow(workName).first { rows ->
                 val active = rows.firstOrNull { it.state !in setOf(
                     WorkInfo.State.SUCCEEDED, WorkInfo.State.FAILED, WorkInfo.State.CANCELLED) }
-                active == null || (active.state == WorkInfo.State.ENQUEUED &&
-                    active.nextScheduleTimeMillis in 1L until Long.MAX_VALUE)
+                active == null || ANCHOR_TAG in active.tags ||
+                    (active.state == WorkInfo.State.ENQUEUED &&
+                        active.nextScheduleTimeMillis in 1L until Long.MAX_VALUE)
             }.firstOrNull { it.state !in setOf(
                 WorkInfo.State.SUCCEEDED, WorkInfo.State.FAILED, WorkInfo.State.CANCELLED) }
         } catch (cancelled: CancellationException) {
@@ -169,6 +171,9 @@ class DigestScheduler @Inject constructor(
             Log.w(TAG, "Could not inspect ${period.name} periodic schedule", error)
             null // KEEP preserves any existing work if the read failed.
         }
+        // Its input already carries the original 24-hour reference. Replacing
+        // it with a post-run nextScheduleTime would shift late occurrences.
+        if (existing != null && ANCHOR_TAG in existing.tags) return
 
         val initialDelay = calculateInitialDelay(period.hour, 0)
         val anchor = existing?.nextScheduleTimeMillis ?: System.currentTimeMillis() + initialDelay
@@ -180,6 +185,7 @@ class DigestScheduler @Inject constructor(
                 .build())
             .addTag(DailyDigestWorker.TAG)
             .addTag(period.name)
+            .addTag(ANCHOR_TAG)
         if (existing == null) builder.setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
         else {
             builder.setId(existing.id)

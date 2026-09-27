@@ -18,9 +18,12 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE, application = android.app.Application::class)
@@ -28,15 +31,16 @@ class DigestSchedulerRegistrationTest {
     private val workName = "daily_digest_MORNING"
 
     private fun info(state: WorkInfo.State, next: Long = Long.MAX_VALUE,
-        id: UUID = UUID.randomUUID()): WorkInfo {
+        id: UUID = UUID.randomUUID(), tags: Set<String> = emptySet()): WorkInfo {
         val result = mockk<WorkInfo>()
         every { result.state } returns state
         every { result.nextScheduleTimeMillis } returns next
         every { result.id } returns id
+        every { result.tags } returns tags
         return result
     }
 
-    @Test fun `new registration is anchored and repeat updates existing timing without cancellation`() {
+    @Test fun `new registration is anchored and first legacy update preserves identity without cancellation`() {
         val context = RuntimeEnvironment.getApplication()
         val manager = mockk<WorkManager>(relaxed = true)
         val rows = MutableStateFlow(emptyList<WorkInfo>())
@@ -62,6 +66,7 @@ class DigestSchedulerRegistrationTest {
             assertEquals("MORNING", first.workSpec.input.getString(DailyDigestWorker.KEY_PERIOD))
             assertTrue(first.workSpec.input.getLong(DailyDigestWorker.KEY_PERIODIC_ANCHOR, 0) > before)
             assertEquals(TimeUnit.HOURS.toMillis(24), first.workSpec.intervalDuration)
+            assertTrue(DigestScheduler.ANCHOR_TAG in first.tags)
 
             val nextDue = before + TimeUnit.HOURS.toMillis(10)
             val oldId = UUID.randomUUID()
@@ -74,9 +79,37 @@ class DigestSchedulerRegistrationTest {
             assertEquals(nextDue, updated.workSpec.input.getLong(DailyDigestWorker.KEY_PERIODIC_ANCHOR, 0))
             assertEquals(nextDue, updated.workSpec.nextScheduleTimeOverride)
             assertEquals(oldId, updated.id)
+            assertTrue(DigestScheduler.ANCHOR_TAG in updated.tags)
             verify(exactly = 0) { manager.cancelUniqueWork(workName) }
             scheduler.cancelPeriod(DigestPeriod.MORNING)
             verify(exactly = 1) { manager.cancelUniqueWork(workName) }
+        } finally {
+            unmockkStatic(WorkManager::class)
+        }
+    }
+
+    @Test fun `already anchored request keeps Monday reference after Tuesday midnight delay`() {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = mockk<WorkManager>(relaxed = true)
+        val zone = ZoneId.of("Europe/Zurich")
+        val original = ZonedDateTime.of(2026, 3, 9, 20, 0, 0, 0, zone)
+        val shiftedNextDue = ZonedDateTime.of(2026, 3, 11, 1, 0, 0, 0, zone)
+        val rows = MutableStateFlow(listOf(info(WorkInfo.State.ENQUEUED,
+            shiftedNextDue.toInstant().toEpochMilli(), tags = setOf(DigestScheduler.ANCHOR_TAG))))
+        val subscriptions = CountDownLatch(2)
+        mockkStatic(WorkManager::class)
+        try {
+            every { WorkManager.getInstance(context) } returns manager
+            every { manager.getWorkInfosForUniqueWorkFlow(workName) } returns
+                rows.onSubscription { subscriptions.countDown() }
+            val scheduler = DigestScheduler(context, mockk(), mockk(), mockk())
+            scheduler.schedulePeriod(DigestPeriod.MORNING)
+            verify(timeout = 3000, exactly = 1) { manager.getWorkInfosForUniqueWorkFlow(workName) }
+            scheduler.schedulePeriod(DigestPeriod.MORNING)
+            assertTrue(subscriptions.await(3, TimeUnit.SECONDS))
+            verify(timeout = 300, exactly = 0) { manager.enqueueUniquePeriodicWork(workName, any(), any()) }
+            assertEquals(LocalDate.of(2026, 3, 10), DailyDigestWorker.periodicOccurrenceDate(
+                shiftedNextDue, original.toInstant().toEpochMilli()))
         } finally {
             unmockkStatic(WorkManager::class)
         }
