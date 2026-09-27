@@ -13,3 +13,5 @@ Local verification on macOS:
 - `git diff --check`: passed. The workflow has not run on GitHub yet.
 
 The fixture invokes no real provider or production content. This gate checks the server/KMP wire contract and shared orchestration; Room/SwiftData migration, durable outbox replay after process death, local delete UI, and platform bypass removal remain separate native acceptance work.
+
+Independent Sol branch review of `c1ed206` completed with no actionable findings. Hosted CI will verify the published branch; native store migration/restart/UI acceptance remains in the platform stages.
