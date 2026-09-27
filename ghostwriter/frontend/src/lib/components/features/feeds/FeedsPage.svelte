@@ -191,12 +191,16 @@
 
 	const updateFeedMutation = createMutation(() => ({
 		mutationFn: ({ feed, data }: EditVariables) => api.updateFeed(feed.id, data, feed.version),
-		onSuccess: (_data, variables) => {
+		onSuccess: (updatedFeed, variables) => {
 			queryClient.invalidateQueries({ queryKey: ['feeds'] });
 			toast.success('Feed updated successfully');
 			if (submittedEditIsCurrent(variables)) {
 				editDialogOpen = false;
 				feedToEdit = null;
+			} else if (editDialogOpen && variables.editSession !== undefined &&
+				variables.editSession === editSession && feedToEdit?.id === variables.feed.id) {
+				// The visible fields are a newer unsent draft; only advance its server baseline.
+				feedToEdit = { ...feedToEdit, ...updatedFeed };
 			}
 			finishConflict(variables.conflict);
 		},
